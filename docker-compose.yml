@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  # 1. Redis Queue Service
+  redis:
+    image: redis:alpine
+    container_name: epms-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - epms-network
+
+  # 2. Database Service MySQL 8
+  mysql:
+    image: mysql:8
+    container_name: epms-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DATABASE_PASSWORD:-123456}
+      MYSQL_DATABASE: ${DATABASE_NAME:-epms_tvmubd_db}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - epms-network
+
+  # 3. Backend Service (NestJS)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: epms-backend
+    restart: always
+    depends_on:
+      - mysql
+      - redis
+    ports:
+      - "4000:4000"
+    environment:
+      PORT: 4000
+      DATABASE_HOST: mysql
+      DATABASE_PORT: 3306
+      DATABASE_USER: root
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-123456}
+      DATABASE_NAME: ${DATABASE_NAME:-epms_tvmubd_db}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-mock_key}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-mock_secret}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-epms-staging-bucket}
+      SMTP_HOST: ${SMTP_HOST:-smtp.mailtrap.io}
+      SMTP_PORT: ${SMTP_PORT:-2525}
+      SMTP_USER: ${SMTP_USER:-mock_user}
+      SMTP_PASS: ${SMTP_PASS:-mock_pass}
+    networks:
+      - epms-network
+
+  # 4. Frontend Service (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: epms-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000/api/v1
+    networks:
+      - epms-network
+
+volumes:
+  redis_data:
+  mysql_data:
+
+networks:
+  epms-network:
+    driver: bridge

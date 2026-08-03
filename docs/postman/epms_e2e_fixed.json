@@ -1,0 +1,249 @@
+{
+  "info": {
+    "name": "EPMS E2E Integration",
+    "description": "E2E API Test for Purchase Request to Invoice Payment",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Login as Procurement",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:4000/api/v1/auth/login",
+          "host": [
+            "http://localhost:4000/api/v1/auth/login"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\"email\":\"procurement@tvmubd.com\",\"password\":\"123456\"}"
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "var responseJson = pm.response.json();",
+              "// Ekstrak token dari TransformInterceptor ({ meta: ..., data: { access_token: ... } })",
+              "var token = responseJson.data ? responseJson.data.access_token : responseJson.access_token;",
+              "if (token) {",
+              "    pm.environment.set(\"token\", token);",
+              "    console.log(\"🔑 Token JWT berhasil disimpan:\", token);",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Create Purchase Request (PR)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:4000/api/v1/procurement/pr",
+          "host": [
+            "http://localhost:4000/api/v1/procurement/pr"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"projectId\": 1,\n  \"totalEstimatedAmount\": 30000000,\n  \"items\": [\n    {\n      \"itemName\": \"Server Rack\",\n      \"quantity\": 2,\n      \"estimatedUnitPrice\": 15000000\n    }\n  ]\n}"
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "3. Vendor Comparison",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:4000/api/v1/procurement/vendor-comparison",
+          "host": [
+            "http://localhost:4000/api/v1/procurement/vendor-comparison"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rfqId\": 1,\n  \"vendors\": [\n    {\n      \"vendorId\": 1,\n      \"offeredAmount\": 45000000,\n      \"isWinner\": true\n    }\n  ]\n}"
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4. Create Purchase Order (PO)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:4000/api/v1/procurement/purchase-orders",
+          "host": [
+            "http://localhost:4000/api/v1/procurement/purchase-orders"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"purchase_request_id\": 1,\n  \"vendor_id\": 1,\n  \"po_items\": [\n    {\n      \"item_name\": \"Server Rack\",\n      \"quantity\": 2,\n      \"unit_price\": 15000000,\n      \"total_price\": 30000000\n    }\n  ]\n}"
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "5. Goods Receipt (GR)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:4000/api/v1/procurement/goods-receipts",
+          "host": [
+            "http://localhost:4000/api/v1/procurement/goods-receipts"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"purchaseOrderId\": 1,\n  \"receiptDate\": \"2026-07-20T10:00:00Z\",\n  \"remarks\": \"Diterima gudang dalam kondisi baik\",\n  \"items\": [\n    {\n      \"poItemId\": 1,\n      \"receivedQuantity\": 2,\n      \"remarks\": \"Pemeriksaan fisik sesuai\"\n    }\n  ]\n}"
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "6. Create Invoice (Finance)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:4000/api/v1/finance/invoices",
+          "host": [
+            "http://localhost:4000/api/v1/finance/invoices"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"purchaseOrderId\": 1,\n  \"invoiceDate\": \"2026-07-20T10:00:00Z\",\n  \"items\": [\n    {\n      \"poItemId\": 1,\n      \"quantity\": 2,\n      \"unitPrice\": 15000000,\n      \"totalPrice\": 30000000\n    }\n  ]\n}"
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "7. Process Payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "http://localhost:4000/api/v1/finance/payments",
+          "host": [
+            "http://localhost:4000/api/v1/finance/payments"
+          ]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"invoiceId\": 1,\n  \"paymentDate\": \"2026-07-21T10:00:00Z\",\n  \"paymentAmount\": 30000000,\n  \"paymentMethod\": \"BANK_TRANSFER\",\n  \"referenceNumber\": \"TRX-EPMS-8899\"\n}"
+        },
+        "auth": {
+          "type": "bearer",
+          "bearer": [
+            {
+              "key": "token",
+              "value": "{{token}}",
+              "type": "string"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

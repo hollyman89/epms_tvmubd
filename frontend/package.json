@@ -1,0 +1,35 @@
+{
+  "name": "epms-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@ant-design/charts": "^2.6.7",
+    "@ant-design/icons": "^5.2.6",
+    "@hello-pangea/dnd": "^18.0.1",
+    "@tanstack/react-query": "^5.101.4",
+    "antd": "^5.10.0",
+    "axios": "^1.6.0",
+    "dayjs": "^1.11.21",
+    "next": "14.0.0",
+    "react": "^18.2.0",
+    "react-countup": "^6.5.3",
+    "react-dom": "^18.2.0",
+    "reactflow": "^11.10.1",
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^20.8.9",
+    "@types/react": "^18.2.33",
+    "@types/react-dom": "^18.2.14",
+    "eslint": "^8.52.0",
+    "eslint-config-next": "14.0.0",
+    "typescript": "^5.2.2"
+  }
+}
