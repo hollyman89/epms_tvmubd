@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsArray, IsBoolean, IsNotEmpty, IsNumber, ValidateNested } from 'class-validator';
+import { IsArray, IsBoolean, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
 
 export class VendorDataDto {
   @ApiProperty({ example: 1 })
@@ -29,4 +29,9 @@ export class SubmitVendorComparisonDto {
   @ValidateNested({ each: true })
   @Type(() => VendorDataDto)
   vendors: VendorDataDto[];
+
+  @ApiProperty({ example: 'Evaluasi berdasarkan harga terendah dan spesifikasi', required: false })
+  @IsOptional()
+  @IsString()
+  remarks?: string;
 }

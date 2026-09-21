@@ -2,6 +2,7 @@ import { Controller, Post, Get, Put, Patch, Delete, Param, Body, Query, UseGuard
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ProcurementService } from './procurement.service';
 import { ProcurementPackageService } from './procurement-package.service';
+import { ProcurementReconciliationService } from './procurement-reconciliation.service';
 import { CreatePurchaseRequestDto } from './dto/create-pr.dto';
 import { CreateRfqDto } from './dto/create-rfq.dto';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
@@ -16,6 +17,11 @@ import {
   CancelPackageDto,
   QueryPackageDto,
 } from './dto/procurement-package.dto';
+import {
+  ReconcileItemDto,
+  ExcludeItemDto,
+  QueryReconciliationDto,
+} from './dto/procurement-reconciliation.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -28,6 +34,7 @@ export class ProcurementController {
   constructor(
     private readonly procurementService: ProcurementService,
     private readonly packageService: ProcurementPackageService,
+    private readonly reconciliationService: ProcurementReconciliationService,
   ) {}
 
   @Get('pr')
@@ -300,5 +307,59 @@ export class ProcurementController {
     const userId = Number(req.user?.userId || req.user?.sub);
     const roles: string[] = Array.isArray(req.user?.roles) ? req.user.roles : [req.user?.role || ''].filter(Boolean);
     return this.packageService.createPrFromPackage(id, userId, roles);
+  }
+
+  // =========================================================================
+  // RECONCILIATION ENDPOINTS (PHASE 3)
+  // =========================================================================
+
+  @Get('reconciliations/unresolved')
+  @Roles('PROCUREMENT', 'PURCHASING', 'PROJECT_MANAGER', 'SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'List unresolved historical / AD_HOC PR items' })
+  async getUnresolvedReconciliationItems(
+    @Request() req,
+    @Query() query: QueryReconciliationDto,
+  ) {
+    const userId = Number(req.user?.userId || req.user?.sub);
+    const roles: string[] = Array.isArray(req.user?.roles) ? req.user.roles : [req.user?.role || ''].filter(Boolean);
+    return this.reconciliationService.getUnresolvedItems(userId, roles, query);
+  }
+
+  @Get('reconciliations/items/:prItemId')
+  @Roles('PROCUREMENT', 'PURCHASING', 'PROJECT_MANAGER', 'SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Get PR item reconciliation details and candidate CostItems' })
+  async getItemReconciliationDetail(
+    @Request() req,
+    @Param('prItemId', ParseIntPipe) prItemId: number,
+  ) {
+    const userId = Number(req.user?.userId || req.user?.sub);
+    const roles: string[] = Array.isArray(req.user?.roles) ? req.user.roles : [req.user?.role || ''].filter(Boolean);
+    return this.reconciliationService.getItemReconciliationDetail(userId, roles, prItemId);
+  }
+
+  @Post('reconciliations/items/:prItemId/reconcile')
+  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Reconcile PR item to an approved baseline CostItem (Procurement/Admin only)' })
+  async reconcileItem(
+    @Request() req,
+    @Param('prItemId', ParseIntPipe) prItemId: number,
+    @Body() dto: ReconcileItemDto,
+  ) {
+    const userId = Number(req.user?.userId || req.user?.sub);
+    const roles: string[] = Array.isArray(req.user?.roles) ? req.user.roles : [req.user?.role || ''].filter(Boolean);
+    return this.reconciliationService.reconcileItem(userId, roles, prItemId, dto);
+  }
+
+  @Post('reconciliations/items/:prItemId/exclude')
+  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Exclude PR item from project RAB quota with mandatory reason (Procurement/Admin only)' })
+  async excludeItem(
+    @Request() req,
+    @Param('prItemId', ParseIntPipe) prItemId: number,
+    @Body() dto: ExcludeItemDto,
+  ) {
+    const userId = Number(req.user?.userId || req.user?.sub);
+    const roles: string[] = Array.isArray(req.user?.roles) ? req.user.roles : [req.user?.role || ''].filter(Boolean);
+    return this.reconciliationService.excludeItem(userId, roles, prItemId, dto);
   }
 }

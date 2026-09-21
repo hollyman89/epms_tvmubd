@@ -18,10 +18,13 @@ import { ProcurementEventListener } from './procurement-event.listener';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import { ProcurementPackage, ProcurementPackageStatus } from '../../entities/procurement-package.entity';
 import { ProcurementPackageItem } from '../../entities/procurement-package-item.entity';
+import { ProcurementReconciliation, ProcurementReconciliationStatus } from '../../entities/procurement-reconciliation.entity';
+import { ProcurementReconciliationService } from './procurement-reconciliation.service';
 import { PurchaseRequestItem } from '../../entities/purchase-request-item.entity';
 import { Project } from '../../entities/project.entity';
 import { CostItem } from '../../entities/cost-item.entity';
 import { ProjectCostEstimate } from '../../entities/project-cost-estimate.entity';
+import { AuditLog } from '../../entities/audit-log.entity';
 import { WorkflowDefinition } from '../../entities/workflow-definition.entity';
 import { WorkflowInstance } from '../../entities/workflow-instance.entity';
 import { WorkflowTask } from '../../entities/workflow-task.entity';
@@ -372,8 +375,8 @@ describe('ProcurementService - WBS Budget & Race Condition Unit Tests', () => {
       status: 'SUBMITTED',
       leadTimeDays: 14,
       items: [
-        { id: 5, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, unitPrice: 24000 },
-        { id: 6, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, unitPrice: 9999999 },
+        { id: 5, prItemId: 1, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, unitPrice: 24000 },
+        { id: 6, prItemId: 2, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, unitPrice: 9999999 },
       ],
     };
 
@@ -433,6 +436,12 @@ describe('ProcurementService - WBS Budget & Race Condition Unit Tests', () => {
       });
 
       queryRunnerMock.manager.find.mockImplementation((entityClass: any, options: any) => {
+        if (entityClass === PurchaseRequestItem) {
+          return Promise.resolve([
+            { id: 1, prId: 1, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, costItemId: 101, wbsId: 501 },
+            { id: 2, prId: 1, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, costItemId: 102, wbsId: 502 },
+          ]);
+        }
         if (entityClass === Rfq || options?.where?.prId === 1) {
           return Promise.resolve([{ ...mockEvaluatedRfq }]);
         }
@@ -648,8 +657,8 @@ describe('ProcurementService - WBS Budget & Race Condition Unit Tests', () => {
       status: 'SUBMITTED',
       leadTimeDays: 14,
       items: [
-        { id: 5, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, unitPrice: 24000 },
-        { id: 6, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, unitPrice: 9999999 },
+        { id: 5, prItemId: 1, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, unitPrice: 24000 },
+        { id: 6, prItemId: 2, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, unitPrice: 9999999 },
       ],
     };
 
@@ -664,6 +673,12 @@ describe('ProcurementService - WBS Budget & Race Condition Unit Tests', () => {
       });
 
       queryRunnerMock.manager.find.mockImplementation((entityClass: any, options: any) => {
+        if (entityClass === PurchaseRequestItem) {
+          return Promise.resolve([
+            { id: 1, prId: 1, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, costItemId: 101, wbsId: 501 },
+            { id: 2, prId: 1, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, costItemId: 102, wbsId: 502 },
+          ]);
+        }
         if (entityClass === Rfq || options?.where?.prId === 1) {
           return Promise.resolve([{ ...mockEvaluatedRfq }]);
         }
@@ -1118,8 +1133,8 @@ describe('ProcurementService - WBS Budget & Race Condition Unit Tests', () => {
       status: 'SUBMITTED',
       leadTimeDays: 14,
       items: [
-        { id: 5, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, unitPrice: 24000 },
-        { id: 6, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, unitPrice: 9999999 },
+        { id: 5, prItemId: 1, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, unitPrice: 24000 },
+        { id: 6, prItemId: 2, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, unitPrice: 9999999 },
       ],
     };
 
@@ -1146,6 +1161,12 @@ describe('ProcurementService - WBS Budget & Race Condition Unit Tests', () => {
       });
 
       queryRunnerMock.manager.find.mockImplementation((entityClass: any, options: any) => {
+        if (entityClass === PurchaseRequestItem) {
+          return Promise.resolve([
+            { id: 1, prId: 1, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, costItemId: 101, wbsId: 501 },
+            { id: 2, prId: 1, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, costItemId: 102, wbsId: 502 },
+          ]);
+        }
         if (entityClass === Rfq) return Promise.resolve([{ ...mockEvaluatedRfq }]);
         if (entityClass === VendorComparison) return Promise.resolve([...mockComparisons]);
         return Promise.resolve([]);
@@ -1194,6 +1215,12 @@ describe('ProcurementService - WBS Budget & Race Condition Unit Tests', () => {
     it('P74-B04: PR with multiple RFQs but exactly one EVALUATED succeeds', async () => {
       setupBaseHappyPath();
       queryRunnerMock.manager.find.mockImplementation((entityClass: any) => {
+        if (entityClass === PurchaseRequestItem) {
+          return Promise.resolve([
+            { id: 1, prId: 1, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, costItemId: 101, wbsId: 501 },
+            { id: 2, prId: 1, itemName: 'Kabel Fiber Optic 24 Core ADSS', quantity: 10, costItemId: 102, wbsId: 502 },
+          ]);
+        }
         if (entityClass === Rfq) {
           return Promise.resolve([
             { ...mockEvaluatedRfq }, // ID 10 EVALUATED
@@ -1820,11 +1847,16 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
       };
 
       mockManager.findOne.mockResolvedValue(mockPkg);
-      mockManager.query.mockResolvedValue([{ cnt: 0 }]);
+      mockManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('procurement_package_items')) {
+          return Promise.resolve([{ reserved_qty: 40, reserved_amount: 400000 }]);
+        }
+        return Promise.resolve([{ cnt: 0, committed_qty: 0, committed_amount: 0, ordered_qty: 0, ordered_amount: 0, received_qty: 0 }]);
+      });
 
       // Baseline is 50, but 40 is already committed
       const qbCostItem = createMockQueryBuilder({
-        getMany: [{ id: 101, itemName: 'Kabel FO', quantity: 50, uom: 'Meter' }],
+        getMany: [{ id: 101, itemName: 'Kabel FO', quantity: 50, uom: 'Meter', subtotal: 500000 }],
       });
       const qbQuota = createMockQueryBuilder({
         getRawOne: { committedQty: 40 }, // 40 + 20 = 60 > 50
@@ -1914,7 +1946,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
       }
     });
 
-    it('P2-17: Direct PR creation sets origin = AD_HOC', async () => {
+    it('P2-17: Direct PR creation on IN_PROGRESS project is rejected with BadRequestException', async () => {
       mockManager.query.mockImplementation((sql: string) => {
         if (sql.includes('FROM projects WHERE id = ? FOR SHARE')) {
           return Promise.resolve([{ status: 'IN_PROGRESS' }]);
@@ -1923,20 +1955,13 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
       });
       mockManager.count.mockResolvedValue(0);
 
-      await procurementService.createAndSubmitPurchaseRequest(1, {
-        projectId: 10,
-        totalEstimatedAmount: 1000000,
-        items: [{ itemName: 'Item Direct', quantity: 2, estimatedUnitPrice: 500000 }],
-      });
-
-      expect(mockManager.create).toHaveBeenCalledWith(
-        PurchaseRequest,
-        expect.objectContaining({
+      await expect(
+        procurementService.createAndSubmitPurchaseRequest(1, {
           projectId: 10,
-          origin: 'AD_HOC',
-          status: 'SUBMITTED',
+          totalEstimatedAmount: 1000000,
+          items: [{ itemName: 'Item Direct', quantity: 2, estimatedUnitPrice: 500000 }],
         }),
-      );
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('P2-18: Package PR creation sets origin = PACKAGE', async () => {
@@ -2242,4 +2267,675 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     });
   });
 });
+
+// ===========================================================================
+// PHASE 3 UNIT TESTS — PROCUREMENT RECONCILIATION & AUTHORITATIVE REMAINING
+// ===========================================================================
+describe('Procurement Reconciliation & Authoritative Remaining Quantity - Phase 3 Unit Tests', () => {
+  let pkgService: ProcurementPackageService;
+  let procurementService: ProcurementService;
+  let reconService: ProcurementReconciliationService;
+  let mockManager: any;
+  let mockQueryRunner: any;
+  let mockDataSource: any;
+  let mockReconRepo: any;
+  let mockPrRepo: any;
+  let mockPrItemRepo: any;
+  let mockCostItemRepo: any;
+  let mockCostEstimateRepo: any;
+  let mockProjectRepo: any;
+  let mockPackageRepo: any;
+  let mockPackageItemRepo: any;
+  let mockWfDefRepo: any;
+  let mockWfInstRepo: any;
+  let mockWfEngineService: any;
+  let eventEmitterMock: any;
+
+  const createMockQueryBuilder = (config: {
+    getOne?: any;
+    getMany?: any;
+    getRawOne?: any;
+  } = {}) => {
+    const qb: any = {
+      setLock: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      innerJoin: jest.fn().mockReturnThis(),
+      innerJoinAndSelect: jest.fn().mockReturnThis(),
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      select: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(config.getOne !== undefined ? config.getOne : null),
+      getMany: jest.fn().mockResolvedValue(config.getMany !== undefined ? config.getMany : []),
+      getRawOne: jest.fn().mockResolvedValue(config.getRawOne !== undefined ? config.getRawOne : null),
+    };
+    return qb;
+  };
+
+  beforeEach(() => {
+    mockManager = {
+      findOne: jest.fn(),
+      find: jest.fn(),
+      create: jest.fn((entityClass, data) => ({ ...data })),
+      save: jest.fn((entityClass, data) =>
+        Promise.resolve(
+          Array.isArray(data)
+            ? data.map((d, idx) => ({ id: idx + 1, ...d }))
+            : { id: (data as any)?.id || 1, ...data }
+        )
+      ),
+      update: jest.fn().mockResolvedValue({ affected: 1 }),
+      delete: jest.fn().mockResolvedValue({ affected: 1 }),
+      count: jest.fn().mockResolvedValue(0),
+      query: jest.fn().mockResolvedValue([]),
+      createQueryBuilder: jest.fn(() => createMockQueryBuilder()),
+    };
+
+    mockQueryRunner = {
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+      manager: mockManager,
+    };
+
+    mockDataSource = {
+      transaction: jest.fn(async (cb: any) => cb(mockManager)),
+      createQueryRunner: jest.fn(() => mockQueryRunner),
+      manager: mockManager,
+      query: jest.fn().mockResolvedValue([]),
+    };
+
+    mockPackageRepo = { createQueryBuilder: jest.fn(() => createMockQueryBuilder()), findOne: jest.fn(), find: jest.fn() };
+    mockPackageItemRepo = { find: jest.fn(), findOne: jest.fn() };
+    mockPrRepo = { find: jest.fn(), findOne: jest.fn(), count: jest.fn() };
+    mockPrItemRepo = { find: jest.fn(), findOne: jest.fn(), createQueryBuilder: jest.fn(() => createMockQueryBuilder()) };
+    mockProjectRepo = { find: jest.fn(), findOne: jest.fn() };
+    mockCostItemRepo = { find: jest.fn(), findOne: jest.fn() };
+    mockCostEstimateRepo = { find: jest.fn(), findOne: jest.fn() };
+    mockWfDefRepo = { findOne: jest.fn() };
+    mockWfInstRepo = { findOne: jest.fn() };
+    mockWfEngineService = { startInstance: jest.fn().mockResolvedValue({ instanceId: 100 }) };
+    mockReconRepo = { find: jest.fn(), findOne: jest.fn(), createQueryBuilder: jest.fn(() => createMockQueryBuilder()) };
+    eventEmitterMock = { emit: jest.fn() };
+
+    pkgService = new ProcurementPackageService(
+      mockPackageRepo,
+      mockPackageItemRepo,
+      mockPrRepo,
+      mockPrItemRepo,
+      mockProjectRepo,
+      mockCostItemRepo,
+      mockCostEstimateRepo,
+      mockWfDefRepo,
+      mockWfInstRepo,
+      mockWfEngineService,
+      mockDataSource,
+    );
+
+    reconService = new ProcurementReconciliationService(
+      mockReconRepo,
+      mockPrRepo,
+      mockPrItemRepo,
+      mockCostItemRepo,
+      mockCostEstimateRepo,
+      mockProjectRepo,
+      mockDataSource,
+    );
+
+    procurementService = new ProcurementService(
+      mockPrRepo,
+      { findOne: jest.fn(), find: jest.fn() } as any,
+      {} as any,
+      { find: jest.fn(), findOne: jest.fn() } as any,
+      { findOne: jest.fn(), find: jest.fn() } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      mockWfEngineService,
+      mockDataSource,
+      eventEmitterMock,
+    );
+  });
+
+  // ---------------------------------------------------------------------------
+  // 1. PO Item Traceability & Zero String Matching
+  // ---------------------------------------------------------------------------
+  describe('1. PO Item Traceability & Zero String Matching', () => {
+    it('P3-01: PO Item authoritatively persists pr_item_id and cost_item_id from quotation items', async () => {
+      const mockPr = { id: 1, prNumber: 'PR-20260901-001', status: 'APPROVED', projectId: 10 };
+      const mockRfq = { id: 1, prId: 1, status: 'EVALUATED' };
+      const mockComparisons = [{ id: 1, rfqId: 1, vendorId: 4, isWinner: true, vendor: { id: 4, name: 'PT Vendor' } }];
+      const mockQuotation = {
+        id: 3,
+        rfqId: 1,
+        vendorId: 4,
+        status: 'SUBMITTED',
+        leadTimeDays: 14,
+        items: [
+          { id: 10, prItemId: 1, itemName: 'Item A', quantity: 10, unitPrice: 5000 },
+          { id: 11, prItemId: 2, itemName: 'Item B', quantity: 20, unitPrice: 2500 },
+        ],
+      };
+
+      mockManager.findOne.mockImplementation((entityClass: any) => {
+        if (entityClass === PurchaseRequest) return Promise.resolve(mockPr);
+        if (entityClass === PurchaseOrder) return Promise.resolve(null);
+        if (entityClass === Rfq) return Promise.resolve(mockRfq);
+        if (entityClass === Quotation) return Promise.resolve(mockQuotation);
+        return Promise.resolve(null);
+      });
+
+      mockManager.find.mockImplementation((entityClass: any) => {
+        if (entityClass === PurchaseRequestItem) {
+          return Promise.resolve([
+            { id: 1, prId: 1, itemName: 'Item A', quantity: 10, costItemId: 101, wbsId: 501 },
+            { id: 2, prId: 1, itemName: 'Item B', quantity: 20, costItemId: 102, wbsId: 502 },
+          ]);
+        }
+        if (entityClass === Rfq) return Promise.resolve([mockRfq]);
+        if (entityClass === VendorComparison) return Promise.resolve(mockComparisons);
+        return Promise.resolve([]);
+      });
+
+      const savedPoItems: any[] = [];
+      mockManager.save.mockImplementation((entityClass: any, data: any) => {
+        if (entityClass === PurchaseOrderItem) {
+          if (Array.isArray(data)) savedPoItems.push(...data);
+          else savedPoItems.push(data);
+        }
+        return Promise.resolve(data);
+      });
+
+      const dto: any = {
+        purchase_request_id: 1,
+        vendor_id: 4,
+        payment_terms: [
+          { sequence: 1, term_name: 'Lunas', term_type: PaymentTermType.DOWN_PAYMENT, percentage: 100 },
+        ],
+      };
+
+      const result = await procurementService.createPurchaseOrder(1, dto);
+
+      expect(result.success).toBe(true);
+      expect(savedPoItems).toHaveLength(2);
+      expect(savedPoItems[0].prItemId).toBe(1);
+      expect(savedPoItems[0].costItemId).toBe(101);
+      expect(savedPoItems[1].prItemId).toBe(2);
+      expect(savedPoItems[1].costItemId).toBe(102);
+    });
+
+    it('P3-02: Zero string matching: throws BadRequestException if quotation item lacks authoritative prItemId / costItemId', async () => {
+      const mockPr = { id: 1, prNumber: 'PR-20260901-001', status: 'APPROVED', projectId: 10 };
+      const mockRfq = { id: 1, prId: 1, status: 'EVALUATED' };
+      const mockComparisons = [{ id: 1, rfqId: 1, vendorId: 4, isWinner: true }];
+      const mockQuotation = {
+        id: 3,
+        rfqId: 1,
+        vendorId: 4,
+        status: 'SUBMITTED',
+        leadTimeDays: 14,
+        items: [
+          // Missing prItemId: Even though itemName matches, string matching is strictly forbidden
+          { id: 10, prItemId: null, itemName: 'Item Unlinked', quantity: 10, unitPrice: 5000 },
+        ],
+      };
+
+      mockManager.findOne.mockImplementation((entityClass: any) => {
+        if (entityClass === PurchaseRequest) return Promise.resolve(mockPr);
+        if (entityClass === PurchaseOrder) return Promise.resolve(null);
+        if (entityClass === Rfq) return Promise.resolve(mockRfq);
+        if (entityClass === Quotation) return Promise.resolve(mockQuotation);
+        return Promise.resolve(null);
+      });
+
+      mockManager.find.mockImplementation((entityClass: any) => {
+        if (entityClass === Rfq) return Promise.resolve([mockRfq]);
+        if (entityClass === VendorComparison) return Promise.resolve(mockComparisons);
+        return Promise.resolve([]);
+      });
+
+      const dto: any = {
+        purchase_request_id: 1,
+        vendor_id: 4,
+        payment_terms: [{ sequence: 1, term_name: 'Lunas', term_type: PaymentTermType.DOWN_PAYMENT, percentage: 100 }],
+      };
+
+      await expect(procurementService.createPurchaseOrder(1, dto)).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 2. Safety Gate (LEGACY / AD_HOC / PENDING / RECONCILED / EXCLUDED)
+  // ---------------------------------------------------------------------------
+  describe('2. Safety Gate Enforcement & Resolution States', () => {
+    it('P3-03: Safety Gate blocks with 422 if active unreconciled LEGACY PR exists', async () => {
+      mockManager.query.mockResolvedValueOnce([{ cnt: 3 }]);
+
+      await expect(
+        pkgService.enforceProcurementSafetyGate(10, mockManager),
+      ).rejects.toThrow(UnprocessableEntityException);
+    });
+
+    it('P3-04: Safety Gate blocks with 422 if active unreconciled AD_HOC PR exists', async () => {
+      mockManager.query.mockResolvedValueOnce([{ cnt: 1 }]);
+
+      await expect(
+        pkgService.enforceProcurementSafetyGate(10, mockManager),
+      ).rejects.toThrow(UnprocessableEntityException);
+    });
+
+    it('P3-05: Safety Gate PASSES when all items are RECONCILED', async () => {
+      mockManager.query.mockResolvedValueOnce([{ cnt: 0 }]);
+
+      await expect(
+        pkgService.enforceProcurementSafetyGate(10, mockManager),
+      ).resolves.toBeUndefined();
+    });
+
+    it('P3-06: Safety Gate PASSES when all items are EXCLUDED', async () => {
+      mockManager.query.mockResolvedValueOnce([{ cnt: 0 }]);
+
+      await expect(
+        pkgService.enforceProcurementSafetyGate(10, mockManager),
+      ).resolves.toBeUndefined();
+    });
+
+    it('P3-07: Safety Gate BLOCKS when reconciliation status is PENDING', async () => {
+      mockManager.query.mockResolvedValueOnce([{ cnt: 1 }]);
+
+      await expect(
+        pkgService.enforceProcurementSafetyGate(10, mockManager),
+      ).rejects.toThrow(UnprocessableEntityException);
+    });
+
+    it('P3-08: Safety Gate ignores REJECTED and soft-deleted PRs', async () => {
+      mockManager.query.mockImplementation((sql: string) => {
+        expect(sql).toContain("pr.status NOT IN ('REJECTED')");
+        expect(sql).toContain('pr.deleted_at IS NULL');
+        return Promise.resolve([{ cnt: 0 }]);
+      });
+
+      await expect(
+        pkgService.enforceProcurementSafetyGate(10, mockManager),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 3. Authoritative Consumption Formulas & Precedence
+  // ---------------------------------------------------------------------------
+  describe('3. Authoritative Consumption Formulas & Precedence', () => {
+    it('P3-09: Active PR is counted once in prCommittedQty', async () => {
+      const mockCostItem = { id: 101, quantity: 100, subtotal: 1000000 };
+      mockManager.findOne.mockResolvedValue(mockCostItem);
+
+      mockManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('procurement_package_items')) {
+          return Promise.resolve([{ reserved_qty: 10, reserved_amount: 100000 }]);
+        }
+        if (sql.includes('purchase_request_items')) {
+          return Promise.resolve([{ committed_qty: 30, committed_amount: 300000 }]);
+        }
+        return Promise.resolve([{ ordered_qty: 0, ordered_amount: 0, received_qty: 0 }]);
+      });
+
+      const consumption = await pkgService.computeCostItemConsumption(101, mockManager);
+
+      expect(consumption.baselineQty).toBe(100);
+      expect(consumption.reservedQty).toBe(10);
+      expect(consumption.prCommittedQty).toBe(30);
+      expect(consumption.orderedQty).toBe(0);
+      expect(consumption.totalCommitted).toBe(40);
+      expect(consumption.rawRemainingQty).toBe(60);
+    });
+
+    it('P3-10: PO supersedes PR (PO_ISSUED excluded from prCommittedQty and transfers to orderedQty)', async () => {
+      const mockCostItem = { id: 101, quantity: 100, subtotal: 1000000 };
+      mockManager.findOne.mockResolvedValue(mockCostItem);
+
+      mockManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('procurement_package_items')) {
+          return Promise.resolve([{ reserved_qty: 0, reserved_amount: 0 }]);
+        }
+        if (sql.includes('goods_receipt_items')) {
+          return Promise.resolve([{ received_qty: 0 }]);
+        }
+        if (sql.includes('purchase_order_items')) {
+          // PO issued -> 30 ordered qty
+          return Promise.resolve([{ ordered_qty: 30, ordered_amount: 300000 }]);
+        }
+        if (sql.includes('purchase_request_items')) {
+          // PR status transitioned to PO_ISSUED -> 0 committed PR qty
+          return Promise.resolve([{ committed_qty: 0, committed_amount: 0 }]);
+        }
+        return Promise.resolve([{ received_qty: 0 }]);
+      });
+
+      const consumption = await pkgService.computeCostItemConsumption(101, mockManager);
+
+      expect(consumption.prCommittedQty).toBe(0);
+      expect(consumption.orderedQty).toBe(30);
+      expect(consumption.totalCommitted).toBe(30);
+      expect(consumption.rawRemainingQty).toBe(70);
+    });
+
+    it('P3-11: Partial PO releases delta (PR 3000, PO 2500 -> 500 released back to remainingQty)', async () => {
+      const mockCostItem = { id: 101, quantity: 3000, subtotal: 30000000 };
+      mockManager.findOne.mockResolvedValue(mockCostItem);
+
+      mockManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('procurement_package_items')) {
+          return Promise.resolve([{ reserved_qty: 0, reserved_amount: 0 }]);
+        }
+        if (sql.includes('goods_receipt_items')) {
+          return Promise.resolve([{ received_qty: 0 }]);
+        }
+        if (sql.includes('purchase_order_items')) {
+          // PO issued for 2500 only
+          return Promise.resolve([{ ordered_qty: 2500, ordered_amount: 25000000 }]);
+        }
+        if (sql.includes('purchase_request_items')) {
+          // Precursor PR status is PO_ISSUED -> prCommittedQty is 0
+          return Promise.resolve([{ committed_qty: 0, committed_amount: 0 }]);
+        }
+        return Promise.resolve([{ received_qty: 0 }]);
+      });
+
+      const consumption = await pkgService.computeCostItemConsumption(101, mockManager);
+
+      expect(consumption.baselineQty).toBe(3000);
+      expect(consumption.prCommittedQty).toBe(0);
+      expect(consumption.orderedQty).toBe(2500);
+      expect(consumption.totalCommitted).toBe(2500);
+      // Sisa kuota 500 kembali tersedia!
+      expect(consumption.rawRemainingQty).toBe(500);
+    });
+
+    it('P3-12: PO CANCELLED results in zero ordered consumption', async () => {
+      const mockCostItem = { id: 101, quantity: 100, subtotal: 1000000 };
+      mockManager.findOne.mockResolvedValue(mockCostItem);
+
+      mockManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('goods_receipt_items')) {
+          return Promise.resolve([{ received_qty: 0 }]);
+        }
+        if (sql.includes('purchase_order_items')) {
+          expect(sql).toContain("po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')");
+          return Promise.resolve([{ ordered_qty: 0, ordered_amount: 0 }]);
+        }
+        return Promise.resolve([{ reserved_qty: 0, committed_qty: 0, received_qty: 0 }]);
+      });
+
+      const consumption = await pkgService.computeCostItemConsumption(101, mockManager);
+      expect(consumption.orderedQty).toBe(0);
+      expect(consumption.rawRemainingQty).toBe(100);
+    });
+
+    it('P3-13: GoodsReceipt received_qty does NOT double deduct budget', async () => {
+      const mockCostItem = { id: 101, quantity: 100, subtotal: 1000000 };
+      mockManager.findOne.mockResolvedValue(mockCostItem);
+
+      mockManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('goods_receipt_items')) {
+          // Received 40 items at warehouse
+          return Promise.resolve([{ received_qty: 40 }]);
+        }
+        if (sql.includes('purchase_order_items')) {
+          return Promise.resolve([{ ordered_qty: 40, ordered_amount: 400000 }]);
+        }
+        return Promise.resolve([{ reserved_qty: 0, committed_qty: 0 }]);
+      });
+
+      const consumption = await pkgService.computeCostItemConsumption(101, mockManager);
+
+      expect(consumption.orderedQty).toBe(40);
+      expect(consumption.receivedQty).toBe(40);
+      // receivedQty is informational only; totalCommitted does not add it a second time
+      expect(consumption.totalCommitted).toBe(40);
+      expect(consumption.rawRemainingQty).toBe(60);
+    });
+    it('P3-14: Historical overrun is reflected in raw values and available is floored at 0', async () => {
+      const mockCostItem = { id: 101, quantity: 1000, subtotal: 1000000 };
+      mockManager.findOne.mockResolvedValue(mockCostItem);
+
+      mockManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('procurement_package_items')) {
+          return Promise.resolve([{ reserved_qty: 0, reserved_amount: 0 }]);
+        }
+        if (sql.includes('goods_receipt_items')) {
+          return Promise.resolve([{ received_qty: 0 }]);
+        }
+        if (sql.includes('purchase_order_items')) {
+          // Ordered 1200 items (200 overrun)
+          return Promise.resolve([{ ordered_qty: 1200, ordered_amount: 1200000 }]);
+        }
+        if (sql.includes('purchase_request_items')) {
+          return Promise.resolve([{ committed_qty: 0, committed_amount: 0 }]);
+        }
+        return Promise.resolve([{ reserved_qty: 0, committed_qty: 0 }]);
+      });
+
+      const consumption = await pkgService.computeCostItemConsumption(101, mockManager);
+
+      expect(consumption.rawRemainingQty).toBe(-200);
+      expect(consumption.availableQty).toBe(0);
+      expect(consumption.overrunQty).toBe(200);
+      
+      expect(consumption.rawRemainingAmount).toBe(-200000);
+      expect(consumption.availableAmount).toBe(0);
+      expect(consumption.overrunAmount).toBe(200000);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 4. Direct AD_HOC PR Guard on IN_PROGRESS
+  // ---------------------------------------------------------------------------
+  describe('4. Direct AD_HOC PR Guard on IN_PROGRESS', () => {
+    it('P3-14: Direct PR creation on IN_PROGRESS project is strictly rejected with BadRequestException', async () => {
+      mockManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT status FROM projects')) {
+          return Promise.resolve([{ status: 'IN_PROGRESS' }]);
+        }
+        return Promise.resolve([]);
+      });
+
+      await expect(
+        procurementService.createAndSubmitPurchaseRequest(1, {
+          projectId: 10,
+          totalEstimatedAmount: 1000000,
+          items: [{ itemName: 'Direct Item', quantity: 2, estimatedUnitPrice: 500000 }],
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // 5. Procurement Reconciliation Service
+  // ---------------------------------------------------------------------------
+  describe('5. Procurement Reconciliation Service & Immutability', () => {
+    it('P3-15: Cross-project CostItem reconciliation is rejected with BadRequestException', async () => {
+      const mockPrItem = {
+        id: 1,
+        purchaseRequest: { id: 10, projectId: 1, origin: 'LEGACY' },
+        quantity: 5,
+        estimatedUnitPrice: 1000,
+        totalAmount: 5000,
+      };
+      const mockCrossProjectCostItem = {
+        id: 999,
+        estimateId: 50,
+        estimate: { id: 50, projectId: 99, status: 'APPROVED' }, // Project 99 != Project 1
+        categoryKey: 'MATERIAL',
+        entryMode: 'ITEMIZED',
+      };
+
+      mockManager.findOne.mockImplementation((entityClass: any) => {
+        if (entityClass === PurchaseRequestItem) return Promise.resolve(mockPrItem);
+        if (entityClass === CostItem) return Promise.resolve(mockCrossProjectCostItem);
+        return Promise.resolve(null);
+      });
+
+      await expect(
+        reconService.reconcileItem(1, ['PROCUREMENT'], 1, { targetCostItemId: 999 }),
+      ).rejects.toThrow('bukan milik proyek');
+    });
+
+    it('P3-16: Target CostItem must be from APPROVED RAB and have eligible category', async () => {
+      const mockPrItem = {
+        id: 1,
+        purchaseRequest: { id: 10, projectId: 1, origin: 'LEGACY' },
+        quantity: 5,
+        estimatedUnitPrice: 1000,
+        totalAmount: 5000,
+      };
+      const mockUnapprovedCostItem = {
+        id: 101,
+        estimateId: 50,
+        estimate: { id: 50, projectId: 1, status: 'DRAFT' }, // Not APPROVED
+        categoryKey: 'MATERIAL',
+        entryMode: 'ITEMIZED',
+      };
+
+      mockManager.findOne.mockImplementation((entityClass: any) => {
+        if (entityClass === PurchaseRequestItem) return Promise.resolve(mockPrItem);
+        if (entityClass === CostItem) return Promise.resolve(mockUnapprovedCostItem);
+        return Promise.resolve(null);
+      });
+
+      await expect(
+        reconService.reconcileItem(1, ['PROCUREMENT'], 1, { targetCostItemId: 101 }),
+      ).rejects.toThrow('Rekonsiliasi hanya diizinkan ke RAB berstatus APPROVED');
+    });
+
+    it('P3-17: Historical commercial fields (itemName, quantity, unitPrice) remain unchanged during reconciliation', async () => {
+      const mockPrItem: any = {
+        id: 1,
+        itemName: 'Kabel Tembaga Legacy Asli',
+        quantity: 10,
+        estimatedUnitPrice: 25000,
+        totalAmount: 250000,
+        costItemId: null,
+        wbsId: null,
+        purchaseRequest: { id: 10, projectId: 1, origin: 'LEGACY' },
+      };
+
+      const mockCostItem: any = {
+        id: 201,
+        itemName: 'Kabel Power NYA 2.5mm',
+        wbsId: 301,
+        estimateId: 50,
+        estimate: { id: 50, projectId: 1, status: 'APPROVED' },
+        categoryKey: 'MATERIAL',
+        entryMode: 'ITEMIZED',
+        quantity: 100,
+        subtotal: 2500000,
+      };
+
+      mockManager.findOne.mockImplementation((entityClass: any) => {
+        if (entityClass === PurchaseRequestItem) return Promise.resolve(mockPrItem);
+        if (entityClass === CostItem) return Promise.resolve(mockCostItem);
+        if (entityClass === ProcurementReconciliation) return Promise.resolve(null);
+        return Promise.resolve(null);
+      });
+
+      mockManager.find.mockResolvedValue([]);
+      mockManager.query.mockResolvedValue([{ reserved_qty: 0, committed_qty: 0, ordered_qty: 0, received_qty: 0 }]);
+
+      const result = await reconService.reconcileItem(1, ['PROCUREMENT'], 1, {
+        targetCostItemId: 201,
+        notes: 'Rekonsiliasi kabel legacy',
+      });
+
+      expect(result.success).toBe(true);
+      // Commercial fields strictly preserved
+      expect(mockPrItem.itemName).toBe('Kabel Tembaga Legacy Asli');
+      expect(mockPrItem.quantity).toBe(10);
+      expect(mockPrItem.estimatedUnitPrice).toBe(25000);
+      expect(mockPrItem.totalAmount).toBe(250000);
+
+      // Projections synchronized
+      expect(mockPrItem.costItemId).toBe(201);
+      expect(mockPrItem.wbsId).toBe(301);
+    });
+
+    it('P3-18: Exclude item requires mandatory reason and sets status EXCLUDED', async () => {
+      const mockPrItem = {
+        id: 1,
+        purchaseRequest: { id: 10, projectId: 1, origin: 'AD_HOC' },
+        quantity: 5,
+        estimatedUnitPrice: 1000,
+        totalAmount: 5000,
+      };
+
+      mockManager.findOne.mockImplementation((entityClass: any) => {
+        if (entityClass === PurchaseRequestItem) return Promise.resolve(mockPrItem);
+        if (entityClass === ProcurementReconciliation) return Promise.resolve(null);
+        return Promise.resolve(null);
+      });
+
+      // Blank reason -> Rejected
+      await expect(
+        reconService.excludeItem(1, ['PROCUREMENT'], 1, { reason: '' }),
+      ).rejects.toThrow('Alasan eksklusi (reason) wajib diisi.');
+
+      // Valid reason -> Success
+      const result = await reconService.excludeItem(1, ['PROCUREMENT'], 1, {
+        reason: 'Item pengadaan dibatalkan dan tidak lagi dibebankan ke RAB proyek.',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.reconciliation.status).toBe(ProcurementReconciliationStatus.EXCLUDED);
+    });
+
+    it('P3-19: Concurrency quota protection evaluates authoritative remaining quantity under pessimistic lock', async () => {
+      const mockPkg: any = {
+        id: 1,
+        packageNumber: 'PKG-20260922-001',
+        projectId: 10,
+        status: ProcurementPackageStatus.DRAFT,
+        project: { id: 10, managerId: 1, status: 'IN_PROGRESS' },
+        requiredDate: '2026-12-31',
+        items: [{ id: 11, costItemId: 101, requestedQty: 25 }],
+      };
+
+      mockManager.findOne.mockResolvedValue(mockPkg);
+      // CostItem baseline is 50, but 30 is committed (20 reserved + 10 ordered)
+      const qbCostItem = createMockQueryBuilder({
+        getMany: [{ id: 101, itemName: 'Kabel FO', quantity: 50, uom: 'Meter', subtotal: 500000 }],
+      });
+
+      mockManager.createQueryBuilder.mockReturnValue(qbCostItem);
+      mockManager.query.mockImplementation((sql: string) => {
+        if (sql.includes('procurement_package_items')) {
+          return Promise.resolve([{ reserved_qty: 20, reserved_amount: 200000 }]);
+        }
+        if (sql.includes('purchase_order_items')) {
+          return Promise.resolve([{ ordered_qty: 10, ordered_amount: 100000 }]);
+        }
+        return Promise.resolve([{ cnt: 0, committed_qty: 0, received_qty: 0 }]);
+      });
+
+      // Requested 25 > remaining 20 (50 - 30) -> Must reject
+      await expect(
+        pkgService.submitPackage(1, 1, ['PROJECT_MANAGER']),
+      ).rejects.toThrow("Alokasi kuota untuk item 'Kabel FO' terlampaui!");
+
+      expect(qbCostItem.setLock).toHaveBeenCalledWith('pessimistic_write');
+    });
+
+    it('P3-20: Reconciliation RBAC: PM role cannot mutate reconciliation', async () => {
+      await expect(
+        reconService.reconcileItem(1, ['PROJECT_MANAGER'], 1, { targetCostItemId: 101 }),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        reconService.excludeItem(1, ['PROJECT_MANAGER'], 1, { reason: 'Test exclude' }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+});
+
 

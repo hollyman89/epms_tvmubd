@@ -552,32 +552,18 @@ export class ProcurementPackageService {
           throw new BadRequestException(`Cost Item #${item.costItemId} tidak ditemukan.`);
         }
 
-        const baselineQty = Number(costItem.quantity || 0);
+        // Authoritative Phase 3 Quota Validation (Packages + PRs + POs + Reconciliations)
+        const consumption = await this.computeCostItemConsumption(
+          costItem,
+          manager,
+          pkg.id,
+        );
 
-        // Sum requestedQty from other packages that are SUBMITTED or PR_CREATED for this cost item
-        const committedRes = await manager
-          .createQueryBuilder(ProcurementPackageItem, 'pi')
-          .innerJoin('pi.package', 'p')
-          .where('pi.costItemId = :costItemId', { costItemId: item.costItemId })
-          .andWhere('p.id != :currentPkgId', { currentPkgId: pkg.id })
-          .andWhere('p.status IN (:...activeStatuses)', {
-            activeStatuses: [
-              ProcurementPackageStatus.SUBMITTED,
-              ProcurementPackageStatus.PR_CREATED,
-            ],
-          })
-          .andWhere('p.deletedAt IS NULL')
-          .andWhere('pi.deletedAt IS NULL')
-          .select('COALESCE(SUM(pi.requested_qty), 0)', 'committedQty')
-          .getRawOne();
-
-        const committedQty = Number(committedRes?.committedQty || 0);
         const requestedQty = Number(item.requestedQty);
 
-        if (committedQty + requestedQty > baselineQty) {
-          const remaining = Math.max(0, baselineQty - committedQty);
+        if (requestedQty > consumption.availableQty) {
           throw new BadRequestException(
-            `Alokasi kuota untuk item '${costItem.itemName}' terlampaui! Baseline: ${baselineQty} ${costItem.uom}, Terkomitmen: ${committedQty} ${costItem.uom}, Sisa Kuota: ${remaining} ${costItem.uom}, Diajukan: ${requestedQty} ${costItem.uom}.`,
+            `Alokasi kuota untuk item '${costItem.itemName}' terlampaui! Baseline: ${consumption.baselineQty} ${costItem.uom}, Terkomitmen: ${consumption.totalCommitted} ${costItem.uom}, Sisa Kuota: ${consumption.availableQty} ${costItem.uom}, Diajukan: ${requestedQty} ${costItem.uom}.`,
           );
         }
       }
@@ -1040,22 +1026,180 @@ export class ProcurementPackageService {
     return orphanedPackages.length;
   }
 
-  private async enforceLegacySafetyGate(projectId: number, manager: EntityManager): Promise<void> {
-    const legacyCountRes = await manager.query(
-      `SELECT COUNT(*) as cnt FROM purchase_requests 
-       WHERE project_id = ? 
-         AND origin = 'LEGACY' 
-         AND status != 'REJECTED' 
-         AND deleted_at IS NULL`,
+  async enforceProcurementSafetyGate(projectId: number, manager: EntityManager): Promise<void> {
+    const unreconciledRes = await manager.query(
+      `SELECT COUNT(pri.id) as cnt
+       FROM purchase_request_items pri
+       JOIN purchase_requests pr ON pri.pr_id = pr.id
+       LEFT JOIN procurement_reconciliations rec ON rec.pr_item_id = pri.id
+       WHERE pr.project_id = ?
+         AND pr.origin IN ('LEGACY', 'AD_HOC')
+         AND pr.status NOT IN ('REJECTED')
+         AND pr.deleted_at IS NULL
+         AND (pri.cost_item_id IS NULL OR rec.status IS NULL OR rec.status = 'PENDING')
+         AND (rec.status IS NULL OR rec.status NOT IN ('RECONCILED', 'EXCLUDED'))`,
       [projectId],
     );
 
-    const legacyCount = Number(legacyCountRes[0]?.cnt || 0);
-    if (legacyCount > 0) {
+    const unreconciledCount = Number(unreconciledRes[0]?.cnt || 0);
+    if (unreconciledCount > 0) {
       throw new UnprocessableEntityException(
-        `Proyek ini memiliki ${legacyCount} Purchase Request legacy yang belum direkonsiliasi. Operasi transaksi paket pengadaan ditangguhkan sampai rekonsiliasi data Phase 3 selesai.`,
+        `Proyek ini memiliki ${unreconciledCount} item Purchase Request legacy yang belum direkonsiliasi (LEGACY / AD_HOC). Operasi transaksi paket pengadaan ditangguhkan sampai seluruh rekonsiliasi berstatus RECONCILED atau EXCLUDED.`,
       );
     }
+  }
+
+  private async enforceLegacySafetyGate(projectId: number, manager: EntityManager): Promise<void> {
+    return this.enforceProcurementSafetyGate(projectId, manager);
+  }
+
+  async computeCostItemConsumption(
+    costItemOrId: number | CostItem,
+    manager: EntityManager,
+    excludePackageId?: number,
+  ): Promise<{
+    baselineQty: number;
+    baselineAmount: number;
+    reservedQty: number;
+    reservedAmount: number;
+    prCommittedQty: number;
+    prCommittedAmount: number;
+    orderedQty: number;
+    orderedAmount: number;
+    receivedQty: number;
+    totalCommitted: number;
+    rawRemainingQty: number;
+    availableQty: number;
+    overrunQty: number;
+    rawRemainingAmount: number;
+    availableAmount: number;
+    overrunAmount: number;
+  }> {
+    let costItem: CostItem | null = null;
+    let costItemId: number;
+
+    if (typeof costItemOrId === 'object' && costItemOrId !== null) {
+      costItem = costItemOrId;
+      costItemId = Number(costItem.id);
+    } else {
+      costItemId = Number(costItemOrId);
+      costItem = await manager.findOne(CostItem, {
+        where: { id: costItemId },
+      });
+    }
+
+    if (!costItem) {
+      throw new NotFoundException(`Cost Item #${costItemId} tidak ditemukan.`);
+    }
+
+    const baselineQty = Number(costItem.quantity || 0);
+    const baselineAmount = Number(costItem.subtotal || 0);
+
+    // 1. Reserved Qty: Package status = 'SUBMITTED' (excluding current pkg if provided)
+    const reservedParams: any[] = [costItemId];
+    let excludePkgClause = '';
+    if (excludePackageId) {
+      excludePkgClause = 'AND pkg.id != ?';
+      reservedParams.push(excludePackageId);
+    }
+
+    const reservedRes = await manager.query(
+      `SELECT 
+         COALESCE(SUM(ppi.requested_qty), 0) AS reserved_qty,
+         COALESCE(SUM(ppi.requested_qty * ppi.estimated_unit_price), 0) AS reserved_amount
+       FROM procurement_package_items ppi
+       JOIN procurement_packages pkg ON ppi.package_id = pkg.id
+       WHERE ppi.cost_item_id = ?
+         AND pkg.status = 'SUBMITTED'
+         ${excludePkgClause}
+         AND pkg.deleted_at IS NULL
+         AND ppi.deleted_at IS NULL`,
+      reservedParams,
+    );
+    const reservedQty = Number(reservedRes[0]?.reserved_qty || 0);
+    const reservedAmount = Number(reservedRes[0]?.reserved_amount || 0);
+
+    // 2. PR Committed Qty: PR status in ('SUBMITTED', 'DIRECTOR_APPROVAL', 'REJECTED_TO_PROCUREMENT', 'APPROVED')
+    // PO_ISSUED is explicitly excluded as it transfers to ordered_qty
+    const committedRes = await manager.query(
+      `SELECT 
+         COALESCE(SUM(pri.quantity), 0) AS committed_qty,
+         COALESCE(SUM(pri.quantity * pri.estimated_unit_price), 0) AS committed_amount
+       FROM purchase_request_items pri
+       JOIN purchase_requests pr ON pri.pr_id = pr.id
+       WHERE pri.cost_item_id = ?
+         AND pr.status IN ('SUBMITTED', 'DIRECTOR_APPROVAL', 'REJECTED_TO_PROCUREMENT', 'APPROVED')
+         AND pr.deleted_at IS NULL`,
+      [costItemId],
+    );
+    const prCommittedQty = Number(committedRes[0]?.committed_qty || 0);
+    const prCommittedAmount = Number(committedRes[0]?.committed_amount || 0);
+
+    // 3. Ordered Qty: PO status in ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
+    // Matched by poi.cost_item_id or linked pri.cost_item_id. PO CANCELLED = 0.
+    const orderedRes = await manager.query(
+      `SELECT 
+         COALESCE(SUM(poi.quantity), 0) AS ordered_qty,
+         COALESCE(SUM(poi.total_price), 0) AS ordered_amount
+       FROM purchase_order_items poi
+       JOIN purchase_orders po ON poi.purchase_order_id = po.id
+       WHERE (poi.cost_item_id = ? OR poi.pr_item_id IN (
+         SELECT id FROM purchase_request_items WHERE cost_item_id = ?
+       ))
+         AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
+         AND po.deleted_at IS NULL
+         AND poi.deleted_at IS NULL`,
+      [costItemId, costItemId],
+    );
+    const orderedQty = Number(orderedRes[0]?.ordered_qty || 0);
+    const orderedAmount = Number(orderedRes[0]?.ordered_amount || 0);
+
+    // 4. Received Qty: GoodsReceipt items (Informational only, zero double-deduction)
+    const receivedRes = await manager.query(
+      `SELECT 
+         COALESCE(SUM(gri.received_quantity), 0) AS received_qty
+       FROM goods_receipt_items gri
+       JOIN purchase_order_items poi ON gri.po_item_id = poi.id
+       JOIN purchase_orders po ON poi.purchase_order_id = po.id
+       WHERE (poi.cost_item_id = ? OR poi.pr_item_id IN (
+         SELECT id FROM purchase_request_items WHERE cost_item_id = ?
+       ))
+         AND po.deleted_at IS NULL
+         AND poi.deleted_at IS NULL
+         AND gri.deleted_at IS NULL`,
+      [costItemId, costItemId],
+    );
+    const receivedQty = Number(receivedRes[0]?.received_qty || 0);
+
+    // Authoritative Calculations
+    const totalCommitted = Math.round((reservedQty + prCommittedQty + orderedQty) * 10000) / 10000;
+    const rawRemainingQty = Math.round((baselineQty - totalCommitted) * 10000) / 10000;
+    const availableQty = Math.max(0, rawRemainingQty);
+    const overrunQty = Math.max(0, -rawRemainingQty);
+
+    const totalCommittedAmount = Math.round((reservedAmount + prCommittedAmount + orderedAmount) * 100) / 100;
+    const rawRemainingAmount = Math.round((baselineAmount - totalCommittedAmount) * 100) / 100;
+    const availableAmount = Math.max(0, rawRemainingAmount);
+    const overrunAmount = Math.max(0, -rawRemainingAmount);
+
+    return {
+      baselineQty,
+      baselineAmount,
+      reservedQty,
+      reservedAmount,
+      prCommittedQty,
+      prCommittedAmount,
+      orderedQty,
+      orderedAmount,
+      receivedQty,
+      totalCommitted,
+      rawRemainingQty,
+      availableQty,
+      overrunQty,
+      rawRemainingAmount,
+      availableAmount,
+      overrunAmount,
+    };
   }
 
   // =========================================================================

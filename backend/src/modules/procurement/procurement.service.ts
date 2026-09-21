@@ -65,13 +65,18 @@ export class ProcurementService {
       const seq = String(countToday + 1).padStart(3, '0');
       const prNumber = `PR-${dateStr}-${seq}`;
 
-      // Enforce Project IN_PROGRESS Guard
+      // Enforce Project IN_PROGRESS Guard & Block Direct PR (Phase 3 Rule)
       const projectRes = await queryRunner.manager.query(
         `SELECT status FROM projects WHERE id = ? FOR SHARE`,
         [dto.projectId]
       );
       if (!projectRes || projectRes.length === 0) {
         throw new BadRequestException(`Project #${dto.projectId} tidak ditemukan`);
+      }
+      if (projectRes[0].status === 'IN_PROGRESS') {
+        throw new BadRequestException(
+          'Pembuatan Purchase Request langsung tidak diizinkan untuk proyek IN_PROGRESS. Seluruh pengadaan proyek wajib melalui Paket Pengadaan (Procurement Package).',
+        );
       }
       if (projectRes[0].status !== 'IN_PROGRESS') {
         throw new BadRequestException(
@@ -1299,13 +1304,38 @@ export class ProcurementService {
         throw new BadRequestException('Item penawaran vendor pemenang tidak ditemukan di database');
       }
 
+      // Authoritative PR Item and CostItem resolution (zero string matching)
+      const prItems = await queryRunner.manager.find(PurchaseRequestItem, {
+        where: { prId: pr.id },
+      });
+      const prItemMap = new Map<number, PurchaseRequestItem>();
+      for (const pri of prItems) {
+        prItemMap.set(Number(pri.id), pri);
+      }
+
       let serverTotalAmount = 0;
       const poItemsToCreate = quoteItems.map((qi) => {
         const qty = Number(qi.quantity || 0);
         const unitPrice = Number(qi.unitPrice || 0);
         const totalPrice = Math.round(qty * unitPrice * 100) / 100;
         serverTotalAmount += totalPrice;
+
+        const prItem = qi.prItemId ? prItemMap.get(Number(qi.prItemId)) : null;
+        if (!prItem) {
+          throw new BadRequestException(
+            `Item penawaran "${qi.itemName}" tidak terhubung ke item Purchase Request yang valid (prItemId: ${qi.prItemId || 'null'})`,
+          );
+        }
+
+        if (!prItem.costItemId) {
+          throw new BadRequestException(
+            `Item Purchase Request "${prItem.itemName}" (#${prItem.id}) belum memiliki authoritative cost_item_id. Rekonsiliasi pengadaan wajib diselesaikan sebelum Purchase Order dapat diterbitkan.`,
+          );
+        }
+
         return {
+          prItemId: prItem.id,
+          costItemId: Number(prItem.costItemId),
           itemName: qi.itemName,
           quantity: qty,
           unitPrice,
@@ -1456,6 +1486,8 @@ export class ProcurementService {
       const items = poItemsToCreate.map((item) =>
         queryRunner.manager.create(PurchaseOrderItem, {
           purchaseOrderId: savedPo.id,
+          prItemId: item.prItemId,
+          costItemId: item.costItemId,
           itemName: item.itemName,
           quantity: item.quantity,
           unitPrice: item.unitPrice,

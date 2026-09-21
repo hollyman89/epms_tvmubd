@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ProcurementController } from './procurement.controller';
 import { ProcurementService } from './procurement.service';
 import { ProcurementPackageService } from './procurement-package.service';
+import { ProcurementReconciliationService } from './procurement-reconciliation.service';
 import { ProcurementEventListener } from './procurement-event.listener';
 import { WorkflowModule } from '../workflow-engine/workflow.module';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
@@ -20,6 +21,7 @@ import { PoPaymentTerm } from '../../entities/po-payment-term.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { ProcurementPackage } from '../../entities/procurement-package.entity';
 import { ProcurementPackageItem } from '../../entities/procurement-package-item.entity';
+import { ProcurementReconciliation } from '../../entities/procurement-reconciliation.entity';
 import { Project } from '../../entities/project.entity';
 import { CostItem } from '../../entities/cost-item.entity';
 import { ProjectCostEstimate } from '../../entities/project-cost-estimate.entity';
@@ -32,6 +34,7 @@ import { WorkflowInstance } from '../../entities/workflow-instance.entity';
     TypeOrmModule.forFeature([
       ProcurementPackage,
       ProcurementPackageItem,
+      ProcurementReconciliation,
       PurchaseRequest,
       PurchaseRequestItem,
       Rfq,
@@ -55,7 +58,16 @@ import { WorkflowInstance } from '../../entities/workflow-instance.entity';
     WorkflowModule,
   ],
   controllers: [ProcurementController],
-  providers: [ProcurementService, ProcurementPackageService, ProcurementEventListener],
-  exports: [ProcurementService, ProcurementPackageService],
+  providers: [
+    ProcurementService,
+    ProcurementPackageService,
+    ProcurementReconciliationService,
+    ProcurementEventListener,
+  ],
+  exports: [
+    ProcurementService,
+    ProcurementPackageService,
+    ProcurementReconciliationService,
+  ],
 })
 export class ProcurementModule {}
