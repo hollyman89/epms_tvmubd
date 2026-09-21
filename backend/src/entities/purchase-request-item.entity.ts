@@ -9,6 +9,15 @@ export class PurchaseRequestItem {
   @Column({ name: 'pr_id' })
   prId: number;
 
+  @Column({ name: 'package_item_id', type: 'bigint', unsigned: true, nullable: true })
+  packageItemId?: number;
+
+  @Column({ name: 'cost_item_id', type: 'bigint', unsigned: true, nullable: true })
+  costItemId?: number;
+
+  @Column({ name: 'wbs_id', type: 'bigint', unsigned: true, nullable: true })
+  wbsId?: number;
+
   @Column({ name: 'item_name' })
   itemName: string;
 
