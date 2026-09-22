@@ -1829,6 +1829,28 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
       });
       expect(cancelled.status).toBe(ProcurementPackageStatus.CANCELLED);
     });
+
+    it('P2-13b: Assigned PM can update package when in RETURNED status', async () => {
+      const mockReturnedPkg: any = {
+        id: 1,
+        projectId: 10,
+        title: 'Old Title',
+        description: 'Old Description',
+        status: ProcurementPackageStatus.RETURNED,
+        project: { id: 10, managerId: 1, status: 'IN_PROGRESS' },
+        items: [],
+      };
+      mockManager.findOne.mockResolvedValue(mockReturnedPkg);
+      mockManager.save.mockImplementation((entity: any, data: any) => Promise.resolve(data));
+
+      const updated = await pkgService.updateDraft(1, 1, ['PROJECT_MANAGER'], {
+        title: 'Revised Title',
+        description: 'Revised Description',
+      });
+
+      expect(updated.title).toBe('Revised Title');
+      expect(updated.description).toBe('Revised Description');
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -338,9 +338,12 @@ export class ProcurementPackageService {
 
       this.validateProjectManagerOwnership(pkg.project, userId, userRoles);
 
-      if (pkg.status !== ProcurementPackageStatus.DRAFT) {
+      if (
+        pkg.status !== ProcurementPackageStatus.DRAFT &&
+        pkg.status !== ProcurementPackageStatus.RETURNED
+      ) {
         throw new BadRequestException(
-          `Hanya paket berstatus DRAFT yang dapat diubah. Status saat ini: ${pkg.status}`,
+          `Hanya paket berstatus DRAFT atau RETURNED yang dapat diubah. Status saat ini: ${pkg.status}`,
         );
       }
 
