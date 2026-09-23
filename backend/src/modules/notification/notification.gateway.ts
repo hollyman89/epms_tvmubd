@@ -46,8 +46,19 @@ export class NotificationGateway implements OnGatewayConnection, OnGatewayDiscon
       
       const roomName = `room:user:${userId}`;
       client.join(roomName);
+      client.join(`user:${userId}`);
+
+      const roles: string[] = Array.isArray(decoded.roles)
+        ? decoded.roles
+        : (decoded.role ? [decoded.role] : []);
+      client.data.roles = roles;
+      for (const r of roles) {
+        if (typeof r === 'string' && r.trim().length > 0) {
+          client.join(`role:${r.trim().toUpperCase()}`);
+        }
+      }
       
-      this.logger.log(`Client connected: ${client.id} | Joined room: ${roomName}`);
+      this.logger.log(`Client connected: ${client.id} | Joined rooms: ${roomName}, user:${userId}, roles: ${roles.join(',')}`);
     } catch (err) {
       this.logger.error(`Client connection error: ${err.message}`);
       client.disconnect();
@@ -62,5 +73,11 @@ export class NotificationGateway implements OnGatewayConnection, OnGatewayDiscon
     const roomName = `room:user:${userId}`;
     this.server.to(roomName).emit('new_notification', notification);
     this.logger.log(`Pushed notification to ${roomName}`);
+  }
+
+  sendSyncEventToRooms(rooms: string[], envelope: any): void {
+    if (!this.server || !rooms || rooms.length === 0) return;
+    this.server.to(rooms).emit('business:sync', envelope);
+    this.logger.log(`Dispatched business:sync for event ${envelope?.eventName} to ${rooms.length} room(s)`);
   }
 }

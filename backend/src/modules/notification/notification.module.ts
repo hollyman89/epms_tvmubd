@@ -12,6 +12,7 @@ import { Payment } from '../../entities/payment.entity';
 
 import { NotificationGateway } from './notification.gateway';
 import { NotificationListener } from './notification.listener';
+import { BusinessSyncConsumer } from './business-sync.consumer';
 import { QueueModule } from '../queue/queue.module';
 
 @Module({
@@ -26,8 +27,15 @@ import { QueueModule } from '../queue/queue.module';
     QueueModule
   ],
   controllers: [NotificationController],
-  providers: [NotificationService, NotificationGateway, NotificationEventListener, ManagementNotificationConsumer, NotificationListener],
-  exports: [NotificationService, NotificationGateway, NotificationListener],
+  providers: [
+    NotificationService,
+    NotificationGateway,
+    NotificationEventListener,
+    ManagementNotificationConsumer,
+    NotificationListener,
+    BusinessSyncConsumer,
+  ],
+  exports: [NotificationService, NotificationGateway, NotificationListener, BusinessSyncConsumer],
 })
 export class NotificationModule {}
 

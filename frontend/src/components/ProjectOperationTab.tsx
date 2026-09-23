@@ -629,6 +629,31 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     fetchBoardData();
   }, [refreshTrigger, localRefreshKey]);
 
+  // Canonical Phase G Cross-User Synchronization & Reconnect Resync
+  useEffect(() => {
+    const handleSync = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+      if (
+        detail.aggregateType === 'Project' &&
+        (detail.eventName === 'project.pm.assigned' || detail.eventName === 'project.kickoff.executed')
+      ) {
+        fetchBoardData();
+      }
+    };
+
+    const handleReconnect = () => {
+      fetchBoardData();
+    };
+
+    window.addEventListener('epms:business-sync', handleSync);
+    window.addEventListener('epms:reconnect-resync', handleReconnect);
+    return () => {
+      window.removeEventListener('epms:business-sync', handleSync);
+      window.removeEventListener('epms:reconnect-resync', handleReconnect);
+    };
+  }, []);
+
   const fetchBoardData = async () => {
     setLoading(true);
     setReadinessLoading(true);
@@ -1689,6 +1714,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
           setSelectedCharterForPackage(null);
         }}
         project={selectedCharterForPackage}
+        onRefreshParent={() => fetchBoardData()}
       />
     </div>
   );
