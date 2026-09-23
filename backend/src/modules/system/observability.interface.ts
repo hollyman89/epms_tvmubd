@@ -14,17 +14,36 @@ export interface SliSloTarget {
 }
 
 export interface ErrorBudgetStatus {
-  monthlyBudgetPercent: number;
-  usedPercent: number;
-  remainingPercent: number;
+  monthlyBudgetPercent: number | null;
+  usedPercent: number | null;
+  remainingPercent: number | null;
   status: 'HEALTHY' | 'WARNING' | 'EXHAUSTED' | 'NOT_MEASURED';
 }
 
 export interface CapacityMetric {
   resource: string;
-  usagePercent: number;
+  usagePercent: number | null;
   status: 'NORMAL' | 'HIGH' | 'CRITICAL' | 'NOT_MEASURED';
   trend: 'STABLE' | 'RISING' | 'FALLING' | 'NOT_MEASURED';
+}
+
+export interface OutboxIssueDiagnostic {
+  eventId: string;
+  eventName: string;
+  status: string;
+  retryCount: number;
+  errorMessage: string | null;
+  createdAt: string | null;
+}
+
+export interface OutboxTelemetry {
+  pendingQueue: number;
+  publishedCount: number;
+  failedCount: number;
+  dlqStatus: 'ACTION_REQUIRED' | 'CLEAR';
+  oldestPendingCreatedAt: string | null;
+  oldestPendingAgeMs: number | null;
+  recentOutboxIssues: OutboxIssueDiagnostic[];
 }
 
 export interface SecurityEventMetric {
