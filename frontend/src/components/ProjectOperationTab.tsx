@@ -202,7 +202,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Status Operational Plan belum tersedia.">
           <Tag color="error" style={{ fontWeight: 600, borderRadius: 6 }}>
-            ⚠ STATUS TIDAK TERSEDIA
+            STATUS TIDAK TERSEDIA
           </Tag>
         </Tooltip>
       );
@@ -213,7 +213,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title={`${errorMsg} Silakan coba muat ulang atau hubungi administrator.`}>
           <Tag color="error" style={{ fontWeight: 600, borderRadius: 6 }}>
-            ⚠ STATUS TIDAK TERSEDIA
+            STATUS TIDAK TERSEDIA
           </Tag>
         </Tooltip>
       );
@@ -256,7 +256,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
                   whiteSpace: 'nowrap',
                 }}
               >
-                ✅ Approved
+                Approved
               </Tag>
             </Tooltip>
             <Tooltip title="Baseline WBS & Jadwal Proyek Terkunci saat Kickoff">
@@ -275,7 +275,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
                   whiteSpace: 'nowrap',
                 }}
               >
-                🔒 Baseline Locked
+                Baseline Locked
               </Tag>
             </Tooltip>
           </div>
@@ -296,7 +296,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Status workflow tidak dikenali. Periksa alur kerja di Workflow Engine.">
           <Tag color="error" style={{ fontWeight: 700, borderRadius: 6 }}>
-            ⚠️ Status Tidak Dikenali
+            Status Tidak Dikenali
           </Tag>
         </Tooltip>
       );
@@ -320,7 +320,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
               whiteSpace: 'nowrap',
             }}
           >
-            ✅ APPROVED (SIAP KICKOFF)
+            APPROVED (SIAP KICKOFF)
           </Tag>
         </Tooltip>
       );
@@ -330,7 +330,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title={gate?.revisionNotes ? `Permintaan Revisi Manajemen: ${gate.revisionNotes}` : "Permintaan Revisi Manajemen (Database SSOT)"}>
           <Tag color="error" style={{ fontWeight: 700, borderRadius: 6 }}>
-            ⚠ NEEDS REVISION
+            NEEDS REVISION
           </Tag>
         </Tooltip>
       );
@@ -341,7 +341,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Operational Plan diajukan oleh PM dan sedang menunggu review Head of Operations (Tahap 1 Governance)">
           <Tag color="processing" style={{ fontWeight: 700, borderRadius: 6 }}>
-            ⏳ REVIEW HEAD OF OPS
+            REVIEW HEAD OF OPS
           </Tag>
         </Tooltip>
       );
@@ -351,7 +351,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Operational Plan telah disetujui HOPS dan sedang direview oleh Procurement (Tahap 2 Governance)">
           <Tag color="processing" style={{ fontWeight: 700, borderRadius: 6 }}>
-            ⏳ REVIEW PROCUREMENT
+            REVIEW PROCUREMENT
           </Tag>
         </Tooltip>
       );
@@ -361,7 +361,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Operational Plan telah disetujui Procurement dan sedang dievaluasi oleh Finance (Tahap 3 Governance)">
           <Tag color="processing" style={{ fontWeight: 700, borderRadius: 6 }}>
-            ⏳ REVIEW FINANCE
+            REVIEW FINANCE
           </Tag>
         </Tooltip>
       );
@@ -380,7 +380,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
               color: '#6d28d9',
             }}
           >
-            ⏳ REVIEW DIRECTOR
+            REVIEW DIRECTOR
           </Tag>
         </Tooltip>
       );
@@ -391,7 +391,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Operational Plan diajukan oleh PM dan sedang dalam peninjauan tata kelola manajemen">
           <Tag color="processing" style={{ fontWeight: 700, borderRadius: 6 }}>
-            ⏳ REVIEW PENDING
+            REVIEW PENDING
           </Tag>
         </Tooltip>
       );
@@ -411,7 +411,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
               color: '#15803d',
             }}
           >
-            ✅ Management Review Approved
+            Management Review Approved
           </Tag>
         </Tooltip>
       );
@@ -420,9 +420,9 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     // Drafting Stages (Before Submit)
     if (count === 4 || currentStage === 'READY_TO_SUBMIT') {
       return (
-        <Tooltip title="Cost Estimate ✅, WBS (100% Bobot) ✅, Schedule Terjadwal Penuh ✅, Kondisi Awal Proyek ✅ — Operational Plan Lengkap (4/4 Siap Review)">
+        <Tooltip title="Cost Estimate, WBS (100% Bobot), Schedule Terjadwal Penuh, Kondisi Awal Proyek — Operational Plan Lengkap (4/4 Siap Review)">
           <Tag color="success" style={{ fontWeight: 700, borderRadius: 6 }}>
-            ✓ Complete Readiness
+            Complete Readiness
           </Tag>
         </Tooltip>
       );
@@ -430,7 +430,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title={`Operational Plan Belum Lengkap (${count}/4 Pilar). Dihitung dari Database SSOT.`}>
           <Tag color="warning" style={{ fontWeight: 700, borderRadius: 6 }}>
-            ⚠ {count}/4 INCOMPLETE
+            {count}/4 INCOMPLETE
           </Tag>
         </Tooltip>
       );
@@ -491,7 +491,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Status workflow tidak dikenali. Periksa alur kerja di Workflow Engine.">
           <Tag color="error" style={{ fontWeight: 700, borderRadius: 6 }}>
-            ⚠️ Status Tidak Dikenali
+            Status Tidak Dikenali
           </Tag>
         </Tooltip>
       );
@@ -511,7 +511,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
               borderColor: '#ddd6fe',
             }}
           >
-            MENUNGGU KICKOFF PM 🚀
+            MENUNGGU KICKOFF PM
           </Tag>
         </Tooltip>
       );
@@ -522,7 +522,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title={gate?.revisionNotes ? `Manajemen meminta revisi operasional: ${gate.revisionNotes}` : "Manajemen meminta revisi operasional kepada PM."}>
           <Tag color="error" style={{ fontWeight: 600, borderRadius: 6 }}>
-            PERLU REVISI PM ⚠
+            PERLU REVISI PM
           </Tag>
         </Tooltip>
       );
@@ -533,7 +533,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Handover tertunda: Menunggu keputusan Management Review oleh Head of Operations.">
           <Tag color="processing" style={{ fontWeight: 600, borderRadius: 6 }}>
-            REVIEW HEAD OF OPS ⏳
+            REVIEW HEAD OF OPS
           </Tag>
         </Tooltip>
       );
@@ -543,7 +543,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Handover tertunda: Menunggu peninjauan perencanaan oleh Procurement.">
           <Tag color="processing" style={{ fontWeight: 600, borderRadius: 6 }}>
-            REVIEW PROCUREMENT ⏳
+            REVIEW PROCUREMENT
           </Tag>
         </Tooltip>
       );
@@ -553,7 +553,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Handover tertunda: Menunggu peninjauan anggaran oleh Finance.">
           <Tag color="processing" style={{ fontWeight: 600, borderRadius: 6 }}>
-            REVIEW FINANCE ⏳
+            REVIEW FINANCE
           </Tag>
         </Tooltip>
       );
@@ -572,7 +572,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
               borderColor: '#ddd6fe',
             }}
           >
-            REVIEW DIRECTOR ⏳
+            REVIEW DIRECTOR
           </Tag>
         </Tooltip>
       );
@@ -583,7 +583,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Handover tertunda: Menunggu keputusan review tata kelola manajemen.">
           <Tag color="processing" style={{ fontWeight: 600, borderRadius: 6 }}>
-            REVIEW MANAJEMEN ⏳
+            REVIEW MANAJEMEN
           </Tag>
         </Tooltip>
       );
@@ -594,7 +594,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Handover proyek belum dimulai: Menunggu inisiasi Purchase Request oleh Procurement.">
           <Tag color="default" style={{ fontWeight: 500, borderRadius: 6 }}>
-            MENUNGGU PR PROCUREMENT ⏳
+            MENUNGGU PR PROCUREMENT
           </Tag>
         </Tooltip>
       );
@@ -605,7 +605,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       return (
         <Tooltip title="Operational Plan sudah lengkap (4/4 Pilar Siap), menunggu pengajuan PM ke manajemen.">
           <Tag color="blue" style={{ fontWeight: 600, borderRadius: 6 }}>
-            MENUNGGU SUBMIT PM ⏳
+            MENUNGGU SUBMIT PM
           </Tag>
         </Tooltip>
       );
@@ -882,7 +882,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       title: 'Klien (Customer)',
       dataIndex: 'customerName',
       key: 'customerName',
-      render: (val: string | null) => <Text style={{ fontSize: 12, fontWeight: 500 }}>🏢 {val ?? '-'}</Text>,
+      render: (val: string | null) => <Text style={{ fontSize: 12, fontWeight: 500 }}>{val ?? '-'}</Text>,
     },
     {
       title: 'Nilai Kontrak',
@@ -986,7 +986,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       title: 'Klien',
       dataIndex: 'customerName',
       key: 'customerName',
-      render: (val: string | null) => <Text style={{ fontSize: 12 }}>🏢 {val ?? '-'}</Text>,
+      render: (val: string | null) => <Text style={{ fontSize: 12 }}>{val ?? '-'}</Text>,
     },
     {
       title: 'Nilai SPK Legal',
@@ -1032,7 +1032,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       title: 'Inisiator Marketing',
       dataIndex: 'marketingName',
       key: 'marketingName',
-      render: (val: string | null) => <Text style={{ fontSize: 12, color: '#4b5563' }}>👤 {val ?? '-'}</Text>,
+      render: (val: string | null) => <Text style={{ fontSize: 12, color: '#4b5563' }}>{val ?? '-'}</Text>,
     },
     {
       title: 'Project Manager (PM)',
@@ -1357,7 +1357,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
                   <Row gutter={[16, 16]}>
                     <Col span={24}>
                       <Card
-                        title="📈 Earned Value Management (EVM) S-Curve Project Monitoring"
+                        title="Earned Value Management (EVM) S-Curve Project Monitoring"
                         size="small"
                         style={{ borderRadius: 8 }}
                       >

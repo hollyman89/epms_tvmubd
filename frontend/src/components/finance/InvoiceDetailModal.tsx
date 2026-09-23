@@ -268,7 +268,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       }
 
       await FinanceService.verifyInvoice(invoiceId, payload);
-      message.success('✅ Invoice berhasil diverifikasi secara sah oleh Finance!');
+      message.success('Invoice berhasil diverifikasi secara sah oleh Finance!');
       setIsVerifyModalOpen(false);
       setEvidenceRef('');
       setVerifyNotes('');
@@ -302,7 +302,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         approved: false,
         notes: rejectNotes.trim(),
       });
-      message.warning('⚠️ Verifikasi invoice telah ditolak.');
+      message.warning('Verifikasi invoice telah ditolak.');
       setIsRejectModalOpen(false);
       setRejectNotes('');
       // Refresh authoritative data
@@ -358,7 +358,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     }
     return (
       <Tag color="gold" style={{ fontWeight: 700, fontSize: 12, padding: '2px 8px', margin: 0 }}>
-        ⏳ PENDING EVALUATION
+        PENDING EVALUATION
       </Tag>
     );
   };
@@ -554,7 +554,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                     <span style={{ fontWeight: 700, fontSize: 12, color: '#334155' }}>
-                      📋 Rincian Termin &amp; Penagihan Parsial (Partial Invoice)
+                      Rincian Termin &amp; Penagihan Parsial (Partial Invoice)
                     </span>
                     {paymentTerm && (
                       <Tag color="geekblue" style={{ fontWeight: 600 }}>
@@ -614,7 +614,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div style={{ background: '#ffffff', padding: '12px 16px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
                   <div style={{ marginBottom: 10 }}>
                     <span style={{ fontWeight: 700, fontSize: 12, color: '#334155' }}>
-                      💼 Akumulasi Kontrak PO Keseluruhan (Audit Trail)
+                      Akumulasi Kontrak PO Keseluruhan (Audit Trail)
                     </span>
                   </div>
 

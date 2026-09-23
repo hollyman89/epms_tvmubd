@@ -263,7 +263,7 @@ export const NotificationBell: React.FC = () => {
             <Tag color="success" style={{ fontWeight: 'bold' }}>WON</Tag>
           )}
           {requiresApproval && (
-            <Tag color="warning" style={{ fontWeight: 600, color: '#d97706' }}>⏳ Menunggu Approval</Tag>
+            <Tag color="warning" style={{ fontWeight: 600, color: '#d97706' }}>Menunggu Approval</Tag>
           )}
         </div>
 

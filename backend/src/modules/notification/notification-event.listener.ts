@@ -96,7 +96,7 @@ export class NotificationEventListener {
     }
 
     this.eventEmitter.emit('notification.send', {
-      title: '🚀 Project Siap Kick Off',
+      title: 'Project Siap Kick Off',
       message: `Proyek "${projectName}" telah disetujui oleh tim Legal dan siap dijadwalkan untuk Kick Off.`,
       type: 'ALERT',
       audience: 'PMO',
@@ -114,7 +114,7 @@ export class NotificationEventListener {
     });
 
     const marketingNotifPayload: any = {
-      title: '✅ SPK Disetujui Legal',
+      title: 'SPK Disetujui Legal',
       message: `Proyek "${projectName}" telah disetujui oleh tim Legal. Proses Sales untuk proyek ini telah selesai.`,
       type: 'SUCCESS',
       dedupeKey: `LEGAL_CONTRACT_APPROVED_MKT:${payload.contractId}`,
@@ -166,7 +166,7 @@ export class NotificationEventListener {
     }
 
     const notifPayload: any = {
-      title: '⚠️ Revisi Kontrak Diminta Legal',
+      title: 'Revisi Kontrak Diminta Legal',
       message: `Kontrak untuk proyek "${projectName}" membutuhkan revisi dari tim Legal. Catatan: ${payload.reason || 'Silakan cek catatan legal.'}`,
       type: 'WARNING',
       tenderId: tenderId,
@@ -195,7 +195,7 @@ export class NotificationEventListener {
     this.logger.log(`[NotificationEventListener] Event diterima: Project Started - Project ID ${payload.projectId}`);
 
     this.eventEmitter.emit('notification.send', {
-      title: '🚀 Proyek Operasional Dimulai',
+      title: 'Proyek Operasional Dimulai',
       message: `Proyek "${payload.title || 'Project'}" resmi dimulai (Inisiasi PMO).`,
       type: 'INFO',
       audience: 'PMO',

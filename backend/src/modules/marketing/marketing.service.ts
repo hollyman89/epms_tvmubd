@@ -1111,7 +1111,7 @@ export class MarketingService {
       if (picId) {
         if (dto.decision === 'GO') {
           this.eventEmitter.emit('notification.send', {
-            title: 'Tender Disetujui (GO) ✅',
+            title: 'Tender Disetujui (GO)',
             message: `Tender "${tender.title}" telah disetujui. Status berubah menjadi Qualification.`,
             type: 'SUCCESS',
             recipientId: picId,
@@ -1119,7 +1119,7 @@ export class MarketingService {
           });
         } else {
           this.eventEmitter.emit('notification.send', {
-            title: 'Tender Ditolak (NO GO) ❌',
+            title: 'Tender Ditolak (NO GO)',
             message: `Tender "${tender.title}" ditolak. Silakan lakukan revisi sebelum submit kembali.`,
             type: 'WARNING',
             recipientId: picId,
@@ -1256,7 +1256,7 @@ export class MarketingService {
       tender.status = TenderStatus.PENDING_APPROVAL as any;
       // Trigger Approval Workflow (Auto-Escalate mechanism handled by Scheduler)
       this.eventEmitter.emit('notification.send', {
-        title: '⚠️ Peringatan Diskon Kritis',
+        title: 'Peringatan Diskon Kritis',
         message: `Tender ${tender.title} mengajukan diskon ${discountPercentage.toFixed(2)}% (Batas: ${maxDiscount}%). Menunggu persetujuan Direktur.`,
         type: 'WARNING',
         audience: 'ALL', // Director
@@ -1330,7 +1330,7 @@ export class MarketingService {
       await this.priceHistoryRepo.save(history);
 
       this.eventEmitter.emit('notification.send', {
-        title: '❌ Diskon Ditolak',
+        title: 'Diskon Ditolak',
         message: `Pengajuan diskon untuk tender ${tender.title} DITOLAK. Harga dikembalikan ke awal. Notes: ${dto.notes || '-'}`,
         type: 'ERROR',
         recipientId: tender.marketing_pic_id || 'C-LEVEL',
@@ -1347,7 +1347,7 @@ export class MarketingService {
     } else {
       // Approved
       this.eventEmitter.emit('notification.send', {
-        title: '✅ Diskon Disetujui',
+        title: 'Diskon Disetujui',
         message: `Pengajuan diskon untuk tender ${tender.title} DISETUJUI oleh Direktur. Notes: ${dto.notes || '-'}`,
         type: 'SUCCESS',
         recipientId: tender.marketing_pic_id || 'C-LEVEL',

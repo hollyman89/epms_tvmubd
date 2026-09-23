@@ -520,7 +520,7 @@ export default function InvoicesPage() {
           return (
             <div>
               <Tag color={isFullyReceived ? 'green' : totalReceived > 0 ? 'processing' : 'orange'} style={{ fontWeight: 700, margin: 0 }}>
-                {isFullyReceived ? '✅ 100% DITERIMA' : totalReceived > 0 ? '📦 PARSIAL' : '⏳ MENUNGGU PENGIRIMAN'}
+                {isFullyReceived ? '100% DITERIMA' : totalReceived > 0 ? 'PARSIAL' : 'MENUNGGU PENGIRIMAN'}
               </Tag>
               <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
                 {totalReceived}/{totalOrdered} Unit {totalReceived > 0 ? '• GR Tercatat' : '• Belum ada GR'}
@@ -567,7 +567,7 @@ export default function InvoicesPage() {
                       color={elig.tagColor}
                       style={{ fontWeight: 700, margin: 0, cursor: elig.reason ? 'help' : 'default' }}
                     >
-                      ⏳ {elig.statusText}
+                      {elig.statusText}
                     </Tag>
                   </Tooltip>
                   <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
@@ -605,7 +605,7 @@ export default function InvoicesPage() {
 
           return (
             <Tag color="gold" style={{ fontWeight: 600, margin: 0 }}>
-              ⏳ Belum Ditagihkan
+              Belum Ditagihkan
             </Tag>
           );
         },

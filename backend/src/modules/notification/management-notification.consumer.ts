@@ -90,11 +90,11 @@ export class ManagementNotificationConsumer {
           if (action === 'CREATED') {
             notif.title = 'Tender Baru';
           } else if (action === 'MARKED_WON') {
-            notif.title = '🎉 Pemenang Tender';
+            notif.title = 'Pemenang Tender';
           } else if (action === 'MARKED_LOST') {
             notif.title = 'Kekalahan Tender';
           } else {
-            notif.title = 'ℹ️ Info Sistem';
+            notif.title = 'Info Sistem';
           }
           
           notif.message = msg;

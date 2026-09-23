@@ -257,11 +257,11 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
 
         let managementReviewText = '○ Belum Diajukan';
         if (hoaStep?.status === 'COMPLETED') {
-          managementReviewText = '✅ Disetujui (Head of Operations)';
+          managementReviewText = 'Disetujui (Head of Operations)';
         } else if (hoaStep?.status === 'ACTIVE') {
-          managementReviewText = '⏳ Sedang Ditinjau';
+          managementReviewText = 'Sedang Ditinjau';
         } else if (hoaStep?.status === 'REVISION_REQUESTED') {
-          managementReviewText = '⚠ Perlu Revisi PM';
+          managementReviewText = 'Perlu Revisi PM';
         } else {
           managementReviewText = '○ Belum Dimulai';
         }
@@ -269,7 +269,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
         const activeStep = steps.find((s: any) => s.status === 'ACTIVE');
         let downstreamWorkflowText = '○ Belum Dimulai';
         if (current.nodeKey === 'COMPLETED' || current.status === 'COMPLETED') {
-          downstreamWorkflowText = '✅ Alur Selesai (Director Approved)';
+          downstreamWorkflowText = 'Alur Selesai (Director Approved)';
         } else if (activeStep) {
           downstreamWorkflowText = `${activeStep.stageName} (${activeStep.roleTitle})`;
         } else if (current.position) {
@@ -278,9 +278,9 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
 
         let handoverText = current.position || current.headerBadge;
         if (isProjectActive) {
-          handoverText = '✅ Kickoff Selesai (Proyek Berjalan)';
+          handoverText = 'Kickoff Selesai (Proyek Berjalan)';
         } else if (current.nodeKey === 'COMPLETED' || current.status === 'COMPLETED') {
-          handoverText = '⏳ Menunggu Kickoff PM';
+          handoverText = 'Menunggu Kickoff PM';
         }
 
         return {
@@ -299,7 +299,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
 
       // Canonical workflow is present but invalid/unknown -> Fail-safe UNKNOWN UI (Phase 2C.14)
       return {
-        stageLabel: '⚠️ STATUS WORKFLOW TIDAK DIKENALI',
+        stageLabel: 'STATUS WORKFLOW TIDAK DIKENALI',
         stageTagColor: 'error',
         nextGate: 'Tidak tersedia',
         action: 'Periksa alur kerja di Workflow Engine atau hubungi administrator sistem',
@@ -326,9 +326,9 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
             action: 'Final Approval Director',
             currentOwner: 'Director',
             position: 'Director Approval',
-            handoverText: '⏳ Waiting for Director Approval',
-            managementReviewText: '✅ Approved — Ready for Procurement',
-            downstreamWorkflowText: '🔵 Director Approval',
+            handoverText: 'Waiting for Director Approval',
+            managementReviewText: 'Approved — Ready for Procurement',
+            downstreamWorkflowText: 'Director Approval',
             prNumber: prNum,
           };
         }
@@ -340,9 +340,9 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
             action: 'Review & Evaluasi Anggaran Finance',
             currentOwner: 'Finance Team',
             position: 'Finance Review',
-            handoverText: '⏳ Menunggu Review Finance',
-            managementReviewText: '✅ Approved — Ready for Procurement',
-            downstreamWorkflowText: '🔵 Finance Review',
+            handoverText: 'Menunggu Review Finance',
+            managementReviewText: 'Approved — Ready for Procurement',
+            downstreamWorkflowText: 'Finance Review',
             prNumber: prNum,
           };
         }
@@ -355,9 +355,9 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
             action: isProjectActive ? 'Eksekusi Pekerjaan & Update Progress WBS' : 'Kickoff Resmi Proyek oleh PM',
             currentOwner: 'Project Manager',
             position: 'Ready for Kickoff',
-            handoverText: isProjectActive ? '✅ Kickoff Selesai (Proyek Berjalan)' : '⏳ Menunggu Kickoff PM',
-            managementReviewText: '✅ Approved — Ready for Procurement',
-            downstreamWorkflowText: '✅ PR Approved (Director)',
+            handoverText: isProjectActive ? 'Kickoff Selesai (Proyek Berjalan)' : 'Menunggu Kickoff PM',
+            managementReviewText: 'Approved — Ready for Procurement',
+            downstreamWorkflowText: 'PR Approved (Director)',
             prNumber: prNum,
           };
         }
@@ -369,9 +369,9 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
             action: 'Revisi & Perbaikan PR oleh Procurement',
             currentOwner: 'Procurement Team',
             position: 'Revisi PR',
-            handoverText: '⚠ Tertunda: Perbaikan PR',
-            managementReviewText: '✅ Approved — Ready for Procurement',
-            downstreamWorkflowText: '⚠ Perbaikan PR',
+            handoverText: 'Tertunda: Perbaikan PR',
+            managementReviewText: 'Approved — Ready for Procurement',
+            downstreamWorkflowText: 'Perbaikan PR',
             prNumber: prNum,
           };
         }
@@ -384,9 +384,9 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
         action: 'Rilis Purchase Request (PR)',
         currentOwner: 'Procurement Team',
         position: 'Procurement Intake',
-        handoverText: '⏳ Menunggu Inisiasi PR',
-        managementReviewText: '✅ Approved — Ready for Procurement',
-        downstreamWorkflowText: '⏳ Menunggu PR Procurement',
+        handoverText: 'Menunggu Inisiasi PR',
+        managementReviewText: 'Approved — Ready for Procurement',
+        downstreamWorkflowText: 'Menunggu PR Procurement',
         prNumber: null,
       };
     }
@@ -399,8 +399,8 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
         action: 'Review & Persetujuan Head Ops',
         currentOwner: 'Head of Operations',
         position: 'Management Review',
-        handoverText: '⏳ Menunggu Review Manajemen',
-        managementReviewText: '⏳ Review Pending',
+        handoverText: 'Menunggu Review Manajemen',
+        managementReviewText: 'Review Pending',
         downstreamWorkflowText: '○ Belum Dimulai',
         prNumber: null,
       };
@@ -414,8 +414,8 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
         action: 'Perbaikan Rencana Operasional PM',
         currentOwner: 'Project Manager',
         position: 'Revisi Perencanaan',
-        handoverText: '⚠ Perlu Revisi Operasional',
-        managementReviewText: '⚠ Perlu Revisi PM',
+        handoverText: 'Perlu Revisi Operasional',
+        managementReviewText: 'Perlu Revisi PM',
         downstreamWorkflowText: '○ Belum Dimulai',
         prNumber: null,
       };
@@ -830,12 +830,12 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
       return {
         status: 'CRITICAL' as const,
         title: 'CRITICAL',
-        label: '🔴 CRITICAL',
+        label: 'CRITICAL',
         tagColor: 'error',
         color: '#b91c1c',
         bgColor: '#fef2f2',
         borderColor: '#fecaca',
-        icon: '🔴',
+        icon: '',
         description: estimatedMarginNominal < 0
           ? `Defisit estimasi PM sebesar Rp ${Math.abs(estimatedMarginNominal).toLocaleString('id-ID')} terhadap SPK Legal.`
           : circularSet.size > 0
@@ -852,12 +852,12 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
       return {
         status: 'AT_RISK' as const,
         title: 'AT RISK',
-        label: '⚠ AT RISK',
+        label: 'AT RISK',
         tagColor: 'warning',
         color: '#b45309',
         bgColor: '#fffbeb',
         borderColor: '#fde68a',
-        icon: '⚠',
+        icon: '',
         description:
           totalPmEstimate > marketingEstimate
             ? `Estimasi biaya PM melebihi budget marketing (+Rp ${varianceNominal.toLocaleString('id-ID')}).`
@@ -870,12 +870,12 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
     return {
       status: 'HEALTHY' as const,
       title: 'HEALTHY',
-      label: '✅ HEALTHY',
+      label: 'HEALTHY',
       tagColor: 'success',
       color: '#15803d',
       bgColor: '#f0fdf4',
       borderColor: '#bbf7d0',
-      icon: '✅',
+      icon: '',
       description: 'Finansial positif (margin aman), struktur WBS seimbang, dan dependensi jadwal valid.',
     };
   }, [
@@ -896,7 +896,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
   const financialHealthCard = useMemo(() => {
     if (!hasCostInput || totalPmEstimate === 0) {
       return {
-        icon: '⚪',
+        icon: '',
         borderColor: '#cbd5e1',
         borderLeftColor: '#94a3b8',
         bgColor: '#f8fafc',
@@ -913,7 +913,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
       const deficitNominal = Math.abs(estimatedMarginNominal);
       const deficitPct = Math.abs(estimatedMarginPercentage);
       return {
-        icon: '🔴',
+        icon: '',
         borderColor: '#f87171',
         borderLeftColor: '#dc2626',
         bgColor: '#fef2f2',
@@ -928,7 +928,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
 
     if (estimatedMarginNominal === 0) {
       return {
-        icon: '⚠️',
+        icon: '',
         borderColor: '#fde68a',
         borderLeftColor: '#d97706',
         bgColor: '#fffbeb',
@@ -942,7 +942,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
     }
 
     return {
-      icon: '🟢',
+      icon: '',
       borderColor: '#bbf7d0',
       borderLeftColor: '#16a34a',
       bgColor: '#f0fdf4',
@@ -971,17 +971,17 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
           ? 'REVISION REQUESTED'
           : '4/4 READY — SIAP DIAJUKAN',
         label: isApproved
-          ? '🚀 4/4 COMPLETE — APPROVED FOR PROCUREMENT'
+          ? '4/4 COMPLETE — APPROVED FOR PROCUREMENT'
           : isPending
-          ? '⏳ SUBMITTED — UNDER MANAGEMENT REVIEW'
+          ? 'SUBMITTED — UNDER MANAGEMENT REVIEW'
           : isRevision
-          ? '⚠ NEEDS REVISION'
-          : '✅ 4/4 READY — SIAP DIAJUKAN',
+          ? 'NEEDS REVISION'
+          : '4/4 READY — SIAP DIAJUKAN',
         tagColor: 'success',
         color: '#15803d',
         bgColor: '#f0fdf4',
         borderColor: '#bbf7d0',
-        icon: '✅',
+        icon: '',
         pillarsText: '4/4 Operational Pillars Complete',
       };
     }
@@ -990,12 +990,12 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
       return {
         status: 'INCOMPLETE' as const,
         title: 'INCOMPLETE',
-        label: '⚠ INCOMPLETE',
+        label: 'INCOMPLETE',
         tagColor: 'warning',
         color: '#b45309',
         bgColor: '#fffbeb',
         borderColor: '#fde68a',
-        icon: '⚠',
+        icon: '',
         pillarsText: `${completenessCount}/4 Operational Pillars Complete`,
       };
     }
@@ -1003,12 +1003,12 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
     return {
       status: 'NOT_READY' as const,
       title: 'NOT READY',
-      label: '🔴 NOT READY',
+      label: 'NOT READY',
       tagColor: 'error',
       color: '#b91c1c',
       bgColor: '#fef2f2',
       borderColor: '#fecaca',
-      icon: '🔴',
+      icon: '',
       pillarsText: '0/4 Operational Pillars Complete',
     };
   }, [completenessCount, gateRecord?.status]);
@@ -1328,15 +1328,15 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
             {showCoveredPrStatusTag && (
               approvedCanonicalPr ? (
                 <Tag color="success" style={{ fontWeight: 700, padding: '4px 10px', borderRadius: 6, fontSize: 11.5, margin: 0 }}>
-                  ✅ PR Telah Disetujui ({approvedCanonicalPr.prNumber || approvedCanonicalPr.prId}) — {allRgbItems.length}/{allRgbItems.length} Item
+                  PR Telah Disetujui ({approvedCanonicalPr.prNumber || approvedCanonicalPr.prId}) — {allRgbItems.length}/{allRgbItems.length} Item
                 </Tag>
               ) : rejectedPr ? (
                 <Tag color="error" style={{ fontWeight: 700, padding: '4px 10px', borderRadius: 6, fontSize: 11.5, margin: 0 }}>
-                  ⚠ PR Perlu Perbaikan ({rejectedPr.prNumber || rejectedPr.prId}) — Gunakan Daftar PR
+                  PR Perlu Perbaikan ({rejectedPr.prNumber || rejectedPr.prId}) — Gunakan Daftar PR
                 </Tag>
               ) : (
                 <Tag color="processing" style={{ fontWeight: 700, padding: '4px 10px', borderRadius: 6, fontSize: 11.5, margin: 0 }}>
-                  ⏳ PR Sedang Diproses ({allRgbItems.length}/{allRgbItems.length} Item)
+                  PR Sedang Diproses ({allRgbItems.length}/{allRgbItems.length} Item)
                 </Tag>
               )
             )}
@@ -1389,7 +1389,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
               Klien &amp; SPK Legal
             </Text>
             <div style={{ fontWeight: 600, fontSize: 12, color: '#334155', lineHeight: 1.3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              🏢 {charter.customerName || '-'}
+              {charter.customerName || '-'}
             </div>
             <div style={{ fontSize: 11, color: '#1d4ed8', fontWeight: 700, marginTop: 2 }}>
               Rp {contractLegalValue.toLocaleString('id-ID')}
@@ -1401,7 +1401,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
               Peran &amp; Tahap Saat Ini
             </Text>
             <div style={{ fontWeight: 600, fontSize: 12, color: '#0f172a', lineHeight: 1.3 }}>
-              👤 {isPmOnly ? 'Project Manager' : isGeneralManager ? 'Head of Operations' : isDirector ? 'Director' : isProcurement ? 'Procurement' : isSuperAdmin ? 'Super Admin' : (user?.roles?.[0] || 'Project Manager')}
+              {isPmOnly ? 'Project Manager' : isGeneralManager ? 'Head of Operations' : isDirector ? 'Director' : isProcurement ? 'Procurement' : isSuperAdmin ? 'Super Admin' : (user?.roles?.[0] || 'Project Manager')}
             </div>
             <div style={{ marginTop: 2 }}>
               <Tag
@@ -1418,7 +1418,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
               Next Gate &amp; Aksi
             </Text>
             <div style={{ fontWeight: 700, fontSize: 12, color: '#0369a1', lineHeight: 1.3 }}>
-              ➡️ Next Gate: {liveWorkflowInfo.nextGate}
+              Next Gate: {liveWorkflowInfo.nextGate}
             </div>
             <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
               Aksi: {liveWorkflowInfo.action}
@@ -1472,9 +1472,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                   flexShrink: 0,
                   boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
                 }}
-              >
-                🟢
-              </div>
+              ></div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                   <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: '#166534' }}>
@@ -1547,7 +1545,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                   </Tag>
                 </div>
                 <div style={{ fontWeight: 800, fontSize: 13.5, color: financialHealthCard.titleColor, marginTop: 2 }}>
-                  {financialHealthCard.icon} {financialHealthCard.title}
+                  {financialHealthCard.title}
                 </div>
                 <div style={{ fontSize: 11, color: financialHealthCard.descColor, marginTop: 3, lineHeight: 1.4 }}>
                   {financialHealthCard.desc}
@@ -1595,7 +1593,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                     ) : estimatedMarginNominal >= 0 ? (
                       <>
                         <Tag color="success" style={{ fontSize: 9.5, lineHeight: '18px', padding: '0 4px', margin: 0, fontWeight: 700 }}>
-                          ✓ Margin Positif
+                          Margin Positif
                         </Tag>
                         <Text strong style={{ fontSize: 12.5, color: '#15803d', whiteSpace: 'nowrap' }}>
                           +Rp {estimatedMarginNominal.toLocaleString('id-ID')} (+{estimatedMarginPercentage.toFixed(1)}%)
@@ -1604,7 +1602,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                     ) : (
                       <>
                         <Tag color="error" style={{ fontSize: 9.5, lineHeight: '18px', padding: '0 4px', margin: 0, fontWeight: 700 }}>
-                          🔴 Defisit
+                          Defisit
                         </Tag>
                         <Text strong style={{ fontSize: 12.5, color: '#dc2626', whiteSpace: 'nowrap' }}>
                           -Rp {Math.abs(estimatedMarginNominal).toLocaleString('id-ID')} ({estimatedMarginPercentage.toFixed(1)}%)
@@ -1655,7 +1653,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px dashed #e2e8f0', paddingTop: 6 }}>
                   <Text type="secondary" style={{ fontSize: 11 }}>Bobot Scope:</Text>
                   <Tag color={isWbsWeightValid ? 'success' : 'warning'} style={{ fontWeight: 700, margin: 0, padding: '0 6px', fontSize: 10.5 }}>
-                    {rootWeightSum.toFixed(1)}% {isWbsWeightValid ? '✓' : '⚠️'}
+                    {rootWeightSum.toFixed(1)}%
                   </Tag>
                 </div>
 
@@ -1830,7 +1828,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
               <CheckCircleOutlined style={{ color: '#16a34a', fontSize: 16 }} />
               <div>
                 <span style={{ fontWeight: 700, fontSize: 12.5, color: '#15803d' }}>
-                  ✅ Tidak Ada Isu Kritis
+                  Tidak Ada Isu Kritis
                 </span>
                 <span style={{ fontSize: 12, color: '#166534', marginLeft: 6 }}>
                   Semua parameter operasional berada dalam ambang batas normal.
@@ -1851,7 +1849,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: '#991b1b', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span>🔴</span> <span>FINANCIAL EXCEPTION: Estimasi Biaya Melebihi Nilai SPK Legal</span>
+                      <span>FINANCIAL EXCEPTION: Estimasi Biaya Melebihi Nilai SPK Legal</span>
                     </div>
                     <Tag color="error" style={{ fontWeight: 700, fontSize: 11, margin: 0, padding: '2px 8px' }}>
                       DEFISIT Rp {Math.abs(estimatedMarginNominal).toLocaleString('id-ID')} (MARGIN {estimatedMarginPercentage.toFixed(1)}%)
@@ -1884,7 +1882,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
                     <div style={{ fontWeight: 700, fontSize: 13, color: '#92400e', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <span>⚠️</span> <span>DEVIASI BUDGET: Estimasi PM Melebihi Budget Awal Marketing</span>
+                      <span>DEVIASI BUDGET: Estimasi PM Melebihi Budget Awal Marketing</span>
                     </div>
                     <Tag color="warning" style={{ fontWeight: 700, fontSize: 11, margin: 0, padding: '2px 8px' }}>
                       DEVIASI +Rp {varianceNominal.toLocaleString('id-ID')} (+{variancePercentage.toFixed(1)}%)
@@ -1936,7 +1934,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                     color={costMappingSummary.isFullyMapped ? 'success' : 'warning'}
                     style={{ fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}
                   >
-                    {costMappingSummary.isFullyMapped ? '✅ Complete' : '⚠ Attention'}
+                    {costMappingSummary.isFullyMapped ? 'Complete' : 'Attention'}
                   </Tag>
                 ),
                 result: `${costMappingSummary.percentage.toFixed(1)}% Terpetakan`,
@@ -1947,7 +1945,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                 aspect: 'Validasi Scope terhadap Jadwal',
                 statusTag: (
                   <Tag color={isScheduleComplete ? 'success' : 'warning'} style={{ fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>
-                    {isScheduleComplete ? '✅ Complete' : '⚠ Attention'}
+                    {isScheduleComplete ? 'Complete' : 'Attention'}
                   </Tag>
                 ),
                 result: `${scheduledDeliverablesCount} / ${leafDeliverablesCount}`,
@@ -1960,7 +1958,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                 aspect: 'Validasi Perhitungan Biaya',
                 statusTag: (
                   <Tag color={isCostCalculationValid ? 'success' : 'error'} style={{ fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>
-                    {isCostCalculationValid ? '✅ Valid' : '🔴 Failed'}
+                    {isCostCalculationValid ? 'Valid' : 'Failed'}
                   </Tag>
                 ),
                 result: isCostCalculationValid ? '100% Sesuai' : 'Perlu Koreksi',
@@ -1971,7 +1969,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                 aspect: 'Validasi Bobot Scope',
                 statusTag: (
                   <Tag color={isWbsWeightValid ? 'success' : 'warning'} style={{ fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>
-                    {isWbsWeightValid ? '✅ Valid' : '⚠ Attention'}
+                    {isWbsWeightValid ? 'Valid' : 'Attention'}
                   </Tag>
                 ),
                 result: `${rootWeightSum.toFixed(1)}%`,
@@ -1985,7 +1983,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                     {wbsData.length === 0
                       ? 'Kosong'
                       : wbsStructureMetrics.isStructured
-                      ? `✅ Valid (L${wbsStructureMetrics.maxHierarchyDepth})`
+                      ? `Valid (L${wbsStructureMetrics.maxHierarchyDepth})`
                       : 'ℹ Valid (Flat)'}
                   </Tag>
                 ),
@@ -1999,7 +1997,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                 aspect: 'Evaluasi Margin Proyek (Finansial)',
                 statusTag: (
                   <Tag color={estimatedMarginNominal >= 0 ? 'success' : 'error'} style={{ fontWeight: 700, margin: 0, whiteSpace: 'nowrap' }}>
-                    {estimatedMarginNominal >= 0 ? '✅ Valid' : '🔴 Defisit'}
+                    {estimatedMarginNominal >= 0 ? 'Valid' : 'Defisit'}
                   </Tag>
                 ),
                 result: !hasCostInput || totalPmEstimate === 0
@@ -2128,7 +2126,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                                       }
                                       if (scope === 'WBS') {
                                         if (!item.wbsNodeId) {
-                                          return <Tag color="warning" style={{ fontSize: 10 }}>⚠ Pilih WBS</Tag>;
+                                          return <Tag color="warning" style={{ fontSize: 10 }}>Pilih WBS</Tag>;
                                         }
                                         const node = wbsLeafMap.get(item.wbsNodeId);
                                         if (!node) {
@@ -2334,9 +2332,9 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                             width: 105,
                             render: (_: any, r: ScheduleTaskItem) => (
                               r.isMilestone ? (
-                                <Tag color="gold" style={{ fontWeight: 700, margin: 0 }}>◆ Milestone</Tag>
+                                <Tag color="gold" style={{ fontWeight: 700, margin: 0 }}>Milestone</Tag>
                               ) : (
-                                <Tag color="blue" style={{ margin: 0 }}>📋 Pekerjaan</Tag>
+                                <Tag color="blue" style={{ margin: 0 }}>Pekerjaan</Tag>
                               )
                             ),
                           },
@@ -2422,7 +2420,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                   {gateRecord.status === 'READY_FOR_PROCUREMENT' && (
                     <Space size={4}>
                       <Tag color="success" style={{ fontWeight: 700, fontSize: 11, margin: 0, borderRadius: 4, color: '#15803d', background: '#f0fdf4', borderColor: '#bbf7d0' }}>
-                        MANAGEMENT APPROVED ✅
+                        MANAGEMENT APPROVED
                       </Tag>
                       {liveWorkflowInfo.prNumber && (
                         <Tag color={liveWorkflowInfo.stageTagColor} style={{ fontWeight: 700, fontSize: 11, margin: 0, borderRadius: 4 }}>
@@ -2433,12 +2431,12 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                   )}
                   {gateRecord.status === 'NEEDS_REVISION' && (
                     <Tag color="error" style={{ fontWeight: 700, fontSize: 11, margin: 0, borderRadius: 4 }}>
-                      NEEDS REVISION ⚠
+                      NEEDS REVISION
                     </Tag>
                   )}
                   {gateRecord.status === 'REVIEW_PENDING' && (
                     <Tag color="processing" style={{ fontWeight: 700, fontSize: 11, margin: 0, borderRadius: 4 }}>
-                      REVIEW PENDING ⏳
+                      REVIEW PENDING
                     </Tag>
                   )}
                 </>
@@ -2474,12 +2472,12 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                   {gateRecord?.workflow?.current
                     ? `${liveWorkflowInfo.stageLabel} — ${gateRecord.workflow.current.position}`
                     : gateRecord.status === 'READY_FOR_PROCUREMENT'
-                    ? '✅ Status: Approved — Ready for Procurement'
+                    ? 'Status: Approved — Ready for Procurement'
                     : gateRecord.status === 'NEEDS_REVISION'
-                    ? '⚠️ Status: Revision Requested — Perlu Revisi PM'
+                    ? 'Status: Revision Requested — Perlu Revisi PM'
                     : gateRecord.status === 'REVIEW_PENDING'
-                    ? '⏳ Status: Under Management Review — Menunggu Keputusan Head of Operations'
-                    : 'ℹ️ Status: PM Planning Workspace (Tahap 1 dari 5) — Siap Diajukan ke Head of Operations'}
+                    ? 'Status: Under Management Review — Menunggu Keputusan Head of Operations'
+                    : 'Status: PM Planning Workspace (Tahap 1 dari 5) — Siap Diajukan ke Head of Operations'}
                 </div>
                 <div style={{ fontSize: 11.5, color: '#475569', lineHeight: 1.45 }}>
                   {gateRecord?.workflow?.current
@@ -2667,7 +2665,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                 <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>STATUS WORKFLOW:</Text>
                 <div>
                   <Tag color="gold" style={{ fontWeight: 700, fontSize: 10.5, color: '#b45309', background: '#fffbeb', borderColor: '#fde68a' }}>
-                    🚀 READY FOR PROCUREMENT
+                    READY FOR PROCUREMENT
                   </Tag>
                 </div>
                 <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Approved by Head of Operations</div>

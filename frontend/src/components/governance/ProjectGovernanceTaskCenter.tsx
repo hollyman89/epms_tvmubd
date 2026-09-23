@@ -746,7 +746,7 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
               size="small"
               title={
                 <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>
-                  📌 Konteks Proyek & Alur Kerja
+                  Konteks Proyek & Alur Kerja
                 </span>
               }
               style={{
@@ -903,7 +903,7 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                             {t.action}
                           </Tag>
                           <span style={{ color: '#475569' }}>
-                            <code>{t.fromNodeId}</code> ➔ <code>{t.toNodeId}</code>
+                            <code>{t.fromNodeId}</code> → <code>{t.toNodeId}</code>
                           </span>
                           <span style={{ color: '#94a3b8' }}>·</span>
                           <span style={{ fontWeight: 600 }}>

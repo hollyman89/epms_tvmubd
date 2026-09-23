@@ -41,7 +41,7 @@ apiClient.interceptors.response.use(
       }
 
       Modal.confirm({
-        title: '⚠️ Data Telah Diubah Pengguna Lain',
+        title: 'Data Telah Diubah Pengguna Lain',
         content:
           'Data yang Anda edit telah diperbarui oleh pengguna lain di server. Halaman telah memuat data versi terbaru secara otomatis agar tidak timpa-menimpa.',
         okText: 'Pahami & Lanjutkan',

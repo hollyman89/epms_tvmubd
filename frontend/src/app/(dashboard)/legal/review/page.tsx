@@ -324,7 +324,7 @@ function LegalReviewContent() {
     }
 
     Modal.confirm({
-      title: '📋 Konfirmasi Rilis Clearance Legal',
+      title: 'Konfirmasi Rilis Clearance Legal',
       content: `Apakah Anda yakin ingin menyetujui & merilis kontrak "${selectedContractObj?.contractNumber}"? Dokumen akan diteruskan ke Tim PMO untuk inisiasi proyek.`,
       okText: 'Setujui & Rilis ke PMO',
       cancelText: 'Batal',
@@ -364,7 +364,7 @@ function LegalReviewContent() {
 
           // 3. Tampilkan Modal Sukses Handover
           Modal.success({
-            title: '🚀 Handover ke PMO Berhasil!',
+            title: 'Handover ke PMO Berhasil!',
             content: (
               <div>
                 <p>Kontrak <strong>#{approvedCharterData.project_code}</strong> telah disahkan oleh tim Legal.</p>
@@ -568,7 +568,7 @@ function LegalReviewContent() {
                 </div>
 
                 <Title level={4} style={{ color: '#0f172a', margin: '0 0 8px 0', fontWeight: 600 }}>
-                  📄 Belum Ada Kontrak untuk Direview
+                  Belum Ada Kontrak untuk Direview
                 </Title>
 
                 <Text style={{ fontSize: 14, color: '#64748b', maxWidth: 480, display: 'block', marginBottom: 28, lineHeight: 1.7 }}>
@@ -650,7 +650,7 @@ function LegalReviewContent() {
                 ) : (
                   <div style={{ height: '100%', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', backgroundColor: '#fffbe6', padding: 24, textAlign: 'center' }}>
                     <FilePdfOutlined style={{ fontSize: 48, color: '#faad14', marginBottom: 16 }} />
-                    <Title level={5} style={{ margin: 0, color: '#d48800' }}>⚠️ SPK belum diupload untuk kontrak ini.</Title>
+                    <Title level={5} style={{ margin: 0, color: '#d48800' }}>SPK belum diupload untuk kontrak ini.</Title>
                     <Text type="secondary" style={{ fontSize: 13, marginTop: 8, maxWidth: 360 }}>
                       Dokumen SPK untuk kontrak ini belum diunggah oleh tim Marketing.
                     </Text>
@@ -721,7 +721,7 @@ function LegalReviewContent() {
         <Modal
           title={
             <Space>
-              <Text strong style={{ color: '#d97706', fontSize: 15 }}>⚠️ Permintaan Revisi Kontrak ke Marketing</Text>
+              <Text strong style={{ color: '#d97706', fontSize: 15 }}>Permintaan Revisi Kontrak ke Marketing</Text>
             </Space>
           }
           open={isRevisionModalVisible}
@@ -746,7 +746,7 @@ function LegalReviewContent() {
             />
             {revisionNotes && revisionNotes.trim().length < 20 && (
               <Text type="danger" style={{ fontSize: 11, marginTop: 4, display: 'block' }}>
-                ⚠️ Catatan revisi minimal 20 karakter ({revisionNotes.trim().length}/20).
+                Catatan revisi minimal 20 karakter ({revisionNotes.trim().length}/20).
               </Text>
             )}
           </div>

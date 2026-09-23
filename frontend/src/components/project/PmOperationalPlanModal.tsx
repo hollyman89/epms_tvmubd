@@ -1510,15 +1510,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         let title = `Peralihan Alur: ${h.action}`;
         if (h.action === 'APPROVE') {
           color = 'success';
-          label = '✓ APPROVED';
+          label = 'APPROVED';
           title = `Persetujuan oleh ${h.actorRole || 'Reviewer'}`;
         } else if (h.action === 'RETURN' || h.action === 'REJECT') {
           color = 'error';
-          label = '⚠ REVISION';
+          label = 'REVISION';
           title = `Permintaan Revisi oleh ${h.actorRole || 'Reviewer'}`;
         } else if (h.action === 'START') {
           color = 'blue';
-          label = '✓ SUBMITTED';
+          label = 'SUBMITTED';
           title = 'Operational Plan Diajukan ke Management Review';
         }
         return {
@@ -1563,7 +1563,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: 'Operational Plan Diajukan ke Management Review',
         actor: `Diajukan oleh ${gateRecord.submittedByName || 'Project Manager'}`,
         role: 'Project Manager',
-        statusTag: { label: '✓ SUBMITTED', color: 'blue' },
+        statusTag: { label: 'SUBMITTED', color: 'blue' },
         time: gateRecord.submittedAt,
         formattedTime: dayjs(gateRecord.submittedAt).format('DD MMM YYYY, HH:mm'),
       });
@@ -1579,7 +1579,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: 'Permintaan Revisi Operasional',
         actor: `Diminta revisi oleh ${gateRecord.decidedByName || 'Head of Operations'}`,
         role: reviewerRoleName,
-        statusTag: { label: '⚠ REVISION REQUESTED', color: 'error' },
+        statusTag: { label: 'REVISION REQUESTED', color: 'error' },
         time: gateRecord.decidedAt,
         formattedTime: dayjs(gateRecord.decidedAt).format('DD MMM YYYY, HH:mm'),
         note: gateRecord.revisionNotes ? `Catatan: "${gateRecord.revisionNotes}"` : undefined,
@@ -1595,7 +1595,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: 'Operational Plan Hasil Revisi Diajukan Ulang',
         actor: 'Diajukan ulang oleh Project Manager',
         role: 'Project Manager',
-        statusTag: { label: '✓ RESUBMITTED', color: 'cyan' },
+        statusTag: { label: 'RESUBMITTED', color: 'cyan' },
         time: gateRecord.resubmittedAt,
         formattedTime: dayjs(gateRecord.resubmittedAt).format('DD MMM YYYY, HH:mm'),
       });
@@ -1611,7 +1611,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: 'Operational Plan Disetujui & Dialihkan ke Procurement',
         actor: `Disetujui oleh ${gateRecord.decidedByName || 'Head of Operations'}`,
         role: reviewerRoleName,
-        statusTag: { label: '✓ APPROVED', color: 'success' },
+        statusTag: { label: 'APPROVED', color: 'success' },
         time: gateRecord.decidedAt,
         formattedTime: dayjs(gateRecord.decidedAt).format('DD MMM YYYY, HH:mm'),
       });
@@ -1626,7 +1626,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: `Purchase Request (${prApprovalState.prNumber || `PR-${prApprovalState.prId}`}) Dibuat & Disubmit`,
         actor: `Diajukan oleh ${prApprovalState.submittedBy || 'Procurement Team'}`,
         role: 'Purchasing / Procurement',
-        statusTag: { label: '✓ PR SUBMITTED', color: 'blue' },
+        statusTag: { label: 'PR SUBMITTED', color: 'blue' },
         time: prApprovalState.submittedAt,
         formattedTime: prApprovalState.submittedAt ? dayjs(prApprovalState.submittedAt).format('DD MMM YYYY, HH:mm') : '-',
         note: prApprovalState.totalAmount ? `Total Estimasi: Rp ${Number(prApprovalState.totalAmount).toLocaleString('id-ID')}` : undefined,
@@ -1642,7 +1642,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: 'Financial Review Disetujui & Diteruskan ke Director',
         actor: `Disetujui oleh ${prApprovalState.financeReviewedBy || 'Finance User'}`,
         role: 'Finance',
-        statusTag: { label: '✓ FINANCE APPROVED', color: 'success' },
+        statusTag: { label: 'FINANCE APPROVED', color: 'success' },
         time: prApprovalState.financeReviewedAt,
         formattedTime: dayjs(prApprovalState.financeReviewedAt).format('DD MMM YYYY, HH:mm'),
         note: prApprovalState.financeComments ? `Evaluasi: "${prApprovalState.financeComments}"` : undefined,
@@ -1659,7 +1659,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: `Purchase Request Dikembalikan ke Procurement oleh ${rejRole}`,
         actor: `Dikembalikan oleh ${prApprovalState.rejectedBy || rejRole}`,
         role: rejRole,
-        statusTag: { label: '⚠ PR REJECTED', color: 'error' },
+        statusTag: { label: 'PR REJECTED', color: 'error' },
         time: prApprovalState.rejectedAt,
         formattedTime: dayjs(prApprovalState.rejectedAt).format('DD MMM YYYY, HH:mm'),
         note: prApprovalState.rejectionReason ? `Catatan: "${prApprovalState.rejectionReason}"` : undefined,
@@ -1675,7 +1675,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: 'Purchase Request Disetujui Final oleh Director',
         actor: `Disetujui oleh ${prApprovalState.directorApprovedBy || 'Director'}`,
         role: 'Director',
-        statusTag: { label: '✓ FINAL APPROVED', color: 'success' },
+        statusTag: { label: 'FINAL APPROVED', color: 'success' },
         time: prApprovalState.directorApprovedAt,
         formattedTime: dayjs(prApprovalState.directorApprovedAt).format('DD MMM YYYY, HH:mm'),
         note: prApprovalState.directorComments ? `Catatan: "${prApprovalState.directorComments}"` : undefined,
@@ -1691,7 +1691,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: 'Menunggu Final Approval Director',
         actor: 'Director (Final Authority)',
         role: 'Director',
-        statusTag: { label: '⏳ FINAL APPROVAL PENDING', color: 'purple' },
+        statusTag: { label: 'FINAL APPROVAL PENDING', color: 'purple' },
         isPending: true,
         formattedTime: 'Sedang Berjalan',
         note: 'Menunggu otorisasi penerbitan pengadaan oleh Director',
@@ -1707,7 +1707,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         title: 'Menunggu Financial Review',
         actor: 'Finance Team',
         role: 'Finance',
-        statusTag: { label: '⏳ REVIEW PENDING', color: 'processing' },
+        statusTag: { label: 'REVIEW PENDING', color: 'processing' },
         isPending: true,
         formattedTime: 'Sedang Berjalan',
         note: 'Menunggu evaluasi anggaran & kelayakan harga oleh Finance',
@@ -1830,7 +1830,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                       if (isUnknown) {
                         return (
                           <Tag color="error" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}>
-                            ⚠️ STATUS WORKFLOW TIDAK DIKENALI
+                            STATUS WORKFLOW TIDAK DIKENALI
                           </Tag>
                         );
                       }
@@ -1847,7 +1847,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                               color={completenessScore === 4 ? 'success' : completenessScore >= 2 ? 'processing' : 'warning'}
                               style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}
                             >
-                              {completenessScore === 4 ? '✅ 4/4 READY' : `${completenessScore}/4 INCOMPLETE`}
+                              {completenessScore === 4 ? '4/4 READY' : `${completenessScore}/4 INCOMPLETE`}
                             </Tag>
                           )}
                         </Space>
@@ -1857,31 +1857,31 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                     // Legacy Fallback (ONLY if workflow instance does not exist)
                     gateRecord?.status === 'READY_FOR_KICKOFF' ? (
                       <Tag color="purple" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0, background: '#f5f3ff', borderColor: '#ddd6fe', color: '#6d28d9' }}>
-                        🚀 READY FOR KICKOFF
+                        READY FOR KICKOFF
                       </Tag>
                     ) : gateRecord?.status === 'REVIEW_FINANCE' ? (
                       <Tag color="cyan" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0, background: '#ecfeff', borderColor: '#a5f3fc', color: '#0e7490' }}>
-                        ⏳ Menunggu Review (Finance Team)
+                        Menunggu Review (Finance Team)
                       </Tag>
                     ) : gateRecord?.status === 'REVIEW_DIRECTOR' ? (
                       <Tag color="purple" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0, background: '#f5f3ff', borderColor: '#ddd6fe', color: '#6d28d9' }}>
-                        ⏳ Menunggu Persetujuan Director
+                        Menunggu Persetujuan Director
                       </Tag>
                     ) : gateRecord?.status === 'READY_FOR_PROCUREMENT' ? (
                       <Tag color="gold" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0, color: '#b45309', background: '#fffbeb', borderColor: '#fde68a' }}>
-                        🚀 READY FOR PROCUREMENT — DISETUJUI HOPS
+                        READY FOR PROCUREMENT — DISETUJUI HOPS
                       </Tag>
                     ) : gateRecord?.status === 'REVIEW_PENDING' ? (
                       <Tag color="processing" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}>
-                        ⏳ Menunggu Review (Head of Operations)
+                        Menunggu Review (Head of Operations)
                       </Tag>
                     ) : gateRecord?.status === 'NEEDS_REVISION' ? (
                       <Tag color="error" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}>
-                        ⚠ NEEDS REVISION
+                        NEEDS REVISION
                       </Tag>
                     ) : completenessScore === 4 ? (
                       <Tag color="success" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}>
-                        ✅ 4/4 READY — SIAP DIAJUKAN
+                        4/4 READY — SIAP DIAJUKAN
                       </Tag>
                     ) : (
                       <Tag
@@ -1910,11 +1910,11 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
             <Space size={8}>
               {lastSavedTime ? (
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  💾 Draft tersimpan di browser: <strong>{lastSavedTime}</strong>
+                  Draft tersimpan di browser: <strong>{lastSavedTime}</strong>
                 </Text>
               ) : (
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  ℹ️ Belum ada perubahan tersimpan
+                  Belum ada perubahan tersimpan
                 </Text>
               )}
             </Space>
@@ -2432,7 +2432,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                 </Text>
                 {isCostReady ? (
                   <Tag color="success" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
-                    ✓ SIAP
+                    SIAP
                   </Tag>
                 ) : isCostLocalDraft ? (
                   <Tag color="warning" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
@@ -2481,7 +2481,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                 </Text>
                 {isWbsReady ? (
                   <Tag color="success" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
-                    ✓ SIAP
+                    SIAP
                   </Tag>
                 ) : isWbsLocalDraft ? (
                   <Tag color="warning" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
@@ -2524,7 +2524,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                 </Text>
                 {isScheduleReady ? (
                   <Tag color="success" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
-                    ✓ SIAP
+                    SIAP
                   </Tag>
                 ) : isScheduleLocalDraft ? (
                   <Tag color="warning" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
@@ -2571,7 +2571,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                 </Text>
                 {isConditionReady ? (
                   <Tag color="success" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
-                    ✓ SIAP
+                    SIAP
                   </Tag>
                 ) : isConditionLocalDraft ? (
                   <Tag color="warning" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
@@ -2663,7 +2663,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                           <DollarOutlined style={{ color: '#1d4ed8', fontSize: 15 }} />
                           <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>1. Cost Estimate / RAB</span>
                           {isCostReady ? (
-                            <Tag color="success" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>✓ Siap</Tag>
+                            <Tag color="success" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>Siap</Tag>
                           ) : isCostLocalDraft ? (
                             <Tag color="warning" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>○ Draft Lokal</Tag>
                           ) : (
@@ -2842,16 +2842,16 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                             <Text type="secondary" style={{ fontSize: 11 }}>Belum ada rincian item biaya</Text>
                           ) : costWbsReconciliation.unassignedItemsCount === 0 && costWbsReconciliation.orphanedItemsCount === 0 ? (
                             <Tag color="success" style={{ fontSize: 10.5, margin: 0 }}>
-                              ✓ Semua item biaya sudah dipetakan ({costWbsReconciliation.mappedItemsCount} WBS • {costWbsReconciliation.projectLevelItemsCount} Project-Level)
+                              Semua item biaya sudah dipetakan ({costWbsReconciliation.mappedItemsCount} WBS • {costWbsReconciliation.projectLevelItemsCount} Project-Level)
                             </Tag>
                           ) : (
                             <Tag color="warning" style={{ fontSize: 10.5, margin: 0 }}>
-                              ⚠ {costWbsReconciliation.unassignedItemsCount} item biaya belum ditentukan
+                              {costWbsReconciliation.unassignedItemsCount} item biaya belum ditentukan
                             </Tag>
                           )}
                           {costWbsReconciliation.orphanedItemsCount > 0 && (
                             <Tag color="error" style={{ fontSize: 10.5, margin: 0 }}>
-                              ⚠ {costWbsReconciliation.orphanedItemsCount} WBS Dihapus
+                              {costWbsReconciliation.orphanedItemsCount} WBS Dihapus
                             </Tag>
                           )}
                         </Space>
@@ -3070,7 +3070,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                         fontWeight: hasWbsError ? 700 : 400,
                                                       }}
                                                     >
-                                                      {isMapped ? 'WBS ✓' : isOrphaned ? 'WBS ⚠' : isMissingWbs ? 'WBS ✕' : 'Detail'}
+                                                      {isMapped || isOrphaned || isMissingWbs ? 'WBS' : 'Detail'}
                                                     </Button>
                                                   </Col>
                                                   <Col span={1} style={{ textAlign: 'center' }}>
@@ -3234,20 +3234,20 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                         ) : isWbsScope ? (
                                                           !item.wbsNodeId ? (
                                                             <Tag color="error" style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
-                                                              ✕ Wajib Pilih WBS
+                                                              Wajib Pilih WBS
                                                             </Tag>
                                                           ) : isMapped ? (
                                                             <Tag color="success" style={{ fontSize: 10, margin: 0 }}>
-                                                              ✓ {wbsLeafMap.get(String(item.wbsNodeId))?.code} · {wbsLeafMap.get(String(item.wbsNodeId))?.name}
+                                                              {wbsLeafMap.get(String(item.wbsNodeId))?.code} · {wbsLeafMap.get(String(item.wbsNodeId))?.name}
                                                             </Tag>
                                                           ) : (
                                                             <Tag color="error" style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
-                                                              ⚠ WBS Dihapus / Remap Diperlukan
+                                                              WBS Dihapus / Remap Diperlukan
                                                             </Tag>
                                                           )
                                                         ) : (
                                                           <Tag color="warning" style={{ fontSize: 10, margin: 0 }}>
-                                                            ⚠ Belum Ditentukan
+                                                            Belum Ditentukan
                                                           </Tag>
                                                         )}
                                                       </Col>
@@ -3399,7 +3399,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                           <ApartmentOutlined style={{ color: '#0284c7', fontSize: 15 }} />
                           <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>2. Work Breakdown Structure (WBS)</span>
                           {isWbsReady ? (
-                            <Tag color="success" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>✓ Siap (100%)</Tag>
+                            <Tag color="success" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>Siap (100%)</Tag>
                           ) : isWbsLocalDraft ? (
                             <Tag color="warning" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>○ Draft Lokal (100%)</Tag>
                           ) : (
@@ -3586,15 +3586,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                               style={{ fontWeight: 600, margin: 0, padding: '2px 8px', whiteSpace: 'nowrap' }}
                             >
                               {wbsStructureMetrics.isStructured
-                                ? `✅ Terstruktur (L${wbsStructureMetrics.maxHierarchyDepth})`
-                                : 'ℹ️ Struktur Flat (L1)'}
+                                ? `Terstruktur (L${wbsStructureMetrics.maxHierarchyDepth})`
+                                : 'Struktur Flat (L1)'}
                             </Tag>
                           )}
                           <Tag
                             color={isWbsWeightValid ? 'success' : 'warning'}
                             style={{ fontWeight: 700, margin: 0, padding: '2px 8px', whiteSpace: 'nowrap' }}
                           >
-                            Bobot Scope: {rootWeightSum.toFixed(1)}% {isWbsWeightValid ? '✅' : '⚠️'}
+                            Bobot Scope: {rootWeightSum.toFixed(1)}%
                           </Tag>
                         </Space>
                       </div>
@@ -3683,7 +3683,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                           <ScheduleOutlined style={{ color: '#d97706', fontSize: 15 }} />
                           <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>3. Schedule & Gantt</span>
                           {isScheduleReady ? (
-                            <Tag color="success" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>✓ Siap</Tag>
+                            <Tag color="success" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>Siap</Tag>
                           ) : isScheduleLocalDraft ? (
                             <Tag color="warning" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>○ Draft Lokal</Tag>
                           ) : (
@@ -3881,7 +3881,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                           <FileTextOutlined style={{ color: '#2563eb', fontSize: 15 }} />
                           <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>4. Kondisi Awal Proyek</span>
                           {isConditionReady ? (
-                            <Tag color="success" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>✓ Siap</Tag>
+                            <Tag color="success" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>Siap</Tag>
                           ) : isConditionLocalDraft ? (
                             <Tag color="warning" style={{ margin: 0, fontSize: 10.5, fontWeight: 700 }}>○ Draft Lokal</Tag>
                           ) : initialCondition?.conditionStatus ? (
@@ -3944,7 +3944,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                           </span>
                           {isConditionReady ? (
                             <Tag color="success" style={{ fontWeight: 700, fontSize: 10 }}>
-                              ✓ SIAP (TERSIMPAN DI SERVER)
+                              SIAP (TERSIMPAN DI SERVER)
                             </Tag>
                           ) : isConditionLocalDraft ? (
                             <Tag color="warning" style={{ fontWeight: 700, fontSize: 10 }}>
@@ -4171,9 +4171,9 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
           {/* Helper / Guidance Text */}
           <div style={{ marginBottom: 12, padding: '6px 10px', background: '#f8fafc', borderRadius: 6, border: '1px solid #e2e8f0' }}>
             <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
-              {nodeModalMode === 'ADD_ROOT' && '💡 Work Package Utama menjadi level pertama dalam struktur WBS.'}
-              {nodeModalMode === 'ADD_CHILD' && '💡 Level dan kode WBS ditentukan otomatis berdasarkan Work Package induk yang dipilih.'}
-              {nodeModalMode === 'EDIT' && '💡 Perubahan nama dan bobot akan memperbarui ringkasan alokasi operasional secara otomatis.'}
+              {nodeModalMode === 'ADD_ROOT' && 'Work Package Utama menjadi level pertama dalam struktur WBS.'}
+              {nodeModalMode === 'ADD_CHILD' && 'Level dan kode WBS ditentukan otomatis berdasarkan Work Package induk yang dipilih.'}
+              {nodeModalMode === 'EDIT' && 'Perubahan nama dan bobot akan memperbarui ringkasan alokasi operasional secara otomatis.'}
             </Text>
           </div>
 

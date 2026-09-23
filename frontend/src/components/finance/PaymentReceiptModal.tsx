@@ -161,7 +161,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
               border: 'none',
             }}
           >
-            ✅ PAID / LUNAS
+            PAID / LUNAS
           </Tag>
         </div>
 
