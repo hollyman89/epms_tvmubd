@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { ObservabilityController } from './observability.controller';
 import { ObservabilityService } from './observability.service';
+import { OutboxRelayService } from './outbox-relay.service';
 import { TracingInterceptor } from './tracing.interceptor';
 import { OutboxEvent } from '../../entities/outbox-event.entity';
 import { Contract } from '../../entities/contract.entity';
@@ -17,11 +18,12 @@ import { AuditLog } from '../../entities/audit-log.entity';
   controllers: [ObservabilityController],
   providers: [
     ObservabilityService,
+    OutboxRelayService,
     {
       provide: APP_INTERCEPTOR,
       useClass: TracingInterceptor,
     },
   ],
-  exports: [ObservabilityService],
+  exports: [ObservabilityService, OutboxRelayService],
 })
 export class SystemModule {}
