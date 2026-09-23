@@ -1527,7 +1527,7 @@ export class ProjectService {
     // Step 6: Emit Event AFTER transaction commits safely
     if (this.eventEmitter) {
       try {
-        this.eventEmitter.emit('project.pm.assigned', {
+        this.eventEmitter.emit('internal.project.pm.assigned', {
           projectId: transactionResult.project.id,
           projectCode: transactionResult.project.code,
           contractId: transactionResult.contract.id,

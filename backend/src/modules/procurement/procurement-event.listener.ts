@@ -25,7 +25,7 @@ export class ProcurementEventListener {
     catch (error) { this.logger.error(`Gagal mengevaluasi penutupan paket PO #${poId}: ${error.message}`); }
   }
 
-  @OnEvent('workflow.instance.completed')
+  @OnEvent('internal.workflow.instance.completed')
   async handleWorkflowInstanceCompleted(payload: {
     instanceId: number;
     entityType: string;

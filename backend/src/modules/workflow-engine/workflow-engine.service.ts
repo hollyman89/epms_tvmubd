@@ -407,7 +407,7 @@ export class WorkflowEngineService {
       });
 
       // 13. Emit real-time domain event for zero-refresh UI synchronization
-      this.eventEmitter.emit('workflow.task.completed', {
+      this.eventEmitter.emit('internal.workflow.task.completed', {
         taskId: task.id,
         instanceId: instance.id,
         action,
@@ -484,7 +484,7 @@ export class WorkflowEngineService {
       });
 
       // Emit real-time domain event for zero-refresh UI synchronization
-      this.eventEmitter.emit('workflow.instance.completed', {
+      this.eventEmitter.emit('internal.workflow.instance.completed', {
         instanceId: instance.id,
         entityType: instance.entityType,
         entityId: instance.entityId,

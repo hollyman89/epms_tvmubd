@@ -51,7 +51,7 @@ export class NotificationListener {
     }
   }
 
-  @OnEvent('project.pm.assigned')
+  @OnEvent('internal.project.pm.assigned')
   handleProjectPmAssignedEvent(payload: {
     projectId: number;
     projectCode: string;
