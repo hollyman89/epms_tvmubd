@@ -99,33 +99,72 @@ export class ObservabilityService {
     const publishedOutbox = await this.outboxRepo.count({ where: { status: OutboxStatus.PUBLISHED } });
     const failedOutbox = await this.outboxRepo.count({ where: { status: OutboxStatus.FAILED } });
 
+    // Oldest pending event calculation
+    const oldestPending = await this.outboxRepo.findOne({
+      select: ['id', 'created_at'],
+      where: { status: OutboxStatus.PENDING },
+      order: { created_at: 'ASC' },
+    });
+
+    const oldestPendingCreatedAt = oldestPending?.created_at ? new Date(oldestPending.created_at).toISOString() : null;
+    const oldestPendingAgeMs = oldestPending?.created_at
+      ? Math.max(0, Date.now() - new Date(oldestPending.created_at).getTime())
+      : null;
+
+    // Real delivery success rate calculation
+    const totalResolved = publishedOutbox + failedOutbox;
+    const deliverySuccessRateNum = totalResolved > 0 ? (publishedOutbox / totalResolved) * 100 : 100;
+    const deliverySuccessRate = `${deliverySuccessRateNum.toFixed(2)}%`;
+
+    // Failed event operational diagnostics (bounded to 10, newest first, no sensitive payload)
+    const failedEvents = await this.outboxRepo.find({
+      select: ['event_id', 'event_name', 'retry_count', 'error_message', 'created_at'],
+      where: { status: OutboxStatus.FAILED },
+      order: { created_at: 'DESC' },
+      take: 10,
+    });
+
+    const recentFailedEvents = failedEvents.map((evt) => ({
+      eventId: evt.event_id,
+      eventName: evt.event_name,
+      retryCount: evt.retry_count,
+      errorMessage: evt.error_message,
+      createdAt: evt.created_at ? new Date(evt.created_at).toISOString() : null,
+    }));
+
     const totalApprovedContracts = await this.contractRepo.count({ where: { legal_status: LegalStatus.APPROVED } });
     const totalWonTenders = await this.tenderRepo.count({ where: { status: TenderStatus.WON } });
     const totalProjects = await this.projectRepo.count();
     const totalAuditLogs = await this.auditRepo.count();
 
-    // 1. SLI / SLO / SLA Metrics
+    const lagSeconds = oldestPendingAgeMs !== null ? oldestPendingAgeMs / 1000 : null;
+    const outboxLagSli = lagSeconds !== null ? `${lagSeconds.toFixed(2)} s` : '0.00 s (Queue Idle)';
+    const outboxLagStatus = lagSeconds === null || lagSeconds <= 2.0 ? 'MEETS_SLO' : (lagSeconds <= 10.0 ? 'AT_RISK' : 'BREACHED');
+
+    const outboxDeliveryStatus = deliverySuccessRateNum >= 99.99 ? 'MEETS_SLO' : (deliverySuccessRateNum >= 95.0 ? 'AT_RISK' : 'BREACHED');
+
+    // 1. SLI / SLO / SLA Metrics (Real evidence-based metrics only, unmeasured APM marked NOT_MEASURED)
     const sliSloReport: SliSloTarget[] = [
-      { name: 'API System Availability', targetSlo: '≥ 99.9%', currentSli: '99.98%', status: 'MEETS_SLO' },
-      { name: 'API P95 Response Latency', targetSlo: '< 300 ms', currentSli: '142 ms', status: 'MEETS_SLO' },
-      { name: 'Approval Transaction Success Rate', targetSlo: '≥ 99.99%', currentSli: '100.00%', status: 'MEETS_SLO' },
-      { name: 'Outbox Event Delivery Success Rate', targetSlo: '≥ 99.99%', currentSli: '99.99%', status: 'MEETS_SLO' },
-      { name: 'Outbox Publish Delay', targetSlo: '< 2.0 s', currentSli: '0.35 s', status: 'MEETS_SLO' },
+      { name: 'API System Availability', targetSlo: '≥ 99.9%', currentSli: 'NOT_MEASURED', status: 'NOT_MEASURED' },
+      { name: 'API P95 Response Latency', targetSlo: '< 300 ms', currentSli: 'NOT_MEASURED', status: 'NOT_MEASURED' },
+      { name: 'Approval Transaction Success Rate', targetSlo: '≥ 99.99%', currentSli: 'NOT_MEASURED', status: 'NOT_MEASURED' },
+      { name: 'Outbox Event Delivery Success Rate', targetSlo: '≥ 99.99%', currentSli: deliverySuccessRate, status: outboxDeliveryStatus },
+      { name: 'Oldest Pending Outbox Age', targetSlo: '< 2.0 s', currentSli: outboxLagSli, status: outboxLagStatus },
     ];
 
-    // 2. Error Budget Tracking
+    // 2. Error Budget Tracking (Marked unmeasured without APM source)
     const errorBudget: ErrorBudgetStatus = {
-      monthlyBudgetPercent: 0.10, // 99.9% SLO allows 0.10% error budget
-      usedPercent: 0.015,
-      remainingPercent: 0.085,
-      status: 'HEALTHY',
+      monthlyBudgetPercent: 0.10,
+      usedPercent: 0,
+      remainingPercent: 0,
+      status: 'NOT_MEASURED',
     };
 
     // 3. Capacity & Resource Utilization Metrics
     const capacityMetrics: CapacityMetric[] = [
-      { resource: 'CPU Utilization', usagePercent: 24, status: 'NORMAL', trend: 'STABLE' },
-      { resource: 'Memory Utilization (RAM)', usagePercent: 38, status: 'NORMAL', trend: 'STABLE' },
-      { resource: 'Database Connections', usagePercent: 12, status: 'NORMAL', trend: 'STABLE' },
+      { resource: 'CPU Utilization', usagePercent: 0, status: 'NOT_MEASURED', trend: 'NOT_MEASURED' },
+      { resource: 'Memory Utilization (RAM)', usagePercent: 0, status: 'NOT_MEASURED', trend: 'NOT_MEASURED' },
+      { resource: 'Database Connections', usagePercent: 0, status: 'NOT_MEASURED', trend: 'NOT_MEASURED' },
       { resource: 'Outbox Backlog Queue', usagePercent: Math.min(Math.round((pendingOutbox / 500) * 100), 100), status: pendingOutbox > 500 ? 'HIGH' : 'NORMAL', trend: 'STABLE' },
     ];
 
@@ -166,6 +205,10 @@ export class ObservabilityService {
           publishedCount: publishedOutbox,
           failedCount: failedOutbox,
           dlqStatus: failedOutbox > 0 ? 'ACTION_REQUIRED' : 'CLEAR',
+          oldestPendingCreatedAt,
+          oldestPendingAgeMs,
+          deliverySuccessRate,
+          recentFailedEvents,
         },
         runbookIndex,
       },

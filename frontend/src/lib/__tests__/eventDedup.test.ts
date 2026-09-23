@@ -66,6 +66,8 @@ describe('Phase G Frontend Canonical Sync & Dedup', () => {
       } else if (eventName === 'procurement.po.issued') {
         mockQueryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
         mockQueryClient.invalidateQueries({ queryKey: ['procurement', 'packages'], type: 'active' });
+        mockQueryClient.invalidateQueries({ queryKey: ['dashboard-summary'], type: 'active' });
+        mockQueryClient.invalidateQueries({ queryKey: ['dashboard-procurement-pending'], type: 'active' });
       } else if (eventName === 'procurement.gr.received') {
         mockQueryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
         mockQueryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'], type: 'active' });
@@ -78,6 +80,7 @@ describe('Phase G Frontend Canonical Sync & Dedup', () => {
         mockQueryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
       } else if (eventName === 'finance.payment.recorded') {
         mockQueryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'], type: 'active' });
+        mockQueryClient.invalidateQueries({ queryKey: ['dashboard-summary'], type: 'active' });
       }
     };
 
@@ -191,6 +194,32 @@ describe('Phase G Frontend Canonical Sync & Dedup', () => {
       // finance.invoice.verified SHOULD trigger payments page fetch
       handlePaymentsPageSync({ aggregateType: 'Invoice', eventName: 'finance.invoice.verified' });
       expect(paymentsFetched).toBe(true);
+    });
+
+    it('22. Phase H: procurement.po.issued invalidates prs-pos, packages, dashboard-summary, and dashboard-procurement-pending', () => {
+      handleSyncEvent({ eventName: 'procurement.po.issued', aggregateType: 'PurchaseOrder', aggregateId: 88 });
+      expect(invalidatedQueries).toEqual([
+        { queryKey: ['procurement', 'prs-pos'], type: 'active' },
+        { queryKey: ['procurement', 'packages'], type: 'active' },
+        { queryKey: ['dashboard-summary'], type: 'active' },
+        { queryKey: ['dashboard-procurement-pending'], type: 'active' },
+      ]);
+    });
+
+    it('23. Phase H: finance.payment.recorded invalidates reconciliations and dashboard-summary', () => {
+      handleSyncEvent({ eventName: 'finance.payment.recorded', aggregateType: 'Payment', aggregateId: 99 });
+      expect(invalidatedQueries).toEqual([
+        { queryKey: ['procurement', 'reconciliations'], type: 'active' },
+        { queryKey: ['dashboard-summary'], type: 'active' },
+      ]);
+    });
+
+    it('24. Phase H: unrelated event does not invalidate unrelated dashboard keys', () => {
+      handleSyncEvent({ eventName: 'finance.invoice.created', aggregateType: 'Invoice', aggregateId: 101 });
+      const summaryCall = invalidatedQueries.find(q => q.queryKey[0] === 'dashboard-summary');
+      const trendCall = invalidatedQueries.find(q => q.queryKey[0] === 'dashboard-project-trend');
+      expect(summaryCall).toBeUndefined();
+      expect(trendCall).toBeUndefined();
     });
   });
 });

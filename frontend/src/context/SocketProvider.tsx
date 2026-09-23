@@ -179,6 +179,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         } else if (eventName === 'procurement.po.issued') {
           queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
           queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['dashboard-summary'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['dashboard-procurement-pending'], type: 'active' });
         } else if (eventName === 'procurement.gr.received') {
           queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
           queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'], type: 'active' });
@@ -191,6 +193,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
         } else if (eventName === 'finance.payment.recorded') {
           queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['dashboard-summary'], type: 'active' });
         }
 
         // Notify active manual-state screens via browser event with canonical envelope

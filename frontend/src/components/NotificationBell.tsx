@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
-import { Badge, Popover, List, Typography, Button, Spin, Empty, theme, Tabs, Tag, notification as antNotification } from 'antd';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Badge, Popover, List, Typography, Button, Spin, Empty, theme, Tabs, Tag } from 'antd';
 import { BellOutlined, CheckOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
-import axios from 'axios';
+import { apiClient } from '@/lib/axios';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/id';
-import { io, Socket } from 'socket.io-client';
+import { useSocket } from '@/context/SocketProvider';
+import { setupNotificationBellSync } from '@/lib/notificationSync';
 
 dayjs.extend(relativeTime);
 dayjs.locale('id');
@@ -27,6 +28,7 @@ interface Notification {
 
 export const NotificationBell: React.FC = () => {
   const { token } = useToken();
+  const { notificationSocket } = useSocket();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(false);
@@ -34,27 +36,23 @@ export const NotificationBell: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('todo');
   const router = useRouter();
 
-  // Authentication token getter (adjust according to your auth logic)
-  const getAuthToken = () => localStorage.getItem('access_token') || '';
+  // Authentication token getter
+  const getAuthToken = useCallback(() => localStorage.getItem('access_token') || '', []);
 
-  const fetchUnreadCount = async () => {
+  const fetchUnreadCount = useCallback(async () => {
     try {
-      const res = await axios.get('http://localhost:4000/api/v1/notifications/count/unread', {
-        headers: { Authorization: `Bearer ${getAuthToken()}` },
-      });
+      const res = await apiClient.get('/notifications/count/unread');
       const count = res.data?.data?.data?.count ?? res.data?.data?.count ?? 0;
       setUnreadCount(count);
     } catch (error) {
       console.error('Failed to fetch unread count', error);
     }
-  };
+  }, []);
 
-  const fetchNotifications = async () => {
+  const fetchNotifications = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await axios.get('http://localhost:4000/api/v1/notifications?page=1&limit=10&isRead=false', {
-        headers: { Authorization: `Bearer ${getAuthToken()}` },
-      });
+      const res = await apiClient.get('/notifications?page=1&limit=10&isRead=false');
       const rawData = res.data?.data?.data || res.data?.data || [];
       const dataArray = Array.isArray(rawData) ? rawData : [];
       setNotifications(dataArray);
@@ -63,105 +61,256 @@ export const NotificationBell: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
+  // Fetch unread count once on initial mount
   useEffect(() => {
     if (getAuthToken()) {
       fetchUnreadCount();
     }
-    
-    // Initial fetch if open
+  }, [fetchUnreadCount, getAuthToken]);
+
+  // Fetch notification list only when popover opens
+  useEffect(() => {
     if (open) {
       fetchNotifications();
     }
-  }, [open]);
+  }, [open, fetchNotifications]);
 
   useEffect(() => {
-    // Set up WebSocket
-    let socket: Socket | null = null;
-    let handleNewNotification: ((notif: Notification) => void) | null = null;
-
-    if (getAuthToken()) {
-      socket = io("http://localhost:4000/notifications", {
-        auth: {
-          token: `Bearer ${getAuthToken()}`
-        }
-      });
-
-      socket.on("connect", () => {
-        console.log("Connected to Real-Time Notifications");
-      });
-
-      handleNewNotification = (notif: Notification) => {
+    return setupNotificationBellSync({
+      socket: notificationSocket,
+      onNewNotification: (notif: Notification) => {
         // Deduplicate logic and UI update (Silent Bell Inbox update)
         setNotifications(prev => {
           if (prev.some(n => n.id === notif.id)) return prev;
           return [notif, ...prev];
         });
         setUnreadCount(prev => prev + 1);
-      };
-
-      socket.on("new_notification", handleNewNotification);
-    }
-
-    return () => {
-      if (socket) {
-        if (handleNewNotification) {
-          socket.off("new_notification", handleNewNotification);
+      },
+      onReconnectResync: () => {
+        fetchUnreadCount();
+        if (open) {
+          fetchNotifications();
         }
-        socket.disconnect();
-      }
-    };
-  }, []);
+      },
+    });
+  }, [notificationSocket, fetchUnreadCount, fetchNotifications, open]);
 
-  const markAsRead = async (id: number) => {
+  const markAsRead = useCallback(async (id: number) => {
     try {
-      await axios.patch(`http://localhost:4000/api/v1/notifications/${id}/read`, {}, {
-        headers: { Authorization: `Bearer ${getAuthToken()}` },
-      });
+      await apiClient.patch(`/notifications/${id}/read`);
       setNotifications(prev => prev.filter(n => n.id !== id));
       setUnreadCount(prev => Math.max(0, prev - 1));
     } catch (error) {
       console.error('Failed to mark as read', error);
     }
-  };
+  }, []);
 
-  const markAllAsRead = async () => {
+  const markAllAsRead = useCallback(async () => {
     try {
-      await axios.patch(`http://localhost:4000/api/v1/notifications/read-all`, {}, {
-        headers: { Authorization: `Bearer ${getAuthToken()}` },
-      });
+      await apiClient.patch('/notifications/read-all');
       setNotifications([]);
       setUnreadCount(0);
     } catch (error) {
       console.error('Failed to mark all as read', error);
     }
-  };
+  }, []);
 
-  const renderNotificationItem = (item: Notification) => {
+  const renderNotificationItem = useCallback((item: Notification) => {
     const isWon = item.metaData?.action_type === 'MARKED_WON';
-    const requiresApproval = item.metaData?.requires_approval === true;
+
+    const isApprovalTask = (notif: Notification) => {
+      if (notif.metaData?.requires_approval !== true) return false;
+      const actionType = String(notif.metaData?.action_type || '').toUpperCase();
+      const excludedActions = [
+        'DELETED',
+        'UPDATED',
+        'PROPOSAL_UPLOADED',
+        'GRACE_PERIOD_ACTIVATED',
+        'NEW_ACTIVITY',
+        'MARKED_LOST',
+        'MARKED_WON',
+        'CREATED'
+      ];
+      if (actionType && excludedActions.includes(actionType)) {
+        return false;
+      }
+      const titleLower = String(notif.title || '').toLowerCase();
+      if (titleLower.includes('info sistem') || titleLower.includes('kekalahan') || titleLower.includes('tender baru')) {
+        return false;
+      }
+      const genuineApprovalActions = [
+        'GO_NOGO_SUBMITTED',
+        'GO_NOGO_RESUBMITTED',
+        'GO_NOGO_REQUESTED',
+        'DISCOUNT_APPROVAL_REQUESTED',
+        'APPROVAL_REQUESTED'
+      ];
+      if (actionType && genuineApprovalActions.includes(actionType)) {
+        return true;
+      }
+      if (notif.notificationType === 'TASK') {
+        return true;
+      }
+      if (titleLower.includes('approval') || titleLower.includes('persetujuan') || titleLower.includes('menunggu approve')) {
+        return true;
+      }
+      return false;
+    };
+
+    const requiresApproval = isApprovalTask(item);
     
+    // Enterprise Metadata Extraction
+    const category = item.metaData?.category;
+    const priority = item.metaData?.priority;
+    const actionButtons: string[] = Array.isArray(item.metaData?.action_buttons)
+      ? item.metaData.action_buttons
+      : item.metaData?.action_buttons
+      ? [item.metaData.action_buttons]
+      : [];
+
+    const renderCategoryTag = () => {
+      if (!category) return null;
+      switch (String(category).toUpperCase()) {
+        case 'LEGAL':
+          return <Tag color="purple" style={{ marginRight: '4px', fontSize: '10px' }}>LEGAL</Tag>;
+        case 'PMO':
+          return <Tag color="cyan" style={{ marginRight: '4px', fontSize: '10px' }}>PMO</Tag>;
+        case 'SALES':
+          return <Tag color="green" style={{ marginRight: '4px', fontSize: '10px' }}>SALES</Tag>;
+        default:
+          return <Tag color="blue" style={{ marginRight: '4px', fontSize: '10px' }}>{String(category).toUpperCase()}</Tag>;
+      }
+    };
+
+    const renderPriorityBadge = () => {
+      if (!priority) return null;
+      switch (String(priority).toUpperCase()) {
+        case 'URGENT':
+          return <Tag color="error" style={{ marginRight: '4px', fontSize: '10px', fontWeight: 600 }}>URGENT</Tag>;
+        case 'HIGH':
+          return <Tag color="warning" style={{ marginRight: '4px', fontSize: '10px', fontWeight: 600 }}>HIGH</Tag>;
+        case 'NORMAL':
+          return <Tag color="processing" style={{ marginRight: '4px', fontSize: '10px' }}>NORMAL</Tag>;
+        default:
+          return null;
+      }
+    };
+
+    const getActionButtonLabel = (action: string) => {
+      switch (String(action).toUpperCase()) {
+        case 'VIEW_CONTRACT':
+          return 'Lihat Kontrak';
+        case 'REVIEW_REVISION':
+          return 'Review Revisi';
+        case 'PROJECT_BOARD':
+          return 'Lihat Project';
+        case 'REVIEW_CONTRACT':
+          return 'Review Kontrak';
+        default:
+          return action;
+      }
+    };
+
+    const renderSmartMessage = (rawMessage: string) => {
+      if (!rawMessage) return null;
+      if (/<[a-z][\s\S]*>/i.test(rawMessage)) {
+        return <span dangerouslySetInnerHTML={{ __html: rawMessage }} />;
+      }
+      const parts = rawMessage.split(/("[^"]+")/g);
+      return (
+        <span>
+          {parts.map((part, index) => {
+            if (part.startsWith('"') && part.endsWith('"')) {
+              return (
+                <strong key={index} style={{ fontWeight: 600, color: item.isRead ? '#334155' : '#0f172a' }}>
+                  {part}
+                </strong>
+              );
+            }
+            if (part.includes('Catatan:')) {
+              const subParts = part.split(/(Catatan:)/g);
+              return (
+                <span key={index}>
+                  {subParts.map((sub, sIdx) =>
+                    sub === 'Catatan:' ? (
+                      <strong key={sIdx} style={{ fontWeight: 600, color: item.isRead ? '#334155' : '#0f172a' }}>
+                        {sub}
+                      </strong>
+                    ) : (
+                      sub
+                    )
+                  )}
+                </span>
+              );
+            }
+            return <span key={index}>{part}</span>;
+          })}
+        </span>
+      );
+    };
+
+    const targetUrl = item.metaData?.lead_id ? `/sales/tenders/${item.metaData.lead_id}` : item.actionLink;
+
     const content = (
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
-          <Text style={{ display: 'block', fontSize: '13px', color: item.isRead ? '#64748b' : '#334155', lineHeight: '1.5' }}>
-            <span dangerouslySetInnerHTML={{ __html: item.message }} />
-          </Text>
+      <div style={{ flex: 1, width: '100%' }}>
+        {/* Row 1: Badges (Category, Priority, WON, Approval) */}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
+          {renderCategoryTag()}
+          {renderPriorityBadge()}
           {isWon && (
-            <Tag color="success" style={{ marginLeft: '8px', fontWeight: 'bold' }}>WON</Tag>
+            <Tag color="success" style={{ fontWeight: 'bold' }}>WON</Tag>
+          )}
+          {requiresApproval && (
+            <Tag color="warning" style={{ fontWeight: 600, color: '#d97706' }}>⏳ Menunggu Approval</Tag>
           )}
         </div>
-        
-        {requiresApproval && (
-          <Text type="warning" style={{ fontSize: '12px', display: 'block', marginTop: '2px', fontWeight: 600, color: '#d97706' }}>
-            ⏳ Menunggu Approval
-          </Text>
+
+        {/* Row 2: Title (Distinct Heading) */}
+        {item.title && (
+          <div style={{ marginBottom: '4px' }}>
+            <Text strong style={{ fontSize: '13px', color: item.isRead ? '#475569' : '#0f172a', display: 'block' }}>
+              {item.title}
+            </Text>
+          </div>
         )}
-        
-        <Text type="secondary" style={{ fontSize: '11px', display: 'block', marginTop: '6px', color: '#94a3b8' }}>
-          {dayjs(item.createdAt).fromNow()}
-        </Text>
+
+        {/* Row 3: Message Body (Smart Formatted) */}
+        <div style={{ marginBottom: '8px' }}>
+          <Text style={{ display: 'block', fontSize: '12px', color: item.isRead ? '#64748b' : '#334155', lineHeight: '1.5' }}>
+            {renderSmartMessage(item.message)}
+          </Text>
+        </div>
+
+        {/* Row 4: Action Buttons + Timestamp */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', flexWrap: 'wrap', gap: '8px' }}>
+          <div>
+            {actionButtons.length > 0 && actionButtons.map((btnKey, idx) => (
+              <Button
+                key={idx}
+                type="primary"
+                size="small"
+                style={{ marginRight: '6px', fontSize: '11px', height: '24px', padding: '0 8px' }}
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  if (!item.isRead) {
+                    await markAsRead(item.id);
+                  }
+                  if (targetUrl) {
+                    router.push(targetUrl);
+                    setOpen(false);
+                  }
+                }}
+              >
+                {getActionButtonLabel(btnKey)}
+              </Button>
+            ))}
+          </div>
+          <Text type="secondary" style={{ fontSize: '11px', color: '#94a3b8' }}>
+            {dayjs(item.createdAt).fromNow()}
+          </Text>
+        </div>
       </div>
     );
 
@@ -207,15 +356,15 @@ export const NotificationBell: React.FC = () => {
         )}
       </List.Item>
     );
-  };
+  }, [markAsRead, router]);
 
-  const todoNotifications = notifications.filter(n => n.notificationType === 'TASK');
-  const alertNotifications = notifications.filter(n => n.notificationType === 'ALERT' || n.notificationType === 'SYSTEM');
+  const todoNotifications = useMemo(() => notifications.filter(n => n.notificationType === 'TASK'), [notifications]);
+  const alertNotifications = useMemo(() => notifications.filter(n => n.notificationType === 'ALERT' || n.notificationType === 'SYSTEM'), [notifications]);
 
-  const currentNotifications = activeTab === 'todo' ? todoNotifications : alertNotifications;
+  const currentNotifications = useMemo(() => activeTab === 'todo' ? todoNotifications : alertNotifications, [activeTab, todoNotifications, alertNotifications]);
 
-  const popoverContent = (
-    <div style={{ width: 380, maxHeight: 650, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+  const popoverContent = useMemo(() => (
+    <div style={{ width: 'calc(100vw - 32px)', maxWidth: 380, maxHeight: 650, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ padding: '16px 20px 0 20px', borderBottom: `1px solid #f1f5f9`, backgroundColor: '#ffffff' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
           <Text style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Inbox</Text>
@@ -262,7 +411,7 @@ export const NotificationBell: React.FC = () => {
         </div>
       )}
     </div>
-  );
+  ), [unreadCount, activeTab, todoNotifications, alertNotifications, currentNotifications, loading, renderNotificationItem, markAllAsRead]);
 
   return (
     <Popover

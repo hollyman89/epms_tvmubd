@@ -10,21 +10,21 @@ export interface SliSloTarget {
   name: string;
   targetSlo: string;
   currentSli: string;
-  status: 'MEETS_SLO' | 'AT_RISK' | 'BREACHED';
+  status: 'MEETS_SLO' | 'AT_RISK' | 'BREACHED' | 'NOT_MEASURED';
 }
 
 export interface ErrorBudgetStatus {
   monthlyBudgetPercent: number;
   usedPercent: number;
   remainingPercent: number;
-  status: 'HEALTHY' | 'WARNING' | 'EXHAUSTED';
+  status: 'HEALTHY' | 'WARNING' | 'EXHAUSTED' | 'NOT_MEASURED';
 }
 
 export interface CapacityMetric {
   resource: string;
   usagePercent: number;
-  status: 'NORMAL' | 'HIGH' | 'CRITICAL';
-  trend: 'STABLE' | 'RISING' | 'FALLING';
+  status: 'NORMAL' | 'HIGH' | 'CRITICAL' | 'NOT_MEASURED';
+  trend: 'STABLE' | 'RISING' | 'FALLING' | 'NOT_MEASURED';
 }
 
 export interface SecurityEventMetric {
