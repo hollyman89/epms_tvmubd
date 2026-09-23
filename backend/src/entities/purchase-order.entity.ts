@@ -1,8 +1,10 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, ManyToOne, JoinColumn, OneToMany, VersionColumn } from 'typeorm';
 import { PurchaseRequest } from './purchase-request.entity';
+import { Vendor } from './vendor.entity';
 import { PurchaseOrderItem } from './purchase-order-item.entity';
 import { GoodsReceipt } from './goods-receipt.entity';
 import { Invoice } from './invoice.entity';
+import { PoPaymentTerm } from './po-payment-term.entity';
 
 @Entity('purchase_orders')
 export class PurchaseOrder {
@@ -27,6 +29,24 @@ export class PurchaseOrder {
   @Column({ default: 'DRAFT' })
   status: string;
 
+  @Column({ name: 'delivery_location', type: 'varchar', length: 255, nullable: true })
+  deliveryLocation: string;
+
+  @Column({ name: 'delivery_date', type: 'datetime', nullable: true })
+  deliveryDate: Date;
+
+  @Column({ type: 'text', nullable: true })
+  notes: string;
+
+  @Column({ name: 'created_by', type: 'bigint', nullable: true })
+  createdBy: number;
+
+  @Column({ name: 'updated_by', type: 'bigint', nullable: true })
+  updatedBy: number;
+
+  @Column({ name: 'deleted_by', type: 'bigint', nullable: true })
+  deletedBy: number;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 
@@ -40,8 +60,15 @@ export class PurchaseOrder {
   @JoinColumn({ name: 'pr_id' })
   purchaseRequest: PurchaseRequest;
 
+  @ManyToOne(() => Vendor, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'vendor_id' })
+  vendor: Vendor;
+
   @OneToMany(() => PurchaseOrderItem, item => item.purchaseOrder, { cascade: true })
   items: PurchaseOrderItem[];
+
+  @OneToMany(() => PoPaymentTerm, term => term.purchaseOrder, { cascade: true })
+  paymentTerms: PoPaymentTerm[];
 
   @OneToMany(() => GoodsReceipt, gr => gr.purchaseOrder)
   goodsReceipts: GoodsReceipt[];

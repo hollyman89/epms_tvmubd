@@ -19,6 +19,9 @@ export class GoodsReceipt {
   @Column({ name: 'receipt_date', type: 'datetime' })
   receiptDate: Date;
 
+  @Column({ name: 'total_received_amount', type: 'decimal', precision: 19, scale: 2, default: 0 })
+  totalReceivedAmount: number;
+
   @Column({ type: 'text', nullable: true })
   remarks: string;
 
