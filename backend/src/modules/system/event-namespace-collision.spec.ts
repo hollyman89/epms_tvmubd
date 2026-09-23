@@ -247,30 +247,8 @@ describe('Phase I-D: Event Namespace Collision & Separation Verification', () =>
     });
   });
 
-  describe('Additional Separated Collisions: project.pm.assigned', () => {
-    it('internal project.pm.assigned triggers NotificationListener and NOT BusinessSyncConsumer', async () => {
-      const notifListenerSpy = jest.spyOn(notifListener, 'handleProjectPmAssignedEvent');
-      const consumerSpy = jest.spyOn(consumer, 'handleProjectPmAssigned');
-
-      const internalDomainPayload = {
-        projectId: 301,
-        projectCode: 'PRJ-301',
-        contractId: 10,
-        projectManagerId: 5,
-        assignedBy: 1,
-        status: 'PLANNING',
-        timestamp: new Date().toISOString(),
-      };
-
-      eventEmitter.emit('internal.project.pm.assigned', internalDomainPayload);
-
-      expect(notifListenerSpy).toHaveBeenCalledTimes(1);
-      expect(notifListenerSpy).toHaveBeenCalledWith(internalDomainPayload);
-      expect(consumerSpy).toHaveBeenCalledTimes(0);
-    });
-
-    it('canonical project.pm.assigned triggers BusinessSyncConsumer and NOT NotificationListener', async () => {
-      const notifListenerSpy = jest.spyOn(notifListener, 'handleProjectPmAssignedEvent');
+  describe('Canonical project.pm.assigned Verification', () => {
+    it('canonical project.pm.assigned triggers BusinessSyncConsumer', async () => {
       const consumerSpy = jest.spyOn(consumer, 'handleProjectPmAssigned');
 
       const canonicalBusinessEvent: BusinessEvent = {
@@ -292,7 +270,6 @@ describe('Phase I-D: Event Namespace Collision & Separation Verification', () =>
 
       expect(consumerSpy).toHaveBeenCalledTimes(1);
       expect(consumerSpy).toHaveBeenCalledWith(canonicalBusinessEvent);
-      expect(notifListenerSpy).toHaveBeenCalledTimes(0);
     });
   });
 

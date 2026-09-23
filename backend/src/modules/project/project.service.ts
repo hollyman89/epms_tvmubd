@@ -1524,23 +1524,6 @@ export class ProjectService {
       return { project: savedProject, contract: contract! };
     });
 
-    // Step 6: Emit Event AFTER transaction commits safely
-    if (this.eventEmitter) {
-      try {
-        this.eventEmitter.emit('internal.project.pm.assigned', {
-          projectId: transactionResult.project.id,
-          projectCode: transactionResult.project.code,
-          contractId: transactionResult.contract.id,
-          projectManagerId: Number(projectManagerId),
-          assignedBy: Number(actorUserId),
-          status: 'PLANNING',
-          timestamp: new Date().toISOString(),
-        });
-      } catch (evtErr) {
-        this.logger.error('EventEmitter error on assignProjectManager:', evtErr);
-      }
-    }
-
     return {
       statusCode: 200,
       message: `Project Manager (${targetPm.fullName}) berhasil ditugaskan ke Proyek #${transactionResult.project.code}`,
