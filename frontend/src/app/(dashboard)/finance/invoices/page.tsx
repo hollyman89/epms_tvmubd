@@ -321,6 +321,35 @@ export default function InvoicesPage() {
     fetchInvoices();
   }, [fetchInvoices, invoiceVersion]);
 
+  // Canonical Phase G Cross-User Synchronization & Reconnect Resync
+  useEffect(() => {
+    const handleSync = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+
+      if (detail.aggregateType === 'PurchaseOrder') {
+        fetchPurchaseOrders();
+      } else if (
+        detail.aggregateType === 'Invoice' ||
+        detail.aggregateType === 'GoodsReceipt' ||
+        detail.aggregateType === 'Payment'
+      ) {
+        fetchInvoices();
+      }
+    };
+
+    const handleReconnect = () => {
+      fetchPurchaseOrders();
+      fetchInvoices();
+    };
+
+    window.addEventListener('epms:business-sync', handleSync);
+    window.addEventListener('epms:reconnect-resync', handleReconnect);
+    return () => {
+      window.removeEventListener('epms:business-sync', handleSync);
+      window.removeEventListener('epms:reconnect-resync', handleReconnect);
+    };
+  }, [fetchPurchaseOrders, fetchInvoices]);
 
   // 3. Filter POs: POs eligible for billing (DP, Progress with GR, or Full Delivery COMPLETED)
   const readyCompletedPos = useMemo(() => {

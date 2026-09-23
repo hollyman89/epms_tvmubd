@@ -88,6 +88,30 @@ export default function PaymentsPage() {
     fetchData();
   }, [fetchData, version]);
 
+  // Canonical Phase G Cross-User Synchronization & Reconnect Resync
+  useEffect(() => {
+    const handleSync = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (!detail) return;
+      if (
+        detail.aggregateType === 'Payment' ||
+        (detail.aggregateType === 'Invoice' && detail.eventName === 'finance.invoice.verified')
+      ) {
+        fetchData();
+      }
+    };
+
+    const handleReconnect = () => {
+      fetchData();
+    };
+
+    window.addEventListener('epms:business-sync', handleSync);
+    window.addEventListener('epms:reconnect-resync', handleReconnect);
+    return () => {
+      window.removeEventListener('epms:business-sync', handleSync);
+      window.removeEventListener('epms:reconnect-resync', handleReconnect);
+    };
+  }, [fetchData]);
 
   // Filter Invoices: Only MATCHED / VERIFIED & UNPAID / PARTIALLY_PAID Invoices
   const readyToPayInvoices = useMemo(() => {
