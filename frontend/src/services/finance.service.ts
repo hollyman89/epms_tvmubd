@@ -1,8 +1,6 @@
 import { apiClient } from '@/lib/axios';
 
-// ==========================================
 // 1. MISMATCH CODES & DEFINITIONS
-// ==========================================
 
 export enum MismatchCode {
   PO_NOT_FOUND = 'PO_NOT_FOUND',
@@ -148,9 +146,7 @@ export const MISMATCH_DEFINITIONS: Record<MismatchCode, MismatchMeta> = {
   },
 };
 
-// ==========================================
 // 2. DTO & INTERFACES
-// ==========================================
 
 export interface MatchingResult {
   invoiceId: number;
@@ -295,9 +291,7 @@ export interface CreateInvoicePayload {
   items?: CreateInvoiceItemPayload[];
 }
 
-// ==========================================
 // 3. FINANCE CENTRALIZED API SERVICE
-// ==========================================
 
 export class FinanceService {
   /**

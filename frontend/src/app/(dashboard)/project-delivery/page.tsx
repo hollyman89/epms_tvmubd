@@ -39,7 +39,7 @@ export default function ProjectDeliveryRoute() {
     if (!notificationSocket) return;
 
     const handleRealtimeUpdate = (payload?: any) => {
-      console.log('📢 Project Delivery Real-time update diterima:', payload);
+      console.log('[Project Delivery] Real-time update diterima:', payload);
       // Trigger refetch di ProjectOperationTab
       setPmoRefreshTrigger(prev => prev + 1);
     };

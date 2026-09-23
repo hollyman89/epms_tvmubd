@@ -88,9 +88,7 @@ export class WorkflowEngineService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  // =========================================================================
   // 1. START WORKFLOW INSTANCE
-  // =========================================================================
 
   /**
    * Instantiates and begins execution of a Published Workflow Definition.
@@ -239,9 +237,7 @@ export class WorkflowEngineService {
     });
   }
 
-  // =========================================================================
   // 2. COMPLETE WORKFLOW TASK
-  // =========================================================================
 
   /**
    * Executes a decision (APPROVE, REJECT, RETURN) on a pending task.
@@ -422,9 +418,7 @@ export class WorkflowEngineService {
     });
   }
 
-  // =========================================================================
   // 3. NODE PROGRESSION & CONDITION EVALUATION
-  // =========================================================================
 
   private async progressToNode(
     manager: EntityManager,
@@ -628,9 +622,7 @@ export class WorkflowEngineService {
     await this.syncBusinessEntity(manager, instance, targetNode, action, actorId, reason);
   }
 
-  // =========================================================================
   // 4. BUSINESS ENTITY SYNCHRONIZATION
-  // =========================================================================
 
   private async syncBusinessEntity(
     manager: EntityManager,
@@ -774,9 +766,7 @@ export class WorkflowEngineService {
     }
   }
 
-  // =========================================================================
   // 4. TRANSITION RESOLUTION & HELPERS
-  // =========================================================================
 
   private resolveNextNode(
     graph: BpmnGraph,
@@ -928,9 +918,7 @@ export class WorkflowEngineService {
     return manager.save(event);
   }
 
-  // =========================================================================
   // 5. GRAPH PARSER & VALIDATION
-  // =========================================================================
 
   private parseGraph(bpmnJson: any): BpmnGraph {
     if (!bpmnJson) {
@@ -992,9 +980,7 @@ export class WorkflowEngineService {
     }
   }
 
-  // =========================================================================
   // 6. QUERY METHODS
-  // =========================================================================
 
   async getInstance(id: number): Promise<WorkflowInstance> {
     const instance = await this.instanceRepo.findOne({

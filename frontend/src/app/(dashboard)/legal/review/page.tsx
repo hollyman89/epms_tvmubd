@@ -83,7 +83,7 @@ function LegalReviewContent() {
     notificationSocket.emit('join-legal-room');
 
     const handleQueueUpdated = (payload: any) => {
-      console.log('📢 Real-time update diterima:', payload);
+      console.log('[LEGAL] Real-time update diterima:', payload);
       const ac = new AbortController();
       fetchPendingContracts(true, ac.signal);
     };
@@ -237,14 +237,14 @@ function LegalReviewContent() {
     }
 
     try {
-      console.log('📄 [LEGAL] Memuat SPK via secure endpoint untuk contract ID:', id);
+      console.log('[LEGAL] Memuat SPK via secure endpoint untuk contract ID:', id);
       const { objectUrl } = await streamSecureContractSpk(id);
       setPdfBlobUrl(objectUrl);
       setPdfReady(true);
       setIsPolling(false);
-      console.log('✅ [LEGAL] SPK berhasil dimuat via secure blob');
+      console.log('[LEGAL] SPK berhasil dimuat via secure blob');
     } catch (err: any) {
-      console.warn('⚠️ [LEGAL] Dokumen SPK belum diunggah atau tidak ditemukan untuk contract ID:', id);
+      console.warn('[LEGAL] Dokumen SPK belum diunggah atau tidak ditemukan untuk contract ID:', id);
       setIsPolling(false);
       setLoadError(true);
       setPdfReady(false);
@@ -431,7 +431,7 @@ function LegalReviewContent() {
   const selectedContractObj = pendingContracts.find((c) => c.id === selectedContractId);
   const selectedRawContract = rawContractsData.find((c: any) => c.id === selectedContractId);
   const pdfUrl = pdfBlobUrl;
-  console.log('📄 [LEGAL] Memuat PDF dari URL:', pdfUrl);
+  console.log('[LEGAL] Memuat PDF dari URL:', pdfUrl);
 
 
   const countWaiting = pendingContracts.filter((c) => c.status === 'WAITING').length;
@@ -639,10 +639,10 @@ function LegalReviewContent() {
                     className="border rounded-lg"
                     onLoad={() => {
                       setPdfReady(true);
-                      console.log('✅ [LEGAL] PDF berhasil dimuat');
+                      console.log('[LEGAL] PDF berhasil dimuat');
                     }}
                     onError={(e) => {
-                      console.error('❌ [LEGAL] Gagal memuat PDF');
+                      console.error('[LEGAL] Gagal memuat PDF');
                       setLoadError(true);
                       setPdfReady(false);
                     }}

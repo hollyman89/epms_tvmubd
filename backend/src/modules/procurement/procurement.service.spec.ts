@@ -1398,7 +1398,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     };
 
     mockDataSource = {
-      transaction: jest.fn(async (cb: any) => cb(mockManager)),
+      transaction: jest.fn(async (isolationOrCallback: any, callback?: any) => (callback || isolationOrCallback)(mockManager)),
       createQueryRunner: jest.fn(() => mockQueryRunner),
       manager: mockManager,
     };
@@ -1451,9 +1451,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     );
   });
 
-  // -------------------------------------------------------------------------
   // 1. PM Ownership & Authorization
-  // -------------------------------------------------------------------------
   describe('1. PM Ownership & Authorization', () => {
     it('P2-01: Non-assigned PM cannot create draft (403 Forbidden)', async () => {
       mockManager.findOne.mockImplementation((entity: any) => {
@@ -1587,9 +1585,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     });
   });
 
-  // -------------------------------------------------------------------------
   // 2. Cost Item Validation, RAB Authority & Categories
-  // -------------------------------------------------------------------------
   describe('2. Cost Item Validation, RAB Authority & Categories', () => {
     it('P2-07: Cross-project CostItem is rejected with BadRequestException', async () => {
       const mockProject = { id: 10, managerId: 1, status: 'IN_PROGRESS' };
@@ -1731,9 +1727,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     });
   });
 
-  // -------------------------------------------------------------------------
   // 3. Required Date & Reservation Lifecycle
-  // -------------------------------------------------------------------------
   describe('3. Required Date & Reservation Lifecycle', () => {
     it('P2-12: submitPackage rejects if required_date is missing or in the past', async () => {
       const mockPkgWithoutDate = {
@@ -1838,9 +1832,11 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
         description: 'Old Description',
         status: ProcurementPackageStatus.RETURNED,
         project: { id: 10, managerId: 1, status: 'IN_PROGRESS' },
-        items: [],
+        items: [{ costItemId: 101, requestedQty: 5 }],
       };
-      mockManager.findOne.mockResolvedValue(mockReturnedPkg);
+      mockManager.findOne.mockImplementation(async (entity: any) => entity === CostItem
+        ? { id: 101, quantity: 50, itemName: 'Kabel FO', uom: 'Meter' }
+        : mockReturnedPkg);
       mockManager.save.mockImplementation((entity: any, data: any) => Promise.resolve(data));
 
       const updated = await pkgService.updateDraft(1, 1, ['PROJECT_MANAGER'], {
@@ -1853,9 +1849,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     });
   });
 
-  // -------------------------------------------------------------------------
   // 4. Over-Allocation Protection & Pessimistic Concurrency Locking
-  // -------------------------------------------------------------------------
   describe('4. Over-Allocation Protection & Pessimistic Concurrency Locking', () => {
     it('P2-14: submitPackage rejects when committed + requested > baseline (Over-allocation)', async () => {
       const mockPkg: any = {
@@ -1937,9 +1931,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     });
   });
 
-  // -------------------------------------------------------------------------
   // 5. Legacy Safety Gate & Origin Handling (LEGACY / PACKAGE / AD_HOC)
-  // -------------------------------------------------------------------------
   describe('5. Legacy Safety Gate & Origin Handling (LEGACY / PACKAGE / AD_HOC)', () => {
     it('P2-16: Legacy Safety Gate blocks package operations with 422 if active LEGACY PR exists', async () => {
       const mockPkg: any = {
@@ -2042,9 +2034,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     });
   });
 
-  // -------------------------------------------------------------------------
   // 6. 1 Package = 1 PR & Atomic PR Creation with Compensation
-  // -------------------------------------------------------------------------
   describe('6. 1 Package = 1 PR & Atomic PR Creation with Compensation', () => {
     it('P2-19: Rejects createPrFromPackage if package status is not SUBMITTED', async () => {
       mockWfDefRepo.findOne.mockResolvedValue({
@@ -2168,9 +2158,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     });
   });
 
-  // -------------------------------------------------------------------------
   // 7. PR Rejection Synchronization & Event Listener Idempotency
-  // -------------------------------------------------------------------------
   describe('7. PR Rejection Synchronization & Event Listener Idempotency', () => {
     it('P2-22: handlePrRejection transitions package to CANCELLED and releases reservation', async () => {
       const mockPr = { id: 10, packageId: 1, status: 'REJECTED' };
@@ -2253,9 +2241,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
     });
   });
 
-  // -------------------------------------------------------------------------
   // 8. Pure Read GET & Legacy PR Compatibility
-  // -------------------------------------------------------------------------
   describe('8. Pure Read GET & Legacy PR Compatibility', () => {
     it('P2-26: findAll and findOne perform pure read without side effects or mutations', async () => {
       const qb = createMockQueryBuilder({ getMany: [{ id: 1, title: 'Pkg 1' }] });
@@ -2290,9 +2276,7 @@ describe('ProcurementPackage - Phase 2 Backend Foundation & Safety Boundaries', 
   });
 });
 
-// ===========================================================================
 // PHASE 3 UNIT TESTS — PROCUREMENT RECONCILIATION & AUTHORITATIVE REMAINING
-// ===========================================================================
 describe('Procurement Reconciliation & Authoritative Remaining Quantity - Phase 3 Unit Tests', () => {
   let pkgService: ProcurementPackageService;
   let procurementService: ProcurementService;
@@ -2363,7 +2347,7 @@ describe('Procurement Reconciliation & Authoritative Remaining Quantity - Phase 
     };
 
     mockDataSource = {
-      transaction: jest.fn(async (cb: any) => cb(mockManager)),
+      transaction: jest.fn(async (isolationOrCallback: any, callback?: any) => (callback || isolationOrCallback)(mockManager)),
       createQueryRunner: jest.fn(() => mockQueryRunner),
       manager: mockManager,
       query: jest.fn().mockResolvedValue([]),
@@ -2422,9 +2406,7 @@ describe('Procurement Reconciliation & Authoritative Remaining Quantity - Phase 
     );
   });
 
-  // ---------------------------------------------------------------------------
   // 1. PO Item Traceability & Zero String Matching
-  // ---------------------------------------------------------------------------
   describe('1. PO Item Traceability & Zero String Matching', () => {
     it('P3-01: PO Item authoritatively persists pr_item_id and cost_item_id from quotation items', async () => {
       const mockPr = { id: 1, prNumber: 'PR-20260901-001', status: 'APPROVED', projectId: 10 };
@@ -2529,9 +2511,7 @@ describe('Procurement Reconciliation & Authoritative Remaining Quantity - Phase 
     });
   });
 
-  // ---------------------------------------------------------------------------
   // 2. Safety Gate (LEGACY / AD_HOC / PENDING / RECONCILED / EXCLUDED)
-  // ---------------------------------------------------------------------------
   describe('2. Safety Gate Enforcement & Resolution States', () => {
     it('P3-03: Safety Gate blocks with 422 if active unreconciled LEGACY PR exists', async () => {
       mockManager.query.mockResolvedValueOnce([{ cnt: 3 }]);
@@ -2586,9 +2566,7 @@ describe('Procurement Reconciliation & Authoritative Remaining Quantity - Phase 
     });
   });
 
-  // ---------------------------------------------------------------------------
   // 3. Authoritative Consumption Formulas & Precedence
-  // ---------------------------------------------------------------------------
   describe('3. Authoritative Consumption Formulas & Precedence', () => {
     it('P3-09: Active PR is counted once in prCommittedQty', async () => {
       const mockCostItem = { id: 101, quantity: 100, subtotal: 1000000 };
@@ -2752,9 +2730,7 @@ describe('Procurement Reconciliation & Authoritative Remaining Quantity - Phase 
     });
   });
 
-  // ---------------------------------------------------------------------------
   // 4. Direct AD_HOC PR Guard on IN_PROGRESS
-  // ---------------------------------------------------------------------------
   describe('4. Direct AD_HOC PR Guard on IN_PROGRESS', () => {
     it('P3-14: Direct PR creation on IN_PROGRESS project is strictly rejected with BadRequestException', async () => {
       mockManager.query.mockImplementation((sql: string) => {
@@ -2774,9 +2750,7 @@ describe('Procurement Reconciliation & Authoritative Remaining Quantity - Phase 
     });
   });
 
-  // ---------------------------------------------------------------------------
   // 5. Procurement Reconciliation Service
-  // ---------------------------------------------------------------------------
   describe('5. Procurement Reconciliation Service & Immutability', () => {
     it('P3-15: Cross-project CostItem reconciliation is rejected with BadRequestException', async () => {
       const mockPrItem = {
@@ -2959,5 +2933,3 @@ describe('Procurement Reconciliation & Authoritative Remaining Quantity - Phase 
     });
   });
 });
-
-

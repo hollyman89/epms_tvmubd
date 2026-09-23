@@ -9,7 +9,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 @ApiTags('Queue Monitoring')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SUPER_ADMIN', 'MONITORING')
+@Roles('SUPER_ADMIN')
 @Controller('queue')
 export class QueueMonitoringController {
   constructor(
@@ -37,8 +37,8 @@ export class QueueMonitoringController {
         thresholdExceeded: thresholdAlert,
         thresholdLimit: 5,
         message: thresholdAlert
-          ? '🚨 ALERT: Dead Letter Queue (DLQ) threshold exceeded! >5 failed jobs detected.'
-          : '✅ Queue status healthy.',
+          ? 'ALERT: Dead Letter Queue (DLQ) threshold exceeded! >5 failed jobs detected.'
+          : 'Queue status healthy.',
       },
       queues: {
         emailPrimary: {

@@ -32,9 +32,7 @@ import { FinanceService, InvoiceDto, PaymentDto, CreatePaymentPayload } from '@/
 const { Text } = Typography;
 const { Option } = Select;
 
-// ==========================================
 // 1. PROCESS PAYMENT MODAL PROPS & COMPONENT
-// ==========================================
 
 export interface ProcessPaymentModalProps {
   open: boolean;

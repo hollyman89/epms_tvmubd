@@ -1,4 +1,16 @@
 import { apiClient } from '@/lib/axios';
+import type { CanonicalCostItem } from './project.service';
+
+export interface ProcurementCostItemAvailability extends CanonicalCostItem {
+  categoryKey: string;
+  baselineQty: number;
+  reservedQty: number;
+  prCommittedQty: number;
+  orderedQty: number;
+  availableQty: number;
+  availabilityStatus: 'AVAILABLE' | 'FULLY_ALLOCATED';
+  unavailableReason: string | null;
+}
 
 // --- DTOs & INTERFACES ---
 
@@ -647,9 +659,7 @@ export class ProcurementService {
     return res.data?.data || res.data;
   }
 
-  // =========================================================================
   // --- PROCUREMENT PACKAGES (PHASE 2 CANONICAL) ---
-  // =========================================================================
 
   static async getPackages(query?: QueryPackagePayload): Promise<ProcurementPackage[]> {
     // When status is omitted (e.g. ALL), do not send status param
@@ -665,6 +675,17 @@ export class ProcurementService {
 
   static async getPackageById(id: number): Promise<ProcurementPackage> {
     const res = await apiClient.get(`/procurement/packages/${id}`);
+    return res.data?.data || res.data;
+  }
+
+  static async getEligibleCostItems(projectId: number): Promise<ProcurementCostItemAvailability[]> {
+    const res = await apiClient.get(`/procurement/projects/${projectId}/eligible-cost-items`);
+    return res.data?.data || res.data;
+  }
+
+  static async saveAndSubmitPackage(payload: CreatePackageDraftPayload | UpdatePackageDraftPayload, id?: number): Promise<ProcurementPackage> {
+    const url = id ? `/procurement/packages/${id}/update-and-submit` : '/procurement/packages/create-and-submit';
+    const res = await apiClient.post(url, payload);
     return res.data?.data || res.data;
   }
 
@@ -709,9 +730,7 @@ export class ProcurementService {
     return res.data;
   }
 
-  // =========================================================================
   // --- RECONCILIATIONS (PHASE 3 CANONICAL) ---
-  // =========================================================================
 
   static async getUnresolvedReconciliations(query?: QueryReconciliationPayload): Promise<UnresolvedReconciliationItem[]> {
     const params: Record<string, any> = {};

@@ -1235,9 +1235,7 @@ export class ProjectService {
     return await repo.save(newProject);
   }
 
-  // =========================================================================
   // PMO -> Project Manager Assignment (Delegated Ownership)
-  // =========================================================================
 
   /**
    * Retrieves active, non-deleted users holding the PROJECT_MANAGER role.
@@ -1532,7 +1530,7 @@ export class ProjectService {
     };
   }
 
-  // Phase 3: Claim Charter & PM Ownership Assignment into Workspace (status: PLANNING)
+  // Claim Charter & PM Ownership Assignment into Workspace (status: PLANNING)
   async claimCharter(
     charterId: any,
     dto: ClaimCharterDto,
@@ -1932,7 +1930,7 @@ export class ProjectService {
       );
     }
 
-    // Phase 2B Authority Check: Workflow Engine is SSOT for kickoff gate
+    // Authority Check: Workflow Engine is SSOT for kickoff gate
     const wfService = this.getWorkflowEngineService();
     let wfInstance: any = null;
     if (wfService) {
@@ -1998,7 +1996,7 @@ export class ProjectService {
           where: { projectId: project.id },
           lock: { mode: 'pessimistic_write' },
         });
-        // Phase 2B Authority Check inside transaction
+        // Authority Check inside transaction
         if (wfInstance) {
           const isCompleted =
             wfInstance.status === 'COMPLETED' || wfInstance.currentNodeId === 'node_end';
@@ -2513,9 +2511,7 @@ export class ProjectService {
     return true;
   }
 
-  // =========================================================================
   // COST / RAB (Project Cost Estimation) Services
-  // =========================================================================
 
   /**
    * Get active canonical Cost Estimate (RAB) for a project

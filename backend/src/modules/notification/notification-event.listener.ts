@@ -44,10 +44,9 @@ export class NotificationEventListener {
    */
   @OnEvent('marketing.tender.won')
   async handleTenderWonEvent(payload: { contractId?: number; tenderId: number; customerId?: number; title?: string }) {
-    this.logger.log(`🔥 [NotificationEventListener] Event diterima: Tender WON - Tender ID ${payload.tenderId}`);
+    this.logger.log(`[NotificationEventListener] Event diterima: Tender WON - Tender ID ${payload.tenderId}`);
     
     // Only send the "Draft Kontrak siap direview" notification if a contract was actually created (e.g. after SPK upload).
-    // In Phase 3 (Strict PRD Flow), tender WON no longer creates a contract immediately.
     if (payload.contractId) {
       await this.handleNotificationSend({
         title: 'Tender WON - Draft Kontrak Baru',
@@ -55,7 +54,15 @@ export class NotificationEventListener {
         type: 'TASK',
         audience: 'LEGAL',
         tenderId: payload.tenderId,
-        metaData: { contractId: payload.contractId, actionLink: '/legal/review?tab=WAITING' }
+        metaData: { 
+          category: 'SALES',
+          priority: 'HIGH',
+          reference_type: 'CONTRACT',
+          reference_id: payload.contractId,
+          action_buttons: ['REVIEW_CONTRACT'],
+          contractId: payload.contractId, 
+          actionLink: '/legal/review?tab=WAITING' 
+        }
       });
     }
   }
@@ -64,14 +71,15 @@ export class NotificationEventListener {
   async handleContractApprovedEvent(payload: any) {
     if (payload.legalStatus !== 'APPROVED') return;
 
-    this.logger.log(`🔥 [NotificationEventListener] Event diterima: Legal Contract Approved - Contract ID ${payload.contractId}`);
+    this.logger.log(`[NotificationEventListener] Event diterima: Legal Contract Approved - Contract ID ${payload.contractId}`);
     
     let projectName = `Kontrak #${payload.contractNumber || payload.contractId}`;
     let tenderId = undefined;
+    let ownerUserId: number | undefined = undefined;
     
     try {
       const contractData = await this.dataSource.query(
-        `SELECT t.id as tenderId, t.title as tenderTitle 
+        `SELECT t.id as tenderId, t.title as tenderTitle, t.marketing_pic_id as marketingPicId, t.created_by as createdBy 
          FROM contracts c
          LEFT JOIN proposals p ON c.proposal_id = p.id
          LEFT JOIN tenders t ON p.tender_id = t.id
@@ -81,6 +89,7 @@ export class NotificationEventListener {
       if (contractData && contractData.length > 0) {
         if (contractData[0].tenderTitle) projectName = contractData[0].tenderTitle;
         if (contractData[0].tenderId) tenderId = contractData[0].tenderId;
+        ownerUserId = contractData[0].marketingPicId ? Number(contractData[0].marketingPicId) : (contractData[0].createdBy ? Number(contractData[0].createdBy) : undefined);
       }
     } catch (e) {
       this.logger.warn(`Failed to fetch tender info for contract ${payload.contractId}`);
@@ -88,25 +97,149 @@ export class NotificationEventListener {
 
     this.eventEmitter.emit('notification.send', {
       title: '🚀 Project Siap Kick Off',
-      message: `Proyek **"${projectName}"** telah **disetujui oleh tim Legal** dan **siap dijadwalkan untuk Kick Off**.`,
-      type: 'TASK',
+      message: `Proyek "${projectName}" telah disetujui oleh tim Legal dan siap dijadwalkan untuk Kick Off.`,
+      type: 'ALERT',
       audience: 'PMO',
+      dedupeKey: `LEGAL_CONTRACT_APPROVED:${payload.contractId}`,
       tenderId: tenderId,
       metaData: { 
+        category: 'PMO',
+        priority: 'HIGH',
+        reference_type: 'CONTRACT',
+        reference_id: payload.contractId,
+        action_buttons: ['PROJECT_BOARD'],
         contractId: payload.contractId, 
         actionLink: '/project-delivery' 
       }
     });
 
-    this.eventEmitter.emit('notification.send', {
+    const marketingNotifPayload: any = {
       title: '✅ SPK Disetujui Legal',
-      message: `Proyek **"${projectName}"** telah **disetujui oleh tim Legal**. Proses Sales untuk proyek ini telah selesai.`,
+      message: `Proyek "${projectName}" telah disetujui oleh tim Legal. Proses Sales untuk proyek ini telah selesai.`,
       type: 'SUCCESS',
-      audience: 'MARKETING',
+      dedupeKey: `LEGAL_CONTRACT_APPROVED_MKT:${payload.contractId}`,
       tenderId: tenderId,
       metaData: { 
+        category: 'LEGAL',
+        priority: 'NORMAL',
+        reference_type: 'CONTRACT',
+        reference_id: payload.contractId,
+        action_buttons: ['VIEW_CONTRACT'],
         contractId: payload.contractId, 
         actionLink: tenderId ? `/sales/tenders/${tenderId}` : '/sales' 
+      }
+    };
+
+    if (ownerUserId) {
+      marketingNotifPayload.recipientId = ownerUserId;
+    } else {
+      marketingNotifPayload.audience = 'MARKETING';
+    }
+
+    this.eventEmitter.emit('notification.send', marketingNotifPayload);
+  }
+
+  @OnEvent('contract.revision_requested')
+  async handleContractRevisionRequestedEvent(payload: { contractId: number; userId?: number; reason?: string }) {
+    this.logger.log(`[NotificationEventListener] Event diterima: Contract Revision Requested - Contract ID ${payload.contractId}`);
+
+    let projectName = `Kontrak #${payload.contractId}`;
+    let tenderId = undefined;
+    let ownerUserId: number | undefined = undefined;
+
+    try {
+      const contractData = await this.dataSource.query(
+        `SELECT t.id as tenderId, t.title as tenderTitle, t.marketing_pic_id as marketingPicId, t.created_by as createdBy 
+         FROM contracts c
+         LEFT JOIN proposals p ON c.proposal_id = p.id
+         LEFT JOIN tenders t ON p.tender_id = t.id
+         WHERE c.id = ?`,
+        [payload.contractId]
+      );
+      if (contractData && contractData.length > 0) {
+        if (contractData[0].tenderTitle) projectName = contractData[0].tenderTitle;
+        if (contractData[0].tenderId) tenderId = contractData[0].tenderId;
+        ownerUserId = contractData[0].marketingPicId ? Number(contractData[0].marketingPicId) : (contractData[0].createdBy ? Number(contractData[0].createdBy) : undefined);
+      }
+    } catch (e) {
+      this.logger.warn(`Failed to fetch tender info for contract ${payload.contractId}`);
+    }
+
+    const notifPayload: any = {
+      title: '⚠️ Revisi Kontrak Diminta Legal',
+      message: `Kontrak untuk proyek "${projectName}" membutuhkan revisi dari tim Legal. Catatan: ${payload.reason || 'Silakan cek catatan legal.'}`,
+      type: 'WARNING',
+      tenderId: tenderId,
+      metaData: {
+        category: 'LEGAL',
+        priority: 'HIGH',
+        reference_type: 'CONTRACT',
+        reference_id: payload.contractId,
+        action_buttons: ['REVIEW_REVISION'],
+        contractId: payload.contractId,
+        actionLink: tenderId ? `/sales/tenders/${tenderId}` : '/sales'
+      }
+    };
+
+    if (ownerUserId) {
+      notifPayload.recipientId = ownerUserId;
+    } else {
+      notifPayload.audience = 'MARKETING';
+    }
+
+    this.eventEmitter.emit('notification.send', notifPayload);
+  }
+
+  @OnEvent('project.started')
+  async handleProjectStartedEvent(payload: { projectId: number; tenderId?: number; title?: string }) {
+    this.logger.log(`[NotificationEventListener] Event diterima: Project Started - Project ID ${payload.projectId}`);
+
+    this.eventEmitter.emit('notification.send', {
+      title: '🚀 Proyek Operasional Dimulai',
+      message: `Proyek "${payload.title || 'Project'}" resmi dimulai (Inisiasi PMO).`,
+      type: 'INFO',
+      audience: 'PMO',
+      tenderId: payload.tenderId,
+      metaData: {
+        category: 'PMO',
+        priority: 'HIGH',
+        reference_type: 'PROJECT',
+        reference_id: payload.projectId,
+        action_buttons: ['PROJECT_BOARD'],
+        actionLink: '/project-delivery'
+      }
+    });
+  }
+
+  @OnEvent('internal.project.pm.assigned')
+  async handleProjectPmAssignedEvent(payload: {
+    projectId: number;
+    projectCode: string;
+    contractId: number;
+    projectManagerId: number;
+    assignedBy: number;
+    status: string;
+    timestamp: string;
+  }) {
+    this.logger.log(`[NotificationEventListener] Event diterima: Project PM Assigned - Project ${payload.projectId} to PM ${payload.projectManagerId}`);
+
+    const dedupeKey = `PROJECT_PM_ASSIGNED:${payload.projectId}:${payload.projectManagerId}`;
+
+    await this.handleNotificationSend({
+      recipientId: payload.projectManagerId,
+      title: 'Penugasan Project Manager Baru',
+      message: `Anda telah resmi ditugaskan sebagai Project Manager untuk proyek #${payload.projectCode}. Silakan mulai menyusun Operational Plan.`,
+      type: 'TASK',
+      dedupeKey: dedupeKey,
+      metaData: {
+        category: 'PROJECT',
+        priority: 'HIGH',
+        reference_type: 'PROJECT',
+        reference_id: payload.projectId,
+        contractId: payload.contractId,
+        projectCode: payload.projectCode,
+        action_buttons: ['OPERATIONAL_PLAN'],
+        actionLink: '/project-delivery'
       }
     });
   }
@@ -119,9 +252,10 @@ export class NotificationEventListener {
    *   recipientId?: number | 'C-LEVEL',  // specific user ID, or role-based target
    *   title: string,
    *   message: string,
-   *   type: 'WARNING' | 'INFO' | 'SUCCESS' | 'ERROR' | 'EMAIL_AND_INAPP' | 'EMAIL_EMERGENCY',
-   *   audience?: 'ALL' | 'DIRECTOR' | 'MARKETING' | 'LEGAL',  // role-based broadcast
+   *   type: 'WARNING' | 'INFO' | 'SUCCESS' | 'ERROR' | 'TASK' | 'EMAIL_AND_INAPP' | 'EMAIL_EMERGENCY',
+   *   audience?: 'ALL' | 'DIRECTOR' | 'MARKETING' | 'LEGAL' | 'PMO',  // role-based broadcast
    *   tenderId?: number,
+   *   dedupeKey?: string,
    *   metaData?: any,
    * }
    */
@@ -133,6 +267,7 @@ export class NotificationEventListener {
     type: string;
     audience?: string;
     tenderId?: number;
+    dedupeKey?: string;
     metaData?: any;
   }) {
     this.logger.log(`[notification.send] Received: ${payload.title}`);
@@ -146,7 +281,7 @@ export class NotificationEventListener {
         return;
       }
 
-      // 2. Create and save notifications
+      // 2. Create notifications
       const notifications: Notification[] = [];
 
       for (const userId of targetUserIds) {
@@ -159,23 +294,58 @@ export class NotificationEventListener {
         notif.isRead = false;
         notif.createdBy = 0; // system
         notif.createdAt = new Date();
-        notif.metaData = payload.metaData || null;
+        if (payload.dedupeKey) {
+          notif.dedupeKey = payload.dedupeKey;
+        }
+
+        const inputMeta = payload.metaData || {};
+        const metaDataEnriched = {
+          category: inputMeta.category || 'SYSTEM',
+          priority: inputMeta.priority || 'NORMAL',
+          reference_type: inputMeta.reference_type || (payload.tenderId ? 'TENDER' : 'SYSTEM'),
+          reference_id: inputMeta.reference_id || payload.tenderId || 0,
+          action_buttons: inputMeta.action_buttons || [],
+          ...inputMeta
+        };
+
+        notif.metaData = metaDataEnriched;
 
         notifications.push(notif);
       }
 
-      const savedNotifs = await this.notificationRepo.save(notifications);
-      this.logger.log(`[notification.send] Saved ${savedNotifs.length} notifications for: ${payload.title}`);
+      // 3. Save notifications atomically with deduplication protection
+      const savedNotifs: Notification[] = [];
+      for (const notif of notifications) {
+        try {
+          const saved = await this.notificationRepo.save(notif);
+          savedNotifs.push(saved);
+        } catch (saveErr: any) {
+          if (
+            saveErr?.code === 'ER_DUP_ENTRY' ||
+            saveErr?.errno === 1062 ||
+            saveErr?.message?.includes('ER_DUP_ENTRY') ||
+            saveErr?.message?.includes('Duplicate entry')
+          ) {
+            this.logger.warn(
+              `[notification.send] Duplicate notification suppressed for user ${notif.userId} with dedupeKey: ${notif.dedupeKey}`,
+            );
+          } else {
+            throw saveErr;
+          }
+        }
+      }
 
-      // 3. Push via WebSocket to each recipient
+      this.logger.log(`[notification.send] Saved ${savedNotifs.length}/${notifications.length} notifications for: ${payload.title}`);
+
+      // 4. Push via WebSocket strictly for saved notifications (no duplicate socket pushes)
       for (const notif of savedNotifs) {
         this.notificationGateway.sendNotificationToUser(notif.userId, notif);
       }
 
-      // 4. Send Email via BullMQ if type requires email
+      // 5. Send Email via BullMQ if type requires email
       if (payload.type === 'EMAIL_AND_INAPP' || payload.type === 'EMAIL_EMERGENCY') {
-        for (const userId of targetUserIds) {
-          const userEmail = `user_${userId}@company.com`;
+        for (const notif of savedNotifs) {
+          const userEmail = `user_${notif.userId}@company.com`;
           await this.emailQueue.add('send-email', {
             to: userEmail,
             subject: payload.title,
@@ -222,22 +392,35 @@ export class NotificationEventListener {
     }
 
     // Case 2: Role-based broadcast
-    if (payload.audience === 'ALL' || payload.audience === 'DIRECTOR') {
+    if (payload.audience === 'ALL') {
       targetRoles.push('SUPER_ADMIN', 'GENERAL_MANAGER', 'DIRECTOR');
+    } else if (payload.audience === 'DIRECTOR') {
+      targetRoles.push('DIRECTOR');
     } else if (payload.audience === 'MARKETING') {
       targetRoles.push('MARKETING');
     } else if (payload.audience === 'LEGAL') {
       targetRoles.push('LEGAL', 'SUPER_ADMIN');
     } else if (payload.audience === 'PMO') {
-      targetRoles.push('PMO', 'PROJECT_MANAGER', 'SUPER_ADMIN');
-    }
-
-    // If no specific IDs and no specific roles, fallback
-    if (resolvedIds.size === 0 && targetRoles.length === 0) {
-      targetRoles = ['SUPER_ADMIN', 'DIRECTOR'];
+      // Isolasi: Hanya kirim ke PMO dan SUPER_ADMIN (PROJECT_MANAGER dikecualikan)
+      targetRoles.push('PMO', 'SUPER_ADMIN');
     }
 
     try {
+      // Validate specific recipient user IDs (must be active and not soft-deleted)
+      if (resolvedIds.size > 0) {
+        const idList = Array.from(resolvedIds);
+        const validUsers = await this.dataSource.query(
+          `SELECT id FROM users
+           WHERE id IN (${idList.map(() => '?').join(',')})
+             AND (is_active = 1 OR is_active = true)
+             AND deleted_at IS NULL`,
+          idList
+        );
+        const validIdSet = new Set(validUsers.map((u: any) => Number(u.id)));
+        resolvedIds = new Set(Array.from(resolvedIds).filter(id => validIdSet.has(id)));
+      }
+
+      // Query role-based audience users if targetRoles specified
       if (targetRoles.length > 0) {
         const users = await this.dataSource.query(`
           SELECT DISTINCT u.id
@@ -245,7 +428,9 @@ export class NotificationEventListener {
           JOIN user_roles ur ON u.id = ur.user_id
           JOIN roles r ON r.id = ur.role_id
           WHERE r.name IN (${targetRoles.map(() => '?').join(',')})
+            AND (u.is_active = 1 OR u.is_active = true)
             AND u.deleted_at IS NULL
+            AND r.deleted_at IS NULL
         `, targetRoles);
         users.forEach((u: any) => resolvedIds.add(Number(u.id)));
       }
@@ -262,6 +447,8 @@ export class NotificationEventListener {
    */
   private mapNotificationType(type: string): string {
     switch (type) {
+      case 'TASK':
+        return 'TASK';
       case 'WARNING':
       case 'ERROR':
       case 'EMAIL_EMERGENCY':

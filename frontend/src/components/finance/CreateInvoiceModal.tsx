@@ -38,9 +38,7 @@ import { InvoiceDto, FinanceService, CreateInvoicePayload } from '@/services/fin
 
 const { Text } = Typography;
 
-// ==========================================
 // 1. MODAL PROPS
-// ==========================================
 
 export interface CreateInvoiceModalProps {
   open: boolean;
@@ -52,9 +50,7 @@ export interface CreateInvoiceModalProps {
   canCreateInvoice?: boolean;
 }
 
-// ==========================================
 // 2. CANONICAL CREATE INVOICE MODAL COMPONENT
-// ==========================================
 
 export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   open,

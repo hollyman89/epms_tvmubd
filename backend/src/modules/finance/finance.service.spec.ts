@@ -57,9 +57,7 @@ describe('FinanceService', () => {
     expect(service).toBeDefined();
   });
 
-  // =========================================================================
   // 1. LEGACY FULL PO INVOICE TESTS
-  // =========================================================================
   describe('createInvoice - Legacy / Full PO', () => {
     it('should throw error if PO not found', async () => {
       mockQueryRunner.manager.findOne.mockResolvedValueOnce(null);
@@ -114,9 +112,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // 2. TERM-BASED INVOICE ENGINE (PHASE 7E-D-2 MANDATORY TESTS A -> R)
-  // =========================================================================
   describe('createInvoice - Term-Based Engine (Phase 7E-D-2)', () => {
     const baselinePo = {
       id: 1,
@@ -595,9 +591,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // 3. PAYMENT TESTS
-  // =========================================================================
   describe('createPayment & Payment Engine (Phase 7E-D-4)', () => {
     const defaultInvoice = {
       id: 1,
@@ -1169,9 +1163,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // 4. VERIFY INVOICE TESTS (PHASE 7E-D-3)
-  // =========================================================================
   describe('verifyInvoice (Phase 7E-D-3)', () => {
     const mockPo = {
       id: 1,
@@ -1740,9 +1732,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // 5. GET INVOICES & GET INVOICE BY ID (PHASE 7E-D-3)
-  // =========================================================================
   describe('getInvoices and getInvoiceById', () => {
     it('should get all invoices with paymentTerm relation', async () => {
       const mockList = [{ id: 1, invoiceNumber: 'INV-1', paymentTerm: { id: 10, termName: 'Termin 1' } }];
@@ -1791,9 +1781,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // 5B. GET PAYMENTS READ MODEL (PHASE FIN-UI-3)
-  // =========================================================================
   describe('getPayments (Phase FIN-UI-3)', () => {
     it('should query paymentRepository with full canonical relations', async () => {
       const mockPayments = [
@@ -1912,9 +1900,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // 6. GET INVOICE MATCHING DATA (PHASE 7E-D-3)
-  // =========================================================================
   describe('getInvoiceMatchingData (Phase 7E-D-3)', () => {
     it('should calculate correct cumulative values and remaining amounts without mutating DB', async () => {
       const mockPoWithData = {
@@ -1991,9 +1977,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // 7. PHASE GR-5: CANONICAL GOODS RECEIPT -> PROGRESS INVOICE ENGINE TESTS
-  // =========================================================================
   describe('Phase GR-5: Canonical Goods Receipt -> Progress Invoice Engine', () => {
     const livePo = {
       id: 1,
@@ -2342,9 +2326,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // 8. PHASE GR-7B-FIX: RELATION LOADING & PHYSICAL CAPACITY REGRESSION TESTS
-  // =========================================================================
   describe('Phase GR-7B-FIX: Finance Matching Relation Load & Physical Capacity', () => {
     const livePoItems = [
       { id: 1, itemName: 'Tim Penarikan & Splicing FO', quantity: 20, receivedQuantity: 0, unitPrice: 24000, totalPrice: 480000 },
@@ -2481,9 +2463,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // Phase GR-8B: Milestone Eligibility & Sequence Gate Engine
-  // =========================================================================
   describe('Phase GR-8B: Milestone Eligibility & Sequence Gate Engine', () => {
     const term1Paid = {
       id: 1,
@@ -2876,9 +2856,7 @@ describe('FinanceService', () => {
     });
   });
 
-  // =========================================================================
   // 10. PHASE FIN-EVIDENCE-DEADLOCK: Preview Canonical GR Resolution & Strict POST
-  // =========================================================================
   describe('Phase FIN-EVIDENCE-DEADLOCK: Preview Canonical GR Resolution & Strict POST', () => {
     const completedPoWithItems = {
       id: 1,

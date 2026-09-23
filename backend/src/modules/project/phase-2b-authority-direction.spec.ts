@@ -218,9 +218,7 @@ describe('Phase 2B — Backend Authority Direction & Conflict Tests', () => {
     });
   });
 
-  // =========================================================================
   // DIRECTION OF AUTHORITY TESTS (PHASE 2B.10)
-  // =========================================================================
   describe('PHASE 2B.10 — Direction of Authority Tests', () => {
     it('CASE A: Runtime node_finance_review + Legacy DB REVIEW_PENDING -> Canonical REVIEW_FINANCE, Finance owner, Baseline LOCKED, Kickoff NOT ALLOWED', async () => {
       inMemoryWorkflowInstance = {
@@ -309,9 +307,7 @@ describe('Phase 2B — Backend Authority Direction & Conflict Tests', () => {
     });
   });
 
-  // =========================================================================
   // KICKOFF TESTS (PHASE 2B.12)
-  // =========================================================================
   describe('PHASE 2B.12 — Kickoff Authority Tests', () => {
     it('allows kickoff when workflow instance is COMPLETED even if legacy mirror is stale', async () => {
       inMemoryWorkflowInstance = {
@@ -362,9 +358,7 @@ describe('Phase 2B — Backend Authority Direction & Conflict Tests', () => {
     });
   });
 
-  // =========================================================================
   // BASELINE LOCK TESTS (PHASE 2B.13 & PHASE 2B.1 ISSUE 2)
-  // =========================================================================
   describe('PHASE 2B.13 & ISSUE 2 — Baseline Lock Authority & Fail-Safe Tests', () => {
     it('allows edits during explicit PM planning (node_start / node_pm_planning)', async () => {
       inMemoryWorkflowInstance = { currentNodeId: 'node_pm_planning', status: 'IN_PROGRESS' };
@@ -437,9 +431,7 @@ describe('Phase 2B — Backend Authority Direction & Conflict Tests', () => {
     });
   });
 
-  // =========================================================================
   // SUBMIT MANAGEMENT REVIEW AUTHORITY (PHASE 2B.1 ISSUE 3)
-  // =========================================================================
   describe('PHASE 2B.1 ISSUE 3 — submitManagementReview Authority & Fallback', () => {
     it('Workflow service exists, activeInstance = null, legacy status READY_FOR_KICKOFF -> blocks resubmit (legacy path works)', async () => {
       inMemoryWorkflowInstance = null;
@@ -498,9 +490,7 @@ describe('Phase 2B — Backend Authority Direction & Conflict Tests', () => {
     });
   });
 
-  // =========================================================================
   // UNKNOWN NODE FAIL-SAFE TESTS (PHASE 2B.14)
-  // =========================================================================
   describe('PHASE 2B.14 — Unknown Node Fail-Safe', () => {
     it('blocks baseline mutation fail-safe when currentNodeId is unknown', async () => {
       inMemoryWorkflowInstance = { currentNodeId: 'node_custom_experimental_gate', status: 'IN_PROGRESS' };
@@ -523,9 +513,7 @@ describe('Phase 2B — Backend Authority Direction & Conflict Tests', () => {
     });
   });
 
-  // =========================================================================
   // AUTHORITY INVARIANT TESTS
-  // =========================================================================
   describe('AUTHORITY INVARIANT SUITE — WorkflowInstance ALWAYS beats Legacy Mirror', () => {
     it('Invariant 1: Runtime Finance + Legacy NOT_SUBMITTED -> baseline LOCKED', async () => {
       inMemoryWorkflowInstance = { currentNodeId: 'node_finance_review', status: 'IN_PROGRESS' };
@@ -568,9 +556,7 @@ describe('Phase 2B — Backend Authority Direction & Conflict Tests', () => {
     });
   });
 
-  // =========================================================================
   // PHASE 2B.2 — FAIL-CLOSED ON WORKFLOW RUNTIME LOOKUP ERROR (TESTS A-F)
-  // =========================================================================
   describe('PHASE 2B.2 — Fail-Closed on Workflow Runtime Lookup Error', () => {
     it('TEST A — INSTANCE EXISTS: runtime authority used, legacy ignored', async () => {
       inMemoryWorkflowInstance = {
@@ -689,9 +675,7 @@ describe('Phase 2B — Backend Authority Direction & Conflict Tests', () => {
     });
   });
 
-  // =========================================================================
   // TYPEORM REPOSITORY VS ENTITYMANAGER SIGNATURE REGRESSION TESTS
-  // =========================================================================
   describe('TYPEORM SIGNATURE REGRESSION — assertBaselineEditable Fallback', () => {
     beforeEach(() => {
       // Ensure workflow instance is absent so code exercises legacy fallback

@@ -139,9 +139,7 @@ export class ProcurementPackageService {
     });
   }
 
-  // =========================================================================
   // 1. CREATE DRAFT
-  // =========================================================================
 
   async createDraft(
     userId: number,
@@ -298,9 +296,7 @@ export class ProcurementPackageService {
     }, transactionManager);
   }
 
-  // =========================================================================
   // 2. FIND ALL & FIND ONE (PURE READ)
-  // =========================================================================
 
   async findAll(
     userId: number,
@@ -381,9 +377,7 @@ export class ProcurementPackageService {
     return pkg;
   }
 
-  // =========================================================================
   // 3. UPDATE DRAFT & DELETE DRAFT
-  // =========================================================================
 
   async updateDraft(
     packageId: number,
@@ -552,9 +546,7 @@ export class ProcurementPackageService {
     });
   }
 
-  // =========================================================================
   // 4. SUBMIT PACKAGE (RESERVATION, SAFETY GATE, CONCURRENCY LOCK)
-  // =========================================================================
 
   async submitPackage(
     packageId: number,
@@ -721,9 +713,7 @@ export class ProcurementPackageService {
     }, transactionManager);
   }
 
-  // =========================================================================
   // 5. RETURN, RESUBMIT & CANCEL PACKAGE
-  // =========================================================================
 
   async returnPackage(
     packageId: number,
@@ -889,9 +879,7 @@ export class ProcurementPackageService {
     });
   }
 
-  // =========================================================================
   // 6. CREATE PR FROM PACKAGE (ATOMIC & VERIFIED COMPENSATION)
-  // =========================================================================
 
   async createPrFromPackage(
     packageId: number,
@@ -1039,7 +1027,7 @@ export class ProcurementPackageService {
         },
         userId,
       );
-      this.logger.log(`✅ Workflow initiated successfully for PR #${savedPrId}.`);
+      this.logger.log(`Workflow initiated successfully for PR #${savedPrId}.`);
 
       return {
         success: true,
@@ -1048,7 +1036,7 @@ export class ProcurementPackageService {
       };
     } catch (wfErr: any) {
       this.logger.error(
-        `❌ Workflow initiation failed for PR #${savedPrId}. Executing verified compensation routine...`,
+        `Workflow initiation failed for PR #${savedPrId}. Executing verified compensation routine...`,
         wfErr?.stack,
       );
 
@@ -1061,9 +1049,7 @@ export class ProcurementPackageService {
     }
   }
 
-  // =========================================================================
   // 7. PR REJECTION & COMPENSATION HANDLERS
-  // =========================================================================
 
   async handlePrRejection(prId: number, instanceId?: number): Promise<void> {
     return this.dataSource.transaction(async (manager) => {
@@ -1124,7 +1110,7 @@ export class ProcurementPackageService {
       await manager.save(AuditLog, audit);
 
       this.logger.log(
-        `⚡ Package #${pkg.id} (${pkg.packageNumber}) synchronized to CANCELLED following rejection of PR #${prId}. Quota released.`,
+        `Package #${pkg.id} (${pkg.packageNumber}) synchronized to CANCELLED following rejection of PR #${prId}. Quota released.`,
       );
     });
   }
@@ -1141,7 +1127,7 @@ export class ProcurementPackageService {
       });
       if (strayInstance) {
         this.logger.error(
-          `🚨 [FAIL SAFE] WorkflowInstance #${strayInstance.id} unexpectedly exists for failed PR #${prId}! Manual intervention required; workflow artifacts cannot be deleted silently.`,
+          `[FAIL SAFE] WorkflowInstance #${strayInstance.id} unexpectedly exists for failed PR #${prId}! Manual intervention required; workflow artifacts cannot be deleted silently.`,
         );
         throw new InternalServerErrorException(
           `Terdeteksi artefak workflow parsial (Instance #${strayInstance.id}) untuk PR #${prId}. Kompensasi otomatis dihentikan untuk mencegah inkonsistensi Workflow Engine.`,
@@ -1173,13 +1159,11 @@ export class ProcurementPackageService {
       });
       await manager.save(AuditLog, audit);
 
-      this.logger.log(`✅ State compensated: Package #${packageId} restored to SUBMITTED, failed PR #${prId} deleted.`);
+      this.logger.log(`State compensated: Package #${packageId} restored to SUBMITTED, failed PR #${prId} deleted.`);
     });
   }
 
-  // =========================================================================
   // 8. PRE-MUTATION RECONCILIATION & SAFETY GATE
-  // =========================================================================
 
   async reconcileProjectPackages(projectId: number, manager: EntityManager): Promise<number> {
     // Find packages in PR_CREATED whose linked PR has become REJECTED
@@ -1383,9 +1367,7 @@ export class ProcurementPackageService {
     };
   }
 
-  // =========================================================================
   // 9. CONCURRENCY-SAFE PACKAGE NUMBER GENERATOR
-  // =========================================================================
 
   async closeCompletedPackage(packageId: number, userId?: number): Promise<boolean> {
     return this.inTransaction(async manager => {
@@ -1471,9 +1453,7 @@ export class ProcurementPackageService {
     return `${prefix}${String(nextSeq).padStart(3, '0')}`;
   }
 
-  // =========================================================================
   // 10. ROLE & OWNERSHIP HELPERS
-  // =========================================================================
 
   private validateProjectManagerOwnership(
     project: Project,

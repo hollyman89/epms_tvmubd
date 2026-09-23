@@ -66,7 +66,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     // Helper: Disconnect and clean up active sockets
     const cleanupSockets = () => {
       if (salesSocketRef.current) {
-        console.log(`[${new Date().toISOString()}] 🧹 DISCONNECT SALES SOCKET & CLEANUP LISTENERS`);
+        console.log(`[${new Date().toISOString()}] [SOCKET] DISCONNECT SALES SOCKET & CLEANUP LISTENERS`);
         salesSocketRef.current.removeAllListeners();
         salesSocketRef.current.disconnect();
         salesSocketRef.current = null;
@@ -76,7 +76,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
       }
       if (notificationSocketRef.current) {
-        console.log(`[${new Date().toISOString()}] 🧹 DISCONNECT NOTIFICATION SOCKET & CLEANUP LISTENERS`);
+        console.log(`[${new Date().toISOString()}] [SOCKET] DISCONNECT NOTIFICATION SOCKET & CLEANUP LISTENERS`);
         notificationSocketRef.current.removeAllListeners();
         notificationSocketRef.current.disconnect();
         notificationSocketRef.current = null;
@@ -108,13 +108,13 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       (window as any).__socket = salesSocket;
 
       salesSocket.on('connect', () => {
-        console.log(`[${new Date().toISOString()}] 🟢 GLOBAL SALES SOCKET CONNECT`, { socketId: salesSocket.id });
+        console.log(`[${new Date().toISOString()}] [SOCKET] GLOBAL SALES SOCKET CONNECT`, { socketId: salesSocket.id });
         setIsConnected(true);
         salesSocket.emit('join-sales-room');
       });
 
       salesSocket.on('disconnect', () => {
-        console.log(`[${new Date().toISOString()}] 🔴 GLOBAL SALES SOCKET DISCONNECT`, { socketId: salesSocket.id });
+        console.log(`[${new Date().toISOString()}] [SOCKET] GLOBAL SALES SOCKET DISCONNECT`, { socketId: salesSocket.id });
         setIsConnected(false);
       });
     }
@@ -130,7 +130,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       (window as any).__notificationSocket = notificationSocket;
 
       notificationSocket.on('connect', () => {
-        console.log(`[${new Date().toISOString()}] 🟢 GLOBAL NOTIFICATION SOCKET CONNECT`, { socketId: notificationSocket.id });
+        console.log(`[${new Date().toISOString()}] [SOCKET] GLOBAL NOTIFICATION SOCKET CONNECT`, { socketId: notificationSocket.id });
 
         // Bounded active prefix invalidations on reconnect (NO global queryClient.invalidateQueries())
         queryClient.invalidateQueries({ queryKey: ['procurement'], type: 'active' });
@@ -149,7 +149,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
 
       notificationSocket.on('disconnect', () => {
-        console.log(`[${new Date().toISOString()}] 🔴 GLOBAL NOTIFICATION SOCKET DISCONNECT`, { socketId: notificationSocket.id });
+        console.log(`[${new Date().toISOString()}] [SOCKET] GLOBAL NOTIFICATION SOCKET DISCONNECT`, { socketId: notificationSocket.id });
       });
 
       // Canonical Phase G Cross-User Synchronization Listener

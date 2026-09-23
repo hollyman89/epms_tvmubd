@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, ForbiddenException, Logger } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, Not } from 'typeorm';
+import { Repository, LessThan} from 'typeorm';
 import { UserSession } from '../../entities/user-session.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
@@ -162,7 +162,7 @@ export class UserSessionService {
 
     const distinctIps = new Set(recentSessions.map((s) => s.ip_address));
     if (distinctIps.size >= 3 && !distinctIps.has(currentIp)) {
-      this.logger.warn(`🚨 SUSPICIOUS ACTIVITY DETECTED: User #${userId} accessed from multiple distinct IPs (${Array.from(distinctIps).join(', ')})!`);
+      this.logger.warn(`SUSPICIOUS ACTIVITY DETECTED: User #${userId} accessed from multiple distinct IPs (${Array.from(distinctIps).join(', ')})!`);
       this.eventEmitter.emit('audit.log', {
         action: 'SUSPICIOUS_LOGIN_LOCATION',
         entityId: userId,

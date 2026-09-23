@@ -57,7 +57,7 @@ export class EmailProcessor extends WorkerHost {
 
     // If max attempts (3) reached, route to Dead Letter Queue (DLQ)
     if (job.attemptsMade >= 3) {
-      this.logger.error(`🚨 Job #${job.id} exceeded max retries (3). Moving to Dead Letter Queue (email-dlq)!`);
+      this.logger.error(`Job #${job.id} exceeded max retries (3). Moving to Dead Letter Queue (email-dlq)!`);
       
       await this.emailDlq.add('failed-email-dlq', {
         originalJobId: job.id,

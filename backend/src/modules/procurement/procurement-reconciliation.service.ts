@@ -46,9 +46,7 @@ export class ProcurementReconciliationService {
     private readonly dataSource: DataSource,
   ) {}
 
-  // ---------------------------------------------------------------------------
   // Role checks
-  // ---------------------------------------------------------------------------
 
   private checkIsProcurementOrAdmin(userRoles: string[] = []): boolean {
     const allowed = ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN', 'ADMIN'];
@@ -59,9 +57,7 @@ export class ProcurementReconciliationService {
     return userRoles.includes('PROJECT_MANAGER');
   }
 
-  // ---------------------------------------------------------------------------
   // 1. GET UNRESOLVED ITEMS
-  // ---------------------------------------------------------------------------
 
   async getUnresolvedItems(
     userId: number,
@@ -118,9 +114,7 @@ export class ProcurementReconciliationService {
     };
   }
 
-  // ---------------------------------------------------------------------------
   // 2. GET ITEM RECONCILIATION DETAIL + CANDIDATES
-  // ---------------------------------------------------------------------------
 
   async getItemReconciliationDetail(
     userId: number,
@@ -207,9 +201,7 @@ export class ProcurementReconciliationService {
     };
   }
 
-  // ---------------------------------------------------------------------------
   // 3. RECONCILE ITEM (MUTATION)
-  // ---------------------------------------------------------------------------
 
   async reconcileItem(
     userId: number,
@@ -408,7 +400,7 @@ export class ProcurementReconciliationService {
       await manager.save(AuditLog, audit);
 
       this.logger.log(
-        `✅ Reconciled PR Item #${prItemId} to CostItem #${costItem.id} (Project #${pr.projectId}).`,
+        `Reconciled PR Item #${prItemId} to CostItem #${costItem.id} (Project #${pr.projectId}).`,
       );
 
       return {
@@ -419,9 +411,7 @@ export class ProcurementReconciliationService {
     });
   }
 
-  // ---------------------------------------------------------------------------
   // 4. EXCLUDE ITEM (MUTATION)
-  // ---------------------------------------------------------------------------
 
   async excludeItem(
     userId: number,
@@ -513,7 +503,7 @@ export class ProcurementReconciliationService {
       await manager.save(AuditLog, audit);
 
       this.logger.log(
-        `✅ Excluded PR Item #${prItemId} from RAB quota (Reason: ${dto.reason.trim()}).`,
+        `Excluded PR Item #${prItemId} from RAB quota (Reason: ${dto.reason.trim()}).`,
       );
 
       return {
@@ -524,9 +514,7 @@ export class ProcurementReconciliationService {
     });
   }
 
-  // ---------------------------------------------------------------------------
   // 5. AUTHORITATIVE COST ITEM REMAINING CALCULATOR
-  // ---------------------------------------------------------------------------
 
   async computeCostItemRemaining(
     costItemId: number,

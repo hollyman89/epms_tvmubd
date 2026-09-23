@@ -26,7 +26,20 @@ async function runSeed() {
 
     // 1. Roles
     console.log('Seeding roles...');
-    const roles = ['SUPER_ADMIN', 'DIRECTOR', 'MARKETING', 'LEGAL', 'HEAD_OF_OPERATIONS', 'PROJECT_MANAGER', 'PROCUREMENT', 'FINANCE'];
+    const roles = [
+      'SUPER_ADMIN',
+      'ADMIN',
+      'GENERAL_MANAGER',
+      'MANAGER',
+      'DIRECTOR',
+      'HEAD_OF_OPERATIONS',
+      'PROJECT_MANAGER',
+      'PMO',
+      'PROCUREMENT',
+      'FINANCE',
+      'MARKETING',
+      'LEGAL',
+    ];
     for (const roleName of roles) {
       await queryRunner.query('INSERT IGNORE INTO roles (name) VALUES (?)', [roleName]);
     }
@@ -37,11 +50,16 @@ async function runSeed() {
     const usersData = [
       { email: 'admin@tvmubd.com', name: 'Super Admin', role: 'SUPER_ADMIN' },
       { email: 'director@tvmubd.com', name: 'Director', role: 'DIRECTOR' },
+      { email: 'gm@tvmubd.com', name: 'General Manager', role: 'GENERAL_MANAGER' },
       { email: 'marketing@tvmubd.com', name: 'Marketing Staff', role: 'MARKETING' },
       { email: 'legal@tvmubd.com', name: 'Legal Staff', role: 'LEGAL' },
       { email: 'pm@tvmubd.com', name: 'Project Manager', role: 'PROJECT_MANAGER' },
+      { email: 'pmo@tvmubd.com', name: 'PMO Staff', role: 'PMO' },
       { email: 'procurement@tvmubd.com', name: 'Procurement Staff', role: 'PROCUREMENT' },
       { email: 'finance@tvmubd.com', name: 'Finance Staff', role: 'FINANCE' },
+      { email: 'headops@tvmubd.com', name: 'Head of Operations', role: 'HEAD_OF_OPERATIONS' },
+      { email: 'hops@epms.com', name: 'Head of Operations', role: 'HEAD_OF_OPERATIONS' },
+      { email: 'manager@tvmubd.com', name: 'Operations Manager', role: 'MANAGER' },
     ];
 
     for (const u of usersData) {
@@ -97,10 +115,10 @@ async function runSeed() {
     }
 
     await queryRunner.commitTransaction();
-    console.log('✅ Master data seeding completed successfully!');
+    console.log('Master data seeding completed successfully!');
   } catch (error) {
     await queryRunner.rollbackTransaction();
-    console.error('❌ Seeding failed, rolling back:', error);
+    console.error('Seeding failed, rolling back:', error);
   } finally {
     await queryRunner.release();
     await AppDataSource.destroy();

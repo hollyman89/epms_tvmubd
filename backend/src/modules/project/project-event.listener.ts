@@ -15,7 +15,7 @@ export class ProjectEventListener {
   @OnEvent('finance.payment_processed')
   async handlePaymentProcessed(payload: { invoiceId: number; amount?: number; paymentAmount?: number; poId?: number }) {
     const effectiveAmount = Number(payload.paymentAmount ?? payload.amount ?? 0);
-    this.logger.log(`🔥 [ProjectEventListener] Payment Processed Event Received: Invoice ${payload.invoiceId}, Amount: ${effectiveAmount}`);
+    this.logger.log(`[ProjectEventListener] Payment Processed Event Received: Invoice ${payload.invoiceId}, Amount: ${effectiveAmount}`);
     if (payload.poId) {
       await this.projectService.recalculateWbsBudgetFromPo(payload.poId, effectiveAmount);
     }
@@ -36,7 +36,7 @@ export class ProjectEventListener {
   }) {
     if (String(payload?.entityType).toUpperCase() === 'PROJECT') {
       this.logger.log(
-        `⚡ [ProjectEventListener] internal.workflow.task.completed for PROJECT #${payload.entityId} (Task #${payload.taskId}, Action: ${payload.action}, Node: ${payload.fromNode} -> ${payload.toNode})`,
+        `[ProjectEventListener] internal.workflow.task.completed for PROJECT #${payload.entityId} (Task #${payload.taskId}, Action: ${payload.action}, Node: ${payload.fromNode} -> ${payload.toNode})`,
       );
       try {
         await this.managementReviewSyncService.syncManagementReviewFromWorkflow({
@@ -52,7 +52,7 @@ export class ProjectEventListener {
           comments: payload.comments || payload.reason,
         });
       } catch (err: any) {
-        this.logger.error(`❌ [ProjectEventListener] Failed to sync projection for PROJECT #${payload.entityId}: ${err.message}`, err.stack);
+        this.logger.error(`[ProjectEventListener] Failed to sync projection for PROJECT #${payload.entityId}: ${err.message}`, err.stack);
       }
     }
   }

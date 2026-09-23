@@ -78,9 +78,7 @@ export class FinanceService {
         throw new Error('Gagal menghasilkan nomor invoice unik.');
       }
 
-      // ==========================================
       // BRANCH A: TERM-BASED INVOICE
-      // ==========================================
       if (dto.paymentTermId) {
         // A1. Validate PO status for Term Invoicing
         // Eligible PO statuses: ISSUED, PARTIALLY_FULFILLED, COMPLETED
@@ -502,9 +500,7 @@ export class FinanceService {
         return savedInvoice;
       }
 
-      // ==========================================
       // BRANCH B: LEGACY / FULL PO INVOICE
-      // ==========================================
       if (po.status !== 'COMPLETED') {
         throw new BadRequestException('Invoice can only be created for COMPLETED Purchase Orders');
       }

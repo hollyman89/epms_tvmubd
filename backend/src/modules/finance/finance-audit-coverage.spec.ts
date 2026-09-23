@@ -90,9 +90,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     jest.clearAllMocks();
   });
 
-  // =========================================================================
   // 1. INVOICE CREATE — TERM-BASED
-  // =========================================================================
   describe('1. Invoice CREATE — Term-Based', () => {
     const actorUserId = 77;
 
@@ -162,9 +160,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     });
   });
 
-  // =========================================================================
   // 2. INVOICE CREATE — LEGACY FULL PO
-  // =========================================================================
   describe('2. Invoice CREATE — Legacy Full PO', () => {
     const actorUserId = 88;
 
@@ -217,9 +213,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     });
   });
 
-  // =========================================================================
   // 3. INVOICE VERIFY — APPROVED
-  // =========================================================================
   describe('3. Invoice VERIFY — Approved', () => {
     const actorUserId = 66;
 
@@ -303,9 +297,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     });
   });
 
-  // =========================================================================
   // 4. INVOICE REJECT
-  // =========================================================================
   describe('4. Invoice REJECT', () => {
     const actorUserId = 55;
 
@@ -352,9 +344,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     });
   });
 
-  // =========================================================================
   // 5. INVOICE MISMATCH
-  // =========================================================================
   describe('5. Invoice MISMATCH', () => {
     const actorUserId = 44;
 
@@ -422,9 +412,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     });
   });
 
-  // =========================================================================
   // 6. PAYMENT RECORD — PARTIAL PAYMENT
-  // =========================================================================
   describe('6. Payment RECORD — Partial Payment', () => {
     const actorUserId = 33; // MAKER_ID and PAYER_ID
 
@@ -524,9 +512,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     });
   });
 
-  // =========================================================================
   // 7. PAYMENT RECORD — FULL PAYMENT
-  // =========================================================================
   describe('7. Payment RECORD — Full Payment', () => {
     const actorUserId = 22; // MAKER_ID and PAYER_ID
 
@@ -625,9 +611,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     });
   });
 
-  // =========================================================================
   // 8. ATOMICITY & TRANSACTION BOUNDARY ROLLBACK
-  // =========================================================================
   describe('8. Atomicity & Rollback Guarantees', () => {
     it('should rollback transaction if error occurs during Invoice CREATE', async () => {
       const mockPo = {
@@ -703,9 +687,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     });
   });
 
-  // =========================================================================
   // 9. ACTOR PROPAGATION FROM CONTROLLER JWT
-  // =========================================================================
   describe('9. Actor Propagation from Controller (req.user.id -> created_by)', () => {
     it('should propagate authenticated JWT user ID to AuditLog for createInvoice endpoint', async () => {
       const jwtUserId = 123;

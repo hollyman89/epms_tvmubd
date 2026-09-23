@@ -203,9 +203,7 @@ export class ProcurementController {
     return this.procurementService.getGoodsReceiptById(goodsReceiptId);
   }
 
-  // =========================================================================
   // PROCUREMENT PACKAGES ENDPOINTS
-  // =========================================================================
 
   @Post('packages')
   @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
@@ -309,9 +307,7 @@ export class ProcurementController {
     return this.packageService.createPrFromPackage(id, userId, roles);
   }
 
-  // =========================================================================
   // RECONCILIATION ENDPOINTS (PHASE 3)
-  // =========================================================================
 
   @Get('reconciliations/unresolved')
   @Roles('PROCUREMENT', 'PURCHASING', 'PROJECT_MANAGER', 'SUPER_ADMIN', 'ADMIN')
@@ -361,5 +357,28 @@ export class ProcurementController {
     const userId = Number(req.user?.userId || req.user?.sub);
     const roles: string[] = Array.isArray(req.user?.roles) ? req.user.roles : [req.user?.role || ''].filter(Boolean);
     return this.reconciliationService.excludeItem(userId, roles, prItemId, dto);
+  }
+  @Get('projects/:projectId/eligible-cost-items')
+  @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
+  async getEligibleCostItems(@Request() req, @Param('projectId', ParseIntPipe) projectId: number) {
+    const userId = Number(req.user?.userId || req.user?.sub);
+    const roles = Array.isArray(req.user?.roles) ? req.user.roles : [req.user?.role || ''].filter(Boolean);
+    return this.packageService.getEligibleCostItems(projectId, userId, roles);
+  }
+
+  @Post('packages/create-and-submit')
+  @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
+  async createAndSubmitPackage(@Request() req, @Body() dto: CreatePackageDraftDto) {
+    const userId = Number(req.user?.userId || req.user?.sub);
+    const roles = Array.isArray(req.user?.roles) ? req.user.roles : [req.user?.role || ''].filter(Boolean);
+    return this.packageService.saveAndSubmit(userId, roles, dto);
+  }
+
+  @Post('packages/:id/update-and-submit')
+  @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
+  async updateAndSubmitPackage(@Request() req, @Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePackageDraftDto) {
+    const userId = Number(req.user?.userId || req.user?.sub);
+    const roles = Array.isArray(req.user?.roles) ? req.user.roles : [req.user?.role || ''].filter(Boolean);
+    return this.packageService.saveAndSubmit(userId, roles, dto, id);
   }
 }

@@ -37,7 +37,7 @@ export class ProcurementEventListener {
       String(payload?.finalStatus).toUpperCase() === 'REJECTED'
     ) {
       this.logger.log(
-        `⚡ [ProcurementEventListener] Terminal REJECTED event received for PURCHASE_REQUEST #${payload.entityId} (Instance #${payload.instanceId}). Synchronizing linked package...`,
+        `[ProcurementEventListener] Terminal REJECTED event received for PURCHASE_REQUEST #${payload.entityId} (Instance #${payload.instanceId}). Synchronizing linked package...`,
       );
       try {
         await this.procurementPackageService.handlePrRejection(
@@ -46,7 +46,7 @@ export class ProcurementEventListener {
         );
       } catch (err: any) {
         this.logger.error(
-          `❌ Failed to synchronize package rejection for PR #${payload.entityId}: ${err?.message}`,
+          `Failed to synchronize package rejection for PR #${payload.entityId}: ${err?.message}`,
           err?.stack,
         );
       }

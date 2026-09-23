@@ -10,7 +10,7 @@ export class NotificationListener {
 
   @OnEvent('marketing.tender.won')
   handleTenderWonEvent(payload: { contractId?: number; tenderId: number; customerId?: number; title?: string }) {
-    this.logger.log(`🔥 Event diterima: Tender WON - Tender ID ${payload.tenderId}`);
+    this.logger.log(`Event diterima: Tender WON - Tender ID ${payload.tenderId}`);
 
     if (this.notificationGateway?.server && payload.contractId) {
       this.notificationGateway.server.emit('legal.queue.updated', {
@@ -20,13 +20,13 @@ export class NotificationListener {
         title: payload.title,
         timestamp: new Date().toISOString()
       });
-      this.logger.log(`⚡ Broadcast Socket.io 'legal.queue.updated' sent to all connected clients.`);
+      this.logger.log(`Broadcast Socket.io 'legal.queue.updated' sent to all connected clients.`);
     }
   }
 
   @OnEvent('legal.contract.approved')
   handleContractApprovedEvent(payload: any) {
-    this.logger.log(`🔥 Event diterima: Legal Contract Approved - Contract ID ${payload.contractId}`);
+    this.logger.log(`Event diterima: Legal Contract Approved - Contract ID ${payload.contractId}`);
 
     if (this.notificationGateway?.server) {
       this.notificationGateway.server.emit('legal.queue.updated', {
@@ -40,7 +40,7 @@ export class NotificationListener {
         contractId: payload.contractId,
         timestamp: new Date().toISOString()
       });
-      this.logger.log(`⚡ Broadcast Socket.io 'legal.queue.updated' & 'marketing.tender.management_update' sent.`);
+      this.logger.log(`Broadcast Socket.io 'legal.queue.updated' & 'marketing.tender.management_update' sent.`);
     }
   }
 
@@ -53,7 +53,7 @@ export class NotificationListener {
 
   @OnEvent('contract.resubmitted')
   handleContractResubmittedEvent(payload: any) {
-    this.logger.log(`🔥 Event diterima: Contract Resubmitted to PM - Contract ID ${payload?.contractId}`);
+    this.logger.log(`Event diterima: Contract Resubmitted to PM - Contract ID ${payload?.contractId}`);
 
     if (this.notificationGateway?.server) {
       this.notificationGateway.server.emit('marketing.tender.management_update', {
@@ -62,7 +62,7 @@ export class NotificationListener {
         tenderId: payload?.tenderId,
         timestamp: new Date().toISOString(),
       });
-      this.logger.log(`⚡ Broadcast Socket.io 'marketing.tender.management_update' sent for Charter Resubmit.`);
+      this.logger.log(`Broadcast Socket.io 'marketing.tender.management_update' sent for Charter Resubmit.`);
     }
   }
 }

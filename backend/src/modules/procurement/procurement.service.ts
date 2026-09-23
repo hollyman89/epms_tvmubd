@@ -68,7 +68,7 @@ export class ProcurementService {
       const seq = String(countToday + 1).padStart(3, '0');
       const prNumber = `PR-${dateStr}-${seq}`;
 
-      // Enforce Project IN_PROGRESS Guard & Block Direct PR (Phase 3 Rule)
+      // Enforce Project IN_PROGRESS Guard & Block Direct PR
       const projectRes = await queryRunner.manager.query(
         `SELECT status FROM projects WHERE id = ? FOR SHARE`,
         [dto.projectId]
