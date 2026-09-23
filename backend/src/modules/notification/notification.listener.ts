@@ -50,4 +50,38 @@ export class NotificationListener {
       this.notificationGateway.server.emit('legal.queue.updated', payload);
     }
   }
+
+  @OnEvent('project.pm.assigned')
+  handleProjectPmAssignedEvent(payload: {
+    projectId: number;
+    projectCode: string;
+    contractId: number;
+    projectManagerId: number;
+    assignedBy: number;
+    status: string;
+    timestamp: string;
+  }) {
+    this.logger.log(`🔥 Event diterima: project.pm.assigned for PM ${payload?.projectManagerId}`);
+    if (this.notificationGateway?.server && payload?.projectManagerId) {
+      const pmRoom = `room:user:${payload.projectManagerId}`;
+      const altRoom = `user:${payload.projectManagerId}`;
+      this.notificationGateway.server.to(pmRoom).to(altRoom).emit('project.pm.assigned', payload);
+      this.logger.log(`⚡ Targeted Socket.io 'project.pm.assigned' sent strictly to user ${payload.projectManagerId}`);
+    }
+  }
+
+  @OnEvent('contract.resubmitted')
+  handleContractResubmittedEvent(payload: any) {
+    this.logger.log(`🔥 Event diterima: Contract Resubmitted to PM - Contract ID ${payload?.contractId}`);
+
+    if (this.notificationGateway?.server) {
+      this.notificationGateway.server.emit('marketing.tender.management_update', {
+        type: 'CHARTER_RESUBMITTED',
+        contractId: payload?.contractId,
+        tenderId: payload?.tenderId,
+        timestamp: new Date().toISOString(),
+      });
+      this.logger.log(`⚡ Broadcast Socket.io 'marketing.tender.management_update' sent for Charter Resubmit.`);
+    }
+  }
 }
