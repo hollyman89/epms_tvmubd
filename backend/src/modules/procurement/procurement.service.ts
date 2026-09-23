@@ -16,7 +16,10 @@ import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { GoodsReceiptItem } from '../../entities/goods-receipt-item.entity';
 import { Quotation } from '../../entities/quotation.entity';
 import { QuotationItem } from '../../entities/quotation-item.entity';
+import { randomUUID } from 'crypto';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { BusinessEvent } from '../../shared/contracts/business-event.contract';
 import { CreatePurchaseRequestDto } from './dto/create-pr.dto';
 import { CreateRfqDto } from './dto/create-rfq.dto';
 import { CreateQuotationDto } from './dto/create-quotation.dto';
@@ -327,6 +330,57 @@ export class ProcurementService {
         created_by: userId ? Number(userId) : null,
       });
       await queryRunner.manager.save(AuditLog, rfqAudit);
+
+      // Canonical Outbox: procurement.rfq.created
+      const rfqEvent: BusinessEvent<{
+        rfqId: number;
+        rfqNumber: string;
+        prId: number;
+        projectId: number;
+        status: string;
+        closingDate: string | null;
+        createdBy: number | null;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'procurement.rfq.created',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Rfq',
+        aggregateId: savedRfq.id,
+        projectId: projectId ? Number(projectId) : undefined,
+        actor: userId ? { userId: Number(userId) } : undefined,
+        routing: undefined,
+        notificationPolicy: undefined,
+        payload: {
+          rfqId: Number(savedRfq.id),
+          rfqNumber: savedRfq.rfqNumber,
+          prId: Number(savedRfq.prId),
+          projectId: Number(projectId),
+          status: savedRfq.status,
+          closingDate: savedRfq.closingDate ? savedRfq.closingDate.toISOString() : null,
+          createdBy: userId ? Number(userId) : null,
+        },
+      };
+
+      const rfqOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: rfqEvent.eventId,
+        event_name: rfqEvent.eventName,
+        event_version: String(rfqEvent.eventVersion),
+        aggregate_type: rfqEvent.aggregateType,
+        aggregate_id: Number(rfqEvent.aggregateId),
+        correlation_id: rfqEvent.correlationId || null,
+        payload: {
+          occurredAt: rfqEvent.occurredAt,
+          projectId: rfqEvent.projectId,
+          actor: rfqEvent.actor,
+          routing: rfqEvent.routing,
+          notificationPolicy: rfqEvent.notificationPolicy,
+          businessPayload: rfqEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await queryRunner.manager.save(OutboxEvent, rfqOutbox);
 
       await queryRunner.commitTransaction();
 
@@ -1538,6 +1592,57 @@ export class ProcurementService {
       });
       await queryRunner.manager.save(AuditLog, poAudit);
 
+      // Canonical Outbox: procurement.po.issued
+      const poEvent: BusinessEvent<{
+        purchaseOrderId: number;
+        poNumber: string;
+        purchaseRequestId: number;
+        vendorId: number;
+        totalAmount: number;
+        status: string;
+        paymentTermsCount: number;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'procurement.po.issued',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'PurchaseOrder',
+        aggregateId: savedPo.id,
+        projectId: pr.projectId ? Number(pr.projectId) : undefined,
+        actor: userId ? { userId: Number(userId) } : undefined,
+        routing: undefined,
+        notificationPolicy: undefined,
+        payload: {
+          purchaseOrderId: Number(savedPo.id),
+          poNumber: savedPo.poNumber,
+          purchaseRequestId: Number(pr.id),
+          vendorId: Number(winningVendorId),
+          totalAmount: Number(savedPo.totalAmount),
+          status: 'ISSUED',
+          paymentTermsCount: paymentTermsToSave.length,
+        },
+      };
+
+      const poOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: poEvent.eventId,
+        event_name: poEvent.eventName,
+        event_version: String(poEvent.eventVersion),
+        aggregate_type: poEvent.aggregateType,
+        aggregate_id: Number(poEvent.aggregateId),
+        correlation_id: poEvent.correlationId || null,
+        payload: {
+          occurredAt: poEvent.occurredAt,
+          projectId: poEvent.projectId,
+          actor: poEvent.actor,
+          routing: poEvent.routing,
+          notificationPolicy: poEvent.notificationPolicy,
+          businessPayload: poEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await queryRunner.manager.save(OutboxEvent, poOutbox);
+
       // 14. Commit transaction
       await queryRunner.commitTransaction();
 
@@ -1729,6 +1834,59 @@ export class ProcurementService {
         created_by: userId ? Number(userId) : null,
       });
       await queryRunner.manager.save(AuditLog, grAudit);
+
+      // Canonical Outbox: procurement.gr.received
+      const grEvent: BusinessEvent<{
+        grId: number;
+        grNumber: string;
+        poId: number;
+        totalReceivedAmount: number;
+        receiptDate: string;
+        poStatusAfter: string;
+        itemsCount: number;
+        receivedBy: number | null;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'procurement.gr.received',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'GoodsReceipt',
+        aggregateId: savedGr.id,
+        projectId: undefined,
+        actor: userId ? { userId: Number(userId) } : undefined,
+        routing: undefined,
+        notificationPolicy: undefined,
+        payload: {
+          grId: Number(savedGr.id),
+          grNumber: savedGr.grNumber,
+          poId: Number(po.id),
+          totalReceivedAmount: Number(savedGr.totalReceivedAmount),
+          receiptDate: savedGr.receiptDate ? savedGr.receiptDate.toISOString() : new Date().toISOString(),
+          poStatusAfter: po.status,
+          itemsCount: grItemsToSave.length,
+          receivedBy: userId ? Number(userId) : null,
+        },
+      };
+
+      const grOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: grEvent.eventId,
+        event_name: grEvent.eventName,
+        event_version: String(grEvent.eventVersion),
+        aggregate_type: grEvent.aggregateType,
+        aggregate_id: Number(grEvent.aggregateId),
+        correlation_id: grEvent.correlationId || null,
+        payload: {
+          occurredAt: grEvent.occurredAt,
+          projectId: grEvent.projectId,
+          actor: grEvent.actor,
+          routing: grEvent.routing,
+          notificationPolicy: grEvent.notificationPolicy,
+          businessPayload: grEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await queryRunner.manager.save(OutboxEvent, grOutbox);
 
       await queryRunner.commitTransaction();
 

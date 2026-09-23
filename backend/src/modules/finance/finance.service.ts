@@ -8,7 +8,10 @@ import { PurchaseOrder } from '../../entities/purchase-order.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { PoPaymentTerm, PaymentTermStatus, PaymentTermType } from '../../entities/po-payment-term.entity';
+import { randomUUID } from 'crypto';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { BusinessEvent } from '../../shared/contracts/business-event.contract';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { VerifyInvoiceDto } from './dto/verify-invoice.dto';
@@ -440,6 +443,61 @@ export class FinanceService {
         });
         await queryRunner.manager.save(AuditLog, invoiceAudit);
 
+        // Canonical Outbox: finance.invoice.created (Term-based)
+        const invoiceEvent: BusinessEvent<{
+          invoiceId: number;
+          invoiceNumber: string;
+          poId: number;
+          totalAmount: number;
+          matchStatus: string;
+          paymentStatus: string;
+          isTermBased: boolean;
+          paymentTermId?: number | null;
+          createdBy: number | null;
+        }> = {
+          eventId: randomUUID(),
+          eventName: 'finance.invoice.created',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Invoice',
+          aggregateId: savedInvoice.id,
+          projectId: undefined,
+          actor: userId ? { userId: Number(userId) } : undefined,
+          routing: undefined,
+          notificationPolicy: undefined,
+          payload: {
+            invoiceId: Number(savedInvoice.id),
+            invoiceNumber: savedInvoice.invoiceNumber,
+            poId: Number(po.id),
+            totalAmount: Number(savedInvoice.totalAmount),
+            matchStatus: savedInvoice.matchStatus,
+            paymentStatus: savedInvoice.paymentStatus,
+            isTermBased: true,
+            paymentTermId: paymentTerm.id ? Number(paymentTerm.id) : null,
+            createdBy: userId ? Number(userId) : null,
+          },
+        };
+
+        const invoiceOutbox = queryRunner.manager.create(OutboxEvent, {
+          event_id: invoiceEvent.eventId,
+          event_name: invoiceEvent.eventName,
+          event_version: String(invoiceEvent.eventVersion),
+          aggregate_type: invoiceEvent.aggregateType,
+          aggregate_id: Number(invoiceEvent.aggregateId),
+          correlation_id: invoiceEvent.correlationId || null,
+          payload: {
+            occurredAt: invoiceEvent.occurredAt,
+            projectId: invoiceEvent.projectId,
+            actor: invoiceEvent.actor,
+            routing: invoiceEvent.routing,
+            notificationPolicy: invoiceEvent.notificationPolicy,
+            businessPayload: invoiceEvent.payload,
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await queryRunner.manager.save(OutboxEvent, invoiceOutbox);
+
         await queryRunner.commitTransaction();
         return savedInvoice;
       }
@@ -570,6 +628,61 @@ export class FinanceService {
         created_by: userId ? Number(userId) : null,
       });
       await queryRunner.manager.save(AuditLog, invoiceAudit);
+
+      // Canonical Outbox: finance.invoice.created (Full PO)
+      const invoiceEvent: BusinessEvent<{
+        invoiceId: number;
+        invoiceNumber: string;
+        poId: number;
+        totalAmount: number;
+        matchStatus: string;
+        paymentStatus: string;
+        isTermBased: boolean;
+        paymentTermId?: number | null;
+        createdBy: number | null;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'finance.invoice.created',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Invoice',
+        aggregateId: savedInvoice.id,
+        projectId: undefined,
+        actor: userId ? { userId: Number(userId) } : undefined,
+        routing: undefined,
+        notificationPolicy: undefined,
+        payload: {
+          invoiceId: Number(savedInvoice.id),
+          invoiceNumber: savedInvoice.invoiceNumber,
+          poId: Number(po.id),
+          totalAmount: Number(savedInvoice.totalAmount),
+          matchStatus: savedInvoice.matchStatus,
+          paymentStatus: savedInvoice.paymentStatus,
+          isTermBased: false,
+          paymentTermId: null,
+          createdBy: userId ? Number(userId) : null,
+        },
+      };
+
+      const invoiceOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: invoiceEvent.eventId,
+        event_name: invoiceEvent.eventName,
+        event_version: String(invoiceEvent.eventVersion),
+        aggregate_type: invoiceEvent.aggregateType,
+        aggregate_id: Number(invoiceEvent.aggregateId),
+        correlation_id: invoiceEvent.correlationId || null,
+        payload: {
+          occurredAt: invoiceEvent.occurredAt,
+          projectId: invoiceEvent.projectId,
+          actor: invoiceEvent.actor,
+          routing: invoiceEvent.routing,
+          notificationPolicy: invoiceEvent.notificationPolicy,
+          businessPayload: invoiceEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await queryRunner.manager.save(OutboxEvent, invoiceOutbox);
 
       await queryRunner.commitTransaction();
 
@@ -993,6 +1106,61 @@ export class FinanceService {
           }
         }
       }
+
+      // Canonical Outbox: finance.payment.recorded
+      const paymentEvent: BusinessEvent<{
+        paymentId: number;
+        paymentNumber: string;
+        invoiceId: number;
+        poId: number;
+        amount: number;
+        paymentDate: string;
+        paymentStatus: string;
+        isFullyPaid: boolean;
+        recordedBy: number | null;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'finance.payment.recorded',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Payment',
+        aggregateId: savedPayment.id,
+        projectId: undefined,
+        actor: userId ? { userId: Number(userId) } : undefined,
+        routing: undefined,
+        notificationPolicy: undefined,
+        payload: {
+          paymentId: Number(savedPayment.id),
+          paymentNumber: savedPayment.paymentNumber,
+          invoiceId: Number(invoice.id),
+          poId: Number(invoice.poId),
+          amount: Number(savedPayment.amount),
+          paymentDate: savedPayment.paymentDate instanceof Date ? savedPayment.paymentDate.toISOString() : new Date(savedPayment.paymentDate).toISOString(),
+          paymentStatus: invoice.paymentStatus,
+          isFullyPaid,
+          recordedBy: userId ? Number(userId) : null,
+        },
+      };
+
+      const paymentOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: paymentEvent.eventId,
+        event_name: paymentEvent.eventName,
+        event_version: String(paymentEvent.eventVersion),
+        aggregate_type: paymentEvent.aggregateType,
+        aggregate_id: Number(paymentEvent.aggregateId),
+        correlation_id: paymentEvent.correlationId || null,
+        payload: {
+          occurredAt: paymentEvent.occurredAt,
+          projectId: paymentEvent.projectId,
+          actor: paymentEvent.actor,
+          routing: paymentEvent.routing,
+          notificationPolicy: paymentEvent.notificationPolicy,
+          businessPayload: paymentEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await queryRunner.manager.save(OutboxEvent, paymentOutbox);
 
       // 12. Commit Transaction
       await queryRunner.commitTransaction();
@@ -1671,6 +1839,59 @@ export class FinanceService {
         });
         await queryRunner.manager.save(AuditLog, rejectAudit);
 
+        // Canonical Outbox: finance.invoice.rejected
+        const rejectEvent: BusinessEvent<{
+          invoiceId: number;
+          invoiceNumber: string;
+          poId: number;
+          paymentTermId?: number | null;
+          totalAmount: number;
+          rejectedBy: number;
+          notes?: string;
+          status: string;
+        }> = {
+          eventId: randomUUID(),
+          eventName: 'finance.invoice.rejected',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Invoice',
+          aggregateId: invoice.id,
+          projectId: undefined,
+          actor: userId ? { userId: Number(userId) } : undefined,
+          routing: invoice.createdBy ? { userIds: [Number(invoice.createdBy)] } : undefined,
+          notificationPolicy: undefined,
+          payload: {
+            invoiceId: Number(invoice.id),
+            invoiceNumber: invoice.invoiceNumber,
+            poId: Number(invoice.poId),
+            paymentTermId: invoice.paymentTermId ? Number(invoice.paymentTermId) : null,
+            totalAmount: Number(invoice.totalAmount),
+            rejectedBy: Number(userId),
+            notes: dto.notes,
+            status: 'REJECTED',
+          },
+        };
+
+        const rejectOutbox = queryRunner.manager.create(OutboxEvent, {
+          event_id: rejectEvent.eventId,
+          event_name: rejectEvent.eventName,
+          event_version: String(rejectEvent.eventVersion),
+          aggregate_type: rejectEvent.aggregateType,
+          aggregate_id: Number(rejectEvent.aggregateId),
+          correlation_id: rejectEvent.correlationId || null,
+          payload: {
+            occurredAt: rejectEvent.occurredAt,
+            projectId: rejectEvent.projectId,
+            actor: rejectEvent.actor,
+            routing: rejectEvent.routing,
+            notificationPolicy: rejectEvent.notificationPolicy,
+            businessPayload: rejectEvent.payload,
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await queryRunner.manager.save(OutboxEvent, rejectOutbox);
+
         await queryRunner.commitTransaction();
 
         this.eventEmitter.emit('finance.invoice_rejected', {
@@ -1786,6 +2007,65 @@ export class FinanceService {
         created_by: userId ? Number(userId) : null,
       });
       await queryRunner.manager.save(AuditLog, verifyAudit);
+
+      // Canonical Outbox: finance.invoice.verified
+      const verifiedEvent: BusinessEvent<{
+        invoiceId: number;
+        invoiceNumber: string;
+        poId: number;
+        paymentTermId?: number | null;
+        termName?: string | null;
+        termType?: string | null;
+        totalAmount: number;
+        verifiedBy: number;
+        evidenceRef?: string | null;
+        notes?: string | null;
+        status: string;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'finance.invoice.verified',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Invoice',
+        aggregateId: invoice.id,
+        projectId: undefined,
+        actor: userId ? { userId: Number(userId) } : undefined,
+        routing: undefined,
+        notificationPolicy: undefined,
+        payload: {
+          invoiceId: Number(invoice.id),
+          invoiceNumber: invoice.invoiceNumber,
+          poId: Number(invoice.poId),
+          paymentTermId: lockedPaymentTerm?.id ? Number(lockedPaymentTerm.id) : (invoice.paymentTermId ? Number(invoice.paymentTermId) : null),
+          termName: lockedPaymentTerm?.termName || null,
+          termType: lockedPaymentTerm?.termType || null,
+          totalAmount: Number(invoice.totalAmount),
+          verifiedBy: Number(userId),
+          evidenceRef: dto.evidenceRef || null,
+          notes: dto.notes || null,
+          status: 'VERIFIED',
+        },
+      };
+
+      const verifiedOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: verifiedEvent.eventId,
+        event_name: verifiedEvent.eventName,
+        event_version: String(verifiedEvent.eventVersion),
+        aggregate_type: verifiedEvent.aggregateType,
+        aggregate_id: Number(verifiedEvent.aggregateId),
+        correlation_id: verifiedEvent.correlationId || null,
+        payload: {
+          occurredAt: verifiedEvent.occurredAt,
+          projectId: verifiedEvent.projectId,
+          actor: verifiedEvent.actor,
+          routing: verifiedEvent.routing,
+          notificationPolicy: verifiedEvent.notificationPolicy,
+          businessPayload: verifiedEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await queryRunner.manager.save(OutboxEvent, verifiedOutbox);
 
       await queryRunner.commitTransaction();
 

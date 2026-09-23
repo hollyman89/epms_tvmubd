@@ -17,8 +17,11 @@ import { WorkBreakdownStructure } from '../../entities/wbs.entity';
 import { Task } from '../../entities/task.entity';
 import { Project } from '../../entities/project.entity';
 import { Contract, LegalStatus } from '../../entities/contract.entity';
+import { randomUUID } from 'crypto';
 import { User } from '../../entities/user.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { BusinessEvent } from '../../shared/contracts/business-event.contract';
 import { ProjectCostEstimate } from '../../entities/project-cost-estimate.entity';
 import { CostItem } from '../../entities/cost-item.entity';
 import { ProjectInitialCondition } from '../../entities/project-initial-condition.entity';
@@ -1466,6 +1469,58 @@ export class ProjectService {
       });
       await manager.save(AuditLog, auditLog);
 
+      // 4. Transactional Outbox: Canonical BusinessEvent
+      const pmAssignedEvent: BusinessEvent<{
+        projectId: number;
+        projectCode: string;
+        contractId: number;
+        projectManagerId: number;
+        assignedBy: number;
+        status: string;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'project.pm.assigned',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Project',
+        aggregateId: savedProject.id,
+        projectId: Number(savedProject.id),
+        actor: actorUserId ? { userId: Number(actorUserId) } : undefined,
+        routing: {
+          userIds: [Number(projectManagerId)],
+          projectId: Number(savedProject.id),
+        },
+        notificationPolicy: undefined,
+        payload: {
+          projectId: Number(savedProject.id),
+          projectCode: savedProject.code,
+          contractId: contract!.id,
+          projectManagerId: Number(projectManagerId),
+          assignedBy: Number(actorUserId),
+          status: 'PLANNING',
+        },
+      };
+
+      const pmAssignedOutbox = manager.create(OutboxEvent, {
+        event_id: pmAssignedEvent.eventId,
+        event_name: pmAssignedEvent.eventName,
+        event_version: String(pmAssignedEvent.eventVersion),
+        aggregate_type: pmAssignedEvent.aggregateType,
+        aggregate_id: Number(pmAssignedEvent.aggregateId),
+        correlation_id: pmAssignedEvent.correlationId || null,
+        payload: {
+          occurredAt: pmAssignedEvent.occurredAt,
+          projectId: pmAssignedEvent.projectId,
+          actor: pmAssignedEvent.actor,
+          routing: pmAssignedEvent.routing,
+          notificationPolicy: pmAssignedEvent.notificationPolicy,
+          businessPayload: pmAssignedEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await manager.save(OutboxEvent, pmAssignedOutbox);
+
       return { project: savedProject, contract: contract! };
     });
 
@@ -2143,6 +2198,55 @@ export class ProjectService {
         created_by: Number(userId),
       });
       await manager.save(AuditLog, auditLog);
+
+      // Canonical Outbox: project.kickoff.executed
+      const kickoffEvent: BusinessEvent<{
+        projectId: number;
+        projectCode: string;
+        contractId: number | null;
+        managerId: number;
+        actualKickoffDate: string;
+        status: string;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'project.kickoff.executed',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Project',
+        aggregateId: savedProject.id,
+        projectId: Number(savedProject.id),
+        actor: userId ? { userId: Number(userId) } : undefined,
+        routing: undefined,
+        notificationPolicy: undefined,
+        payload: {
+          projectId: Number(savedProject.id),
+          projectCode: savedProject.code,
+          contractId: contract?.id || null,
+          managerId: Number(userId),
+          actualKickoffDate: actualKickoffDate,
+          status: 'IN_PROGRESS',
+        },
+      };
+
+      const kickoffOutbox = manager.create(OutboxEvent, {
+        event_id: kickoffEvent.eventId,
+        event_name: kickoffEvent.eventName,
+        event_version: String(kickoffEvent.eventVersion),
+        aggregate_type: kickoffEvent.aggregateType,
+        aggregate_id: Number(kickoffEvent.aggregateId),
+        correlation_id: kickoffEvent.correlationId || null,
+        payload: {
+          occurredAt: kickoffEvent.occurredAt,
+          projectId: kickoffEvent.projectId,
+          actor: kickoffEvent.actor,
+          routing: kickoffEvent.routing,
+          notificationPolicy: kickoffEvent.notificationPolicy,
+          businessPayload: kickoffEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await manager.save(OutboxEvent, kickoffOutbox);
 
       return {
         statusCode: 200,

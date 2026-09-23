@@ -25,7 +25,10 @@ import { WorkBreakdownStructure } from '../../entities/wbs.entity';
 import { WorkflowDefinition } from '../../entities/workflow-definition.entity';
 import { WorkflowInstance } from '../../entities/workflow-instance.entity';
 import { WorkflowTask } from '../../entities/workflow-task.entity';
+import { randomUUID } from 'crypto';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { BusinessEvent } from '../../shared/contracts/business-event.contract';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import {
   CostCategoryKey,
@@ -663,6 +666,57 @@ export class ProcurementPackageService {
       });
       await manager.save(AuditLog, audit);
 
+      // Canonical Outbox: procurement.package.submitted
+      const submitEvent: BusinessEvent<{
+        packageId: number;
+        packageNumber: string;
+        projectId: number;
+        totalEstimatedAmount: number;
+        submittedBy: number;
+        submittedAt: string;
+        status: string;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'procurement.package.submitted',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'ProcurementPackage',
+        aggregateId: saved.id,
+        projectId: Number(saved.projectId),
+        actor: userId ? { userId: Number(userId) } : undefined,
+        routing: undefined,
+        notificationPolicy: undefined,
+        payload: {
+          packageId: Number(saved.id),
+          packageNumber: saved.packageNumber,
+          projectId: Number(saved.projectId),
+          totalEstimatedAmount: Number(saved.totalEstimatedAmount),
+          submittedBy: Number(userId),
+          submittedAt: saved.submittedAt ? saved.submittedAt.toISOString() : new Date().toISOString(),
+          status: ProcurementPackageStatus.SUBMITTED,
+        },
+      };
+
+      const submitOutbox = manager.create(OutboxEvent, {
+        event_id: submitEvent.eventId,
+        event_name: submitEvent.eventName,
+        event_version: String(submitEvent.eventVersion),
+        aggregate_type: submitEvent.aggregateType,
+        aggregate_id: Number(submitEvent.aggregateId),
+        correlation_id: submitEvent.correlationId || null,
+        payload: {
+          occurredAt: submitEvent.occurredAt,
+          projectId: submitEvent.projectId,
+          actor: submitEvent.actor,
+          routing: submitEvent.routing,
+          notificationPolicy: submitEvent.notificationPolicy,
+          businessPayload: submitEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await manager.save(OutboxEvent, submitOutbox);
+
       return saved;
     }, transactionManager);
   }
@@ -721,6 +775,55 @@ export class ProcurementPackageService {
         created_by: reviewerId,
       });
       await manager.save(AuditLog, audit);
+
+      // Canonical Outbox: procurement.package.returned
+      const returnEvent: BusinessEvent<{
+        packageId: number;
+        packageNumber: string;
+        projectId: number;
+        reviewerId: number;
+        reason: string;
+        status: string;
+      }> = {
+        eventId: randomUUID(),
+        eventName: 'procurement.package.returned',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'ProcurementPackage',
+        aggregateId: saved.id,
+        projectId: Number(saved.projectId),
+        actor: reviewerId ? { userId: Number(reviewerId) } : undefined,
+        routing: undefined,
+        notificationPolicy: undefined,
+        payload: {
+          packageId: Number(saved.id),
+          packageNumber: saved.packageNumber,
+          projectId: Number(saved.projectId),
+          reviewerId: Number(reviewerId),
+          reason: saved.rejectionNotes,
+          status: ProcurementPackageStatus.RETURNED,
+        },
+      };
+
+      const returnOutbox = manager.create(OutboxEvent, {
+        event_id: returnEvent.eventId,
+        event_name: returnEvent.eventName,
+        event_version: String(returnEvent.eventVersion),
+        aggregate_type: returnEvent.aggregateType,
+        aggregate_id: Number(returnEvent.aggregateId),
+        correlation_id: returnEvent.correlationId || null,
+        payload: {
+          occurredAt: returnEvent.occurredAt,
+          projectId: returnEvent.projectId,
+          actor: returnEvent.actor,
+          routing: returnEvent.routing,
+          notificationPolicy: returnEvent.notificationPolicy,
+          businessPayload: returnEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await manager.save(OutboxEvent, returnOutbox);
 
       return saved;
     });
