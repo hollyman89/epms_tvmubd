@@ -83,7 +83,7 @@ import { isPmEditableWorkflowState, getCanonicalStatusColor } from './workflowUi
 import { ProjectService, ProcurementService } from '@/services';
 import WorkflowEngineService from '@/services/workflowEngine.service';
 import { useAuth } from '@/context/AuthContext';
-import { useSocket } from '@/context/SocketProvider';
+import { setupOperationalPlanSync } from '@/lib/workflowSync';
 import dayjs from 'dayjs';
 import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 
@@ -117,6 +117,7 @@ import {
   CostWbsAllocationSummary,
   mapBackendEstimateToCategories,
   buildSaveCostEstimatePayload,
+  validateCostEstimateItems,
 } from './PmCostEstimationModal';
 
 export type { CostItemDetail, CostCategoryEstimation, CostGroupKey, CostWbsAllocationSummary, CostAssignmentScope };
@@ -188,10 +189,32 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
   const wbsLeafMap = useMemo(() => {
     const map = new Map<string, { id: string; code: string; name: string }>();
     for (const leaf of wbsLeaves) {
-      map.set(leaf.id, leaf);
+      map.set(String(leaf.id), leaf);
+      if ((leaf as any).dbId) {
+        map.set(String((leaf as any).dbId), leaf);
+      }
     }
     return map;
   }, [wbsLeaves]);
+
+  const activeLeafWbsIds = useMemo(() => {
+    const set = new Set<string | number>();
+    for (const leaf of wbsLeaves) {
+      set.add(String(leaf.id));
+      set.add(Number(leaf.id));
+      if ((leaf as any).dbId) {
+        set.add(Number((leaf as any).dbId));
+        set.add(String((leaf as any).dbId));
+      }
+    }
+    return set;
+  }, [wbsLeaves]);
+
+  const costValidationResult = useMemo(() => {
+    return validateCostEstimateItems(costCategories, activeLeafWbsIds);
+  }, [costCategories, activeLeafWbsIds]);
+
+  const isCostMappingValid = costValidationResult.valid;
 
   const wbsSelectOptions = useMemo(() => buildWbsHierarchyOptions(wbsData), [wbsData]);
 
@@ -242,7 +265,6 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     workflow?: any;
   } | null>(null);
 
-  const { notificationSocket } = useSocket();
   const [operationalReadinessData, setOperationalReadinessData] = useState<any>(null);
   const [prApprovalState, setPrApprovalState] = useState<PrApprovalStateLike | null>(null);
 
@@ -267,11 +289,11 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     return `epms_schedule_draft_${canonicalProjectId}`;
   }, [canonicalProjectId]);
 
-  // Real-time synchronization via Socket.IO
+  // Real-time synchronization via Canonical Workflow Events & Reconnect Resync
   useEffect(() => {
-    if (!notificationSocket || !open || canonicalProjectId <= 0) return;
+    if (!open || canonicalProjectId <= 0) return;
 
-    const handleWorkflowUpdated = (payload?: any) => {
+    const refreshManagementReview = () => {
       ProjectService.getManagementReview(canonicalProjectId)
         .then((serverGate) => {
           if (serverGate && serverGate.status) {
@@ -279,20 +301,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
           }
         })
         .catch((err) => {
-          console.warn('[PmOperationalPlanModal] Refetch on socket event failed:', err);
+          console.warn('[PmOperationalPlanModal] Refetch on sync event failed:', err);
         });
     };
 
-    notificationSocket.on('workflow.task.completed', handleWorkflowUpdated);
-    notificationSocket.on('workflow.queue.updated', handleWorkflowUpdated);
-    notificationSocket.on('project.governance.updated', handleWorkflowUpdated);
-
-    return () => {
-      notificationSocket.off('workflow.task.completed', handleWorkflowUpdated);
-      notificationSocket.off('workflow.queue.updated', handleWorkflowUpdated);
-      notificationSocket.off('project.governance.updated', handleWorkflowUpdated);
-    };
-  }, [notificationSocket, open, canonicalProjectId]);
+    return setupOperationalPlanSync({
+      canonicalProjectId,
+      onRefresh: refreshManagementReview,
+    });
+  }, [open, canonicalProjectId]);
 
   // Load all drafts on open (Single-Pass Hydration)
   useEffect(() => {
@@ -674,7 +691,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
   }, [scheduleData]);
 
   // --- COMPLETENESS & SYNCHRONIZED READINESS STATUS ---
-  const isCostComplete = hasCostInput && totalPmEstimate > 0;
+  const isCostComplete = hasCostInput && totalPmEstimate > 0 && isCostMappingValid;
   const isConditionComplete = isInitialConditionComplete(initialCondition);
 
   // Synchronized Readiness: Requires both local completeness AND authoritative server persistence
@@ -727,30 +744,39 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
 
       // 1. Save Cost via Canonical API SSOT
       if (costAttempted) {
-        setIsCostSaving(true);
-        try {
-          const costPayload = buildSaveCostEstimatePayload(costCategories, pmNotes);
-          const res = await ProjectService.saveCostEstimate(canonicalProjectId, costPayload);
-          if (res && res.categories) {
-            const mapped = mapBackendEstimateToCategories(res.categories);
-            setCostCategories(mapped);
-            setPmNotes(res.pmNotes || '');
-          }
-          if (costStorageKey && typeof window !== 'undefined') {
-            localStorage.removeItem(costStorageKey);
-            localStorage.removeItem(`pm_cost_estimate_draft_${canonicalProjectId}`);
-          }
-          setIsCostServerSynced(true);
-          setIsLegacyCostDraftDetected(false);
-        } catch (err: any) {
+        // PRE-SAVE GUARD: Block save if any WBS item lacks active leaf WBS mapping
+        const costValidation = validateCostEstimateItems(costCategories, activeLeafWbsIds);
+        if (!costValidation.valid) {
           costSaveError = true;
           setIsCostServerSynced(false);
-          console.error('Failed to save Cost estimate to server:', err);
-          const errMsg = err.response?.data?.message || err.message || 'Gagal menyimpan Estimasi Biaya ke server';
-          const formattedErr = Array.isArray(errMsg) ? errMsg.join('. ') : errMsg;
-          message.error(`Cost / RAB: ${formattedErr}`);
-        } finally {
-          setIsCostSaving(false);
+          const errText = costValidation.error || 'Terdapat item WBS yang belum dipetakan ke WBS Deliverable aktif.';
+          message.error(`Cost / RAB: ${errText}`);
+        } else {
+          setIsCostSaving(true);
+          try {
+            const costPayload = buildSaveCostEstimatePayload(costCategories, pmNotes);
+            const res = await ProjectService.saveCostEstimate(canonicalProjectId, costPayload);
+            if (res && res.categories) {
+              const mapped = mapBackendEstimateToCategories(res.categories);
+              setCostCategories(mapped);
+              setPmNotes(res.pmNotes || '');
+            }
+            if (costStorageKey && typeof window !== 'undefined') {
+              localStorage.removeItem(costStorageKey);
+              localStorage.removeItem(`pm_cost_estimate_draft_${canonicalProjectId}`);
+            }
+            setIsCostServerSynced(true);
+            setIsLegacyCostDraftDetected(false);
+          } catch (err: any) {
+            costSaveError = true;
+            setIsCostServerSynced(false);
+            console.error('Failed to save Cost estimate to server:', err);
+            const errMsg = err.response?.data?.message || err.message || 'Gagal menyimpan Estimasi Biaya ke server';
+            const formattedErr = Array.isArray(errMsg) ? errMsg.join('. ') : errMsg;
+            message.error(`Cost / RAB: ${formattedErr}`);
+          } finally {
+            setIsCostSaving(false);
+          }
         }
       }
 
@@ -2412,14 +2438,20 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                   <Tag color="warning" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
                     ○ DRAFT LOKAL
                   </Tag>
+                ) : hasCostInput && !isCostMappingValid ? (
+                  <Tag color="error" style={{ margin: 0, fontSize: 9, fontWeight: 700 }}>
+                    ○ INCOMPLETE
+                  </Tag>
                 ) : (
                   <Tag color="default" style={{ margin: 0, fontSize: 9 }}>
                     ○ DRAFT
                   </Tag>
                 )}
               </div>
-              <div style={{ fontSize: 10.5, color: isCostReady ? '#059669' : isCostLocalDraft ? '#b45309' : '#64748b', marginTop: 3 }}>
-                {isCostComplete
+              <div style={{ fontSize: 10.5, color: isCostReady ? '#059669' : isCostLocalDraft ? '#b45309' : hasCostInput && !isCostMappingValid ? '#dc2626' : '#64748b', marginTop: 3 }}>
+                {hasCostInput && !isCostMappingValid
+                  ? 'Mapping WBS belum lengkap'
+                  : isCostComplete
                   ? `Rp ${(totalPmEstimate / 1000000).toFixed(1)}Jt (${estimatedMarginPercentage.toFixed(1)}%)`
                   : 'Belum ada rincian'}
               </div>
@@ -2839,6 +2871,16 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                         </div>
                       </div>
 
+                      {!isCostMappingValid && costValidationResult.error && (
+                        <Alert
+                          type="error"
+                          showIcon
+                          style={{ borderRadius: 6 }}
+                          message="Pemetaan WBS Belum Lengkap"
+                          description={costValidationResult.error}
+                        />
+                      )}
+
                       {/* 3 LOGICAL COST GROUPS */}
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                         {COST_GROUP_CONFIGS.map((grp) => {
@@ -2947,17 +2989,22 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                                           {cat.items.map((item, idx) => {
                                             const isExpanded = !!expandedCostItemIds[item.id];
-                                            const isMapped = !!item.wbsNodeId && wbsLeafMap.has(item.wbsNodeId);
-                                            const isOrphaned = !!item.wbsNodeId && !wbsLeafMap.has(item.wbsNodeId);
+                                            const effectiveScope: CostAssignmentScope =
+                                              item.assignmentScope || (item.wbsNodeId ? 'WBS' : 'UNASSIGNED');
+                                            const isWbsScope = effectiveScope === 'WBS';
+                                            const isMissingWbs = isWbsScope && (!item.wbsNodeId || String(item.wbsNodeId).trim() === '');
+                                            const isMapped = isWbsScope && !!item.wbsNodeId && wbsLeafMap.has(String(item.wbsNodeId));
+                                            const isOrphaned = isWbsScope && !!item.wbsNodeId && !wbsLeafMap.has(String(item.wbsNodeId));
+                                            const hasWbsError = isMissingWbs || isOrphaned;
 
                                             return (
                                               <div
                                                 key={item.id}
                                                 style={{
-                                                  background: '#f8fafc',
+                                                  background: hasWbsError ? '#fff8f8' : '#f8fafc',
                                                   padding: '5px 8px',
                                                   borderRadius: 6,
-                                                  border: `1px solid ${isOrphaned ? '#fca5a5' : isMapped ? '#cbd5e1' : '#e2e8f0'}`,
+                                                  border: `1px solid ${hasWbsError ? '#fca5a5' : isMapped ? '#cbd5e1' : '#e2e8f0'}`,
                                                   display: 'flex',
                                                   flexDirection: 'column',
                                                   gap: 4,
@@ -3019,10 +3066,11 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                       style={{
                                                         fontSize: 11,
                                                         padding: '0 4px',
-                                                        color: isOrphaned ? '#dc2626' : isMapped ? '#059669' : '#64748b',
+                                                        color: hasWbsError ? '#dc2626' : isMapped ? '#059669' : '#64748b',
+                                                        fontWeight: hasWbsError ? 700 : 400,
                                                       }}
                                                     >
-                                                      {isMapped ? 'WBS ✓' : isOrphaned ? 'WBS ⚠' : 'Detail'}
+                                                      {isMapped ? 'WBS ✓' : isOrphaned ? 'WBS ⚠' : isMissingWbs ? 'WBS ✕' : 'Detail'}
                                                     </Button>
                                                   </Col>
                                                   <Col span={1} style={{ textAlign: 'center' }}>
@@ -3105,7 +3153,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                         </Text>
                                                         <Select
                                                           size="small"
-                                                          value={item.assignmentScope || (item.wbsNodeId ? 'WBS' : 'UNASSIGNED')}
+                                                          value={effectiveScope}
                                                           onChange={(val: CostAssignmentScope) => handleItemChange(cat.categoryKey, item.id, 'assignmentScope', val)}
                                                           options={[
                                                             { label: 'Pekerjaan WBS', value: 'WBS' },
@@ -3116,10 +3164,11 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                         />
                                                       </Col>
                                                       <Col span={10}>
-                                                        {(item.assignmentScope === 'WBS' || (!item.assignmentScope && item.wbsNodeId)) ? (
+                                                        {isWbsScope ? (
                                                           <div>
                                                             <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
-                                                              Pilih Pekerjaan WBS:
+                                                              <span style={{ color: '#ef4444', fontWeight: 'bold' }}>* </span>
+                                                              Pilih Pekerjaan WBS <span style={{ color: '#ef4444', fontSize: 9 }}>(Wajib)</span>:
                                                             </Text>
                                                             {wbsData.length === 0 ? (
                                                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f8fafc', padding: '3px 8px', borderRadius: 4, border: '1px dashed #cbd5e1' }}>
@@ -3142,19 +3191,19 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                                 size="small"
                                                                 allowClear
                                                                 showSearch
-                                                                placeholder="Pilih pekerjaan WBS..."
-                                                                value={item.wbsNodeId}
+                                                                placeholder="Pilih pekerjaan WBS (Wajib)..."
+                                                                value={item.wbsNodeId ? String(item.wbsNodeId) : undefined}
                                                                 onChange={(val) => handleItemChange(cat.categoryKey, item.id, 'wbsNodeId', val)}
                                                                 filterOption={(input, option) =>
                                                                   ((option?.label as string) || '').toLowerCase().includes(input.toLowerCase())
                                                                 }
                                                                 options={wbsSelectOptions}
                                                                 style={{ width: '100%', fontSize: 11 }}
-                                                                status={isOrphaned ? 'warning' : undefined}
+                                                                status={hasWbsError ? 'error' : undefined}
                                                               />
                                                             )}
                                                           </div>
-                                                        ) : item.assignmentScope === 'PROJECT' ? (
+                                                        ) : effectiveScope === 'PROJECT' ? (
                                                           <div>
                                                             <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
                                                               Keterangan Scope:
@@ -3178,20 +3227,22 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                         <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
                                                           Status Pemetaan:
                                                         </Text>
-                                                        {item.assignmentScope === 'PROJECT' ? (
+                                                        {effectiveScope === 'PROJECT' ? (
                                                           <Tag color="purple" style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
                                                             ● Project-Level
                                                           </Tag>
-                                                        ) : (item.assignmentScope === 'WBS' || (!item.assignmentScope && item.wbsNodeId)) ? (
+                                                        ) : isWbsScope ? (
                                                           !item.wbsNodeId ? (
-                                                            <Tag color="warning" style={{ fontSize: 10, margin: 0 }}>⚠ Pilih WBS</Tag>
+                                                            <Tag color="error" style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
+                                                              ✕ Wajib Pilih WBS
+                                                            </Tag>
                                                           ) : isMapped ? (
                                                             <Tag color="success" style={{ fontSize: 10, margin: 0 }}>
-                                                              ✓ {wbsLeafMap.get(item.wbsNodeId)?.code} · {wbsLeafMap.get(item.wbsNodeId)?.name}
+                                                              ✓ {wbsLeafMap.get(String(item.wbsNodeId))?.code} · {wbsLeafMap.get(String(item.wbsNodeId))?.name}
                                                             </Tag>
                                                           ) : (
-                                                            <Tag color="error" style={{ fontSize: 10, margin: 0 }}>
-                                                              ⚠ WBS Dihapus
+                                                            <Tag color="error" style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
+                                                              ⚠ WBS Dihapus / Remap Diperlukan
                                                             </Tag>
                                                           )
                                                         ) : (
