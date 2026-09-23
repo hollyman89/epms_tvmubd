@@ -42,3 +42,13 @@ docs/scratch/
 node_modules/
 frontend/.next/
 backend/uploads/
+backend/dist/
+backend/coverage/
+backend/*.tsbuildinfo
+frontend/*.tsbuildinfo
+backend/logs/
+frontend/test-results/
+frontend/analyze/
+
+# Security: Audit scripts containing hardcoded credentials (never commit)
+backend/audit_procurement.js
