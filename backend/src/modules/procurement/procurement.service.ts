@@ -1646,11 +1646,6 @@ export class ProcurementService {
       // 14. Commit transaction
       await queryRunner.commitTransaction();
 
-      // 15. Emit event after successful commit
-      this.eventEmitter.emit('po.created', {
-        purchase_order_id: savedPo.id,
-        vendor_id: winningVendorId,
-      });
       this.logger.log(`Purchase Order ${savedPo.poNumber} (ID: ${savedPo.id}) created successfully with ${paymentTermsToSave.length} payment terms for Vendor #${winningVendorId}`);
 
       return {

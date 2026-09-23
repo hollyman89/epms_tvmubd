@@ -1894,16 +1894,6 @@ export class FinanceService {
 
         await queryRunner.commitTransaction();
 
-        this.eventEmitter.emit('finance.invoice_rejected', {
-          invoiceId: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
-          poId: invoice.poId,
-          paymentTermId: invoice.paymentTermId,
-          rejectedBy: userId,
-          notes: dto.notes,
-          timestamp: new Date().toISOString(),
-        });
-
         const matchingResult = await this.evaluateMatching(invoice, dto, queryRunner.manager);
         matchingResult.status = 'REJECTED';
 
@@ -2070,20 +2060,6 @@ export class FinanceService {
       await queryRunner.commitTransaction();
 
       matchingResult.status = 'VERIFIED';
-
-      this.eventEmitter.emit('finance.invoice_verified', {
-        invoiceId: invoice.id,
-        invoiceNumber: invoice.invoiceNumber,
-        poId: invoice.poId,
-        paymentTermId: lockedPaymentTerm?.id,
-        termName: lockedPaymentTerm?.termName,
-        termType: lockedPaymentTerm?.termType,
-        amount: invoice.totalAmount,
-        verifiedBy: userId,
-        evidenceRef: dto.evidenceRef,
-        notes: dto.notes,
-        timestamp: new Date().toISOString(),
-      });
 
       return {
         ...savedInvoice,
