@@ -5,11 +5,10 @@ import { ValidationPipe } from '@nestjs/common';
 import { TransformInterceptor } from './core/interceptors/transform.interceptor';
 import { RedisIoAdapter } from './modules/notification/redis-io.adapter';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { NestExpressApplication } from '@nestjs/platform-express';
-import { join } from 'path';
 import { WinstonModule, utilities } from 'nest-winston';
 import * as winston from 'winston';
+import * as cookieParser from 'cookie-parser';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -49,23 +48,8 @@ async function bootstrap() {
     console.warn('Redis IoAdapter connection failed, falling back to default in-memory adapter:', err);
   }
 
-  // Register Cookie Parser Middleware
-  try {
-    const cookieParser = require('cookie-parser');
-    app.use(cookieParser());
-  } catch (err) {
-    // Cookie parser fallback
-  }
-
-  // Melayani file statis dari folder uploads (untuk akses PDF)
-  const uploadsDir = fs.existsSync(join(__dirname, '..', 'uploads'))
-    ? join(__dirname, '..', 'uploads')
-    : join(process.cwd(), 'uploads');
-
-  app.useStaticAssets(uploadsDir, { prefix: '/uploads/' });
-  app.useStaticAssets(uploadsDir, { prefix: '/api/v1/uploads/' });
-  console.log('✅ [STATIC] Folder uploads siap dilayani di /uploads/');
-
+  // Register Cookie Parser Middleware before routes
+  app.use(cookieParser());
 
   // Set Global Prefix API v1
   app.setGlobalPrefix('api/v1');
@@ -80,8 +64,15 @@ async function bootstrap() {
   // Global Response Format
   app.useGlobalInterceptors(new TransformInterceptor());
 
-  // CORS for frontend
-  app.enableCors();
+  // CORS for frontend with credentials support for HttpOnly auth cookies
+  const allowedOrigins = process.env.FRONTEND_URL
+    ? [process.env.FRONTEND_URL, 'http://localhost:3000', 'http://127.0.0.1:3000']
+    : true;
+
+  app.enableCors({
+    origin: allowedOrigins,
+    credentials: true,
+  });
 
   // Swagger Configuration
   const config = new DocumentBuilder()
@@ -92,21 +83,6 @@ async function bootstrap() {
     .build();
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, document);
-
-  // RabbitMQ Consumer Configuration (Komentar agar tidak crash karena tidak ada RabbitMQ lokal)
-  /*
-  app.connectMicroservice<MicroserviceOptions>({
-    transport: Transport.RMQ,
-    options: {
-      urls: [process.env.RABBITMQ_URL || 'amqp://localhost:5672'],
-      queue: 'notification_queue',
-      queueOptions: {
-        durable: true
-      },
-    },
-  });
-  await app.startAllMicroservices();
-  */
 
   await app.listen(4000);
   console.log(`EPMS Backend running on port 4000`);
