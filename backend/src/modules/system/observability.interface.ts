@@ -10,7 +10,7 @@ export interface SliSloTarget {
   name: string;
   targetSlo: string;
   currentSli: string;
-  status: 'MEETS_SLO' | 'AT_RISK' | 'BREACHED' | 'NOT_MEASURED';
+  status: 'MEETS_SLO' | 'AT_RISK' | 'BREACHED' | 'NOT_MEASURED' | 'NOT_DEFINED';
 }
 
 export interface ErrorBudgetStatus {

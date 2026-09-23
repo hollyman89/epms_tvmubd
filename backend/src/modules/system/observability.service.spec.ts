@@ -207,12 +207,14 @@ describe('Phase H: ObservabilityService (Aligned Outbox Metrics & Operational Di
       const ageSli = result.data.sliSloReport.find(s => s.name === 'Oldest Pending Outbox Age');
       expect(ageSli).toBeDefined();
       expect(ageSli?.currentSli).toBe('2.50 s');
-      expect(ageSli?.status).toBe('AT_RISK'); // > 2.0s
+      expect(ageSli?.targetSlo).toBe('NOT_DEFINED');
+      expect(ageSli?.targetSlo).not.toBe('< 2.0 s');
+      expect(ageSli?.status).toBe('NOT_DEFINED');
 
       jest.spyOn(Date, 'now').mockRestore();
     });
 
-    it('9. empty pending queue returns null age, null created_at, and Queue Idle presentation', async () => {
+    it('9. empty pending queue returns null age, null created_at, and Queue Idle presentation with NOT_DEFINED target', async () => {
       outboxRepo.count.mockResolvedValue(0);
       outboxRepo.findOne.mockResolvedValue(null);
       outboxRepo.find.mockResolvedValue([]);
@@ -224,7 +226,8 @@ describe('Phase H: ObservabilityService (Aligned Outbox Metrics & Operational Di
 
       const ageSli = result.data.sliSloReport.find(s => s.name === 'Oldest Pending Outbox Age');
       expect(ageSli?.currentSli).toBe('Queue Idle');
-      expect(ageSli?.status).toBe('MEETS_SLO');
+      expect(ageSli?.targetSlo).toBe('NOT_DEFINED');
+      expect(ageSli?.status).toBe('NOT_DEFINED');
     });
   });
 

@@ -142,7 +142,6 @@ export class ObservabilityService {
 
     const lagSeconds = oldestPendingAgeMs !== null ? oldestPendingAgeMs / 1000 : null;
     const outboxLagSli = lagSeconds !== null ? `${lagSeconds.toFixed(2)} s` : 'Queue Idle';
-    const outboxLagStatus = lagSeconds === null || lagSeconds <= 2.0 ? 'MEETS_SLO' : (lagSeconds <= 10.0 ? 'AT_RISK' : 'BREACHED');
 
     // 1. SLI / SLO / SLA Metrics (Real evidence-based metrics only, unmeasured APM marked NOT_MEASURED)
     const sliSloReport: SliSloTarget[] = [
@@ -150,7 +149,7 @@ export class ObservabilityService {
       { name: 'API P95 Response Latency', targetSlo: '< 300 ms', currentSli: 'NOT_MEASURED', status: 'NOT_MEASURED' },
       { name: 'Approval Transaction Success Rate', targetSlo: '≥ 99.99%', currentSli: 'NOT_MEASURED', status: 'NOT_MEASURED' },
       { name: 'Outbox Event Delivery Success Rate', targetSlo: '≥ 99.99%', currentSli: 'NOT_MEASURED', status: 'NOT_MEASURED' },
-      { name: 'Oldest Pending Outbox Age', targetSlo: '< 2.0 s', currentSli: outboxLagSli, status: outboxLagStatus },
+      { name: 'Oldest Pending Outbox Age', targetSlo: 'NOT_DEFINED', currentSli: outboxLagSli, status: 'NOT_DEFINED' },
     ];
 
     // 2. Error Budget Tracking (Marked unmeasured without APM source, null for unmeasured numeric values)
