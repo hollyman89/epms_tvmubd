@@ -10,6 +10,21 @@ export class ProcurementEventListener {
     private readonly procurementPackageService: ProcurementPackageService,
   ) {}
 
+  @OnEvent('finance.payment_processed')
+  async handlePaymentProcessed(payload: { poId?: number }) {
+    if (payload?.poId) await this.closePackageForPo(Number(payload.poId));
+  }
+
+  @OnEvent('gr.created')
+  async handleGoodsReceived(payload: { po_id?: number }) {
+    if (payload?.po_id) await this.closePackageForPo(Number(payload.po_id));
+  }
+
+  private async closePackageForPo(poId: number) {
+    try { await this.procurementPackageService.closeCompletedPackageForPo(poId); }
+    catch (error) { this.logger.error(`Gagal mengevaluasi penutupan paket PO #${poId}: ${error.message}`); }
+  }
+
   @OnEvent('workflow.instance.completed')
   async handleWorkflowInstanceCompleted(payload: {
     instanceId: number;

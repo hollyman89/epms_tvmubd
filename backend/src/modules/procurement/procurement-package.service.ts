@@ -9,6 +9,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { Cron } from '@nestjs/schedule';
 import { Repository, DataSource, EntityManager, In } from 'typeorm';
 import {
   ProcurementPackage,
@@ -76,6 +77,65 @@ export class ProcurementPackageService {
     private readonly dataSource: DataSource,
   ) {}
 
+  private inTransaction<T>(work: (manager: EntityManager) => Promise<T>, manager?: EntityManager): Promise<T> {
+    // Refresh consumption after waiting for the cost-item lock.
+    return manager ? work(manager) : this.dataSource.transaction('READ COMMITTED', work);
+  }
+
+  private async lockDraftItems(items: { costItemId: number; requestedQty: number }[], manager: EntityManager) {
+    if (!items.length || new Set(items.map(i => Number(i.costItemId))).size !== items.length) {
+      throw new BadRequestException('Paket wajib memiliki item RAB yang unik dan tidak kosong.');
+    }
+    for (const item of items) {
+      if (!Number.isFinite(Number(item.requestedQty)) || Number(item.requestedQty) < 0.0001) {
+        throw new BadRequestException('Kuantitas item harus lebih besar dari nol.');
+      }
+    }
+    const ids = items.map(i => Number(i.costItemId)).sort((a, b) => a - b);
+    await manager.query('SELECT id FROM cost_items WHERE id IN (?) ORDER BY id FOR UPDATE', [ids]);
+  }
+
+  private async validateAvailableQuantity(costItem: CostItem, quantity: number, manager: EntityManager, packageId?: number) {
+    const consumption = await this.computeCostItemConsumption(costItem, manager, packageId);
+    if (quantity > consumption.availableQty) {
+      throw new BadRequestException(
+        `Alokasi kuota untuk item '${costItem.itemName}' terlampaui! Baseline: ${consumption.baselineQty} ${costItem.uom}, Terkomitmen: ${consumption.totalCommitted} ${costItem.uom}, Sisa Kuota: ${consumption.availableQty} ${costItem.uom}, Diajukan: ${quantity} ${costItem.uom}.`,
+      );
+    }
+  }
+
+  async getEligibleCostItems(projectId: number, userId: number, roles: string[]) {
+    const project = await this.projectRepo.findOne({ where: { id: projectId } });
+    if (!project) throw new NotFoundException('Proyek tidak ditemukan.');
+    this.validateProjectManagerOwnership(project, userId, roles);
+    const estimate = await this.costEstimateRepo.findOne({
+      where: { projectId, status: 'APPROVED' }, order: { version: 'DESC' },
+    });
+    if (!estimate || project.status !== 'IN_PROGRESS') return [];
+    const items = await this.costItemRepo.find({ where: { estimateId: estimate.id }, order: { id: 'ASC' } });
+    return Promise.all(items.filter(item => item.entryMode === 'ITEMIZED' &&
+      PROCUREMENT_ELIGIBLE_CATEGORIES.includes(item.categoryKey as CostCategoryKey)).map(async item => {
+      const consumption = await this.computeCostItemConsumption(item, this.dataSource.manager);
+      return {
+        id: Number(item.id), itemName: item.itemName, categoryKey: item.categoryKey,
+        quantity: Number(item.quantity), unitPrice: Number(item.unitPrice), subtotal: Number(item.subtotal), uom: item.uom,
+        assignmentScope: item.assignmentScope, wbsId: item.wbsId ? Number(item.wbsId) : null,
+        ...consumption,
+        availabilityStatus: consumption.availableQty > 0 ? 'AVAILABLE' : 'FULLY_ALLOCATED',
+        unavailableReason: consumption.availableQty > 0 ? null : 'Sudah dialokasikan sepenuhnya',
+      };
+    }));
+  }
+
+  async saveAndSubmit(userId: number, roles: string[], dto: CreatePackageDraftDto | UpdatePackageDraftDto, packageId?: number) {
+    return this.inTransaction(async manager => {
+      const pkg = packageId
+        ? await this.updateDraft(packageId, userId, roles, dto, manager)
+        : await this.createDraft(userId, roles, dto as CreatePackageDraftDto, manager);
+      return this.submitPackage(pkg.id, userId, roles, manager);
+    });
+  }
+
   // =========================================================================
   // 1. CREATE DRAFT
   // =========================================================================
@@ -84,12 +144,13 @@ export class ProcurementPackageService {
     userId: number,
     userRoles: string[] = [],
     dto: CreatePackageDraftDto,
+    transactionManager?: EntityManager,
   ): Promise<ProcurementPackage> {
     if (!dto.items || dto.items.length === 0) {
       throw new BadRequestException('Paket pengadaan wajib memiliki minimal 1 item.');
     }
 
-    return this.dataSource.transaction(async (manager) => {
+    return this.inTransaction(async (manager) => {
       // 1. Verify Project status and PM ownership
       const project = await manager.findOne(Project, {
         where: { id: dto.projectId },
@@ -118,6 +179,7 @@ export class ProcurementPackageService {
       }
 
       // 3. Validate CostItems ownership, baseline eligibility, and categories
+      await this.lockDraftItems(dto.items, manager);
       const costItemIds = dto.items.map((i) => Number(i.costItemId));
       const costItems = await manager.find(CostItem, {
         where: { id: In(costItemIds) },
@@ -164,6 +226,7 @@ export class ProcurementPackageService {
         }
 
         const requestedQty = Number(itemDto.requestedQty);
+        await this.validateAvailableQuantity(costItem, requestedQty, manager);
         if (isNaN(requestedQty) || requestedQty <= 0) {
           throw new BadRequestException(`Jumlah requestedQty untuk item #${costItem.id} harus lebih besar dari 0.`);
         }
@@ -229,7 +292,7 @@ export class ProcurementPackageService {
       await manager.save(AuditLog, audit);
 
       return savedPkg;
-    });
+    }, transactionManager);
   }
 
   // =========================================================================
@@ -324,8 +387,9 @@ export class ProcurementPackageService {
     userId: number,
     userRoles: string[] = [],
     dto: UpdatePackageDraftDto,
+    transactionManager?: EntityManager,
   ): Promise<ProcurementPackage> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.inTransaction(async (manager) => {
       const pkg = await manager.findOne(ProcurementPackage, {
         where: { id: packageId },
         relations: ['project', 'items'],
@@ -357,7 +421,9 @@ export class ProcurementPackageService {
       if (dto.description !== undefined) pkg.description = dto.description?.trim() || null;
       if (dto.requiredDate !== undefined) pkg.requiredDate = dto.requiredDate || null;
 
-      if (dto.items && dto.items.length > 0) {
+      const requestedItems = dto.items ?? pkg.items;
+      await this.lockDraftItems(requestedItems, manager);
+      if (dto.items) {
         // Resolve Current Authoritative Approved RAB
         const currentRab = await manager.findOne(ProjectCostEstimate, {
           where: { projectId: pkg.projectId, status: 'APPROVED' },
@@ -408,6 +474,7 @@ export class ProcurementPackageService {
           }
 
           const requestedQty = Number(itemDto.requestedQty);
+          await this.validateAvailableQuantity(costItem, requestedQty, manager, pkg.id);
           const unitPrice = Number(costItem.unitPrice || 0);
           const subtotal = Math.round(requestedQty * unitPrice * 100) / 100;
           totalEstimatedAmount += subtotal;
@@ -431,11 +498,17 @@ export class ProcurementPackageService {
 
         pkg.totalEstimatedAmount = Math.round(totalEstimatedAmount * 100) / 100;
         pkg.items = await manager.save(ProcurementPackageItem, newItems);
+      } else {
+        for (const item of pkg.items) {
+          const costItem = await manager.findOne(CostItem, { where: { id: item.costItemId } });
+          if (!costItem) throw new BadRequestException('Item RAB tidak ditemukan.');
+          await this.validateAvailableQuantity(costItem, Number(item.requestedQty), manager, pkg.id);
+        }
       }
 
       pkg.updatedBy = userId;
       return manager.save(ProcurementPackage, pkg);
-    });
+    }, transactionManager);
   }
 
   async deleteDraft(
@@ -484,8 +557,9 @@ export class ProcurementPackageService {
     packageId: number,
     userId: number,
     userRoles: string[] = [],
+    transactionManager?: EntityManager,
   ): Promise<ProcurementPackage> {
-    return this.dataSource.transaction(async (manager) => {
+    return this.inTransaction(async (manager) => {
       const pkg = await manager.findOne(ProcurementPackage, {
         where: { id: packageId },
         relations: ['project', 'items'],
@@ -536,6 +610,7 @@ export class ProcurementPackageService {
       await this.reconcileProjectPackages(pkg.projectId, manager);
 
       // 3. PESSIMISTIC LOCK: Lock CostItems in ascending order to prevent deadlocks
+      await this.lockDraftItems(pkg.items, manager);
       const costItemIds = pkg.items.map((i) => Number(i.costItemId)).sort((a, b) => a - b);
       const lockedCostItems = await manager
         .createQueryBuilder(CostItem, 'ci')
@@ -589,7 +664,7 @@ export class ProcurementPackageService {
       await manager.save(AuditLog, audit);
 
       return saved;
-    });
+    }, transactionManager);
   }
 
   // =========================================================================
@@ -1208,6 +1283,65 @@ export class ProcurementPackageService {
   // =========================================================================
   // 9. CONCURRENCY-SAFE PACKAGE NUMBER GENERATOR
   // =========================================================================
+
+  async closeCompletedPackage(packageId: number, userId?: number): Promise<boolean> {
+    return this.inTransaction(async manager => {
+      const pkg = await manager.findOne(ProcurementPackage, {
+        where: { id: packageId }, lock: { mode: 'pessimistic_write' },
+      });
+      if (!pkg || pkg.status !== ProcurementPackageStatus.PR_CREATED) return false;
+      // Serialize against payment/GR transactions before reading financial totals.
+      const orders = await manager.query(`SELECT po.id, po.status, po.total_amount
+        FROM purchase_orders po JOIN purchase_requests pr ON pr.id = po.pr_id
+        WHERE pr.package_id = ? AND pr.deleted_at IS NULL AND po.deleted_at IS NULL
+        ORDER BY po.id FOR UPDATE`, [packageId]);
+      if (!orders.length || orders.some(po => po.status !== 'COMPLETED')) return false;
+      for (const po of orders) {
+        const [totals] = await manager.query(`SELECT
+          COUNT(*) invoice_count,
+          COALESCE(SUM(i.payment_status <> 'PAID' OR i.match_status <> 'VERIFIED'), 0) unpaid_count,
+          COALESCE(SUM(i.total_amount), 0) invoiced_amount,
+          COALESCE(SUM((SELECT COALESCE(SUM(p.amount_paid), 0) FROM payments p
+            WHERE p.invoice_id = i.id AND p.deleted_at IS NULL)), 0) paid_amount
+          FROM invoices i WHERE i.po_id = ? AND i.deleted_at IS NULL
+            AND i.status <> 'CANCELLED' AND i.match_status <> 'REJECTED'`, [po.id]);
+        const [terms] = await manager.query(`SELECT COUNT(*) unpaid_terms FROM po_payment_terms
+          WHERE po_id = ? AND deleted_at IS NULL AND status <> 'PAID'`, [po.id]);
+        if (!Number(totals.invoice_count) || Number(totals.unpaid_count) || Number(terms.unpaid_terms) ||
+            Math.abs(Number(totals.invoiced_amount) - Number(po.total_amount)) > 0.001 ||
+            Number(totals.paid_amount) < Number(po.total_amount) - 0.001) return false;
+      }
+      pkg.status = ProcurementPackageStatus.CLOSED;
+      if (userId) pkg.updatedBy = userId;
+      await manager.save(ProcurementPackage, pkg);
+      await manager.save(AuditLog, manager.create(AuditLog, {
+        table_name: 'procurement_packages', record_id: pkg.id, action: 'CLOSE_PACKAGE',
+        old_value: { status: ProcurementPackageStatus.PR_CREATED },
+        new_value: { status: ProcurementPackageStatus.CLOSED, poIds: orders.map(po => Number(po.id)) },
+        created_by: userId || null,
+      }));
+      return true;
+    });
+  }
+
+  async closeCompletedPackageForPo(poId: number, userId?: number) {
+    const rows = await this.dataSource.manager.query(`SELECT pr.package_id FROM purchase_orders po
+      JOIN purchase_requests pr ON pr.id = po.pr_id
+      WHERE po.id = ? AND pr.package_id IS NOT NULL AND pr.deleted_at IS NULL AND po.deleted_at IS NULL`, [poId]);
+    for (const row of rows) await this.closeCompletedPackage(Number(row.package_id), userId);
+  }
+
+  // Recover missed events and close eligible historical packages; GET endpoints remain read-only.
+  @Cron('0 * * * * *')
+  async reconcileCompletedPackages(): Promise<void> {
+    const packages = await this.packageRepo.find({
+      where: { status: ProcurementPackageStatus.PR_CREATED }, select: ['id'],
+    });
+    for (const pkg of packages) {
+      try { await this.closeCompletedPackage(Number(pkg.id)); }
+      catch (error) { this.logger.error(`Gagal menutup paket #${pkg.id}: ${error.message}`); }
+    }
+  }
 
   private async generatePackageNumber(manager: EntityManager): Promise<string> {
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
