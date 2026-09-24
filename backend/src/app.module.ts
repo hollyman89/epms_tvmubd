@@ -19,6 +19,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { ContractModule } from './modules/contract/contract.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { SystemModule } from './modules/system/system.module';
+import { InboxModule } from './modules/inbox/inbox.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { SystemModule } from './modules/system/system.module';
     AnalyticsModule,
     AuditModule,
     ContractModule,
+    InboxModule,
   ],
   controllers: [],
   providers: [],

@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Badge, Popover, List, Typography, Button, Spin, Empty, theme, Tabs, Tag } from 'antd';
-import { BellOutlined, CheckOutlined } from '@ant-design/icons';
+import { BellOutlined, CheckOutlined, ArrowRightOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/axios';
+import { InboxService, TodoItem } from '@/services/inbox.service';
+import { resolveTodoActionTarget } from '@/lib/todoActionResolver';
+import { setupTodoSync } from '@/lib/todoSync';
+import { setupNotificationBellSync } from '@/lib/notificationSync';
+import { useSocket } from '@/context/SocketProvider';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/id';
-import { useSocket } from '@/context/SocketProvider';
-import { setupNotificationBellSync } from '@/lib/notificationSync';
 
 dayjs.extend(relativeTime);
 dayjs.locale('id');
@@ -29,29 +32,52 @@ interface Notification {
 export const NotificationBell: React.FC = () => {
   const { token } = useToken();
   const { notificationSocket } = useSocket();
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [unreadCount, setUnreadCount] = useState<number>(0);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [open, setOpen] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<string>('todo');
   const router = useRouter();
 
-  // Authentication token getter
+  const [open, setOpen] = useState<boolean>(false);
+  const [activeTab, setActiveTab] = useState<'todo' | 'notifications'>('todo');
+
+  // Authoritative State: To-Do
+  const [todos, setTodos] = useState<TodoItem[]>([]);
+  const [todoCount, setTodoCount] = useState<number>(0);
+  const [loadingTodos, setLoadingTodos] = useState<boolean>(false);
+
+  // Authoritative State: Notifications
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState<number>(0);
+  const [loadingNotifications, setLoadingNotifications] = useState<boolean>(false);
+
   const getAuthToken = useCallback(() => localStorage.getItem('access_token') || '', []);
 
-  const fetchUnreadCount = useCallback(async () => {
+  // Fetch summary counts (To-Do count and unread notification count)
+  const fetchSummaryCounts = useCallback(async () => {
     try {
-      const res = await apiClient.get('/notifications/count/unread');
-      const count = res.data?.data?.data?.count ?? res.data?.data?.count ?? 0;
-      setUnreadCount(count);
+      const summary = await InboxService.getSummary();
+      setTodoCount(summary.todoCount);
+      setUnreadNotificationCount(summary.unreadNotificationCount);
     } catch (error) {
-      console.error('Failed to fetch unread count', error);
+      console.error('Failed to fetch inbox summary counts', error);
     }
   }, []);
 
+  // Fetch actionable To-Dos
+  const fetchTodos = useCallback(async () => {
+    try {
+      setLoadingTodos(true);
+      const items = await InboxService.getTodos();
+      setTodos(items.slice(0, 10)); // Top 10 in popover
+      setTodoCount(items.length);
+    } catch (error) {
+      console.error('Failed to fetch todos', error);
+    } finally {
+      setLoadingTodos(false);
+    }
+  }, []);
+
+  // Fetch informational unread notifications
   const fetchNotifications = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoadingNotifications(true);
       const res = await apiClient.get('/notifications?page=1&limit=10&isRead=false');
       const rawData = res.data?.data?.data || res.data?.data || [];
       const dataArray = Array.isArray(rawData) ? rawData : [];
@@ -59,49 +85,62 @@ export const NotificationBell: React.FC = () => {
     } catch (error) {
       console.error('Failed to fetch notifications', error);
     } finally {
-      setLoading(false);
+      setLoadingNotifications(false);
     }
   }, []);
 
-  // Fetch unread count once on initial mount
+  // Initial mount: fetch counts
   useEffect(() => {
     if (getAuthToken()) {
-      fetchUnreadCount();
+      fetchSummaryCounts();
     }
-  }, [fetchUnreadCount, getAuthToken]);
+  }, [fetchSummaryCounts, getAuthToken]);
 
-  // Fetch notification list only when popover opens
+  // When popover opens: fetch lists
   useEffect(() => {
     if (open) {
+      fetchTodos();
       fetchNotifications();
     }
-  }, [open, fetchNotifications]);
+  }, [open, fetchTodos, fetchNotifications]);
 
+  // Realtime Sync for To-Do: Listen to canonical business events & reconnect
+  useEffect(() => {
+    return setupTodoSync({
+      onRefresh: () => {
+        fetchSummaryCounts();
+        if (open) {
+          fetchTodos();
+        }
+      },
+    });
+  }, [fetchSummaryCounts, fetchTodos, open]);
+
+  // Realtime Sync for Notifications: Listen to socket new_notification & reconnect
   useEffect(() => {
     return setupNotificationBellSync({
       socket: notificationSocket,
       onNewNotification: (notif: Notification) => {
-        // Deduplicate logic and UI update (Silent Bell Inbox update)
-        setNotifications(prev => {
-          if (prev.some(n => n.id === notif.id)) return prev;
+        setNotifications((prev) => {
+          if (prev.some((n) => n.id === notif.id)) return prev;
           return [notif, ...prev];
         });
-        setUnreadCount(prev => prev + 1);
+        setUnreadNotificationCount((prev) => prev + 1);
       },
       onReconnectResync: () => {
-        fetchUnreadCount();
+        fetchSummaryCounts();
         if (open) {
           fetchNotifications();
         }
       },
     });
-  }, [notificationSocket, fetchUnreadCount, fetchNotifications, open]);
+  }, [notificationSocket, fetchSummaryCounts, fetchNotifications, open]);
 
   const markAsRead = useCallback(async (id: number) => {
     try {
       await apiClient.patch(`/notifications/${id}/read`);
-      setNotifications(prev => prev.filter(n => n.id !== id));
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      setNotifications((prev) => prev.filter((n) => n.id !== id));
+      setUnreadNotificationCount((prev) => Math.max(0, prev - 1));
     } catch (error) {
       console.error('Failed to mark as read', error);
     }
@@ -111,307 +150,371 @@ export const NotificationBell: React.FC = () => {
     try {
       await apiClient.patch('/notifications/read-all');
       setNotifications([]);
-      setUnreadCount(0);
+      setUnreadNotificationCount(0);
     } catch (error) {
       console.error('Failed to mark all as read', error);
     }
   }, []);
 
-  const renderNotificationItem = useCallback((item: Notification) => {
-    const isWon = item.metaData?.action_type === 'MARKED_WON';
+  const renderCategoryTag = (category?: string) => {
+    if (!category) return null;
+    switch (String(category).toUpperCase()) {
+      case 'LEGAL':
+        return <Tag color="purple" style={{ marginRight: '4px', fontSize: '10px' }}>LEGAL</Tag>;
+      case 'PMO':
+        return <Tag color="cyan" style={{ marginRight: '4px', fontSize: '10px' }}>PMO</Tag>;
+      case 'SALES':
+        return <Tag color="green" style={{ marginRight: '4px', fontSize: '10px' }}>SALES</Tag>;
+      default:
+        return <Tag color="blue" style={{ marginRight: '4px', fontSize: '10px' }}>{String(category).toUpperCase()}</Tag>;
+    }
+  };
 
-    const isApprovalTask = (notif: Notification) => {
-      if (notif.metaData?.requires_approval !== true) return false;
-      const actionType = String(notif.metaData?.action_type || '').toUpperCase();
-      const excludedActions = [
-        'DELETED',
-        'UPDATED',
-        'PROPOSAL_UPLOADED',
-        'GRACE_PERIOD_ACTIVATED',
-        'NEW_ACTIVITY',
-        'MARKED_LOST',
-        'MARKED_WON',
-        'CREATED'
-      ];
-      if (actionType && excludedActions.includes(actionType)) {
-        return false;
-      }
-      const titleLower = String(notif.title || '').toLowerCase();
-      if (titleLower.includes('info sistem') || titleLower.includes('kekalahan') || titleLower.includes('tender baru')) {
-        return false;
-      }
-      const genuineApprovalActions = [
-        'GO_NOGO_SUBMITTED',
-        'GO_NOGO_RESUBMITTED',
-        'GO_NOGO_REQUESTED',
-        'DISCOUNT_APPROVAL_REQUESTED',
-        'APPROVAL_REQUESTED'
-      ];
-      if (actionType && genuineApprovalActions.includes(actionType)) {
-        return true;
-      }
-      if (notif.notificationType === 'TASK') {
-        return true;
-      }
-      if (titleLower.includes('approval') || titleLower.includes('persetujuan') || titleLower.includes('menunggu approve')) {
-        return true;
-      }
-      return false;
-    };
+  const renderPriorityBadge = (priority?: string) => {
+    if (!priority) return null;
+    switch (String(priority).toUpperCase()) {
+      case 'URGENT':
+        return <Tag color="error" style={{ marginRight: '4px', fontSize: '10px', fontWeight: 600 }}>URGENT</Tag>;
+      case 'HIGH':
+        return <Tag color="warning" style={{ marginRight: '4px', fontSize: '10px', fontWeight: 600 }}>HIGH</Tag>;
+      case 'NORMAL':
+        return <Tag color="processing" style={{ marginRight: '4px', fontSize: '10px' }}>NORMAL</Tag>;
+      default:
+        return null;
+    }
+  };
 
-    const requiresApproval = isApprovalTask(item);
-    
-    // Enterprise Metadata Extraction
-    const category = item.metaData?.category;
-    const priority = item.metaData?.priority;
-    const actionButtons: string[] = Array.isArray(item.metaData?.action_buttons)
-      ? item.metaData.action_buttons
-      : item.metaData?.action_buttons
-      ? [item.metaData.action_buttons]
-      : [];
-
-    const renderCategoryTag = () => {
-      if (!category) return null;
-      switch (String(category).toUpperCase()) {
-        case 'LEGAL':
-          return <Tag color="purple" style={{ marginRight: '4px', fontSize: '10px' }}>LEGAL</Tag>;
-        case 'PMO':
-          return <Tag color="cyan" style={{ marginRight: '4px', fontSize: '10px' }}>PMO</Tag>;
-        case 'SALES':
-          return <Tag color="green" style={{ marginRight: '4px', fontSize: '10px' }}>SALES</Tag>;
-        default:
-          return <Tag color="blue" style={{ marginRight: '4px', fontSize: '10px' }}>{String(category).toUpperCase()}</Tag>;
-      }
-    };
-
-    const renderPriorityBadge = () => {
-      if (!priority) return null;
-      switch (String(priority).toUpperCase()) {
-        case 'URGENT':
-          return <Tag color="error" style={{ marginRight: '4px', fontSize: '10px', fontWeight: 600 }}>URGENT</Tag>;
-        case 'HIGH':
-          return <Tag color="warning" style={{ marginRight: '4px', fontSize: '10px', fontWeight: 600 }}>HIGH</Tag>;
-        case 'NORMAL':
-          return <Tag color="processing" style={{ marginRight: '4px', fontSize: '10px' }}>NORMAL</Tag>;
-        default:
-          return null;
-      }
-    };
-
-    const getActionButtonLabel = (action: string) => {
-      switch (String(action).toUpperCase()) {
-        case 'VIEW_CONTRACT':
-          return 'Lihat Kontrak';
-        case 'REVIEW_REVISION':
-          return 'Review Revisi';
-        case 'PROJECT_BOARD':
-          return 'Lihat Project';
-        case 'REVIEW_CONTRACT':
-          return 'Review Kontrak';
-        default:
-          return action;
-      }
-    };
-
-    const renderSmartMessage = (rawMessage: string) => {
-      if (!rawMessage) return null;
-      if (/<[a-z][\s\S]*>/i.test(rawMessage)) {
-        return <span dangerouslySetInnerHTML={{ __html: rawMessage }} />;
-      }
-      const parts = rawMessage.split(/("[^"]+")/g);
-      return (
-        <span>
-          {parts.map((part, index) => {
-            if (part.startsWith('"') && part.endsWith('"')) {
-              return (
-                <strong key={index} style={{ fontWeight: 600, color: item.isRead ? '#334155' : '#0f172a' }}>
-                  {part}
-                </strong>
-              );
-            }
-            if (part.includes('Catatan:')) {
-              const subParts = part.split(/(Catatan:)/g);
-              return (
-                <span key={index}>
-                  {subParts.map((sub, sIdx) =>
-                    sub === 'Catatan:' ? (
-                      <strong key={sIdx} style={{ fontWeight: 600, color: item.isRead ? '#334155' : '#0f172a' }}>
-                        {sub}
-                      </strong>
-                    ) : (
-                      sub
-                    )
-                  )}
-                </span>
-              );
-            }
-            return <span key={index}>{part}</span>;
-          })}
-        </span>
-      );
-    };
-
-    const targetUrl = item.metaData?.lead_id ? `/sales/tenders/${item.metaData.lead_id}` : item.actionLink;
-
-    const content = (
-      <div style={{ flex: 1, width: '100%' }}>
-        {/* Row 1: Badges (Category, Priority, WON, Approval) */}
-        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', marginBottom: '6px' }}>
-          {renderCategoryTag()}
-          {renderPriorityBadge()}
-          {isWon && (
-            <Tag color="success" style={{ fontWeight: 'bold' }}>WON</Tag>
-          )}
-          {requiresApproval && (
-            <Tag color="warning" style={{ fontWeight: 600, color: '#d97706' }}>Menunggu Approval</Tag>
-          )}
-        </div>
-
-        {/* Row 2: Title (Distinct Heading) */}
-        {item.title && (
-          <div style={{ marginBottom: '4px' }}>
-            <Text strong style={{ fontSize: '13px', color: item.isRead ? '#475569' : '#0f172a', display: 'block' }}>
-              {item.title}
-            </Text>
-          </div>
-        )}
-
-        {/* Row 3: Message Body (Smart Formatted) */}
-        <div style={{ marginBottom: '8px' }}>
-          <Text style={{ display: 'block', fontSize: '12px', color: item.isRead ? '#64748b' : '#334155', lineHeight: '1.5' }}>
-            {renderSmartMessage(item.message)}
-          </Text>
-        </div>
-
-        {/* Row 4: Action Buttons + Timestamp */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', flexWrap: 'wrap', gap: '8px' }}>
-          <div>
-            {actionButtons.length > 0 && actionButtons.map((btnKey, idx) => (
-              <Button
-                key={idx}
-                type="primary"
-                size="small"
-                style={{ marginRight: '6px', fontSize: '11px', height: '24px', padding: '0 8px' }}
-                onClick={async (e) => {
-                  e.stopPropagation();
-                  if (!item.isRead) {
-                    await markAsRead(item.id);
-                  }
-                  if (targetUrl) {
-                    router.push(targetUrl);
-                    setOpen(false);
-                  }
-                }}
-              >
-                {getActionButtonLabel(btnKey)}
-              </Button>
-            ))}
-          </div>
-          <Text type="secondary" style={{ fontSize: '11px', color: '#94a3b8' }}>
-            {dayjs(item.createdAt).fromNow()}
-          </Text>
-        </div>
-      </div>
-    );
-
+  const renderSmartMessage = (rawMessage: string, isRead: boolean) => {
+    if (!rawMessage) return null;
+    if (/<[a-z][\s\S]*>/i.test(rawMessage)) {
+      return <span dangerouslySetInnerHTML={{ __html: rawMessage }} />;
+    }
+    const parts = rawMessage.split(/("[^"]+")/g);
     return (
-      <List.Item
-        key={item.id}
-        className="notification-item"
-        style={{
-          backgroundColor: item.isRead ? '#ffffff' : '#f8fafc',
-          cursor: 'pointer',
-          padding: '16px',
-          marginBottom: '8px',
-          borderRadius: '8px',
-          border: `1px solid ${item.isRead ? 'transparent' : '#e2e8f0'}`,
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          transition: 'all 0.2s ease',
-        }}
-        onClick={async () => {
-          if (!item.isRead) {
-            await markAsRead(item.id);
+      <span>
+        {parts.map((part, index) => {
+          if (part.startsWith('"') && part.endsWith('"')) {
+            return (
+              <strong key={index} style={{ fontWeight: 600, color: isRead ? '#334155' : '#0f172a' }}>
+                {part}
+              </strong>
+            );
           }
-          const targetUrl = item.metaData?.lead_id ? `/sales/tenders/${item.metaData.lead_id}` : item.actionLink;
-          if (targetUrl) {
+          if (part.includes('Catatan:')) {
+            const subParts = part.split(/(Catatan:)/g);
+            return (
+              <span key={index}>
+                {subParts.map((sub, sIdx) =>
+                  sub === 'Catatan:' ? (
+                    <strong key={sIdx} style={{ fontWeight: 600, color: isRead ? '#334155' : '#0f172a' }}>
+                      {sub}
+                    </strong>
+                  ) : (
+                    sub
+                  )
+                )}
+              </span>
+            );
+          }
+          return <span key={index}>{part}</span>;
+        })}
+      </span>
+    );
+  };
+
+  const renderTodoItem = useCallback(
+    (item: TodoItem) => {
+      const targetUrl = resolveTodoActionTarget(item);
+      const dueTime = item.dueAt ? new Date(item.dueAt).getTime() : null;
+      const isOverdue = dueTime !== null && dueTime < Date.now();
+
+      return (
+        <List.Item
+          key={item.todoId}
+          style={{
+            backgroundColor: '#ffffff',
+            cursor: 'pointer',
+            padding: '12px 16px',
+            marginBottom: '6px',
+            borderRadius: '8px',
+            border: '1px solid #e2e8f0',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            transition: 'all 0.2s ease',
+          }}
+          onClick={() => {
             router.push(targetUrl);
             setOpen(false);
-          }
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.backgroundColor = '#f1f5f9';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.backgroundColor = item.isRead ? '#ffffff' : '#f8fafc';
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#f8fafc';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = '#ffffff';
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
+              <Tag color="blue" style={{ fontSize: '10px' }}>{item.entityType}</Tag>
+              {item.assignedRole && <Tag color="gold" style={{ fontSize: '10px' }}>{item.assignedRole}</Tag>}
+              {item.dueAt && (
+                <Tag
+                  color={isOverdue ? 'error' : 'warning'}
+                  icon={<ClockCircleOutlined />}
+                  style={{ fontSize: '10px', fontWeight: 600 }}
+                >
+                  {isOverdue ? 'Terlambat' : dayjs(item.dueAt).fromNow()}
+                </Tag>
+              )}
+            </div>
+
+            <div style={{ marginBottom: '2px' }}>
+              <Text strong style={{ fontSize: '13px', color: '#0f172a', display: 'block' }}>
+                {item.title}
+              </Text>
+            </div>
+
+            {item.description && (
+              <div style={{ marginBottom: '4px' }}>
+                <Text style={{ fontSize: '11px', color: '#64748b', display: 'block', lineHeight: '1.4' }}>
+                  {item.description}
+                </Text>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+              <Text type="secondary" style={{ fontSize: '10px', color: '#94a3b8' }}>
+                {dayjs(item.createdAt).fromNow()}
+              </Text>
+              <Button
+                type="link"
+                size="small"
+                icon={<ArrowRightOutlined />}
+                style={{ fontSize: '11px', padding: 0, height: 'auto' }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  router.push(targetUrl);
+                  setOpen(false);
+                }}
+              >
+                Buka
+              </Button>
+            </div>
+          </div>
+        </List.Item>
+      );
+    },
+    [router]
+  );
+
+  const renderNotificationItem = useCallback(
+    (item: Notification) => {
+      const isWon = item.metaData?.action_type === 'MARKED_WON';
+      const category = item.metaData?.category;
+      const priority = item.metaData?.priority;
+      const targetUrl = item.metaData?.lead_id
+        ? `/sales/tenders/${item.metaData.lead_id}`
+        : item.actionLink;
+
+      return (
+        <List.Item
+          key={item.id}
+          style={{
+            backgroundColor: item.isRead ? '#ffffff' : '#f8fafc',
+            cursor: 'pointer',
+            padding: '12px 16px',
+            marginBottom: '6px',
+            borderRadius: '8px',
+            border: `1px solid ${item.isRead ? 'transparent' : '#e2e8f0'}`,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            transition: 'all 0.2s ease',
+          }}
+          onClick={async () => {
+            if (!item.isRead) {
+              await markAsRead(item.id);
+            }
+            if (targetUrl) {
+              router.push(targetUrl);
+              setOpen(false);
+            }
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = '#f1f5f9';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = item.isRead ? '#ffffff' : '#f8fafc';
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', marginBottom: '4px' }}>
+              {renderCategoryTag(category)}
+              {renderPriorityBadge(priority)}
+              {isWon && <Tag color="success" style={{ fontWeight: 'bold', fontSize: '10px' }}>WON</Tag>}
+            </div>
+
+            {item.title && (
+              <div style={{ marginBottom: '2px' }}>
+                <Text strong style={{ fontSize: '13px', color: item.isRead ? '#475569' : '#0f172a', display: 'block' }}>
+                  {item.title}
+                </Text>
+              </div>
+            )}
+
+            <div style={{ marginBottom: '4px' }}>
+              <Text style={{ display: 'block', fontSize: '12px', color: item.isRead ? '#64748b' : '#334155', lineHeight: '1.4' }}>
+                {renderSmartMessage(item.message, item.isRead)}
+              </Text>
+            </div>
+
+            <Text type="secondary" style={{ fontSize: '10px', color: '#94a3b8' }}>
+              {dayjs(item.createdAt).fromNow()}
+            </Text>
+          </div>
+
+          {!item.isRead && (
+            <div style={{ paddingLeft: '8px', paddingTop: '4px' }}>
+              <div
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: '#3b82f6',
+                  boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.15)',
+                }}
+              />
+            </div>
+          )}
+        </List.Item>
+      );
+    },
+    [markAsRead, router]
+  );
+
+  const totalAttentionCount = todoCount + unreadNotificationCount;
+
+  const popoverContent = useMemo(
+    () => (
+      <div
+        style={{
+          width: 'calc(100vw - 32px)',
+          maxWidth: 380,
+          maxHeight: 650,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
         }}
       >
-        {content}
-        
-        {!item.isRead && (
-          <div style={{ paddingLeft: '12px', paddingTop: '4px' }}>
-            <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#3b82f6', boxShadow: '0 0 0 4px rgba(59, 130, 246, 0.1)' }} />
+        <div style={{ padding: '16px 20px 0 20px', borderBottom: `1px solid #f1f5f9`, backgroundColor: '#ffffff' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <Text style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Inbox</Text>
+            {totalAttentionCount > 0 && (
+              <Badge
+                count={totalAttentionCount}
+                style={{ backgroundColor: '#10b981', color: '#fff', fontWeight: 600, boxShadow: '0 0 0 1px #fff' }}
+              />
+            )}
           </div>
-        )}
-      </List.Item>
-    );
-  }, [markAsRead, router]);
-
-  const todoNotifications = useMemo(() => notifications.filter(n => n.notificationType === 'TASK'), [notifications]);
-  const alertNotifications = useMemo(() => notifications.filter(n => n.notificationType === 'ALERT' || n.notificationType === 'SYSTEM'), [notifications]);
-
-  const currentNotifications = useMemo(() => activeTab === 'todo' ? todoNotifications : alertNotifications, [activeTab, todoNotifications, alertNotifications]);
-
-  const popoverContent = useMemo(() => (
-    <div style={{ width: 'calc(100vw - 32px)', maxWidth: 380, maxHeight: 650, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ padding: '16px 20px 0 20px', borderBottom: `1px solid #f1f5f9`, backgroundColor: '#ffffff' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-          <Text style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Inbox</Text>
-          {unreadCount > 0 && <Badge count={unreadCount} style={{ backgroundColor: '#10b981', color: '#fff', fontWeight: 600, boxShadow: '0 0 0 1px #fff' }} />}
-        </div>
-        <Tabs 
-          activeKey={activeTab} 
-          onChange={setActiveTab} 
-          size="small"
-          tabBarStyle={{ marginBottom: 0, borderBottom: 'none' }}
-          items={[
-            {
-              key: 'todo',
-              label: <span style={{ fontWeight: activeTab === 'todo' ? 600 : 400 }}>To-Do ({todoNotifications.length})</span>,
-            },
-            {
-              key: 'alert',
-              label: <span style={{ fontWeight: activeTab === 'alert' ? 600 : 400 }}>Notifications ({alertNotifications.length})</span>,
-            }
-          ]}
-        />
-      </div>
-      
-      <div style={{ flex: 1, overflowY: 'auto', minHeight: 200, padding: '12px 16px', backgroundColor: '#ffffff' }}>
-        {loading && currentNotifications.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /></div>
-        ) : currentNotifications.length === 0 ? (
-          <Empty description="Belum ada notifikasi baru" style={{ margin: '40px 0' }} />
-        ) : (
-          <List
-            itemLayout="horizontal"
-            dataSource={currentNotifications}
-            renderItem={renderNotificationItem}
-            split={false}
+          <Tabs
+            activeKey={activeTab}
+            onChange={(key) => setActiveTab(key as 'todo' | 'notifications')}
+            size="small"
+            tabBarStyle={{ marginBottom: 0, borderBottom: 'none' }}
+            items={[
+              {
+                key: 'todo',
+                label: (
+                  <span style={{ fontWeight: activeTab === 'todo' ? 600 : 400 }}>
+                    To-Do ({todoCount})
+                  </span>
+                ),
+              },
+              {
+                key: 'notifications',
+                label: (
+                  <span style={{ fontWeight: activeTab === 'notifications' ? 600 : 400 }}>
+                    Notifications ({unreadNotificationCount})
+                  </span>
+                ),
+              },
+            ]}
           />
-        )}
-      </div>
-
-      {currentNotifications.length > 0 && (
-        <div style={{ padding: '12px 20px', borderTop: `1px solid #f1f5f9`, textAlign: 'center', backgroundColor: '#ffffff' }}>
-          <Button type="text" onClick={markAllAsRead} icon={<CheckOutlined />} style={{ color: '#3b82f6', fontWeight: 500, width: '100%', borderRadius: '6px' }}>
-            Tandai semua telah dibaca
-          </Button>
         </div>
-      )}
-    </div>
-  ), [unreadCount, activeTab, todoNotifications, alertNotifications, currentNotifications, loading, renderNotificationItem, markAllAsRead]);
+
+        <div style={{ flex: 1, overflowY: 'auto', minHeight: 200, padding: '12px 16px', backgroundColor: '#ffffff' }}>
+          {activeTab === 'todo' ? (
+            loadingTodos && todos.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /></div>
+            ) : todos.length === 0 ? (
+              <Empty description="Tidak ada tugas tertunda" style={{ margin: '40px 0' }} />
+            ) : (
+              <List
+                itemLayout="horizontal"
+                dataSource={todos}
+                renderItem={renderTodoItem}
+                split={false}
+              />
+            )
+          ) : (
+            loadingNotifications && notifications.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /></div>
+            ) : notifications.length === 0 ? (
+              <Empty description="Belum ada notifikasi baru" style={{ margin: '40px 0' }} />
+            ) : (
+              <List
+                itemLayout="horizontal"
+                dataSource={notifications}
+                renderItem={renderNotificationItem}
+                split={false}
+              />
+            )
+          )}
+        </div>
+
+        <div style={{ padding: '10px 16px', borderTop: `1px solid #f1f5f9`, display: 'flex', justifyContent: 'space-between', backgroundColor: '#ffffff' }}>
+          <Button
+            type="link"
+            size="small"
+            onClick={() => {
+              router.push('/inbox');
+              setOpen(false);
+            }}
+            style={{ padding: 0 }}
+          >
+            Lihat Semua Inbox
+          </Button>
+
+          {activeTab === 'notifications' && notifications.length > 0 && (
+            <Button
+              type="text"
+              size="small"
+              onClick={markAllAsRead}
+              icon={<CheckOutlined />}
+              style={{ color: '#3b82f6', fontWeight: 500, padding: 0 }}
+            >
+              Tandai semua dibaca
+            </Button>
+          )}
+        </div>
+      </div>
+    ),
+    [
+      totalAttentionCount,
+      activeTab,
+      todoCount,
+      unreadNotificationCount,
+      loadingTodos,
+      todos,
+      renderTodoItem,
+      loadingNotifications,
+      notifications,
+      renderNotificationItem,
+      router,
+      markAllAsRead,
+    ]
+  );
 
   return (
     <Popover
@@ -420,10 +523,15 @@ export const NotificationBell: React.FC = () => {
       placement="bottomRight"
       open={open}
       onOpenChange={setOpen}
-      overlayInnerStyle={{ padding: 0, borderRadius: '12px', overflow: 'hidden', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)' }}
+      overlayInnerStyle={{
+        padding: 0,
+        borderRadius: '12px',
+        overflow: 'hidden',
+        boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+      }}
       arrow={false}
     >
-      <Badge count={unreadCount} overflowCount={99} size="small" style={{ cursor: 'pointer' }}>
+      <Badge count={totalAttentionCount} overflowCount={99} size="small" style={{ cursor: 'pointer' }}>
         <BellOutlined style={{ fontSize: '20px', cursor: 'pointer', color: token.colorTextSecondary }} />
       </Badge>
     </Popover>
