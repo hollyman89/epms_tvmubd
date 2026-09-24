@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Table,
   Card,
@@ -207,6 +208,11 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
   const { user } = useAuth();
   const queryClient = useQueryClient();
 
+  const searchParams = useSearchParams();
+  const taskIdParam = searchParams.get('taskId');
+  const projectIdParam = searchParams.get('projectId');
+  const autoOpenedTaskRef = useRef<string | null>(null);
+
   // Review Workspace Modal State
   const [selectedTask, setSelectedTask] = useState<EnrichedGovernanceTask | null>(null);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState<boolean>(false);
@@ -370,6 +376,26 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
     setManagementReviewData(null);
     setWorkflowTransitions([]);
   };
+
+  // Deep-link support: auto open review modal if taskId is present
+  useEffect(() => {
+    if (!taskIdParam || loading) return;
+    if (autoOpenedTaskRef.current === taskIdParam) return;
+
+    const matchingTask = tasks.find((t) => {
+      const matchTaskId = String(t.id) === String(taskIdParam);
+      if (!matchTaskId) return false;
+      if (projectIdParam && String(t.projectId) !== String(projectIdParam)) {
+        return false;
+      }
+      return true;
+    });
+
+    if (matchingTask) {
+      autoOpenedTaskRef.current = taskIdParam;
+      handleOpenReview(matchingTask);
+    }
+  }, [taskIdParam, projectIdParam, tasks, loading]);
 
   // ── 3. APPROVE Action ──────────────────────────────────────────────────────
   const handleApprove = async () => {

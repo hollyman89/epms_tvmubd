@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Table,
@@ -94,8 +95,15 @@ export const ProcurementPage: React.FC = () => {
     userRoles.includes('PURCHASING') ||
     userRoles.includes('ADMIN');
 
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  const prIdParam = searchParams.get('prId');
+  const autoOpenedPrRef = useRef<string | null>(null);
+
   // Workstation Tab
-  const [activeTabKey, setActiveTabKey] = useState<string>('packages');
+  const [activeTabKey, setActiveTabKey] = useState<string>(
+    tabParam === 'pr' || prIdParam ? 'pr' : 'packages'
+  );
 
   // Package Intake Filters
   const [statusFilter, setStatusFilter] = useState<string>('SUBMITTED');
@@ -210,6 +218,51 @@ export const ProcurementPage: React.FC = () => {
   const prs = useMemo(() => procurementData?.prs || [], [procurementData]);
   const rfqs = useMemo(() => procurementData?.rfqs || [], [procurementData]);
   const pos = useMemo(() => procurementData?.pos || [], [procurementData]);
+
+  // Deep-link support: Auto-select 'pr' tab and open PrApprovalWorkflow for prId
+  useEffect(() => {
+    if (tabParam === 'pr' || prIdParam) {
+      setActiveTabKey('pr');
+    }
+  }, [tabParam, prIdParam]);
+
+  useEffect(() => {
+    if (!prIdParam) return;
+    if (autoOpenedPrRef.current === prIdParam) return;
+
+    const prIdNum = Number(prIdParam);
+    if (!Number.isFinite(prIdNum) || prIdNum <= 0) return;
+
+    // Check if present in prs list
+    const foundInList = prs.find((p: any) => Number(p.id) === prIdNum);
+    if (foundInList) {
+      autoOpenedPrRef.current = prIdParam;
+      setSelectedPrForApproval(foundInList);
+      setIsPrApprovalModalOpen(true);
+      return;
+    }
+
+    // If prs list is still loading, wait for it unless loading completed
+    if (loadingPrPo) return;
+
+    // Otherwise, fetch authoritative PR by ID directly
+    let isCancelled = false;
+    ProcurementService.getPurchaseRequestById(prIdNum)
+      .then((fetchedPr) => {
+        if (!isCancelled && fetchedPr && (fetchedPr.id || (fetchedPr as any).prId)) {
+          autoOpenedPrRef.current = prIdParam;
+          setSelectedPrForApproval(fetchedPr);
+          setIsPrApprovalModalOpen(true);
+        }
+      })
+      .catch((err) => {
+        console.warn(`Failed to load PR #${prIdNum} for deep link:`, err);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [prIdParam, prs, loadingPrPo]);
 
   const rfqMapByPrId = useMemo(() => {
     const map: Record<string, RfqRecord> = {};

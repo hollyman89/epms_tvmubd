@@ -10,6 +10,20 @@ import { TodoReadModelDto, InboxSummaryDto } from './inbox.dto';
 const LEGAL_REVIEW_ROLES = ['LEGAL', 'SUPER_ADMIN', 'ADMIN', 'DIRECTOR'];
 const TENDER_GO_NOGO_ROLES = ['DIRECTOR', 'GENERAL_MANAGER', 'SUPER_ADMIN'];
 
+export const GOVERNANCE_MANAGEMENT_REVIEW_NODES = [
+  'node_hops_review',
+  'node_procurement_review',
+  'node_finance_review',
+  'node_director_approval',
+];
+
+export const PM_REVISION_NODES = [
+  'node_pm_revision_hops',
+  'node_pm_revision_procurement',
+  'node_pm_revision_finance',
+  'node_pm_revision_director',
+];
+
 @Injectable()
 export class InboxService {
   private readonly logger = new Logger(InboxService.name);
@@ -39,22 +53,47 @@ export class InboxService {
         const entityId = Number(task.workflowInstance?.entityId || 0);
 
         let actionType = task.taskKey || 'WORKFLOW_TASK';
-        let actionTarget = '/inbox';
+        let actionTarget: string | null = null;
         let title = `Tugas Alur Kerja: ${task.taskKey || task.id}`;
         let projectId: number | undefined;
 
         if (entityType === 'PURCHASE_REQUEST') {
           actionType = 'PURCHASE_REQUEST_APPROVAL';
-          actionTarget = '/procurement';
+          actionTarget = entityId > 0 ? `/procurement?tab=pr&prId=${entityId}` : null;
           title = `Review & Persetujuan Purchase Request #${entityId}`;
           if (task.workflowInstance?.context?.projectId) {
             projectId = Number(task.workflowInstance.context.projectId);
           }
         } else if (entityType === 'PROJECT') {
-          actionType = 'MANAGEMENT_REVIEW';
-          actionTarget = '/project-delivery';
-          title = `Review Rencana Operasional Proyek #${entityId}`;
-          projectId = entityId;
+          const resolvedProjectId =
+            entityId > 0
+              ? entityId
+              : Number(task.workflowInstance?.context?.projectId || 0) || undefined;
+          projectId = resolvedProjectId;
+
+          if (task.nodeId && PM_REVISION_NODES.includes(task.nodeId)) {
+            actionType = 'PM_REVISION';
+            actionTarget = resolvedProjectId
+              ? `/project-delivery?projectId=${resolvedProjectId}&action=operational-plan`
+              : null;
+            title = `Revisi Rencana Operasional Proyek #${entityId}`;
+          } else if (task.nodeId && GOVERNANCE_MANAGEMENT_REVIEW_NODES.includes(task.nodeId)) {
+            actionType = 'MANAGEMENT_REVIEW';
+            actionTarget =
+              resolvedProjectId && task.id
+                ? `/governance/tasks?taskId=${task.id}&projectId=${resolvedProjectId}`
+                : null;
+            title = `Review Rencana Operasional Proyek #${entityId}`;
+          } else {
+            // Unmapped project task node: explicit unresolved state
+            actionType = task.taskKey || 'WORKFLOW_TASK';
+            actionTarget = null;
+            title = `Tugas Proyek: ${task.taskKey || task.id}`;
+          }
+        } else {
+          // Generic unmapped workflow task: explicit unresolved state (no /inbox fallback)
+          actionType = task.taskKey || 'WORKFLOW_TASK';
+          actionTarget = null;
         }
 
         todos.push({
@@ -137,7 +176,8 @@ export class InboxService {
             entityType: 'TENDER',
             entityId: Number(tender.id),
             actionType: 'GO_NOGO_APPROVAL',
-            actionTarget: `/sales/tenders/${tender.id}`,
+            // TARGET_REQUIRES_ACTION_UI: sales/tenders/[id] lacks actionable Go/No-Go decision UI
+            actionTarget: null,
             title: `Persetujuan GO / NO GO: ${tender.title || `Tender #${tender.id}`}`,
             description: (tender as any).notes || undefined,
             status: 'WAITING_GO_NO_GO',

@@ -241,6 +241,7 @@ export const NotificationBell: React.FC = () => {
   const renderTodoItem = useCallback(
     (item: TodoItem) => {
       const targetUrl = resolveTodoActionTarget(item);
+      const isActionAvailable = Boolean(targetUrl);
       const dueTime = item.dueAt ? new Date(item.dueAt).getTime() : null;
       const isOverdue = dueTime !== null && dueTime < Date.now();
 
@@ -249,7 +250,7 @@ export const NotificationBell: React.FC = () => {
           key={item.todoId}
           style={{
             backgroundColor: '#ffffff',
-            cursor: 'pointer',
+            cursor: isActionAvailable ? 'pointer' : 'default',
             padding: '12px 16px',
             marginBottom: '6px',
             borderRadius: '8px',
@@ -260,11 +261,15 @@ export const NotificationBell: React.FC = () => {
             transition: 'all 0.2s ease',
           }}
           onClick={() => {
-            router.push(targetUrl);
-            setOpen(false);
+            if (targetUrl) {
+              router.push(targetUrl);
+              setOpen(false);
+            }
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = '#f8fafc';
+            if (isActionAvailable) {
+              e.currentTarget.style.backgroundColor = '#f8fafc';
+            }
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.backgroundColor = '#ffffff';
@@ -306,15 +311,18 @@ export const NotificationBell: React.FC = () => {
               <Button
                 type="link"
                 size="small"
-                icon={<ArrowRightOutlined />}
+                disabled={!isActionAvailable}
+                icon={isActionAvailable ? <ArrowRightOutlined /> : undefined}
                 style={{ fontSize: '11px', padding: 0, height: 'auto' }}
                 onClick={(e) => {
                   e.stopPropagation();
-                  router.push(targetUrl);
-                  setOpen(false);
+                  if (targetUrl) {
+                    router.push(targetUrl);
+                    setOpen(false);
+                  }
                 }}
               >
-                Buka
+                {isActionAvailable ? 'Buka' : 'Aksi Belum Tersedia'}
               </Button>
             </div>
           </div>

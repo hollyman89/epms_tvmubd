@@ -11,7 +11,7 @@ export interface TodoItem {
   entityId: number;
   projectId?: number;
   actionType: string;
-  actionTarget: string;
+  actionTarget: string | null;
   title: string;
   description?: string;
   status: string;

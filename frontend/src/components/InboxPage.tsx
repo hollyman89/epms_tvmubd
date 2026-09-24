@@ -314,6 +314,7 @@ export const InboxPage: React.FC = () => {
                 dataSource={todos}
                 renderItem={(item) => {
                   const targetUrl = resolveTodoActionTarget(item);
+                  const isActionAvailable = Boolean(targetUrl);
 
                   return (
                     <List.Item
@@ -323,9 +324,12 @@ export const InboxPage: React.FC = () => {
                           key="open"
                           type="primary"
                           icon={<ArrowRightOutlined />}
-                          onClick={() => router.push(targetUrl)}
+                          disabled={!isActionAvailable}
+                          onClick={() => {
+                            if (targetUrl) router.push(targetUrl);
+                          }}
                         >
-                          Buka
+                          {isActionAvailable ? 'Buka' : 'Aksi Belum Tersedia'}
                         </Button>,
                       ]}
                       style={{

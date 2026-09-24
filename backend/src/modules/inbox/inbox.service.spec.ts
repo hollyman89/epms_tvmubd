@@ -62,6 +62,7 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
     it('should map directly assigned pending workflow task to TodoReadModel', async () => {
       const pendingTask: Partial<WorkflowTask> = {
         id: 101,
+        nodeId: 'node_hops_review',
         taskKey: 'HOPS_REVIEW',
         status: WorkflowTaskStatus.PENDING,
         assigneeUserId: 42,
@@ -93,7 +94,7 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
         entityId: 20,
         projectId: 20,
         actionType: 'MANAGEMENT_REVIEW',
-        actionTarget: '/project-delivery',
+        actionTarget: '/governance/tasks?taskId=101&projectId=20',
         title: 'Review Rencana Operasional Proyek #20',
         description: undefined,
         status: 'PENDING',
@@ -128,7 +129,7 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       expect(todos).toHaveLength(1);
       expect(todos[0].entityType).toBe('PURCHASE_REQUEST');
       expect(todos[0].actionType).toBe('PURCHASE_REQUEST_APPROVAL');
-      expect(todos[0].actionTarget).toBe('/procurement');
+      expect(todos[0].actionTarget).toBe('/procurement?tab=pr&prId=15');
       expect(todos[0].projectId).toBe(20);
     });
   });
@@ -159,6 +160,7 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
     it('should include returned workflow task re-assigned as PENDING to revision actor', async () => {
       const revisionTask: Partial<WorkflowTask> = {
         id: 303,
+        nodeId: 'node_pm_revision_hops',
         taskKey: 'node_pm_revision_hops',
         status: WorkflowTaskStatus.PENDING,
         assigneeUserId: 15,
@@ -179,8 +181,9 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       expect(todos).toHaveLength(1);
       expect(todos[0].taskId).toBe(303);
       expect(todos[0].assignedUserId).toBe(15);
+      expect(todos[0].actionType).toBe('PM_REVISION');
       expect(todos[0].description).toBe('Mohon perbaiki anggaran WBS item 3');
-      expect(todos[0].actionTarget).toBe('/project-delivery');
+      expect(todos[0].actionTarget).toBe('/project-delivery?projectId=20&action=operational-plan');
     });
   });
 
@@ -246,7 +249,7 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       const tenderTodo = todos.find((t) => t.todoId === 'tender-88');
       expect(tenderTodo).toBeDefined();
       expect(tenderTodo?.actionType).toBe('GO_NOGO_APPROVAL');
-      expect(tenderTodo?.actionTarget).toBe('/sales/tenders/88');
+      expect(tenderTodo?.actionTarget).toBeNull();
     });
 
     it('should NOT query pending tenders if user does NOT have director/gm/super_admin roles', async () => {
@@ -324,6 +327,74 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       // 4. NO_DUE_NEW (id 1)
       // 5. NO_DUE_OLD (id 2)
       expect(todos.map((t) => t.taskId)).toEqual([5, 4, 3, 1, 2]);
+    });
+  });
+
+  describe('9. Unknown/unmapped workflow task returns actionTarget: null (no /inbox fallback)', () => {
+    it('should set actionTarget to null for unknown entityType or unmapped node', async () => {
+      const genericTask: Partial<WorkflowTask> = {
+        id: 777,
+        taskKey: 'UNKNOWN_CUSTOM_STEP',
+        status: WorkflowTaskStatus.PENDING,
+        createdAt: new Date('2026-09-24T08:00:00Z'),
+        workflowInstance: {
+          id: 999,
+          entityType: 'HR_LEAVE_REQUEST',
+          entityId: 123,
+        } as any,
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([genericTask]);
+
+      const todos = await service.getTodos(1, ['USER']);
+
+      expect(todos).toHaveLength(1);
+      expect(todos[0].actionType).toBe('UNKNOWN_CUSTOM_STEP');
+      expect(todos[0].actionTarget).toBeNull();
+    });
+  });
+
+  describe('10. Missing required identity cannot construct actionTarget (yields null)', () => {
+    it('returns null actionTarget when PR has missing or 0 entityId', async () => {
+      const invalidPrTask: Partial<WorkflowTask> = {
+        id: 888,
+        taskKey: 'PR_APPROVAL',
+        status: WorkflowTaskStatus.PENDING,
+        workflowInstance: {
+          id: 111,
+          entityType: 'PURCHASE_REQUEST',
+          entityId: 0,
+        } as any,
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([invalidPrTask]);
+
+      const todos = await service.getTodos(1, ['PROCUREMENT']);
+
+      expect(todos).toHaveLength(1);
+      expect(todos[0].actionTarget).toBeNull();
+    });
+
+    it('returns null actionTarget when project task lacks projectId', async () => {
+      const invalidProjectTask: Partial<WorkflowTask> = {
+        id: 889,
+        nodeId: 'node_hops_review',
+        taskKey: 'HOPS_REVIEW',
+        status: WorkflowTaskStatus.PENDING,
+        workflowInstance: {
+          id: 112,
+          entityType: 'PROJECT',
+          entityId: 0,
+          context: {},
+        } as any,
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([invalidProjectTask]);
+
+      const todos = await service.getTodos(1, ['HEAD_OF_OPERATIONS']);
+
+      expect(todos).toHaveLength(1);
+      expect(todos[0].actionTarget).toBeNull();
     });
   });
 });

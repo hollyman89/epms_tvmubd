@@ -1,39 +1,26 @@
 export interface TodoActionContext {
-  entityType?: string;
-  entityId?: number | string;
-  actionType?: string;
-  projectId?: number | string;
-  actionTarget?: string;
+  actionTarget?: string | null;
+  [key: string]: any;
 }
 
 /**
- * Resolves the canonical route target for an actionable To-Do item.
- * Centralized mapping foundation for N1.
+ * Validates and normalizes the backend-authoritative actionTarget.
+ * Backend Inbox domain is the SSOT for todo.actionTarget.
+ * Returns safe relative URL if valid, or null if unresolved / unavailable.
+ * Strictly rejects artificial '/inbox' fallback or non-relative paths.
  */
-export function resolveTodoActionTarget(item: TodoActionContext): string {
-  // If backend provided an authoritative relative target, use it
-  if (item.actionTarget && item.actionTarget.startsWith('/')) {
-    return item.actionTarget;
+export function resolveTodoActionTarget(item: TodoActionContext | null | undefined): string | null {
+  if (!item) return null;
+  const target = item.actionTarget;
+  if (!target || typeof target !== 'string') {
+    return null;
   }
 
-  const entityType = String(item.entityType || '').toUpperCase();
-  const actionType = String(item.actionType || '').toUpperCase();
-
-  if (entityType === 'CONTRACT' || actionType === 'LEGAL_REVIEW') {
-    return item.entityId ? `/legal/review?contractId=${item.entityId}` : '/legal/review';
+  const trimmed = target.trim();
+  // Valid relative path, rejecting artificial '/inbox' fallback
+  if (trimmed.startsWith('/') && trimmed !== '/inbox') {
+    return trimmed;
   }
 
-  if (entityType === 'TENDER' || actionType === 'GO_NOGO_APPROVAL') {
-    return item.entityId ? `/sales/tenders/${item.entityId}` : '/sales';
-  }
-
-  if (entityType === 'PROJECT' || actionType === 'MANAGEMENT_REVIEW') {
-    return '/project-delivery';
-  }
-
-  if (entityType === 'PURCHASE_REQUEST' || actionType === 'PURCHASE_REQUEST_APPROVAL') {
-    return '/procurement';
-  }
-
-  return '/inbox';
+  return null;
 }

@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Card,
   Tabs,
@@ -101,6 +102,11 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     const roles = (user?.roles || []).map((r: any) => String(r.name || r).toUpperCase());
     return roles.includes('DIRECTOR') || roles.includes('GENERAL_MANAGER') || roles.includes('HEAD_OF_OPERATIONS');
   }, [user]);
+
+  const searchParams = useSearchParams();
+  const projectIdParam = searchParams.get('projectId');
+  const actionParam = searchParams.get('action');
+  const autoOpenedPlanRef = useRef<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<string>('1');
   const [loading, setLoading] = useState<boolean>(true);
@@ -727,6 +733,52 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       setReadinessLoading(false);
     }
   };
+
+  // Deep-link support: auto open PM Operational Plan modal if action=operational-plan
+  useEffect(() => {
+    if (actionParam !== 'operational-plan' || !projectIdParam || loading) return;
+    if (autoOpenedPlanRef.current === projectIdParam) return;
+
+    const pidNum = Number(projectIdParam);
+    if (!Number.isFinite(pidNum) || pidNum <= 0) return;
+
+    const allCharters = [...pendingKickoff, ...activeProjects];
+    const matchingCharter = allCharters.find(
+      (c) => Number(c.projectId) === pidNum || Number(c.id) === pidNum
+    );
+
+    if (matchingCharter) {
+      autoOpenedPlanRef.current = projectIdParam;
+      handleOpenOperationalPlan(matchingCharter);
+      return;
+    }
+
+    // If not found in current board lists, fetch readiness to construct charter
+    let isCancelled = false;
+    ProjectService.getOperationalReadiness(pidNum)
+      .then((readinessData) => {
+        if (isCancelled || !readinessData) return;
+        const fallbackCharter: ProjectCharter = {
+          id: readinessData.contract?.id || pidNum,
+          projectId: pidNum,
+          tender_id: 0,
+          project_code: readinessData.projectCode || `PRJ-${pidNum}`,
+          project_name: readinessData.projectName || `Project #${pidNum}`,
+          customerName: readinessData.contract?.customerName || null,
+          contract_total_value: readinessData.contract?.contractValue || null,
+          status: 'PENDING_KICKOFF',
+        };
+        autoOpenedPlanRef.current = projectIdParam;
+        handleOpenOperationalPlan(fallbackCharter);
+      })
+      .catch((err) => {
+        console.warn(`Failed to resolve project #${pidNum} for deep link:`, err);
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [actionParam, projectIdParam, pendingKickoff, activeProjects, loading]);
 
   const setupKickoffOrClaimModal = async (charter: ProjectCharter, isFormal: boolean = false) => {
     setSelectedCharter(charter);

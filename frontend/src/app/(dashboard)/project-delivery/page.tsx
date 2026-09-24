@@ -68,7 +68,9 @@ export default function ProjectDeliveryRoute() {
             Project Delivery Workspace
           </Title>
         </div>
-        <ProjectOperationTab refreshTrigger={pmoRefreshTrigger} />
+        <React.Suspense fallback={<div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh', background: '#f8fafc', borderRadius: '12px' }}><Spin size="large" tip="Memuat Project Delivery Workspace..." /></div>}>
+          <ProjectOperationTab refreshTrigger={pmoRefreshTrigger} />
+        </React.Suspense>
       </div>
     </ProtectedRoute>
   );
