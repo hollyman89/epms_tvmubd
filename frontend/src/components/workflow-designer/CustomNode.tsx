@@ -34,6 +34,12 @@ export const CustomNode = ({ data, type }: any) => {
         {data?.label || nodeDef.label}
       </div>
 
+      {data?.taskKey && (
+        <div style={{ fontSize: 9, color: '#1890ff', marginTop: 2, fontFamily: 'monospace' }}>
+          [{data.taskKey}]
+        </div>
+      )}
+
       {(data?.assignedRole || data?.role) && (
         <div style={{ fontSize: 9, color: '#8c8c8c', marginTop: 4, textAlign: 'center' }}>
           {(data.assignedRole || data.role).replace(/_/g, ' ')}

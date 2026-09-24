@@ -373,6 +373,7 @@ export const WorkflowList: React.FC<WorkflowListProps> = ({
               <Select.Option value="FINANCE">Finance</Select.Option>
               <Select.Option value="PROJECT">Project</Select.Option>
               <Select.Option value="LEGAL">Legal</Select.Option>
+              <Select.Option value="MARKETING">Marketing</Select.Option>
               <Select.Option value="GENERAL">General</Select.Option>
             </Select>
           </Form.Item>

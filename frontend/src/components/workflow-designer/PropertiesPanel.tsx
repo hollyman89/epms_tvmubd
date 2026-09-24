@@ -24,7 +24,8 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
     if (selectedNode) {
       form.setFieldsValue({
         label: selectedNode.data?.label || '',
-        assignedRole: selectedNode.data?.assignedRole || '',
+        taskKey: selectedNode.data?.taskKey || '',
+        assignedRole: selectedNode.data?.assignedRole || selectedNode.data?.role || '',
         slaDays: selectedNode.data?.slaDays || 0,
         condition: selectedNode.data?.condition || '',
       });
@@ -75,6 +76,21 @@ export const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             <Form.Item label="Name / Label" name="label">
               <Input placeholder="Enter node label" />
             </Form.Item>
+            {selectedNode.type !== 'START' && selectedNode.type !== 'END' && (
+              <Form.Item
+                label="Task Key"
+                name="taskKey"
+                tooltip="Explicit machine identifier (e.g. GO_NOGO_APPROVAL). If empty, defaults to node label or node id."
+                rules={[
+                  {
+                    pattern: /^[A-Z0-9_]*$/,
+                    message: 'Task Key must contain only uppercase letters, numbers, and underscores (e.g. GO_NOGO_APPROVAL)',
+                  },
+                ]}
+              >
+                <Input placeholder="e.g. GO_NOGO_APPROVAL" style={{ textTransform: 'uppercase' }} />
+              </Form.Item>
+            )}
             <Form.Item label="Assigned Role" name="assignedRole">
               <Select placeholder="Select role" allowClear>
                 <Select.Option value="PROJECT_MANAGER">Project Manager</Select.Option>

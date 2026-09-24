@@ -39,9 +39,11 @@ interface BpmnNode {
   type: string;
   data?: {
     label?: string;
+    taskKey?: string;
     type?: string;
     role?: string;
     assigneeRole?: string;
+    assignedRole?: string;
     condition?: string;
     action?: string;
     [key: string]: any;
@@ -570,7 +572,7 @@ export class WorkflowEngineService {
     await manager.save(instance);
 
     // Resolve Role ID if assigned
-    const roleName = targetNode.data?.role || targetNode.data?.assigneeRole;
+    const roleName = targetNode.data?.role || targetNode.data?.assigneeRole || targetNode.data?.assignedRole;
     let roleId: number | null = null;
 
     if (roleName) {
@@ -586,7 +588,7 @@ export class WorkflowEngineService {
     const task = manager.create(WorkflowTask, {
       workflowInstanceId: instance.id,
       nodeId: targetNode.id,
-      taskKey: targetNode.data?.label || targetNode.id,
+      taskKey: targetNode.data?.taskKey || targetNode.data?.label || targetNode.id,
       assigneeRoleId: roleId,
       assigneeUserId: targetNode.data?.assigneeUserId || null,
       status: WorkflowTaskStatus.PENDING,
