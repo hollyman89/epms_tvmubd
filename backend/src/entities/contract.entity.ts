@@ -79,11 +79,21 @@ export class Contract {
   @Column({ type: 'datetime', nullable: true })
   ops_team_activated_at: Date;
 
-  // Grace Deadline Extension Engine Virtual Attributes (Not in contracts table)
+  @Column({ type: 'datetime', nullable: true })
   grace_deadline: Date;
-  grace_extended_by: number;
-  grace_extended_at: Date;
+
+  @Column({ type: 'int', default: 0 })
   grace_extension_count: number;
+
+  @Column({ type: 'bigint', unsigned: true, nullable: true })
+  grace_extended_by: number;
+
+  @ManyToOne(() => User, { nullable: true })
+  @JoinColumn({ name: 'grace_extended_by' })
+  grace_extended_by_user: User;
+
+  @Column({ type: 'datetime', nullable: true })
+  grace_extended_at: Date;
 
   @OneToMany(() => ContractAmendment, amendment => amendment.contract)
   amendments: ContractAmendment[];

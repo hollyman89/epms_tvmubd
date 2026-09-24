@@ -21,14 +21,14 @@ export class CustomersController {
   }
 
   @Get()
-  @Roles('MARKETING', 'SUPER_ADMIN')
+  @Roles('MARKETING', 'SUPER_ADMIN', 'DIRECTOR')
   @ApiOperation({ summary: 'Get all customers with pagination and filters' })
   async findAll(@Query() query: CustomerQueryDto) {
     return await this.customersService.findAll(query);
   }
 
   @Get('export')
-  @Roles('MARKETING', 'SUPER_ADMIN', 'GENERAL_MANAGER')
+  @Roles('MARKETING', 'SUPER_ADMIN', 'GENERAL_MANAGER', 'DIRECTOR')
   @ApiOperation({ summary: 'Export customers list' })
   async export() {
     return await this.customersService.exportCustomers();
@@ -42,7 +42,7 @@ export class CustomersController {
   }
 
   @Get(':id')
-  @Roles('MARKETING', 'SUPER_ADMIN')
+  @Roles('MARKETING', 'SUPER_ADMIN', 'DIRECTOR')
   @ApiOperation({ summary: 'Get details of a specific customer' })
   async findOne(@Param('id') id: number) {
     return await this.customersService.findOne(id);

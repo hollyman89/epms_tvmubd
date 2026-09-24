@@ -20,6 +20,22 @@ export class WorkBreakdownStructure {
   @Column({ default: 1 })
   level: number;
 
+  @Column({ name: 'weight_percentage', type: 'decimal', precision: 5, scale: 2, default: 0.0 })
+  weightPercentage: number;
+
+  @Column({ type: 'text', nullable: true })
+  description: string;
+
+  // Audit trail columns — present in DB schema, aligned here for ORM consistency
+  @Column({ name: 'created_by', type: 'bigint', unsigned: true, nullable: true })
+  createdBy: number;
+
+  @Column({ name: 'updated_by', type: 'bigint', unsigned: true, nullable: true })
+  updatedBy: number;
+
+  @Column({ name: 'deleted_by', type: 'bigint', unsigned: true, nullable: true })
+  deletedBy: number;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;
 

@@ -68,7 +68,7 @@ export const ReconciliationTab: React.FC<ReconciliationTabProps> = ({
     error,
     refetch,
   } = useQuery({
-    queryKey: ['procurement-reconciliations', originFilter],
+    queryKey: ['procurement', 'reconciliations', originFilter],
     queryFn: () =>
       ProcurementService.getUnresolvedReconciliations({
         origin: originFilter === 'ALL' ? undefined : originFilter,

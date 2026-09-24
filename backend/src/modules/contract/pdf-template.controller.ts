@@ -1,5 +1,5 @@
-import { Controller, Get, Post, Body, Param, ParseIntPipe, UseGuards, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Param, ParseIntPipe, UseGuards} from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation} from '@nestjs/swagger';
 import { PdfTemplateService } from './pdf-template.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';

@@ -12,6 +12,7 @@ import {
   Input,
   DatePicker,
   InputNumber,
+  Checkbox,
   Alert,
   Spin,
   Empty,
@@ -40,13 +41,106 @@ import {
   ProcurementPackageStatus,
   CreatePackageDraftPayload,
   UpdatePackageDraftPayload,
+  ProcurementCostItemAvailability,
 } from '@/services/procurement.service';
-import { ProjectService } from '@/services/project.service';
+import {
+  ProjectService,
+  CanonicalCostCategory,
+  CanonicalCostItem,
+} from '@/services/project.service';
 import { useAuth } from '@/context/AuthContext';
 import { getPackageStatusTag } from '@/components/procurement/ProcurementPackageDetailDrawer';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
+
+export interface EligibleCostItemRow extends CanonicalCostItem {
+  categoryKey: string;
+  categoryLabel?: string;
+  categoryMode?: string;
+}
+
+/**
+ * Pure helper to build WBS lookup map from canonical wbsCostSummary or costEstimateData.
+ */
+export function buildWbsMap(
+  costEstimateOrSummary?: any
+): Map<number, { code: string; name: string }> {
+  const summary = Array.isArray(costEstimateOrSummary)
+    ? costEstimateOrSummary
+    : costEstimateOrSummary?.wbsCostSummary;
+
+  const map = new Map<number, { code: string; name: string }>();
+  if (Array.isArray(summary)) {
+    summary.forEach((w: any) => {
+      if (w.wbsId) {
+        map.set(Number(w.wbsId), {
+          code: w.wbsCode,
+          name: w.wbsName,
+        });
+      }
+    });
+  }
+  return map;
+}
+
+/**
+ * Pure canonical filter for procurement package eligible CostItems.
+ * Rule: categoryKey in [MATERIAL, EQUIPMENT, SUBCONTRACTOR, OPERATIONAL]
+ * and category.mode === 'ITEMIZED' and items is Array.
+ * Accepts either costEstimateData object or categories array directly.
+ */
+export function filterEligibleCostItems(
+  costEstimateOrCategories?: any
+): EligibleCostItemRow[] {
+  const categories = Array.isArray(costEstimateOrCategories)
+    ? costEstimateOrCategories
+    : costEstimateOrCategories?.categories;
+
+  if (!categories || !Array.isArray(categories)) {
+    return [];
+  }
+  const eligibleCategories = ['MATERIAL', 'EQUIPMENT', 'SUBCONTRACTOR', 'OPERATIONAL'];
+  const items: EligibleCostItemRow[] = [];
+
+  categories.forEach((cat: CanonicalCostCategory) => {
+    if (
+      eligibleCategories.includes(cat.categoryKey) &&
+      cat.mode === 'ITEMIZED' &&
+      Array.isArray(cat.items)
+    ) {
+      cat.items.forEach((ci: CanonicalCostItem) => {
+        items.push({
+          ...ci,
+          categoryKey: cat.categoryKey,
+          categoryLabel: cat.categoryLabel,
+          categoryMode: cat.mode,
+        });
+      });
+    }
+  });
+
+  return items;
+}
+
+/**
+ * Resolves WBS label or Project-Level display tag.
+ * Fallback: WBS Node #<id> if label is not found in wbsCostSummary.
+ */
+export function resolveWbsDisplay(
+  item: { assignmentScope?: string; wbsId?: number | null },
+  wbsMap: Map<number, { code: string; name: string }>
+): { isProjectLevel: boolean; label: string } {
+  if (item.assignmentScope === 'PROJECT' || !item.wbsId) {
+    return { isProjectLevel: true, label: 'Project-Level' };
+  }
+  const wbsInfo = wbsMap.get(Number(item.wbsId));
+  if (wbsInfo && (wbsInfo.code || wbsInfo.name)) {
+    const formatted = [wbsInfo.code, wbsInfo.name].filter(Boolean).join(' — ');
+    return { isProjectLevel: false, label: `WBS ${formatted}` };
+  }
+  return { isProjectLevel: false, label: `WBS Node #${item.wbsId}` };
+}
 
 export interface PmProcurementPackageModalProps {
   open: boolean;
@@ -60,12 +154,14 @@ export interface PmProcurementPackageModalProps {
     status?: string;
     managerId?: number | null;
   } | null;
+  onRefreshParent?: () => void;
 }
 
 export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps> = ({
   open,
   onClose,
   project,
+  onRefreshParent,
 }) => {
   const queryClient = useQueryClient();
   const { user, isProjectManager, isSuperAdmin } = useAuth();
@@ -77,8 +173,15 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
   const [submitting, setSubmitting] = useState<boolean>(false);
   const [selectedCostItemIds, setSelectedCostItemIds] = useState<React.Key[]>([]);
   const [quantitiesMap, setQuantitiesMap] = useState<Record<number, number>>({});
-  const [itemDatesMap, setItemDatesMap] = useState<Record<number, string>>({});
+  const [itemDatesMap, setItemDatesMap] = useState<Record<number, string | undefined>>({});
   const [viewingPackage, setViewingPackage] = useState<ProcurementPackage | null>(null);
+  const [showAllocatedItems, setShowAllocatedItems] = useState(false);
+  const { data: availableItems = [], isFetching: loadingAvailability, isError: availabilityError, refetch: refetchAvailability } = useQuery({
+    queryKey: ['procurement', 'availability', projectId],
+    queryFn: () => ProcurementService.getEligibleCostItems(projectId),
+    enabled: Boolean(open && projectId > 0),
+    staleTime: 0,
+  });
 
   // 1. Load project packages via React Query
   const {
@@ -86,7 +189,7 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
     isLoading: loadingPackages,
     refetch: refetchPackages,
   } = useQuery({
-    queryKey: ['procurement-packages', { projectId }],
+    queryKey: ['procurement', 'packages', { projectId }],
     queryFn: () => ProcurementService.getPackages({ projectId }),
     enabled: Boolean(open && projectId > 0),
     staleTime: 10 * 1000,
@@ -103,32 +206,27 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
     staleTime: 60 * 1000,
   });
 
-  // Filter eligible CostItems: entryMode = 'ITEMIZED' & category in [MATERIAL, EQUIPMENT, SUBCONTRACTOR, OPERATIONAL]
-  const eligibleCostItems = useMemo(() => {
-    if (!costEstimateData?.categories || !Array.isArray(costEstimateData.categories)) {
-      return [];
-    }
-    const eligibleCategories = ['MATERIAL', 'EQUIPMENT', 'SUBCONTRACTOR', 'OPERATIONAL'];
-    const items: any[] = [];
-
-    costEstimateData.categories.forEach((cat: any) => {
-      if (eligibleCategories.includes(cat.categoryKey) && Array.isArray(cat.costItems)) {
-        cat.costItems.forEach((ci: any) => {
-          if (ci.entryMode === 'ITEMIZED') {
-            items.push({
-              ...ci,
-              categoryKey: cat.categoryKey,
-            });
-          }
-        });
-      }
-    });
-
-    return items;
+  // Authoritative WBS mapping from costEstimateData.wbsCostSummary
+  const wbsMap = useMemo(() => {
+    return buildWbsMap(costEstimateData?.wbsCostSummary);
   }, [costEstimateData]);
+
+  const eligibleCostItems = useMemo(() => availableItems.filter(item =>
+    showAllocatedItems || item.availableQty > 0 || selectedCostItemIds.includes(item.id)
+  ), [availableItems, showAllocatedItems, selectedCostItemIds]);
+
+  useEffect(() => {
+    if (open) {
+      setViewMode('list');
+      setEditingPackage(null);
+      setSelectedCostItemIds([]);
+      setShowAllocatedItems(false);
+    }
+  }, [open, projectId]);
 
   // Handle open Form to Create or Edit
   const handleOpenCreateForm = () => {
+    void refetchAvailability();
     setEditingPackage(null);
     setSelectedCostItemIds([]);
     setQuantitiesMap({});
@@ -138,6 +236,7 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
   };
 
   const handleOpenEditForm = (pkg: ProcurementPackage) => {
+    void refetchAvailability();
     setEditingPackage(pkg);
     const itemIds = (pkg.items || []).map((i) => i.costItemId);
     const qMap: Record<number, number> = {};
@@ -145,7 +244,11 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
 
     (pkg.items || []).forEach((i) => {
       qMap[i.costItemId] = Number(i.requestedQty);
-      if (i.requiredDate) dMap[i.costItemId] = i.requiredDate;
+      if (i.requiredDate) {
+        dMap[i.costItemId] = dayjs(i.requiredDate).isValid()
+          ? dayjs(i.requiredDate).format('YYYY-MM-DD')
+          : i.requiredDate;
+      }
     });
 
     setSelectedCostItemIds(itemIds);
@@ -184,6 +287,10 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
         if (!requestedQty || requestedQty <= 0) {
           throw new Error(`Kuantitas untuk item #${costItemId} harus lebih dari 0.`);
         }
+        const availability = availableItems.find(item => Number(item.id) === costItemId);
+        if (!availability || requestedQty > availability.availableQty) {
+          throw new Error(`${availability?.itemName || `Item #${costItemId}`}: jumlah diminta melebihi sisa tersedia (${availability?.availableQty ?? 0}).`);
+        }
         return {
           costItemId,
           requestedQty,
@@ -202,7 +309,9 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
           requiredDate: values.requiredDate ? values.requiredDate.format('YYYY-MM-DD') : undefined,
           items: itemsPayload,
         };
-        savedPkg = await ProcurementService.updatePackageDraft(editingPackage.id, payload);
+        savedPkg = submitImmediately
+          ? await ProcurementService.saveAndSubmitPackage(payload, editingPackage.id)
+          : await ProcurementService.updatePackageDraft(editingPackage.id, payload);
       } else {
         // Create new draft
         const payload: CreatePackageDraftPayload = {
@@ -212,23 +321,20 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
           requiredDate: values.requiredDate ? values.requiredDate.format('YYYY-MM-DD') : undefined,
           items: itemsPayload,
         };
-        savedPkg = await ProcurementService.createPackageDraft(payload);
+        savedPkg = submitImmediately
+          ? await ProcurementService.saveAndSubmitPackage(payload)
+          : await ProcurementService.createPackageDraft(payload);
       }
 
       // If submit immediately was requested:
       if (submitImmediately) {
-        if (editingPackage && editingPackage.status === 'RETURNED') {
-          savedPkg = await ProcurementService.resubmitPackage(savedPkg.id);
-          message.success(`Paket ${savedPkg.packageNumber} berhasil diajukan ulang ke Procurement!`);
-        } else {
-          savedPkg = await ProcurementService.submitPackage(savedPkg.id);
-          message.success(`Paket ${savedPkg.packageNumber} berhasil diajukan ke Antrean Procurement!`);
-        }
+        message.success(`Paket ${savedPkg.packageNumber} berhasil diajukan ke Antrean Procurement!`);
       } else {
         message.success(`Draf paket ${savedPkg.packageNumber} berhasil disimpan!`);
       }
 
-      await queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+      onRefreshParent?.();
       setViewMode('list');
     } catch (err: any) {
       console.error(err);
@@ -236,6 +342,7 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       message.error(errMsg);
     } finally {
       setSubmitting(false);
+      void queryClient.invalidateQueries({ queryKey: ['procurement', 'availability', projectId] });
     }
   };
 
@@ -245,7 +352,8 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       setSubmitting(true);
       const res = await ProcurementService.submitPackage(pkgId);
       message.success(`Paket ${res.packageNumber} berhasil diajukan ke Procurement!`);
-      await queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+      onRefreshParent?.();
     } catch (err: any) {
       const errMsg = err?.response?.data?.message || err?.message || 'Gagal mengajukan paket.';
       message.error(errMsg);
@@ -259,7 +367,8 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       setSubmitting(true);
       const res = await ProcurementService.resubmitPackage(pkgId);
       message.success(`Paket ${res.packageNumber} berhasil diajukan ulang ke Procurement!`);
-      await queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+      onRefreshParent?.();
     } catch (err: any) {
       const errMsg = err?.response?.data?.message || err?.message || 'Gagal mengajukan ulang paket.';
       message.error(errMsg);
@@ -273,7 +382,8 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       setSubmitting(true);
       await ProcurementService.deletePackageDraft(pkgId);
       message.success('Draf paket berhasil dihapus.');
-      await queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+      onRefreshParent?.();
     } catch (err: any) {
       const errMsg = err?.response?.data?.message || err?.message || 'Gagal menghapus draf paket.';
       message.error(errMsg);
@@ -287,7 +397,8 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       setSubmitting(true);
       await ProcurementService.cancelPackage(pkgId, { reason: 'Dibatalkan oleh Project Manager' });
       message.success('Paket berhasil dibatalkan.');
-      await queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+      onRefreshParent?.();
     } catch (err: any) {
       const errMsg = err?.response?.data?.message || err?.message || 'Gagal membatalkan paket.';
       message.error(errMsg);
@@ -301,17 +412,29 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
     {
       title: 'Item RAB',
       key: 'itemName',
-      render: (_: any, r: any) => (
-        <div>
-          <div style={{ fontWeight: 600, color: '#0f172a' }}>{r.itemName}</div>
-          <Space size={4} style={{ marginTop: 2 }}>
-            <Tag color="cyan" style={{ fontSize: 9.5, margin: 0 }}>{r.categoryKey}</Tag>
-            {r.wbs?.task_name && (
-              <span style={{ fontSize: 11, color: '#64748b' }}>WBS: {r.wbs.task_name}</span>
-            )}
-          </Space>
-        </div>
-      ),
+      width: 250,
+      render: (_: any, r: EligibleCostItemRow) => {
+        const wbs = resolveWbsDisplay(r, wbsMap);
+        return (
+          <div>
+            <div style={{ fontWeight: 600, color: '#0f172a' }}>{r.itemName}</div>
+            <Space size={4} style={{ marginTop: 2 }} wrap>
+              <Tag color="cyan" style={{ fontSize: 9.5, margin: 0 }}>
+                {r.categoryKey}
+              </Tag>
+              {wbs.isProjectLevel ? (
+                <Tag color="purple" style={{ fontSize: 9.5, margin: 0 }}>
+                  {wbs.label}
+                </Tag>
+              ) : (
+                <span style={{ fontSize: 11, color: '#64748b' }}>
+                  {wbs.label}
+                </span>
+              )}
+            </Space>
+          </div>
+        );
+      },
     },
     {
       title: 'Baseline RAB',
@@ -322,6 +445,17 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
         <span style={{ fontSize: 12 }}>
           {Number(r.quantity || 0).toLocaleString('id-ID')} {r.uom || 'Unit'}
         </span>
+      ),
+    },
+    {
+      title: 'Sisa Tersedia',
+      key: 'availableQty',
+      width: 145,
+      render: (_: any, r: ProcurementCostItemAvailability) => (
+        <div>
+          <Text strong type={r.availableQty > 0 ? undefined : 'secondary'}>{r.availableQty.toLocaleString('id-ID')} {r.uom}</Text>
+          {r.availableQty === 0 && <div><Text type="secondary" style={{ fontSize: 11 }}>Sudah dialokasikan sepenuhnya</Text></div>}
+        </div>
       ),
     },
     {
@@ -337,11 +471,13 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       width: 160,
       render: (_: any, r: any) => {
         const isSelected = selectedCostItemIds.includes(r.id);
+        if (r.availableQty <= 0) return <Text type="secondary">Tidak tersedia</Text>;
         return (
           <InputNumber
             min={0.0001}
-            disabled={!isSelected}
-            value={quantitiesMap[r.id] ?? Number(r.quantity || 1)}
+            max={r.availableQty}
+            disabled={!isSelected || r.availableQty <= 0}
+            value={quantitiesMap[r.id] ?? r.availableQty}
             onChange={(val) => {
               if (val !== null) {
                 setQuantitiesMap((prev) => ({ ...prev, [r.id]: Number(val) }));
@@ -363,9 +499,12 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
           <DatePicker
             disabled={!isSelected}
             format="DD/MM/YYYY"
-            value={itemDatesMap[r.id] ? dayjs(itemDatesMap[r.id]) : undefined}
-            onChange={(_, dateString) => {
-              setItemDatesMap((prev) => ({ ...prev, [r.id]: dateString as string }));
+            value={itemDatesMap[r.id] ? dayjs(itemDatesMap[r.id]) : null}
+            onChange={(date) => {
+              setItemDatesMap((prev) => ({
+                ...prev,
+                [r.id]: date ? date.format('YYYY-MM-DD') : undefined,
+              }));
             }}
             placeholder="Pilih tgl"
             style={{ width: '100%' }}
@@ -480,7 +619,7 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
             </Popconfirm>
           )}
 
-          {r.status === 'PR_CREATED' && (
+          {(r.status === 'PR_CREATED' || r.status === 'CLOSED') && (
             <Tag color="green" style={{ fontWeight: 600 }}>
               PR: {r.purchaseRequest?.prNumber || 'Diterbitkan'}
             </Tag>
@@ -500,7 +639,7 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
           onClose();
         }
       }}
-      width="min(1050px, 95vw)"
+      width="min(1200px, 95vw)"
       centered
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -622,16 +761,22 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
               </Tag>
             </div>
 
+            {availabilityError && <Alert type="error" showIcon message="Sisa kuota gagal dimuat. Coba buka kembali formulir." style={{ marginBottom: 8 }} />}
+            <Checkbox checked={showAllocatedItems} onChange={event => setShowAllocatedItems(event.target.checked)} style={{ marginBottom: 8 }}>
+              Tampilkan item sudah dialokasikan
+            </Checkbox>
             <Table
               size="small"
               columns={costItemColumns}
               dataSource={eligibleCostItems}
               rowKey="id"
-              loading={loadingCostEstimate}
+              loading={loadingAvailability}
+              locale={{ emptyText: 'Tidak ada item RAB dengan sisa kuota pengadaan.' }}
               pagination={false}
-              scroll={{ y: 260 }}
+              scroll={{ x: 1100, y: 260 }}
               rowSelection={{
                 selectedRowKeys: selectedCostItemIds,
+                getCheckboxProps: (record) => ({ disabled: record.availableQty <= 0 && !selectedCostItemIds.includes(record.id) }),
                 onChange: (selectedKeys) => {
                   setSelectedCostItemIds(selectedKeys);
                   // Initialize default quantity if not set
@@ -641,7 +786,7 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
                       const id = Number(key);
                       if (next[id] === undefined) {
                         const it = eligibleCostItems.find((ci) => ci.id === id);
-                        next[id] = Number(it?.quantity || 1);
+                        next[id] = Number(it?.availableQty || 0);
                       }
                     });
                     return next;
@@ -652,13 +797,14 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
               <Button onClick={() => setViewMode('list')}>Batal</Button>
-              <Button loading={submitting} onClick={() => handleSavePackage(false)}>
+              <Button disabled={availabilityError || loadingAvailability} loading={submitting} onClick={() => handleSavePackage(false)}>
                 Simpan Draf
               </Button>
               <Button
                 type="primary"
                 icon={<SendOutlined />}
                 loading={submitting}
+                disabled={availabilityError || loadingAvailability}
                 onClick={() => handleSavePackage(true)}
                 style={{ backgroundColor: '#059669', borderColor: '#059669' }}
               >

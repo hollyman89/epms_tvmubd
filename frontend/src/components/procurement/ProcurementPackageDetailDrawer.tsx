@@ -106,7 +106,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
     error,
     refetch,
   } = useQuery({
-    queryKey: ['procurement-package', packageId],
+    queryKey: ['procurement', 'packages', packageId],
     queryFn: () => ProcurementService.getPackageById(packageId!),
     enabled: Boolean(open && packageId && packageId > 0),
     staleTime: 30 * 1000,

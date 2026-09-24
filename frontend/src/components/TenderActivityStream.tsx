@@ -1,6 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Input, Button, List, Avatar, Typography, message, Skeleton, Timeline, Tag } from 'antd';
-import { UserOutlined, SendOutlined, InfoCircleFilled, EyeOutlined, DownloadOutlined, SwapOutlined, FilePdfOutlined, CheckCircleFilled, MessageFilled } from '@ant-design/icons';
+import { Input, Button, Avatar, Typography, message, Skeleton, Timeline, Tag, Tabs, Empty } from 'antd';
+import { 
+  UserOutlined, 
+  SendOutlined, 
+  InfoCircleFilled, 
+  EyeOutlined, 
+  DownloadOutlined, 
+  SwapOutlined, 
+  FilePdfOutlined, 
+  CheckCircleFilled, 
+  MessageFilled,
+  AppstoreOutlined,
+  HistoryOutlined,
+  FileTextOutlined
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { apiClient } from '@/lib/axios';
@@ -8,7 +21,24 @@ import { apiClient } from '@/lib/axios';
 dayjs.extend(relativeTime);
 const { Text } = Typography;
 
-export const TenderActivityStream = ({ tenderId }: { tenderId: string | number }) => {
+const getPriorityColor = (priority?: string) => {
+  switch (priority) {
+    case 'HIGH': return 'error';
+    case 'MEDIUM': return 'warning';
+    case 'LOW': return 'default';
+    default: return 'default';
+  }
+};
+
+export const TenderActivityStream = ({ 
+  tenderId,
+  tender,
+  headerContent
+}: { 
+  tenderId: string | number;
+  tender?: any;
+  headerContent?: React.ReactNode;
+}) => {
   const [activities, setActivities] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [comment, setComment] = useState('');
@@ -48,13 +78,17 @@ export const TenderActivityStream = ({ tenderId }: { tenderId: string | number }
     }
   };
 
-  const handleDownload = async (filename: string, action: 'view' | 'download') => {
+  const handleDownload = async (filename: string, action: 'view' | 'download', type: 'proposal' | 'contract' = 'proposal') => {
     try {
-      const response = await apiClient.get(`/marketing/tenders/proposals/${filename}`, {
+      const endpoint = type === 'contract'
+        ? `/marketing/tenders/contracts/${filename}`
+        : `/marketing/tenders/proposals/${filename}`;
+
+      const response = await apiClient.get(endpoint, {
         responseType: 'blob'
       });
       
-      const url = window.URL.createObjectURL(new Blob([response.data], { type: response.headers['content-type'] as string }));
+      const url = window.URL.createObjectURL(new Blob([response.data], { type: response.headers['content-type'] as string || 'application/pdf' }));
       
       if (action === 'view') {
         window.open(url, '_blank');
@@ -74,117 +108,350 @@ export const TenderActivityStream = ({ tenderId }: { tenderId: string | number }
   if (loading && activities.length === 0) {
     return (
       <div style={{ padding: 24 }}>
-        <Skeleton active avatar paragraph={{ rows: 6 }} />
+        {headerContent}
+        <Skeleton active avatar paragraph={{ rows: 6 }} style={{ marginTop: headerContent ? 20 : 0 }} />
       </div>
     );
   }
 
+  const renderTimelineItems = () => {
+    return (
+      <Timeline
+        mode="left"
+        items={activities.map((item) => {
+          const isSystem = item.type === 'SYSTEM';
+          
+          // Detect Proposal Upload
+          const proposalMatch = item.content.match(/Proposal document uploaded: (.+?)\. Stage updated to PROPOSAL\./);
+          const proposalFileName = proposalMatch ? proposalMatch[1] : null;
+
+          // Detect SPK Upload (Initial or Revision with filename in parentheses)
+          const spkMatch = item.content.match(/Dokumen (?:revisi )?SPK \((.+?)\) berhasil diunggah\./);
+          const spkFileName = spkMatch ? spkMatch[1] : null;
+          const isRevisionSpk = item.content.includes('Dokumen revisi SPK');
+          
+          // Detect Stage Change
+          const stageChangeMatch = item.content.match(/Tender stage changed from (.+?) to (.+?)$/);
+          const isStageChange = !!stageChangeMatch;
+
+          // Detect WON/LOST
+          const isWonLost = item.content.includes('Tender marked as WON') || item.content.includes('Tender marked as LOST');
+
+          let dotIcon = <InfoCircleFilled style={{ fontSize: '16px', color: '#94a3b8' }} />;
+          let dotColor = '#94a3b8';
+
+          if (!isSystem) {
+            dotIcon = <Avatar size={28} icon={<UserOutlined />} src={item.user?.avatarUrl} style={{ background: '#3b82f6', border: '2px solid white', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }} />;
+            dotColor = 'transparent';
+          } else if (proposalFileName) {
+            dotIcon = <div style={{ background: '#ef4444', width: 28, height: 28, borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: '0 2px 6px rgba(239,68,68,0.4)', color: 'white' }}><FilePdfOutlined /></div>;
+            dotColor = 'transparent';
+          } else if (isStageChange) {
+            dotIcon = <div style={{ background: '#f59e0b', width: 28, height: 28, borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: '0 2px 6px rgba(245,158,11,0.4)', color: 'white' }}><SwapOutlined /></div>;
+            dotColor = 'transparent';
+          } else if (isWonLost) {
+            const isWon = item.content.includes('WON');
+            dotIcon = <div style={{ background: isWon ? '#10b981' : '#ef4444', width: 28, height: 28, borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: `0 2px 6px ${isWon ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`, color: 'white' }}><CheckCircleFilled /></div>;
+            dotColor = 'transparent';
+          } else if (item.content.includes('Catatan Negosiasi')) {
+            dotIcon = <div style={{ background: '#8b5cf6', width: 28, height: 28, borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: '0 2px 6px rgba(139,92,246,0.4)', color: 'white' }}><MessageFilled /></div>;
+            dotColor = 'transparent';
+          }
+
+          return {
+            color: dotColor,
+            dot: dotIcon,
+            children: (
+              <div style={{
+                background: 'white',
+                borderRadius: '12px',
+                padding: '12px 16px',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                border: '1px solid #f1f5f9',
+                marginLeft: 8,
+                marginBottom: 8,
+                transition: 'all 0.3s ease',
+                cursor: 'default',
+                position: 'relative'
+              }}
+              className="activity-card"
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text strong style={{ fontSize: 13, color: '#334155' }}>
+                    {item.user?.fullName || (isSystem ? 'Sistem' : 'User')}
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 11, color: '#94a3b8' }}>
+                    {dayjs(item.created_at).fromNow()}
+                  </Text>
+                </div>
+                
+                {isStageChange && stageChangeMatch ? (
+                  <div>
+                    <Text style={{ color: '#64748b', fontSize: 14 }}>Tender berpindah dari </Text>
+                    <Tag color="default">{stageChangeMatch[1]}</Tag>
+                    <Text style={{ color: '#64748b', fontSize: 14 }}> ke </Text>
+                    <Tag color="processing">{stageChangeMatch[2]}</Tag>
+                  </div>
+                ) : proposalFileName ? (
+                  <div>
+                    <Text style={{ color: '#64748b', fontSize: 14, display: 'block', marginBottom: 12 }}>
+                      Dokumen proposal baru telah diunggah.
+                    </Text>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Button type="primary" ghost size="small" icon={<EyeOutlined />} onClick={() => handleDownload(proposalFileName, 'view', 'proposal')} style={{ borderRadius: 6 }}>
+                        Lihat PDF
+                      </Button>
+                      <Button size="small" icon={<DownloadOutlined />} onClick={() => handleDownload(proposalFileName, 'download', 'proposal')} style={{ borderRadius: 6 }}>
+                        Unduh
+                      </Button>
+                    </div>
+                  </div>
+                ) : spkFileName ? (
+                  <div>
+                    <Text style={{ color: '#64748b', fontSize: 14, display: 'block', marginBottom: 12 }}>
+                      {isRevisionSpk ? 'Dokumen revisi SPK telah diunggah.' : 'Dokumen SPK telah diunggah.'}
+                    </Text>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <Button type="primary" ghost size="small" icon={<EyeOutlined />} onClick={() => handleDownload(spkFileName, 'view', 'contract')} style={{ borderRadius: 6 }}>
+                        Lihat PDF
+                      </Button>
+                      <Button size="small" icon={<DownloadOutlined />} onClick={() => handleDownload(spkFileName, 'download', 'contract')} style={{ borderRadius: 6 }}>
+                        Unduh
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <Text style={{ color: '#475569', fontSize: 14, lineHeight: 1.5 }}>
+                    {item.content}
+                  </Text>
+                )}
+              </div>
+            )
+          };
+        })}
+      />
+    );
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f8fafc' }}>
       
-      {/* Activity Timeline Area */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '24px', paddingBottom: '80px' }}>
-        <Typography.Title level={5} style={{ color: '#64748b', marginBottom: 24, fontSize: 13, textTransform: 'uppercase', letterSpacing: 1 }}>
-          Riwayat Aktivitas
-        </Typography.Title>
-        <Timeline
-          mode="left"
-          items={activities.map((item) => {
-            const isSystem = item.type === 'SYSTEM';
-            
-            // Detect Proposal Upload
-            const proposalMatch = item.content.match(/Proposal document uploaded: (.+?)\. Stage updated to PROPOSAL\./);
-            const fileName = proposalMatch ? proposalMatch[1] : null;
-            
-            // Detect Stage Change
-            const stageChangeMatch = item.content.match(/Tender stage changed from (.+?) to (.+?)$/);
-            const isStageChange = !!stageChangeMatch;
+      {/* Scrollable Content Body */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: '20px', paddingBottom: '90px' }}>
+        {headerContent}
 
-            // Detect WON/LOST
-            const isWonLost = item.content.includes('Tender marked as WON') || item.content.includes('Tender marked as LOST');
-
-            let dotIcon = <InfoCircleFilled style={{ fontSize: '16px', color: '#94a3b8' }} />;
-            let dotColor = '#94a3b8';
-
-            if (!isSystem) {
-              dotIcon = <Avatar size={28} icon={<UserOutlined />} src={item.user?.avatarUrl} style={{ background: '#3b82f6', border: '2px solid white', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' }} />;
-              dotColor = 'transparent';
-            } else if (fileName) {
-              dotIcon = <div style={{ background: '#ef4444', width: 28, height: 28, borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: '0 2px 6px rgba(239,68,68,0.4)', color: 'white' }}><FilePdfOutlined /></div>;
-              dotColor = 'transparent';
-            } else if (isStageChange) {
-              dotIcon = <div style={{ background: '#f59e0b', width: 28, height: 28, borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: '0 2px 6px rgba(245,158,11,0.4)', color: 'white' }}><SwapOutlined /></div>;
-              dotColor = 'transparent';
-            } else if (isWonLost) {
-              const isWon = item.content.includes('WON');
-              dotIcon = <div style={{ background: isWon ? '#10b981' : '#ef4444', width: 28, height: 28, borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: `0 2px 6px ${isWon ? 'rgba(16,185,129,0.4)' : 'rgba(239,68,68,0.4)'}`, color: 'white' }}><CheckCircleFilled /></div>;
-              dotColor = 'transparent';
-            } else if (item.content.includes('Catatan Negosiasi')) {
-              dotIcon = <div style={{ background: '#8b5cf6', width: 28, height: 28, borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', boxShadow: '0 2px 6px rgba(139,92,246,0.4)', color: 'white' }}><MessageFilled /></div>;
-              dotColor = 'transparent';
-            }
-
-            return {
-              color: dotColor,
-              dot: dotIcon,
-              children: (
-                <div style={{
-                  background: 'white',
-                  borderRadius: '12px',
-                  padding: '12px 16px',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
-                  border: '1px solid #f1f5f9',
-                  marginLeft: 8,
-                  marginBottom: 8,
-                  transition: 'all 0.3s ease',
-                  cursor: 'default',
-                  position: 'relative'
-                }}
-                className="activity-card"
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <Text strong style={{ fontSize: 13, color: '#334155' }}>
-                      {isSystem ? 'Sistem' : (item.user?.fullName || 'User')}
-                    </Text>
-                    <Text type="secondary" style={{ fontSize: 11, color: '#94a3b8' }}>
-                      {dayjs(item.created_at).fromNow()}
-                    </Text>
-                  </div>
-                  
-                  {isStageChange && stageChangeMatch ? (
-                    <div>
-                      <Text style={{ color: '#64748b', fontSize: 14 }}>Tender berpindah dari </Text>
-                      <Tag color="default">{stageChangeMatch[1]}</Tag>
-                      <Text style={{ color: '#64748b', fontSize: 14 }}> ke </Text>
-                      <Tag color="processing">{stageChangeMatch[2]}</Tag>
-                    </div>
-                  ) : fileName ? (
-                    <div>
-                      <Text style={{ color: '#64748b', fontSize: 14, display: 'block', marginBottom: 12 }}>
-                        Dokumen proposal baru telah diunggah.
+        {tender ? (
+          <Tabs
+            defaultActiveKey="overview"
+            className="project-detail-tabs"
+            items={[
+              {
+                key: 'overview',
+                label: <span style={{ fontWeight: 600 }}><AppstoreOutlined /> Overview</span>,
+                children: (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {/* Project Summary Card */}
+                    <div style={{ 
+                      background: '#ffffff', 
+                      borderRadius: 12, 
+                      padding: '16px', 
+                      border: '1px solid #e2e8f0',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+                    }}>
+                      <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 12 }}>
+                        Informasi Proyek
                       </Text>
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        <Button type="primary" ghost size="small" icon={<EyeOutlined />} onClick={() => handleDownload(fileName, 'view')} style={{ borderRadius: 6 }}>
-                          Lihat PDF
-                        </Button>
-                        <Button size="small" icon={<DownloadOutlined />} onClick={() => handleDownload(fileName, 'download')} style={{ borderRadius: 6 }}>
-                          Unduh
-                        </Button>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Customer</Text>
+                          <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
+                            {tender.customer?.name || (tender.customer_id ? `Client ID: ${tender.customer_id}` : '-')}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Sektor Industri</Text>
+                          <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
+                            {tender.customer?.business_sector || tender.business_sector || '-'}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Nilai Anggaran</Text>
+                          <Text strong style={{ fontSize: 13, color: '#10b981' }}>
+                            Rp {(Number(tender.estimated_budget) || 0).toLocaleString('id-ID')}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>PIC Marketing</Text>
+                          <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
+                            {tender.marketing_pic_name || 'Belum Ditentukan'}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Prioritas</Text>
+                          <div style={{ marginTop: 2 }}>
+                            <Tag color={getPriorityColor(tender.priority)} style={{ borderRadius: 4, margin: 0, fontWeight: 600, fontSize: 11 }}>
+                              {tender.priority || 'MEDIUM'}
+                            </Tag>
+                          </div>
+                        </div>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Probabilitas Menang</Text>
+                          <Text strong style={{ fontSize: 13, color: '#0284c7' }}>
+                            {tender.probability_percentage ?? 0}%
+                          </Text>
+                        </div>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Deadline Penawaran</Text>
+                          <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
+                            {tender.bid_submission_deadline ? dayjs(tender.bid_submission_deadline).format('DD MMM YYYY') : '-'}
+                          </Text>
+                        </div>
+                        <div>
+                          <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Status Dokumen SPK</Text>
+                          <Text strong style={{ fontSize: 13, color: tender.spk_file_key ? '#16a34a' : (tender.stage === 'WON' ? '#d97706' : '#64748b') }}>
+                            {tender.spk_file_key ? 'Sudah Diunggah' : (tender.stage === 'WON' ? 'Menunggu Upload SPK' : 'Belum Tersedia')}
+                          </Text>
+                        </div>
+                        {tender.legal_status && (
+                          <div>
+                            <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Status Review Legal</Text>
+                            <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
+                              {tender.legal_status}
+                            </Text>
+                          </div>
+                        )}
+                        {tender.created_at && (
+                          <div>
+                            <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Dibuat Pada</Text>
+                            <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
+                              {dayjs(tender.created_at).format('DD MMM YYYY, HH:mm')}
+                            </Text>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    <Text style={{ color: '#475569', fontSize: 14, lineHeight: 1.5 }}>
-                      {item.content}
-                    </Text>
-                  )}
-                </div>
-              )
-            };
-          })}
-        />
+
+                    {/* Ringkasan Catatan Marketing Singkat (Jika ada) */}
+                    {tender.notes && (
+                      <div style={{ 
+                        background: '#ffffff', 
+                        borderRadius: 12, 
+                        padding: '14px 16px', 
+                        border: '1px solid #e2e8f0',
+                        borderLeft: '4px solid #94a3b8'
+                      }}>
+                        <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+                          Catatan Marketing
+                        </Text>
+                        <Text italic style={{ color: '#475569', fontSize: 13 }}>"{tender.notes}"</Text>
+                      </div>
+                    )}
+                  </div>
+                )
+              },
+              {
+                key: 'activity',
+                label: <span style={{ fontWeight: 600 }}><HistoryOutlined /> Activity</span>,
+                children: (
+                  <div style={{ background: '#ffffff', borderRadius: 12, padding: '16px', border: '1px solid #e2e8f0' }}>
+                    <Typography.Title level={5} style={{ color: '#64748b', marginTop: 0, marginBottom: 16, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>
+                      Riwayat Aktivitas
+                    </Typography.Title>
+
+                    {activities && activities.length > 0 ? (
+                      renderTimelineItems()
+                    ) : (
+                      <Empty 
+                        image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        description={<Text type="secondary" style={{ fontSize: 12 }}>Belum ada riwayat aktivitas untuk proyek ini.</Text>}
+                        style={{ margin: '24px 0' }}
+                      />
+                    )}
+                  </div>
+                )
+              },
+              {
+                key: 'notes',
+                label: <span style={{ fontWeight: 600 }}><FileTextOutlined /> Notes</span>,
+                children: (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {tender.notes && (
+                      <div style={{ 
+                        background: '#ffffff', 
+                        borderRadius: 12, 
+                        padding: '16px', 
+                        border: '1px solid #e2e8f0',
+                        borderLeft: '4px solid #3b82f6'
+                      }}>
+                        <Text strong style={{ fontSize: 13, color: '#1e3a8a', display: 'block', marginBottom: 6 }}>
+                          Catatan / Rekomendasi Marketing
+                        </Text>
+                        <Text style={{ color: '#334155', fontSize: 13, lineHeight: 1.6 }}>
+                          "{tender.notes}"
+                        </Text>
+                      </div>
+                    )}
+
+                    {tender.legal_notes && (
+                      tender.contract_status === 'PM_RETURNED' || tender.contractStatus === 'PM_RETURNED' ? (
+                        <div style={{ 
+                          background: '#fffbe6', 
+                          borderRadius: 12, 
+                          padding: '16px', 
+                          border: '1px solid #fef3c7',
+                          borderLeft: '4px solid #d97706'
+                        }}>
+                          <Text strong style={{ fontSize: 13, color: '#b45309', display: 'block', marginBottom: 6 }}>
+                            Catatan Project Manager
+                          </Text>
+                          <Text style={{ color: '#78350f', fontSize: 13, lineHeight: 1.6 }}>
+                            "{tender.legal_notes}"
+                          </Text>
+                        </div>
+                      ) : (
+                        <div style={{ 
+                          background: '#ffffff', 
+                          borderRadius: 12, 
+                          padding: '16px', 
+                          border: '1px solid #fee2e2',
+                          borderLeft: '4px solid #ef4444'
+                        }}>
+                          <Text strong style={{ fontSize: 13, color: '#991b1b', display: 'block', marginBottom: 6 }}>
+                            Catatan Tim Legal
+                          </Text>
+                          <Text style={{ color: '#7f1d1d', fontSize: 13, lineHeight: 1.6 }}>
+                            "{tender.legal_notes}"
+                          </Text>
+                        </div>
+                      )
+                    )}
+
+                    {!tender.notes && !tender.legal_notes && (
+                      <div style={{ background: '#ffffff', borderRadius: 12, padding: '24px', border: '1px solid #e2e8f0' }}>
+                        <Empty 
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          description={<Text type="secondary" style={{ fontSize: 12 }}>Belum ada catatan untuk proyek ini.</Text>}
+                          style={{ margin: '16px 0' }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )
+              }
+            ]}
+          />
+        ) : (
+          <div>
+            <Typography.Title level={5} style={{ color: '#64748b', marginTop: headerContent ? 8 : 0, marginBottom: 20, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>
+              Riwayat Aktivitas
+            </Typography.Title>
+            {renderTimelineItems()}
+          </div>
+        )}
       </div>
 
-      {/* Modern Chat Input Area */}
+      {/* Modern Messenger Chat Input Area */}
       <div style={{ 
         position: 'absolute', 
         bottom: 0, 
@@ -197,7 +464,8 @@ export const TenderActivityStream = ({ tenderId }: { tenderId: string | number }
         display: 'flex',
         alignItems: 'flex-end',
         gap: 12,
-        boxShadow: '0 -4px 20px rgba(0,0,0,0.02)'
+        boxShadow: '0 -4px 20px rgba(0,0,0,0.02)',
+        zIndex: 10
       }}>
         <Input.TextArea
           placeholder="Ketik catatan tambahan..."

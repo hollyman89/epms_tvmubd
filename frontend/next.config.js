@@ -1,7 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-  swcMinify: true,
   transpilePackages: [
     'antd',
     '@ant-design/icons',
@@ -15,6 +14,22 @@ const nextConfig = {
   },
   experimental: {
     optimizePackageImports: ['antd', '@ant-design/icons'],
+  },
+  async rewrites() {
+    return [
+      {
+        source: '/api/v1/:path*',
+        destination: 'http://localhost:4000/api/v1/:path*',
+      },
+      {
+        source: '/uploads/:path*',
+        destination: 'http://localhost:4000/uploads/:path*',
+      },
+      {
+        source: '/socket.io/:path*',
+        destination: 'http://localhost:4000/socket.io/:path*',
+      },
+    ];
   },
 };
 

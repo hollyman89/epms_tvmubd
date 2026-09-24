@@ -1,0 +1,10 @@
+.env
+.env.*
+**/secrets/**
+**/*.key
+**/*.pem
+node_modules/
+.next/
+dist/
+coverage/
+**/*.log

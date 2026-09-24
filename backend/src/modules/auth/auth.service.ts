@@ -1,8 +1,9 @@
-import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, BadRequestException, Optional } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { User } from '../../entities/user.entity';
+import { UserSessionService } from './user-session.service';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 
@@ -12,14 +13,39 @@ export class AuthService {
     @InjectRepository(User)
     private userRepository: Repository<User>,
     private jwtService: JwtService,
+    @Optional() private userSessionService?: UserSessionService,
   ) {}
 
   /**
-   * Device Fingerprint Generator (SHA-256 IP + User-Agent)
+  /**
+   * Device Fingerprint Generator (Anchored to User-Agent for stable session identification across dynamic IP changes)
    */
   generateDeviceFingerprint(ipAddress: string, userAgent: string): string {
-    const raw = `${ipAddress || '127.0.0.1'}-${userAgent || 'unknown-device'}`;
+    const raw = `ua:${userAgent || 'unknown-device'}`;
     return crypto.createHash('sha256').update(raw).digest('hex');
+  }
+
+  private parseTokenStore(raw: string | null): Array<{ hash: string; createdAt: number; rotatedAt?: number }> {
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      if (typeof raw === 'string' && raw.length > 0) {
+        return [{ hash: raw, createdAt: Date.now() }];
+      }
+    }
+    return [];
+  }
+
+  private serializeTokenStore(items: Array<{ hash: string; createdAt: number; rotatedAt?: number }>): string {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const graceCutoff = Date.now() - 60 * 1000;
+    const valid = items.filter((item) => {
+      if (item.rotatedAt && item.rotatedAt < graceCutoff) return false;
+      return item.createdAt > cutoff;
+    });
+    return JSON.stringify(valid.slice(-10));
   }
 
   async validateUser(identifier: string, pass: string): Promise<any> {
@@ -33,15 +59,8 @@ export class AuthService {
       .orWhere('user.fullName = :identifier', { identifier: trimmed })
       .getOne();
 
-    console.log('DEBUG_LOGIN: found user?', !!user, 'has hash?', !!(user && user.passwordHash));
-
     if (user && user.passwordHash) {
-      let isMatch = await bcrypt.compare(pass, user.passwordHash);
-      console.log('DEBUG_LOGIN: isMatch?', isMatch);
-      if (!isMatch && (pass === 'password123' || pass === '123456')) {
-        isMatch = await bcrypt.compare('123456', user.passwordHash) || await bcrypt.compare('password123', user.passwordHash);
-        console.log('DEBUG_LOGIN: fallback isMatch?', isMatch);
-      }
+      const isMatch = await bcrypt.compare(pass, user.passwordHash);
       if (isMatch) {
         const { passwordHash, ...result } = user;
         return result;
@@ -109,8 +128,15 @@ export class AuthService {
     // Store Hashed Refresh Token in DB for session revocation
     const dbUser = await this.userRepository.findOne({ where: { id: user.id } });
     if (dbUser) {
-      dbUser.refreshToken = await bcrypt.hash(refreshToken, 10);
+      const newHash = await bcrypt.hash(refreshToken, 10);
+      const store = this.parseTokenStore(dbUser.refreshToken);
+      store.push({ hash: newHash, createdAt: Date.now() });
+      dbUser.refreshToken = this.serializeTokenStore(store);
       await this.userRepository.save(dbUser);
+    }
+
+    if (this.userSessionService) {
+      await this.userSessionService.recordSessionActivity(user.id, ipAddress, userAgent, 'device-default');
     }
 
     return {
@@ -147,13 +173,38 @@ export class AuthService {
       throw new UnauthorizedException('Session revoked or user not found!');
     }
 
-    // Verify Refresh Token Hash
-    const isTokenValid = await bcrypt.compare(rawRefreshToken, dbUser.refreshToken);
-    if (!isTokenValid) {
-      // Possible Reuse Attack: Revoke session immediately!
-      dbUser.refreshToken = null;
-      await this.userRepository.save(dbUser);
-      throw new UnauthorizedException('Security Alert: Refresh token reuse detected! Session revoked.');
+    const store = this.parseTokenStore(dbUser.refreshToken);
+    let matchedItemIndex = -1;
+
+    for (let i = 0; i < store.length; i++) {
+      const isMatch = await bcrypt.compare(rawRefreshToken, store[i].hash);
+      if (isMatch) {
+        matchedItemIndex = i;
+        break;
+      }
+    }
+
+    if (matchedItemIndex === -1) {
+      throw new UnauthorizedException('Invalid or revoked refresh token!');
+    }
+
+    const matchedItem = store[matchedItemIndex];
+    const now = Date.now();
+
+    // Concurrent request rotation grace period (within 60s of previous rotation)
+    if (matchedItem.rotatedAt && now - matchedItem.rotatedAt < 60000) {
+      const payload = {
+        email: dbUser.email,
+        sub: dbUser.id,
+        fullName: dbUser.fullName,
+        roles: dbUser.roles?.map((r: any) => r.name) || [],
+      };
+      const newAccessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
+      return {
+        accessToken: newAccessToken,
+        refreshToken: rawRefreshToken,
+        user: payload,
+      };
     }
 
     // Device Fingerprint Verification
@@ -176,9 +227,16 @@ export class AuthService {
       { expiresIn: '7d' }
     );
 
-    // Update DB with new rotated refresh token hash
-    dbUser.refreshToken = await bcrypt.hash(newRefreshToken, 10);
+    const newHash = await bcrypt.hash(newRefreshToken, 10);
+    matchedItem.rotatedAt = now;
+    store.push({ hash: newHash, createdAt: now });
+
+    dbUser.refreshToken = this.serializeTokenStore(store);
     await this.userRepository.save(dbUser);
+
+    if (this.userSessionService) {
+      await this.userSessionService.recordSessionActivity(dbUser.id, ipAddress, userAgent, 'device-default');
+    }
 
     return {
       accessToken: newAccessToken,
@@ -190,10 +248,36 @@ export class AuthService {
   /**
    * Session Invalidation on Logout
    */
-  async logout(userId: number) {
-    const dbUser = await this.userRepository.findOne({ where: { id: userId } });
-    if (dbUser) {
-      dbUser.refreshToken = null;
+  async logout(userId?: number, rawRefreshToken?: string) {
+    let effectiveUserId = userId;
+    if (!effectiveUserId && rawRefreshToken) {
+      try {
+        const decoded: any = this.jwtService.decode(rawRefreshToken);
+        if (decoded && decoded.sub) {
+          effectiveUserId = Number(decoded.sub);
+        }
+      } catch {
+        // Ignore token decoding failure during logout
+      }
+    }
+
+    if (!effectiveUserId) {
+      return { success: true, message: 'Session invalidated.' };
+    }
+
+    const dbUser = await this.userRepository.findOne({ where: { id: effectiveUserId } });
+    if (dbUser && dbUser.refreshToken) {
+      if (rawRefreshToken) {
+        const store = this.parseTokenStore(dbUser.refreshToken);
+        const remaining = [];
+        for (const item of store) {
+          const isMatch = await bcrypt.compare(rawRefreshToken, item.hash);
+          if (!isMatch) remaining.push(item);
+        }
+        dbUser.refreshToken = remaining.length > 0 ? this.serializeTokenStore(remaining) : null;
+      } else {
+        dbUser.refreshToken = null;
+      }
       await this.userRepository.save(dbUser);
     }
     return { success: true, message: 'Session invalidated successfully.' };

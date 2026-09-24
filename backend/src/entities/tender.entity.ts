@@ -11,6 +11,28 @@ export enum TenderStatus {
   LOST = 'LOST',
 }
 
+export enum GoNoGoStatus {
+  PENDING = 'PENDING',
+  GO = 'GO',
+  NO_GO = 'NO_GO',
+}
+
+export enum TenderStage {
+  LEAD = 'LEAD',
+  WAITING_GO_NO_GO = 'WAITING_GO_NO_GO',
+  QUALIFICATION = 'QUALIFICATION',
+  PROPOSAL = 'PROPOSAL',
+  NEGOTIATION = 'NEGOTIATION',
+  WON = 'WON',
+  LOST = 'LOST',
+}
+
+export enum RevisionStatus {
+  NOT_REQUIRED = 'NOT_REQUIRED',
+  REQUIRED = 'REQUIRED',
+  COMPLETED = 'COMPLETED',
+}
+
 @Entity('tenders')
 export class Tender {
   @PrimaryGeneratedColumn('increment', { type: 'bigint', unsigned: true })
@@ -43,7 +65,7 @@ export class Tender {
   @Column({ type: 'varchar', length: 255, nullable: true })
   spk_file_key: string;
 
-  @Column({ type: 'enum', enum: ['UNVERIFIED', 'PENDING_REVIEW', 'VERIFIED', 'REJECTED'], default: 'UNVERIFIED' })
+  @Column({ type: 'enum', enum: ['UNVERIFIED', 'PENDING_REVIEW', 'VERIFIED', 'REJECTED', 'SPK_REQUIRED'], default: 'UNVERIFIED' })
   spk_verification_status: string;
 
   @Column({ type: 'bigint', unsigned: true, nullable: true })
@@ -90,6 +112,21 @@ export class Tender {
 
   @Column({ type: 'enum', enum: TenderStatus, default: TenderStatus.NEW })
   status: TenderStatus;
+
+  @Column({ type: 'enum', enum: GoNoGoStatus, default: GoNoGoStatus.PENDING })
+  go_nogo_status: GoNoGoStatus;
+
+  @Column({ type: 'text', nullable: true })
+  go_nogo_notes: string;
+
+  @Column({ type: 'bigint', unsigned: true, nullable: true })
+  go_nogo_by: number;
+
+  @Column({ type: 'datetime', nullable: true })
+  go_nogo_at: Date;
+
+  @Column({ type: 'enum', enum: RevisionStatus, default: RevisionStatus.NOT_REQUIRED })
+  revision_status: RevisionStatus;
 
   @ManyToOne(() => Customer, (customer) => customer.tenders)
   @JoinColumn({ name: 'customer_id' })

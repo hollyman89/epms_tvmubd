@@ -52,3 +52,9 @@ frontend/analyze/
 
 # Security: Audit scripts containing hardcoded credentials (never commit)
 backend/audit_procurement.js
+
+# Local Tool Residue & Generated Artifacts (R7C)
+/.freebuff/
+/.playwright-mcp/
+/graphify-out/
+/reports/test_20260922.md

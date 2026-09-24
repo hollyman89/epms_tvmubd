@@ -59,10 +59,17 @@ export class PdfProcessor extends WorkerHost {
             ContentType: 'application/pdf',
           }));
           
-          const s3Url = `https://${process.env.AWS_S3_BUCKET || 'epms-staging-bucket'}.s3.amazonaws.com/${key}`;
-          console.log(`[Worker] Uploaded to S3: ${s3Url}`);
+          const streamUrl = `/api/v1/contracts/${contract.id}/spk/stream`;
+          const downloadUrl = `/api/v1/contracts/${contract.id}/spk/download`;
+          console.log(`[Worker] Uploaded contract PDF to S3 for Contract ID: ${contract.id}`);
           
-          resolve({ status: 'completed', url: s3Url });
+          resolve({
+            status: 'completed',
+            contractId: contract.id,
+            streamUrl,
+            downloadUrl,
+            url: streamUrl,
+          });
         } catch (error) {
           console.error(`[Worker] S3 Upload failed: ${error.message}`);
           reject(error);

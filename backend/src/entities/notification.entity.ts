@@ -26,6 +26,9 @@ export class Notification {
   @Column({ name: 'meta_data', type: 'json', nullable: true })
   metaData: any;
 
+  @Column({ name: 'dedupe_key', length: 191, nullable: true })
+  dedupeKey?: string;
+
   @Column({ name: 'created_by', default: 0 })
   createdBy: number;
 

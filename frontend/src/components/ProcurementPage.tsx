@@ -147,14 +147,14 @@ export const ProcurementPage: React.FC = () => {
     error: packagesFetchError,
     refetch: refetchPackages,
   } = useQuery({
-    queryKey: ['procurement-packages', packageQueryFilters],
+    queryKey: ['procurement', 'packages', packageQueryFilters],
     queryFn: () => ProcurementService.getPackages(packageQueryFilters),
     staleTime: 30 * 1000,
   });
 
   // Query for unresolved reconciliations count badge (only for authorized roles)
   const { data: unresolvedReconciliations = [], refetch: refetchReconciliations } = useQuery({
-    queryKey: ['procurement-reconciliations'],
+    queryKey: ['procurement', 'reconciliations'],
     queryFn: () => ProcurementService.getUnresolvedReconciliations(),
     enabled: Boolean(user && canReadReconciliation),
     staleTime: 60 * 1000,
@@ -167,7 +167,7 @@ export const ProcurementPage: React.FC = () => {
 
   // 2. Existing Downstream PR, PO & GR Queries
   const { data: procurementData, isLoading: loadingPrPo, refetch: refetchPrPo } = useQuery({
-    queryKey: ['procurement-prs-pos', user?.sub, prVersion, rfqVersion, poVersion, grVersion],
+    queryKey: ['procurement', 'prs-pos', user?.sub, prVersion, rfqVersion, poVersion, grVersion],
     enabled: Boolean(user),
     queryFn: async () => {
       try {
@@ -263,8 +263,8 @@ export const ProcurementPage: React.FC = () => {
     try {
       await ProcurementService.returnPackage(packageToReturn.id, { reason: trimmed });
       message.success(`Paket pengadaan ${packageToReturn.packageNumber} berhasil dikembalikan ke PM.`);
-      queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
-      queryClient.invalidateQueries({ queryKey: ['procurement-package', packageToReturn.id] });
+      queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+      queryClient.invalidateQueries({ queryKey: ['procurement', 'packages', packageToReturn.id] });
       setReturnModalOpen(false);
       setPackageToReturn(null);
       setReturnReason('');
@@ -286,10 +286,10 @@ export const ProcurementPage: React.FC = () => {
       message.success(
         `Purchase Request ${result.purchaseRequest?.prNumber || (result as any).prNumber || ''} berhasil dibuat dari paket pengadaan!`
       );
-      queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
-      queryClient.invalidateQueries({ queryKey: ['procurement-package', pkg.id] });
-      queryClient.invalidateQueries({ queryKey: ['procurement-prs-pos'] });
-      queryClient.invalidateQueries({ queryKey: ['procurement-prs'] });
+      queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+      queryClient.invalidateQueries({ queryKey: ['procurement', 'packages', pkg.id] });
+      queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
+      queryClient.invalidateQueries({ queryKey: ['procurement', 'prs'] });
       refetchPrPo();
       if (isPackageDrawerOpen) {
         setIsPackageDrawerOpen(false);
@@ -301,8 +301,8 @@ export const ProcurementPage: React.FC = () => {
 
       if (status === 409) {
         message.warning('Purchase Request sudah pernah dibuat untuk paket pengadaan ini.');
-        queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
-        queryClient.invalidateQueries({ queryKey: ['procurement-package', pkg.id] });
+        queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+        queryClient.invalidateQueries({ queryKey: ['procurement', 'packages', pkg.id] });
       } else if (status === 422) {
         // Safety Gate active: unresolved reconciliation items exist for this project
         Modal.warning({
@@ -334,7 +334,7 @@ export const ProcurementPage: React.FC = () => {
         message.error('Akses ditolak. Anda tidak memiliki otoritas untuk memproses paket ini.');
       } else if (status === 404) {
         message.error('Paket pengadaan tidak ditemukan di database.');
-        queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
+        queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
       } else {
         message.error(errorMsg);
       }
@@ -609,7 +609,7 @@ export const ProcurementPage: React.FC = () => {
               </Tag>
               {rfq.comparison?.selectedWinnerVendorName && (
                 <span style={{ fontSize: 9.5, color: '#6b21a8', fontWeight: 600 }}>
-                  🏆 {rfq.comparison.selectedWinnerVendorName}
+                  {rfq.comparison.selectedWinnerVendorName}
                 </span>
               )}
             </Space>
@@ -857,7 +857,7 @@ export const ProcurementPage: React.FC = () => {
 
               {isCompleted && (
                 <Tag color="green" style={{ fontWeight: 700, margin: 0, padding: '2px 6px', fontSize: 10.5 }}>
-                  ✅ Selesai Diterima
+                  Selesai Diterima
                 </Tag>
               )}
 
@@ -1110,8 +1110,8 @@ export const ProcurementPage: React.FC = () => {
             children: (
               <ReconciliationTab
                 onReconciliationChanged={() => {
-                  queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
-                  queryClient.invalidateQueries({ queryKey: ['procurement-reconciliations'] });
+                  queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+                  queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'] });
                   refetchReconciliations();
                 }}
               />

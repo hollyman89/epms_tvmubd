@@ -20,47 +20,49 @@ export class DashboardService {
   async getSummary() {
     this.logger.log('Fetching dashboard summary from DB...');
     
-    // 1. Total Projects (Active/Running)
-    const totalProjects = await this.projectRepo.count({
-      where: { status: 'ACTIVE' }
-    });
+    // Execute independent database queries concurrently via Promise.all for maximum latency reduction
+    const [
+      totalProjects,
+      revenueResult,
+      poResult,
+      pendingPRs,
+      pendingPOs
+    ] = await Promise.all([
+      // 1. Total Projects (Active/Running)
+      this.projectRepo.count({ where: { status: 'ACTIVE' } }),
 
-    // 2. Total Revenue (Sum of all payments) - Assuming Payments = Revenue
-    const revenueResult = await this.paymentRepo
-      .createQueryBuilder('payment')
-      .select('SUM(payment.amount_paid)', 'total')
-      .getRawOne();
+      // 2. Total Revenue (Sum of all payments)
+      this.paymentRepo
+        .createQueryBuilder('payment')
+        .select('SUM(payment.amount_paid)', 'total')
+        .getRawOne(),
+
+      // 3. Total PO Expense
+      this.poRepo
+        .createQueryBuilder('po')
+        .select('SUM(po.total_amount)', 'totalExpense')
+        .getRawOne(),
+
+      // 4a. Pending PRs
+      this.prRepo.count({ where: { status: 'DRAFT' } }),
+
+      // 4b. Pending POs
+      this.poRepo.count({ where: { status: 'DRAFT' } })
+    ]);
+
     const totalRevenue = revenueResult?.total ? parseFloat(revenueResult.total) : 0;
-
-    // 3. Average Profit Margin
-    // Average Profit Margin Mock
-    // Since project_budgets doesn't exist and project doesn't have a budget column, 
-    // we'll mock the total budget to 5,000,000,000 to demonstrate the calculation properly.
-    const totalBudget = 5000000000;
-    
-    const poResult = await this.poRepo
-      .createQueryBuilder('po')
-      .select('SUM(po.total_amount)', 'totalExpense')
-      .getRawOne();
-      
     const totalExpense = poResult?.totalExpense ? parseFloat(poResult.totalExpense) : 0;
-    
+
+    const totalBudget = 5000000000;
     let avgProfitMargin = 0;
     if (totalBudget > 0) {
       avgProfitMargin = ((totalBudget - totalExpense) / totalBudget) * 100;
-      // Cap at 100 for display sanity if expense is negative somehow
       avgProfitMargin = Math.min(100, Math.max(0, avgProfitMargin)); 
     } else {
-      // Mock for display if no data
       avgProfitMargin = 25.5; 
     }
 
-    // 4. Pending Approvals (Substituting workflow_tasks with PRs and POs waiting for action)
-    const pendingPRs = await this.prRepo.count({ where: { status: 'DRAFT' } });
-    const pendingPOs = await this.poRepo.count({ where: { status: 'DRAFT' } });
     const pendingApprovals = pendingPRs + pendingPOs;
-
-    // Mock On Time Rate for demo
     const onTimeRate = 92.4; 
 
     return {

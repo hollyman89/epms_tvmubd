@@ -1,9 +1,15 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Card, List, Tag, Button, Space, Typography, Tooltip, Spin, message, Empty } from 'antd';
+import { Card, List, Tag, Button, Space, Typography, Tooltip, Spin, message } from 'antd';
 import { FilePdfOutlined, DownloadOutlined, HistoryOutlined, PaperClipOutlined, EyeOutlined } from '@ant-design/icons';
-import { LegalService } from '@/services';
+import { apiClient } from '@/lib/axios';
+import {
+  streamSecureDocument,
+  downloadSecureDocument,
+  streamSecureContractSpk,
+  downloadSecureContractSpk,
+} from '@/lib/fileDelivery';
 
 const { Text } = Typography;
 
@@ -16,10 +22,12 @@ interface VersionItem {
 
 interface AttachmentItem {
   id?: number;
+  documentId?: number;
+  contractId?: number;
+  isContractSpk?: boolean;
   name: string;
   type: string;
   size: string;
-  url?: string;
 }
 
 interface LegalVersionHistoryAttachmentsProps {
@@ -43,23 +51,39 @@ export const LegalVersionHistoryAttachments: React.FC<LegalVersionHistoryAttachm
   const fetchDynamicHistoryAndAttachments = async (id: number) => {
     setLoading(true);
     try {
-      // 1. Fetch Dynamic Document Attachments from backend API via LegalService
-      const docsData = await LegalService.getDocuments(id);
-      if (Array.isArray(docsData) && docsData.length > 0) {
-        const mappedAttachments: AttachmentItem[] = docsData.map((doc: any) => ({
-          id: doc.id,
-          name: doc.fileName || doc.file_name || `Dokumen_Kontrak_${id}.pdf`,
-          type: doc.fileType || doc.entityType || 'DOCUMENT',
-          size: doc.fileSize ? `${(doc.fileSize / (1024 * 1024)).toFixed(2)} MB` : '1.85 MB',
-          url: doc.fileUrl || doc.filePath || '/uploads/proposals/sample_contract.pdf',
-        }));
-        setAttachments(mappedAttachments);
-      } else {
-        setAttachments([
-          { name: `Proposal_Penawaran_Pengadaan_CTR-${id}.pdf`, type: 'PROPOSAL', size: '2.45 MB', url: '/uploads/proposals/sample_contract.pdf' },
-          { name: `Surat_Perjanjian_Kerja_SPK_CTR-${id}.pdf`, type: 'SPK', size: '1.84 MB', url: '/uploads/proposals/sample_contract.pdf' },
-        ]);
+      // 1. Fetch Dynamic Document Attachments from backend API via canonical entity endpoint
+      let docsData: any[] = [];
+      try {
+        const entityDocsRes = await apiClient.get(`/documents/entity/CONTRACT/${id}`);
+        docsData = entityDocsRes.data?.data || entityDocsRes.data || [];
+      } catch (e) {
+        // entity docs empty or not yet uploaded
       }
+
+      const mappedAttachments: AttachmentItem[] = [
+        {
+          id,
+          contractId: id,
+          isContractSpk: true,
+          name: `Surat_Perjanjian_Kerja_SPK_CTR-${id}.pdf`,
+          type: 'SPK',
+          size: '1.84 MB',
+        },
+      ];
+
+      if (Array.isArray(docsData) && docsData.length > 0) {
+        docsData.forEach((doc: any) => {
+          mappedAttachments.push({
+            id: doc.id,
+            documentId: doc.id,
+            name: doc.fileName || doc.file_name || `Dokumen_Kontrak_${id}.pdf`,
+            type: doc.fileType || doc.entityType || 'DOCUMENT',
+            size: doc.fileSize ? `${(doc.fileSize / (1024 * 1024)).toFixed(2)} MB` : '1.85 MB',
+          });
+        });
+      }
+
+      setAttachments(mappedAttachments);
 
       // 2. Fetch Dynamic Version History
       setVersions([
@@ -74,10 +98,33 @@ export const LegalVersionHistoryAttachments: React.FC<LegalVersionHistoryAttachm
     }
   };
 
-  const handleDownload = (item: AttachmentItem) => {
-    const downloadUrl = item.url || 'http://localhost:4000/uploads/proposals/sample_contract.pdf';
-    window.open(downloadUrl, '_blank');
-    message.success(`Membuka berkas lampiran: ${item.name}`);
+  const handleAction = async (item: AttachmentItem, action: 'view' | 'download') => {
+    try {
+      if (item.isContractSpk || item.contractId) {
+        if (action === 'view') {
+          const { objectUrl } = await streamSecureContractSpk(item.contractId || item.id!);
+          window.open(objectUrl, '_blank');
+        } else {
+          message.loading({ content: `Mengunduh berkas ${item.name}...`, key: 'att-download' });
+          await downloadSecureContractSpk(item.contractId || item.id!, item.name);
+          message.success({ content: `Berkas ${item.name} berhasil diunduh.`, key: 'att-download' });
+        }
+      } else if (item.documentId || item.id) {
+        if (action === 'view') {
+          const { objectUrl } = await streamSecureDocument(item.documentId || item.id!);
+          window.open(objectUrl, '_blank');
+        } else {
+          message.loading({ content: `Mengunduh berkas ${item.name}...`, key: 'att-download' });
+          await downloadSecureDocument(item.documentId || item.id!, item.name);
+          message.success({ content: `Berkas ${item.name} berhasil diunduh.`, key: 'att-download' });
+        }
+      } else {
+        message.error('ID berkas lampiran tidak valid.');
+      }
+    } catch (err) {
+      console.error('File action error:', err);
+      message.error({ content: `Gagal memproses berkas: ${item.name}`, key: 'att-download' });
+    }
   };
 
   return (
@@ -130,11 +177,11 @@ export const LegalVersionHistoryAttachments: React.FC<LegalVersionHistoryAttachm
               <List.Item
                 extra={
                   <Space size={4}>
-                    <Tooltip title="Pratinjau / Unduh Berkas">
-                      <Button size="small" icon={<EyeOutlined />} onClick={() => handleDownload(item)} />
+                    <Tooltip title="Pratinjau Berkas">
+                      <Button size="small" icon={<EyeOutlined />} onClick={() => handleAction(item, 'view')} />
                     </Tooltip>
                     <Tooltip title="Unduh Berkas Lampiran">
-                      <Button size="small" icon={<DownloadOutlined />} onClick={() => handleDownload(item)} />
+                      <Button size="small" icon={<DownloadOutlined />} onClick={() => handleAction(item, 'download')} />
                     </Tooltip>
                   </Space>
                 }

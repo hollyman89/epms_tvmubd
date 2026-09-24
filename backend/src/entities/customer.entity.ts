@@ -31,6 +31,12 @@ export class Customer {
   @Column({ type: 'varchar', length: 100, nullable: true })
   city: string;
 
+  @Column({ type: 'text', nullable: true })
+  address?: string;
+
+  @Column({ name: 'tax_id', type: 'varchar', length: 50, nullable: true })
+  taxId?: string;
+
   @Column({ type: 'enum', enum: ['Active', 'Inactive', 'PROSPECT'], default: 'Active' })
   status: string;
 

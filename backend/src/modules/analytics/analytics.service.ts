@@ -111,8 +111,8 @@ export class AnalyticsService {
     let userFilter = '';
     const params: any[] = [start, end];
     if (userId && !isManagement) {
-      userFilter = 'AND marketing_pic_id = ?';
-      params.push(userId);
+      userFilter = 'AND (marketing_pic_id = ? OR (marketing_pic_id IS NULL AND created_by = ?))';
+      params.push(userId, userId);
     }
 
     // Amendment 1: COALESCE ganda to guarantee 0 instead of null
@@ -133,8 +133,8 @@ export class AnalyticsService {
     let userFilter = '';
     const params: any[] = [start, end];
     if (userId && !isManagement) {
-      userFilter = 'AND marketing_pic_id = ?';
-      params.push(userId);
+      userFilter = 'AND (marketing_pic_id = ? OR (marketing_pic_id IS NULL AND created_by = ?))';
+      params.push(userId, userId);
     }
 
     const result = await this.tenderRepository.query(`
@@ -162,8 +162,8 @@ export class AnalyticsService {
     let userFilter = '';
     const params: any[] = [start, end];
     if (userId && !isManagement) {
-      userFilter = 'AND marketing_pic_id = ?';
-      params.push(userId);
+      userFilter = 'AND (marketing_pic_id = ? OR (marketing_pic_id IS NULL AND created_by = ?))';
+      params.push(userId, userId);
     }
 
     const result = await this.tenderRepository.query(`
@@ -184,10 +184,12 @@ export class AnalyticsService {
     const negCount: number = (stageMap.get('NEGOTIATION') ?? 0) + (stageMap.get('PENDING_APPROVAL') ?? 0) + wonCount + lostCount;
     const propCount: number = (stageMap.get('PROPOSAL') ?? 0) + negCount;
     const qualCount: number = (stageMap.get('QUALIFICATION') ?? 0) + propCount;
-    const leadCount: number = (stageMap.get('LEAD') ?? 0) + qualCount;
+    const waitingGoNoGoCount: number = (stageMap.get('WAITING_GO_NO_GO') ?? 0) + qualCount;
+    const leadCount: number = (stageMap.get('LEAD') ?? 0) + waitingGoNoGoCount;
 
     return [
       { stage: 'LEAD', count: leadCount },
+      { stage: 'WAITING_GO_NO_GO', count: waitingGoNoGoCount },
       { stage: 'QUALIFICATION', count: qualCount },
       { stage: 'PROPOSAL', count: propCount },
       { stage: 'NEGOTIATION', count: negCount },
@@ -203,8 +205,8 @@ export class AnalyticsService {
     let userFilter = '';
     const params: any[] = [startDate, referenceDate];
     if (userId && !isManagement) {
-      userFilter = 'AND marketing_pic_id = ?';
-      params.push(userId);
+      userFilter = 'AND (marketing_pic_id = ? OR (marketing_pic_id IS NULL AND created_by = ?))';
+      params.push(userId, userId);
     }
 
     const result = await this.tenderRepository.query(`
@@ -268,5 +270,39 @@ export class AnalyticsService {
     }
 
     return { topInsight, warningInsight };
+  }
+
+  async getMarketingPerformance(query: GetAnalyticsQueryDto) {
+    const { period, startDate, endDate } = query;
+    const { start, end } = this.calculateDateRange(period, startDate, endDate);
+
+    const rawData = await this.tenderRepository.query(
+      `
+      SELECT 
+        COALESCE(t.marketing_pic_id, t.created_by) AS marketingId,
+        COALESCE(u.full_name, 'Unassigned') AS marketingName,
+        COUNT(t.id) AS totalTender,
+        COALESCE(SUM(COALESCE(t.negotiated_price, t.estimated_budget)), 0) AS pipelineValue,
+        COUNT(CASE WHEN t.status = 'WON' THEN 1 END) AS wonTender,
+        COALESCE(ROUND((COUNT(CASE WHEN t.status = 'WON' THEN 1 END) * 100.0 / NULLIF(COUNT(t.id), 0)), 1), 0) AS winRate,
+        COALESCE(AVG(CASE WHEN t.status = 'WON' THEN t.negotiated_price END), 0) AS averageDealSize
+      FROM tenders t
+      LEFT JOIN users u ON u.id = COALESCE(t.marketing_pic_id, t.created_by)
+      WHERE t.created_at BETWEEN ? AND ? AND t.deleted_at IS NULL
+      GROUP BY COALESCE(t.marketing_pic_id, t.created_by), COALESCE(u.full_name, 'Unassigned')
+      ORDER BY pipelineValue DESC
+      `,
+      [start, end],
+    );
+
+    return rawData.map((row: any) => ({
+      marketingId: row.marketingId ? Number(row.marketingId) : null,
+      marketingName: row.marketingName,
+      totalTender: Number(row.totalTender || 0),
+      pipelineValue: Number(row.pipelineValue || 0),
+      wonTender: Number(row.wonTender || 0),
+      winRate: Number(row.winRate || 0),
+      averageDealSize: Number(row.averageDealSize || 0),
+    }));
   }
 }

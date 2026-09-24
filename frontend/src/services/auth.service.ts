@@ -20,19 +20,51 @@ export class AuthService {
   }
 
   /**
-   * Refreshes access token using refresh token via apiClient SSOT.
+   * Refreshes access token using HttpOnly cookie via apiClient SSOT.
+   * Does NOT require or depend on refresh token in browser localStorage.
    */
-  static async refreshSession(): Promise<{ accessToken: string; refreshToken?: string }> {
-    const refreshToken = this.getRefreshToken();
-    if (!refreshToken) throw new Error('No refresh token available');
-    const res = await apiClient.post('/auth/refresh', { refreshToken }, { withCredentials: true });
-    const newAccessToken = res.data?.accessToken || res.data?.data?.accessToken;
-    const newRefreshToken = res.data?.refreshToken || res.data?.data?.refreshToken;
+  static async refreshSession(): Promise<{ accessToken: string; user?: any }> {
+    const res = await apiClient.post('/auth/refresh', {}, { withCredentials: true });
+    const payload = res.data?.data || res.data;
+    const newAccessToken = payload?.accessToken || payload?.access_token;
+    const user = payload?.user;
+
     if (newAccessToken) {
       this.setAccessToken(newAccessToken);
-      if (newRefreshToken) this.setRefreshToken(newRefreshToken);
     }
-    return { accessToken: newAccessToken, refreshToken: newRefreshToken };
+    if (user) {
+      this.setUser(user);
+    }
+    // Clean up any legacy refresh token in browser storage
+    this.removeRefreshToken();
+
+    return { accessToken: newAccessToken, user };
+  }
+
+  /**
+   * Safe JWT expiration check without external dependencies.
+   * Returns true if token is missing, malformed, or expired (within 10s buffer).
+   */
+  static isTokenExpired(token?: string | null): boolean {
+    const t = token || this.getAccessToken();
+    if (!t) return true;
+    try {
+      const parts = t.split('.');
+      if (parts.length !== 3) return true;
+      // Base64URL to Base64 decode
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      const parsed = JSON.parse(jsonPayload);
+      if (!parsed.exp) return false;
+      return parsed.exp * 1000 <= Date.now() + 10000;
+    } catch {
+      return true;
+    }
   }
 
   /**
@@ -119,14 +151,13 @@ export class AuthService {
   }
 
   /**
-   * Saves full session credentials (access token, refresh token, user).
+   * Saves active session credentials (access token, user).
+   * Explicitly purges any legacy refresh token from storage.
    */
-  static setSession(token: string, user: UserSessionData, refreshToken?: string): void {
+  static setSession(token: string, user: UserSessionData): void {
     this.setAccessToken(token);
     this.setUser(user);
-    if (refreshToken) {
-      this.setRefreshToken(refreshToken);
-    }
+    this.removeRefreshToken();
   }
 
   /**
@@ -144,6 +175,10 @@ export class AuthService {
   static isAuthenticated(): boolean {
     return Boolean(this.getAccessToken());
   }
+}
+
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  (window as any).AuthService = AuthService;
 }
 
 export default AuthService;

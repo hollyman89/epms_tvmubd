@@ -38,7 +38,7 @@ export class AuthController {
     res.cookie('refresh_token', refreshToken, {
       httpOnly: true,
       secure: isProduction,
-      sameSite: 'strict',
+      sameSite: 'lax',
       path: '/api/v1/auth',
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 Days
     });
@@ -49,14 +49,15 @@ export class AuthController {
    */
   private clearRefreshTokenCookie(res: any) {
     const isProduction = process.env.NODE_ENV === 'production';
-    res.cookie('refresh_token', '', {
+    const cookieOpts = {
       httpOnly: true,
       secure: isProduction,
-      sameSite: 'strict',
-      path: '/api/v1/auth',
+      sameSite: 'lax' as const,
       maxAge: 0,
       expires: new Date(0),
-    });
+    };
+    res.cookie('refresh_token', '', { ...cookieOpts, path: '/api/v1/auth' });
+    res.cookie('refresh_token', '', { ...cookieOpts, path: '/' });
   }
 
   @Post('login')
@@ -127,10 +128,9 @@ export class AuthController {
     @Request() req: any,
     @Response({ passthrough: true }) res: any,
   ) {
+    const rawRefreshToken = req.cookies?.['refresh_token'] || req.body?.refreshToken;
     const userId = req.user?.sub || req.user?.userId;
-    if (userId) {
-      await this.authService.logout(userId);
-    }
+    await this.authService.logout(userId, rawRefreshToken);
 
     // Clear Refresh Token Cookie
     this.clearRefreshTokenCookie(res);

@@ -1,5 +1,5 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class CreateWbsDto {
   @ApiProperty({ example: 1 })
@@ -22,8 +22,21 @@ export class CreateWbsDto {
   @IsNotEmpty()
   name: string;
 
-  @ApiProperty({ example: 1 })
+  @ApiProperty({ example: 1, required: false })
   @IsNumber()
   @IsOptional()
   level?: number;
+
+  @ApiProperty({ example: 15.5, required: false })
+  @IsNumber()
+  @Min(0)
+  @Max(100)
+  @IsOptional()
+  weightPercentage?: number;
+
+  @ApiProperty({ example: 'Site survey, koordinasi perizinan instansi & K3 operasional', required: false })
+  @IsString()
+  @MaxLength(500)
+  @IsOptional()
+  description?: string;
 }

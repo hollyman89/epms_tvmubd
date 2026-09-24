@@ -73,7 +73,7 @@ export const ReconciliationItemModal: React.FC<ReconciliationItemModalProps> = (
     error,
     refetch,
   } = useQuery({
-    queryKey: ['procurement-reconciliation-item', prItemId],
+    queryKey: ['procurement', 'reconciliation-item', prItemId],
     queryFn: () => ProcurementService.getReconciliationDetail(prItemId!),
     enabled: Boolean(open && prItemId && prItemId > 0),
     staleTime: 10 * 1000,
@@ -100,9 +100,9 @@ export const ReconciliationItemModal: React.FC<ReconciliationItemModalProps> = (
       });
 
       message.success(`Item PR #${prItemId} berhasil direkonsiliasi ke CostItem #${selectedCostItemId}!`);
-      await queryClient.invalidateQueries({ queryKey: ['procurement-reconciliations'] });
-      await queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
-      await queryClient.invalidateQueries({ queryKey: ['procurement-reconciliation-item', prItemId] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliation-item', prItemId] });
       if (onSuccess) onSuccess();
       onClose();
     } catch (err: any) {
@@ -124,9 +124,9 @@ export const ReconciliationItemModal: React.FC<ReconciliationItemModalProps> = (
       });
 
       message.success(`Item PR #${prItemId} berhasil dieksklusi dari quota RAB proyek!`);
-      await queryClient.invalidateQueries({ queryKey: ['procurement-reconciliations'] });
-      await queryClient.invalidateQueries({ queryKey: ['procurement-packages'] });
-      await queryClient.invalidateQueries({ queryKey: ['procurement-reconciliation-item', prItemId] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliation-item', prItemId] });
       if (onSuccess) onSuccess();
       onClose();
     } catch (err: any) {

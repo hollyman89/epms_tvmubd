@@ -16,7 +16,8 @@ export class AdminUserService {
     private roleRepository: Repository<Role>,
   ) {}
 
-  async findAll(roleName?: string) {
+  async findAll(roleName?: string, page: number = 1, limit: number = 10) {
+    const skip = (page - 1) * limit;
     const query = this.userRepository.createQueryBuilder('user')
       .leftJoinAndSelect('user.roles', 'role')
       .select(['user.id', 'user.email', 'user.fullName', 'user.isActive', 'user.createdAt', 'role.name'])
@@ -26,7 +27,24 @@ export class AdminUserService {
       query.andWhere('role.name = :roleName', { roleName });
     }
 
-    return await query.getMany();
+    query.orderBy('user.createdAt', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [data, total] = await query.getManyAndCount();
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async getRoles() {
+    return this.roleRepository.find({
+      order: { name: 'ASC' },
+    });
   }
 
   async createUser(createUserDto: CreateUserDto) {

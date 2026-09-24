@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Modal, Form, Input, Select, message } from 'antd';
-import axios from 'axios';
+import { apiClient } from '@/lib/axios';
 
 const { Option } = Select;
 
@@ -36,10 +36,7 @@ const EditCustomerModal: React.FC<EditCustomerModalProps> = ({ visible, customer
       const values = await form.validateFields();
       setIsSubmitting(true);
       
-      const token = localStorage.getItem('access_token');
-      await axios.patch(`http://localhost:4000/api/v1/customers/${customer.id}`, values, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.patch(`/customers/${customer.id}`, values);
       
       message.success('Customer berhasil diupdate');
       onSuccess();
@@ -67,6 +64,7 @@ const EditCustomerModal: React.FC<EditCustomerModalProps> = ({ visible, customer
       okText={isSubmitting ? "Menyimpan..." : "Update"}
       okButtonProps={{ disabled: isSubmitting }}
       width={700}
+      style={{ maxWidth: '95vw' }}
       destroyOnClose
     >
       <Form form={form} layout="vertical">

@@ -1,86 +1,137 @@
 import React, { useState, useEffect } from 'react';
-import { Table, Button, Input, Select, Tag, Space, Modal, Form, Drawer, Descriptions, message, Popconfirm, Card, Row, Col } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, SearchOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { 
+  Table, 
+  Button, 
+  Input, 
+  Select, 
+  Tag, 
+  Space, 
+  Modal, 
+  Drawer, 
+  Descriptions, 
+  message, 
+  Popconfirm, 
+  Card, 
+  Row, 
+  Col, 
+  Typography, 
+  Tooltip, 
+  Empty, 
+  Avatar, 
+  Tabs, 
+  Timeline 
+} from 'antd';
+import { 
+  EditOutlined, 
+  DeleteOutlined, 
+  EyeOutlined, 
+  SearchOutlined, 
+  TeamOutlined, 
+  UserAddOutlined, 
+  PlusOutlined,
+  PhoneOutlined,
+  MailOutlined,
+  BankOutlined,
+  EnvironmentOutlined,
+  FileTextOutlined,
+  TrophyOutlined,
+  AppstoreOutlined,
+  CopyOutlined,
+  UserOutlined
+} from '@ant-design/icons';
+import dayjs from 'dayjs';
+import { apiClient } from '@/lib/axios';
+import { useUsersQuery } from '@/hooks/useMasterDataQuery';
 import EditCustomerModal from './EditCustomerModal';
+import CustomerForm, { CustomerFormPayload } from './CustomerForm';
 
 const { Option } = Select;
+const { Title, Text } = Typography;
 
-const BUSINESS_SECTORS = [
-  'Telekomunikasi & Internet',
-  'Teknologi Informasi & Software',
-  'Perbankan & Keuangan',
-  'Energi & Sumber Daya Mineral',
-  'Konstruksi & Infrastruktur',
-  'Manufaktur & Industri',
-  'Transportasi & Logistik',
-  'Pemerintahan & BUMN',
-  'Kesehatan & Farmasi',
-  'Pendidikan',
-  'Properti & Real Estate',
-  'Pariwisata & Perhotelan'
-];
+const getInitials = (name?: string) => {
+  if (!name) return 'CU';
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[1][0]).toUpperCase();
+};
 
-const CustomersPage: React.FC = () => {
-  const [customers, setCustomers] = useState<any[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
+const getStatusColor = (status?: string) => {
+  const s = status ? status.toUpperCase() : '';
+  if (s === 'ACTIVE') return 'success';
+  if (s === 'PROSPECT') return 'processing';
+  if (s === 'INACTIVE') return 'default';
+  return 'default';
+};
+
+export interface Customer {
+  id: number;
+  code: string;
+  name: string;
+  company?: string;
+  contact_person: string;
+  phone: string;
+  email: string;
+  business_sector?: string;
+  city?: string;
+  status: 'Active' | 'Inactive' | 'PROSPECT';
+  marketing_pic_id?: number;
+  marketing_pic?: {
+    id: number;
+    fullName: string;
+    email: string;
+  };
+}
+
+export const CustomersPage: React.FC = () => {
+  const queryClient = useQueryClient();
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
-  const [marketingPics, setMarketingPics] = useState<any[]>([]);
+  
+  const { data: rawMarketingPics = [] } = useUsersQuery();
+  const marketingPics = rawMarketingPics;
   
   // Pagination & Filters
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 10, total: 0 });
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [searchText, setSearchText] = useState<string>('');
   const [sectorFilter, setSectorFilter] = useState<string | undefined>(undefined);
 
   // Modals & Drawers
   const [isModalVisible, setIsModalVisible] = useState<boolean>(false);
   const [isDrawerVisible, setIsDrawerVisible] = useState<boolean>(false);
-  const [editingCustomer, setEditingCustomer] = useState<any>(null);
   const [detailCustomer, setDetailCustomer] = useState<any>(null);
-  const [isCustomSector, setIsCustomSector] = useState<boolean>(false);
   const [userRole, setUserRole] = useState<string | null>(null);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
 
-  const [form] = Form.useForm();
+  const roleStr = userRole ? userRole.toUpperCase() : '';
+  const isSuperAdmin = roleStr === 'SUPER_ADMIN' || roleStr === 'ADMIN';
+  const isCanEdit = isSuperAdmin || roleStr === 'MANAGER' || roleStr === 'GENERAL_MANAGER';
 
-  const fetchCustomers = async (page = 1, limit = 10, search = searchText, sector = sectorFilter) => {
-    setLoading(true);
-    try {
-      const token = localStorage.getItem('access_token');
-      const params: any = { page, limit };
-      if (search) params.search = search;
-      if (sector) params.sector = sector;
+  const { data: queryData, isLoading: loading } = useQuery({
+    queryKey: ['customers', pagination.current, pagination.pageSize, searchText, sectorFilter],
+    queryFn: async () => {
+      try {
+        const params: any = { page: pagination.current, limit: pagination.pageSize };
+        if (searchText) params.search = searchText;
+        if (sectorFilter) params.sector = sectorFilter;
 
-      const res = await axios.get('http://localhost:4000/api/v1/customers', {
-        headers: { Authorization: `Bearer ${token}` },
-        params
-      });
-      const responseBody = res.data?.data || res.data;
-      const customerArray = Array.isArray(responseBody) ? responseBody : (responseBody?.data || []);
-      const totalCount = Array.isArray(responseBody) ? responseBody.length : (responseBody?.total || customerArray.length);
-      
-      setCustomers(customerArray);
-      setPagination({ current: page, pageSize: limit, total: totalCount });
-    } catch (error: any) {
-      message.error(error.response?.data?.message || 'Failed to fetch customers');
-    } finally {
-      setLoading(false);
-    }
-  };
+        const res = await apiClient.get('/customers', { params });
+        const responseBody = res.data?.data || res.data;
+        const customerArray = Array.isArray(responseBody) ? responseBody : (responseBody?.data || []);
+        const totalCount = Array.isArray(responseBody) ? responseBody.length : (responseBody?.total || customerArray.length);
 
-  const fetchMarketingPics = async () => {
-    try {
-      const token = localStorage.getItem('access_token');
-      const res = await axios.get('http://localhost:4000/api/v1/marketing/pics', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setMarketingPics(res.data.data || res.data);
-    } catch (error) {
-      console.error('Failed to fetch marketing pics', error);
-    }
-  };
+        return { customers: customerArray, total: totalCount };
+      } catch (error: any) {
+        message.error(error.response?.data?.message || 'Failed to fetch customers');
+        throw error;
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const customers = queryData?.customers || [];
+  const totalCustomers = queryData?.total || 0;
 
   useEffect(() => {
     try {
@@ -94,31 +145,23 @@ const CustomersPage: React.FC = () => {
     } catch (e) {
       console.error('Error parsing user from localStorage', e);
     }
-    fetchCustomers();
-    fetchMarketingPics();
   }, []);
 
   const handleTableChange = (pag: any) => {
-    fetchCustomers(pag.current, pag.pageSize);
+    setPagination({ current: pag.current, pageSize: pag.pageSize });
   };
 
   const handleSearch = (value: string) => {
     setSearchText(value);
-    fetchCustomers(1, pagination.pageSize, value, sectorFilter);
+    setPagination((prev) => ({ ...prev, current: 1 }));
   };
 
   const handleSectorFilter = (value: string) => {
     setSectorFilter(value);
-    fetchCustomers(1, pagination.pageSize, searchText, value);
+    setPagination((prev) => ({ ...prev, current: 1 }));
   };
 
   const openAddModal = () => {
-    setEditingCustomer(null);
-    form.resetFields();
-    form.setFieldsValue({
-      status: userRole === 'MARKETING' ? 'PROSPECT' : 'Active'
-    });
-    setIsCustomSector(false);
     setIsModalVisible(true);
   };
 
@@ -127,42 +170,14 @@ const CustomersPage: React.FC = () => {
     setIsEditModalOpen(true);
   };
 
-  const handleModalOk = async () => {
+  const handleCreateCustomer = async (payload: CustomerFormPayload) => {
     try {
-      const values = await form.validateFields();
       setIsSubmitting(true);
-      const token = localStorage.getItem('access_token');
-      
-      const payload: any = {
-        ...values,
-        business_sector: values.business_sector_select === 'Lainnya' 
-          ? values.business_sector_custom 
-          : values.business_sector_select,
-        marketing_pic_id: values.marketing_pic_id ? Number(values.marketing_pic_id) : null
-      };
-
-      delete payload.business_sector_select;
-      delete payload.business_sector_custom;
-      
-      if (editingCustomer) {
-        await axios.patch(`http://localhost:4000/api/v1/customers/${editingCustomer.id}`, payload, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        message.success('Customer updated successfully');
-      } else {
-        await axios.post('http://localhost:4000/api/v1/customers', payload, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        message.success('Customer added successfully');
-      }
-      
+      await apiClient.post('/customers', payload);
+      message.success('Customer added successfully');
       setIsModalVisible(false);
-      fetchCustomers(pagination.current, pagination.pageSize);
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
     } catch (error: any) {
-      if (error.errorFields) {
-        message.error('Harap perbaiki isian form yang ditandai dengan warna merah.');
-        return;
-      }
       if (error.response) {
         message.error(error.response?.data?.message || 'Failed to save customer');
       }
@@ -173,12 +188,9 @@ const CustomersPage: React.FC = () => {
 
   const handleDelete = async (id: number) => {
     try {
-      const token = localStorage.getItem('access_token');
-      await axios.delete(`http://localhost:4000/api/v1/customers/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.delete(`/customers/${id}`);
       message.success('Customer deleted successfully');
-      fetchCustomers(pagination.current, pagination.pageSize);
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
     } catch (error: any) {
       message.error(error.response?.data?.message || 'Failed to delete customer');
     }
@@ -186,10 +198,7 @@ const CustomersPage: React.FC = () => {
 
   const openDetailDrawer = async (record: any) => {
     try {
-      const token = localStorage.getItem('access_token');
-      const res = await axios.get(`http://localhost:4000/api/v1/customers/${record.id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      const res = await apiClient.get(`/customers/${record.id}`);
       setDetailCustomer(res.data.data || res.data);
       setIsDrawerVisible(true);
     } catch (error: any) {
@@ -198,44 +207,138 @@ const CustomersPage: React.FC = () => {
   };
 
   const columns = [
-    { title: 'Code', dataIndex: 'code', key: 'code', width: 100 },
-    { title: 'Name', dataIndex: 'name', key: 'name', width: 200 },
-    { title: 'Company', dataIndex: 'company', key: 'company', width: 200 },
-    { title: 'Contact Person', dataIndex: 'contact_person', key: 'contact_person', width: 150 },
-    { title: 'Phone', dataIndex: 'phone', key: 'phone', width: 150 },
-    { title: 'Sector', dataIndex: 'business_sector', key: 'business_sector', width: 120 },
+    { 
+      title: 'Code', 
+      dataIndex: 'code', 
+      key: 'code', 
+      width: 110,
+      render: (text: string) => <Text code style={{ fontWeight: 600, color: '#334155', fontSize: 12 }}>{text || '-'}</Text>
+    },
+    { 
+      title: 'Name', 
+      dataIndex: 'name', 
+      key: 'name', 
+      width: 200,
+      render: (text: string) => <Text strong style={{ color: '#0f172a', fontSize: 13 }}>{text}</Text>
+    },
+    { 
+      title: 'Company', 
+      dataIndex: 'company', 
+      key: 'company', 
+      width: 200,
+      render: (text: string) => <Text style={{ color: '#475569', fontSize: 13 }}>{text || '-'}</Text>
+    },
+    { 
+      title: 'Contact Person', 
+      dataIndex: 'contact_person', 
+      key: 'contact_person', 
+      width: 160,
+      render: (text: string) => <Text style={{ color: '#334155', fontSize: 12 }}>{text || '-'}</Text>
+    },
+    { 
+      title: 'Phone', 
+      dataIndex: 'phone', 
+      key: 'phone', 
+      width: 140,
+      render: (text: string) => <Text style={{ color: '#64748b', fontSize: 12 }}>{text || '-'}</Text>
+    },
+    { 
+      title: 'Email', 
+      dataIndex: 'email', 
+      key: 'email', 
+      width: 190,
+      render: (text: string) => <Text style={{ color: '#64748b', fontSize: 12, wordBreak: 'break-all' }}>{text || '-'}</Text>
+    },
+    { 
+      title: 'Sector', 
+      dataIndex: 'business_sector', 
+      key: 'business_sector', 
+      width: 150,
+      render: (text: string) => text ? <Tag color="blue" style={{ borderRadius: 6, margin: 0 }}>{text}</Tag> : <Text type="secondary">-</Text>
+    },
+    { 
+      title: 'City', 
+      dataIndex: 'city', 
+      key: 'city', 
+      width: 130,
+      render: (text: string) => <Text style={{ color: '#64748b', fontSize: 12 }}>{text || '-'}</Text>
+    },
+    { 
+      title: 'Marketing PIC', 
+      dataIndex: 'marketing_pic', 
+      key: 'marketing_pic', 
+      width: 160,
+      render: (pic: any) => {
+        if (!pic) return <Text type="secondary">-</Text>;
+        return (
+          <Space size={6}>
+            
+            <Text style={{ fontSize: 12, fontWeight: 500, color: '#334155' }}>
+              {pic.fullName || pic.email}
+            </Text>
+          </Space>
+        );
+      }
+    },
     { 
       title: 'Status', 
       dataIndex: 'status', 
-      key: 'status',
-      width: 100,
-      render: (status: string) => (
-        <Tag color={status === 'Active' ? 'green' : 'default'}>
-          {status ? status.toUpperCase() : 'UNKNOWN'}
-        </Tag>
-      )
+      key: 'status', 
+      width: 110,
+      render: (status: string) => {
+        const s = status ? status.toUpperCase() : 'UNKNOWN';
+        if (s === 'ACTIVE') return <Tag color="success" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>ACTIVE</Tag>;
+        if (s === 'PROSPECT') return <Tag color="processing" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>PROSPECT</Tag>;
+        return <Tag color="default" style={{ fontWeight: 500, borderRadius: 10, padding: '2px 8px' }}>{s}</Tag>;
+      }
     },
-    {
-      title: 'Action',
-      key: 'action',
-      width: 150,
+    { 
+      title: 'Action', 
+      key: 'action', 
+      width: 120,
+      align: 'center' as const,
       render: (_: any, record: any) => {
-        const roleStr = userRole ? userRole.toUpperCase() : '';
-        const isSuperAdmin = roleStr === 'SUPER_ADMIN' || roleStr === 'ADMIN';
-        // Marketing role is explicitly excluded from editing (View only)
-        const isCanEdit = isSuperAdmin || roleStr === 'MANAGER' || roleStr === 'GENERAL_MANAGER';
-
         return (
-          <Space size="middle">
-            <Button type="text" icon={<EyeOutlined />} onClick={() => openDetailDrawer(record)} />
+          <Space size={6}>
+            <Tooltip title="View Detail">
+              <Button 
+                type="text" 
+                size="small"
+                icon={<EyeOutlined style={{ color: '#2563eb' }} />} 
+                onClick={() => openDetailDrawer(record)} 
+                style={{ backgroundColor: '#eff6ff', borderRadius: 6 }}
+              />
+            </Tooltip>
             
             {isCanEdit && (
-              <Button type="text" icon={<EditOutlined />} onClick={() => openEditModal(record)} />
+              <Tooltip title="Edit Customer">
+                <Button 
+                  type="text" 
+                  size="small"
+                  icon={<EditOutlined style={{ color: '#d97706' }} />} 
+                  onClick={() => openEditModal(record)} 
+                  style={{ backgroundColor: '#fef3c7', borderRadius: 6 }}
+                />
+              </Tooltip>
             )}
 
             {isSuperAdmin && (
-              <Popconfirm title="Yakin ingin menghapus customer ini? Customer yang memiliki Tender aktif tidak dapat dihapus." onConfirm={() => handleDelete(record.id)}>
-                <Button type="text" danger icon={<DeleteOutlined />} />
+              <Popconfirm 
+                title="Hapus Customer?"
+                description="Customer yang memiliki Tender aktif tidak dapat dihapus."
+                onConfirm={() => handleDelete(record.id)}
+                okText="Hapus"
+                cancelText="Batal"
+              >
+                <Tooltip title="Delete Customer">
+                  <Button 
+                    type="text" 
+                    danger 
+                    size="small"
+                    icon={<DeleteOutlined style={{ color: '#dc2626' }} />} 
+                    style={{ backgroundColor: '#fef2f2', borderRadius: 6 }}
+                  />
+                </Tooltip>
               </Popconfirm>
             )}
           </Space>
@@ -245,25 +348,43 @@ const CustomersPage: React.FC = () => {
   ];
 
   return (
-    <div style={{ padding: '24px', background: '#fff', borderRadius: '12px', minHeight: '80vh' }}>
-      <Row justify="space-between" align="middle" style={{ marginBottom: 24 }}>
+    <div style={{ 
+      background: '#ffffff', 
+      borderRadius: '16px', 
+      padding: '24px', 
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02)',
+      border: '1px solid #f1f5f9',
+      minHeight: '80vh' 
+    }}>
+      <Row justify="space-between" align="middle" style={{ marginBottom: 20 }}>
         <Col>
-          <h2 style={{ margin: 0 }}>Master Data Customer</h2>
+          <Space direction="vertical" size={2}>
+            <Space align="center" size={8}>
+              <TeamOutlined style={{ fontSize: 22, color: '#0f172a' }} />
+              <Title level={4} style={{ margin: 0, color: '#0f172a', fontWeight: 700 }}>
+                Master Data Customer
+              </Title>
+            </Space>
+            <Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>
+              Kelola direktori pelanggan, profil perusahaan, dan penanggung jawab (PIC)
+            </Text>
+          </Space>
         </Col>
         <Col>
-          <Space>
+          <Space size={12} wrap>
             <Input 
               placeholder="Search Name / Company" 
-              prefix={<SearchOutlined />} 
+              prefix={<SearchOutlined style={{ color: '#94a3b8' }} />} 
               onChange={(e) => handleSearch(e.target.value)}
-              style={{ width: 250 }}
+              style={{ width: 250, borderRadius: 8 }}
               allowClear
             />
             <Select 
               placeholder="Filter Sector" 
-              style={{ width: 150 }} 
+              style={{ width: 160 }} 
               onChange={handleSectorFilter}
               allowClear
+              dropdownStyle={{ borderRadius: 8 }}
             >
               <Option value="Technology">Technology</Option>
               <Option value="Finance">Finance</Option>
@@ -271,8 +392,19 @@ const CustomersPage: React.FC = () => {
               <Option value="Government">Government</Option>
               <Option value="Retail">Retail</Option>
             </Select>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
-              Add Customer
+            <Button 
+              type="primary" 
+              icon={<PlusOutlined />}
+              onClick={openAddModal}
+              style={{
+                backgroundColor: '#1677ff',
+                borderColor: '#1677ff',
+                borderRadius: 8,
+                fontWeight: 600,
+                boxShadow: '0 2px 6px rgba(22, 119, 255, 0.2)'
+              }}
+            >
+              Input Customer
             </Button>
           </Space>
         </Col>
@@ -283,172 +415,492 @@ const CustomersPage: React.FC = () => {
         dataSource={customers} 
         rowKey="id" 
         loading={loading}
-        pagination={pagination}
+        pagination={{
+          current: pagination.current,
+          pageSize: pagination.pageSize,
+          total: totalCustomers,
+          showSizeChanger: true,
+          showTotal: (total, range) => `Menampilkan ${range[0]}-${range[1]} dari ${total} customer`,
+        }}
         onChange={handleTableChange}
-        scroll={{ x: 1000 }}
+        scroll={{ x: 1200 }}
+        rowClassName={() => 'customer-table-row'}
+        locale={{
+          emptyText: (
+            <Empty 
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                <Space direction="vertical" size={4}>
+                  <Text strong style={{ color: '#475569' }}>Tidak ada data customer</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>Gunakan tombol "Add Customer" di atas untuk menambahkan data baru.</Text>
+                </Space>
+              }
+              style={{ margin: '32px 0' }}
+            />
+          )
+        }}
       />
 
-      <Modal 
-        title={editingCustomer ? "Edit Customer" : "Add New Customer"} 
-        open={isModalVisible} 
-        onOk={handleModalOk} 
-        onCancel={() => setIsModalVisible(false)}
-        width={700}
-        confirmLoading={isSubmitting}
-        okText={isSubmitting ? "Menyimpan..." : (editingCustomer ? "Update" : "Save")}
-        okButtonProps={{ disabled: isSubmitting }}
-      >
-        <Form form={form} layout="vertical">
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="name" label="Customer Name" extra="Minimal 3 karakter" rules={[
-                { required: true, message: 'Nama Customer wajib diisi' },
-                { min: 3, message: 'Minimal 3 karakter' },
-                { max: 100, message: 'Maksimal 100 karakter' }
-              ]}>
-                <Input placeholder="e.g. PT Teknologi Cerdas" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="company" label="Legal Company" rules={[
-                { required: true, message: 'Legal Company wajib diisi' },
-                { min: 3, message: 'Minimal 3 karakter' },
-                { max: 150, message: 'Maksimal 150 karakter' }
-              ]}>
-                <Input placeholder="e.g. PT Teknologi Cerdas Indonesia" />
-              </Form.Item>
-            </Col>
-          </Row>
+      <style>{`
+        .customer-table-row:hover > td {
+          background-color: #f8fafc !important;
+          cursor: pointer;
+        }
+        .customer-table-row > td {
+          border-bottom: 1px solid #f1f5f9;
+          padding: 12px 16px !important;
+          vertical-align: middle !important;
+        }
+        .ant-table-thead > tr > th {
+          background-color: #102A43 !important;
+          color: #ffffff !important;
+          font-weight: 600 !important;
+          text-transform: uppercase;
+          font-size: 11px;
+          letter-spacing: 0.5px;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+          padding: 12px 16px !important;
+          vertical-align: middle !important;
+        }
+        .ant-table-thead > tr > th::before {
+          display: none !important;
+        }
+        .ant-table {
+          border-radius: 12px;
+          overflow: hidden;
+          border: 1px solid #e2e8f0;
+        }
+      `}</style>
 
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="contact_person" label="Contact Person" rules={[{ required: true, message: 'Contact Person wajib diisi' }]}>
-                <Input placeholder="Name of contact person" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="phone" label="Phone Number" extra="Contoh: 081234567890 atau +6281234567890 (Min. 10 digit)" rules={[
-                { required: true, message: 'Nomor Telepon wajib diisi' },
-                { pattern: /^(0|\+62)[0-9]+$/, message: 'Hanya angka, diawali 0 atau +62' },
-                { min: 10, message: 'Minimal 10 digit' },
-                { max: 15, message: 'Maksimal 15 digit' }
-              ]}>
-                <Input placeholder="e.g. 08123456789" />
-              </Form.Item>
-            </Col>
-          </Row>
+      {isModalVisible && (
+        <Modal 
+          title={
+            <Space align="center" size={8}>
+              <UserAddOutlined style={{ color: '#1677ff', fontSize: 18 }} />
+              <Text strong style={{ fontSize: 16, color: '#0f172a' }}>
+                Create New Customer
+              </Text>
+            </Space>
+          } 
+          open={isModalVisible} 
+          onCancel={() => setIsModalVisible(false)} 
+          width={720}
+          style={{ top: 40, maxWidth: '95vw' }}
+          footer={null}
+          destroyOnClose
+        >
+          <CustomerForm
+            onSubmit={handleCreateCustomer}
+            onCancel={() => setIsModalVisible(false)}
+            isSubmitting={isSubmitting}
+            marketingPics={marketingPics}
+            userRole={userRole}
+          />
+        </Modal>
+      )}
 
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="email" label="Email Address" rules={[{ type: 'email', message: 'Format email tidak valid' }]}>
-                <Input placeholder="email@company.com" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label="Business Sector" style={{ marginBottom: 0 }} required>
-                <Space.Compact style={{ width: '100%' }}>
-                  <Form.Item name="business_sector_select" style={{ width: isCustomSector ? '40%' : '100%', margin: 0 }} rules={[{ required: true, message: 'Harap pilih sektor' }]}>
-                    <Select 
-                      showSearch 
-                      placeholder="Select Sector" 
-                      dropdownMatchSelectWidth={false}
-                      popupMatchSelectWidth={false}
-                      onChange={(val) => setIsCustomSector(val === 'Lainnya')}
-                    >
-                      {BUSINESS_SECTORS.map(sector => (
-                        <Option key={sector} value={sector}>{sector}</Option>
-                      ))}
-                      <Option value="Lainnya">Lainnya</Option>
-                    </Select>
-                  </Form.Item>
-                  {isCustomSector && (
-                    <Form.Item name="business_sector_custom" style={{ width: '60%', margin: 0 }} rules={[{ required: true, message: 'Harap diisi' }]}>
-                      <Input placeholder="Ketik sektor lain" />
-                    </Form.Item>
-                  )}
-                </Space.Compact>
-              </Form.Item>
-            </Col>
-          </Row>
+      {/* Redesigned Customer Detail Drawer */}
+      {isDrawerVisible && (
+        <Drawer 
+          title={
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <TeamOutlined style={{ color: '#2563eb', fontSize: 16 }} />
+              <span style={{ fontWeight: 700, fontSize: 16, color: '#0f172a' }}>Customer Details</span>
+            </div>
+          } 
+          placement="right" 
+          onClose={() => setIsDrawerVisible(false)} 
+          open={isDrawerVisible}
+          width={480}
+          bodyStyle={{ 
+            padding: 0, 
+            display: 'flex', 
+            flexDirection: 'column', 
+            height: '100%', 
+            background: '#f8fafc',
+            overflow: 'hidden'
+          }}
+          headerStyle={{ 
+            borderBottom: '1px solid #e2e8f0', 
+            padding: '16px 20px', 
+            background: '#ffffff',
+            position: 'sticky',
+            top: 0,
+            zIndex: 10
+          }}
+          footer={
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              padding: '12px 16px',
+              background: '#ffffff',
+              borderTop: '1px solid #e2e8f0'
+            }}>
+              <Button 
+                onClick={() => {
+                  if (detailCustomer) {
+                    const text = `Customer: ${detailCustomer.name} (${detailCustomer.code})\nCompany: ${detailCustomer.company || '-'}\nSector: ${detailCustomer.business_sector || '-'}\nContact: ${detailCustomer.contact_person} (${detailCustomer.phone} / ${detailCustomer.email})`;
+                    navigator.clipboard.writeText(text);
+                    message.success('Informasi customer disalin ke clipboard');
+                  }
+                }}
+                icon={<CopyOutlined />}
+                style={{ borderRadius: 8 }}
+              >
+                Copy Info
+              </Button>
 
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="city" label="City">
-                <Input placeholder="e.g. Jakarta" />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="status" label="Status" initialValue="Active">
-                <Select disabled={userRole === 'MARKETING'}>
-                  {userRole !== 'MARKETING' && <Option value="Active">Active</Option>}
-                  {userRole !== 'MARKETING' && <Option value="Inactive">Inactive</Option>}
-                  <Option value="PROSPECT">PROSPECT</Option>
-                </Select>
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="marketing_pic_id" label="Marketing PIC">
-                <Select placeholder="Select PIC" allowClear>
-                  {marketingPics.map(pic => (
-                    <Option key={pic.id} value={pic.id}>{pic.full_name}</Option>
-                  ))}
-                </Select>
-              </Form.Item>
-            </Col>
-          </Row>
-        </Form>
-      </Modal>
+              {isCanEdit && (
+                <Button 
+                  type="primary" 
+                  icon={<EditOutlined />} 
+                  onClick={() => {
+                    setIsDrawerVisible(false);
+                    openEditModal(detailCustomer);
+                  }}
+                  style={{ background: '#2563eb', borderColor: '#2563eb', borderRadius: 8, fontWeight: 600 }}
+                >
+                  Edit Customer
+                </Button>
+              )}
+            </div>
+          }
+        >
+          {detailCustomer && (
+            <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
+              {/* 1. CUSTOMER IDENTITY HEADER */}
+              <div style={{ 
+                background: '#ffffff', 
+                borderRadius: 14, 
+                padding: '20px', 
+                border: '1px solid #e2e8f0', 
+                boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                marginBottom: 16
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                  <Avatar 
+                    size={52} 
+                    style={{ 
+                      background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)', 
+                      fontSize: 18, 
+                      fontWeight: 700,
+                      flexShrink: 0,
+                      boxShadow: '0 4px 10px rgba(37,99,235,0.2)'
+                    }}
+                  >
+                    {getInitials(detailCustomer.name)}
+                  </Avatar>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                      <Typography.Title level={4} style={{ margin: 0, color: '#0f172a', fontWeight: 700, fontSize: 18, lineHeight: 1.3 }}>
+                        {detailCustomer.name}
+                      </Typography.Title>
+                      <Tag 
+                        color={getStatusColor(detailCustomer.status)} 
+                        style={{ borderRadius: 6, fontWeight: 700, fontSize: 11, padding: '2px 8px', margin: 0 }}
+                      >
+                        {detailCustomer.status?.toUpperCase() || 'UNKNOWN'}
+                      </Tag>
+                    </div>
 
-      <Drawer 
-        title="Customer Details" 
-        placement="right" 
-        onClose={() => setIsDrawerVisible(false)} 
-        open={isDrawerVisible}
-        width={500}
-      >
-        {detailCustomer && (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
-            <Descriptions title="Company Info" column={1} bordered size="small">
-              <Descriptions.Item label="Code">{detailCustomer.code}</Descriptions.Item>
-              <Descriptions.Item label="Name">{detailCustomer.name}</Descriptions.Item>
-              <Descriptions.Item label="Legal Company">{detailCustomer.company || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Sector">{detailCustomer.business_sector || '-'}</Descriptions.Item>
-              <Descriptions.Item label="City">{detailCustomer.city || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Status">
-                <Tag color={detailCustomer.status === 'Active' ? 'green' : 'default'}>
-                  {detailCustomer.status?.toUpperCase() || 'UNKNOWN'}
-                </Tag>
-              </Descriptions.Item>
-            </Descriptions>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, color: '#475569', fontSize: 13, fontWeight: 500 }}>
+                      <BankOutlined style={{ color: '#64748b' }} />
+                      <span style={{ wordBreak: 'break-word' }}>{detailCustomer.company || 'Perusahaan Belum Terdaftar'}</span>
+                    </div>
 
-            <Descriptions title="Contact Info" column={1} bordered size="small">
-              <Descriptions.Item label="Contact Person">{detailCustomer.contact_person}</Descriptions.Item>
-              <Descriptions.Item label="Phone">{detailCustomer.phone}</Descriptions.Item>
-              <Descriptions.Item label="Email">{detailCustomer.email}</Descriptions.Item>
-            </Descriptions>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
+                      <Text code style={{ fontSize: 11, background: '#f1f5f9', color: '#334155', fontWeight: 600, padding: '2px 6px', borderRadius: 4 }}>
+                        {detailCustomer.code}
+                      </Text>
+                      {detailCustomer.business_sector && (
+                        <Tag color="blue" style={{ borderRadius: 4, fontSize: 11, margin: 0, border: 'none', background: '#eff6ff', color: '#1d4ed8' }}>
+                          {detailCustomer.business_sector}
+                        </Tag>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
 
-            <Card size="small" title="Tenders Activity" style={{ background: '#fafafa' }}>
-              <Descriptions column={2} size="small">
-                <Descriptions.Item label="Total Tenders">
-                  <strong style={{ fontSize: '1.2em' }}>{detailCustomer.tenders?.length || 0}</strong>
-                </Descriptions.Item>
-                <Descriptions.Item label="Won Tenders">
-                  <strong style={{ fontSize: '1.2em', color: '#52c41a' }}>
-                    {detailCustomer.tenders?.filter((t: any) => t.status === 'WON').length || 0}
-                  </strong>
-                </Descriptions.Item>
-              </Descriptions>
-            </Card>
-          </Space>
-        )}
-      </Drawer>
+              {/* 2. TABS SECTION */}
+              <Tabs 
+                defaultActiveKey="overview"
+                className="customer-detail-tabs"
+                items={[
+                  {
+                    key: 'overview',
+                    label: <span style={{ fontWeight: 600 }}><AppstoreOutlined /> Overview</span>,
+                    children: (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        {/* Company Info */}
+                        <div style={{ 
+                          background: '#ffffff', 
+                          borderRadius: 12, 
+                          padding: '16px', 
+                          border: '1px solid #e2e8f0' 
+                        }}>
+                          <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 12 }}>
+                            Informasi Perusahaan
+                          </Text>
+                          
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Kode Customer</Text>
+                              <Text strong style={{ fontSize: 13, color: '#0f172a' }}>{detailCustomer.code || '-'}</Text>
+                            </div>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Kota / Lokasi</Text>
+                              <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
+                                <EnvironmentOutlined style={{ marginRight: 4, color: '#64748b' }} />
+                                {detailCustomer.city || '-'}
+                              </Text>
+                            </div>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Sektor Industri</Text>
+                              <Text strong style={{ fontSize: 13, color: '#0f172a' }}>{detailCustomer.business_sector || '-'}</Text>
+                            </div>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Terdaftar Sejak</Text>
+                              <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
+                                {detailCustomer.created_at ? dayjs(detailCustomer.created_at).format('DD MMM YYYY') : '-'}
+                              </Text>
+                            </div>
+                          </div>
+                        </div>
 
-      <EditCustomerModal 
-        visible={isEditModalOpen} 
-        customer={selectedCustomer} 
-        onClose={() => setIsEditModalOpen(false)} 
-        onSuccess={() => fetchCustomers(pagination.current, pagination.pageSize)} 
-      />
+                        {/* Contact Info Card */}
+                        <div style={{ 
+                          background: '#ffffff', 
+                          borderRadius: 12, 
+                          padding: '16px', 
+                          border: '1px solid #e2e8f0' 
+                        }}>
+                          <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 12 }}>
+                            Kontak Utama
+                          </Text>
+
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <Avatar size={28} icon={<UserOutlined />} style={{ background: '#e0e7ff', color: '#4338ca' }} />
+                              <div>
+                                <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Contact Person</Text>
+                                <Text strong style={{ fontSize: 13, color: '#0f172a' }}>{detailCustomer.contact_person || '-'}</Text>
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <Avatar size={28} icon={<PhoneOutlined />} style={{ background: '#dcfce7', color: '#15803d' }} />
+                              <div>
+                                <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Nomor Telepon</Text>
+                                {detailCustomer.phone ? (
+                                  <a href={`tel:${detailCustomer.phone}`} style={{ fontSize: 13, color: '#2563eb', fontWeight: 600 }}>
+                                    {detailCustomer.phone}
+                                  </a>
+                                ) : (
+                                  <Text type="secondary" style={{ fontSize: 13 }}>-</Text>
+                                )}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <Avatar size={28} icon={<MailOutlined />} style={{ background: '#ffedd5', color: '#c2410c' }} />
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Email</Text>
+                                {detailCustomer.email ? (
+                                  <a href={`mailto:${detailCustomer.email}`} style={{ fontSize: 13, color: '#2563eb', fontWeight: 600, wordBreak: 'break-all' }}>
+                                    {detailCustomer.email}
+                                  </a>
+                                ) : (
+                                  <Text type="secondary" style={{ fontSize: 13 }}>-</Text>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Tender Activity Summary KPI */}
+                        <div style={{ 
+                          background: '#ffffff', 
+                          borderRadius: 12, 
+                          padding: '16px', 
+                          border: '1px solid #e2e8f0' 
+                        }}>
+                          <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 12 }}>
+                            Ringkasan Tender
+                          </Text>
+
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            <div style={{ 
+                              background: '#f8fafc', 
+                              borderRadius: 10, 
+                              padding: '12px 14px', 
+                              border: '1px solid #e2e8f0' 
+                            }}>
+                              <Text type="secondary" style={{ fontSize: 11, display: 'block', fontWeight: 600 }}>TOTAL TENDER</Text>
+                              <div style={{ fontSize: 20, fontWeight: 800, color: '#0f172a', marginTop: 2 }}>
+                                {detailCustomer.tenders?.length || 0}
+                              </div>
+                            </div>
+
+                            <div style={{ 
+                              background: '#f0fdf4', 
+                              borderRadius: 10, 
+                              padding: '12px 14px', 
+                              border: '1px solid #bbf7d0' 
+                            }}>
+                              <Text style={{ fontSize: 11, display: 'block', fontWeight: 600, color: '#166534' }}>WON TENDERS</Text>
+                              <div style={{ fontSize: 20, fontWeight: 800, color: '#16a34a', marginTop: 2 }}>
+                                {detailCustomer.tenders?.filter((t: any) => t.stage === 'WON' || t.status === 'WON').length || 0}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  },
+                  {
+                    key: 'contacts',
+                    label: <span style={{ fontWeight: 600 }}><PhoneOutlined /> Contacts</span>,
+                    children: (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        <div style={{ 
+                          background: '#ffffff', 
+                          borderRadius: 12, 
+                          padding: '16px', 
+                          border: '1px solid #e2e8f0' 
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                            <Avatar size={36} icon={<UserOutlined />} style={{ background: '#3b82f6' }} />
+                            <div>
+                              <Text strong style={{ fontSize: 14, color: '#0f172a', display: 'block' }}>{detailCustomer.contact_person || 'Nama Kontak Belum Ada'}</Text>
+                              <Text type="secondary" style={{ fontSize: 12 }}>Kontak Utama</Text>
+                            </div>
+                          </div>
+
+                          <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11 }}>Telepon:</Text>
+                              <div style={{ marginTop: 2 }}>
+                                {detailCustomer.phone ? (
+                                  <a href={`tel:${detailCustomer.phone}`} style={{ fontSize: 13, fontWeight: 600, color: '#2563eb' }}>{detailCustomer.phone}</a>
+                                ) : (
+                                  <Text type="secondary">-</Text>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11 }}>Email:</Text>
+                              <div style={{ marginTop: 2 }}>
+                                {detailCustomer.email ? (
+                                  <a href={`mailto:${detailCustomer.email}`} style={{ fontSize: 13, fontWeight: 600, color: '#2563eb', wordBreak: 'break-all' }}>{detailCustomer.email}</a>
+                                ) : (
+                                  <Text type="secondary">-</Text>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11 }}>Lokasi / Kota:</Text>
+                              <div style={{ marginTop: 2, fontSize: 13, color: '#334155' }}>
+                                {detailCustomer.city || '-'}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {detailCustomer.marketing_pic && (
+                          <div style={{ 
+                            background: '#ffffff', 
+                            borderRadius: 12, 
+                            padding: '16px', 
+                            border: '1px solid #e2e8f0' 
+                          }}>
+                            <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 10 }}>
+                              PIC Marketing Internal
+                            </Text>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <Avatar size={32} icon={<UserOutlined />} style={{ background: '#6366f1' }} />
+                              <div>
+                                <Text strong style={{ fontSize: 13, color: '#0f172a', display: 'block' }}>{detailCustomer.marketing_pic.fullName}</Text>
+                                <Text type="secondary" style={{ fontSize: 12 }}>{detailCustomer.marketing_pic.email}</Text>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )
+                  },
+                  {
+                    key: 'activity',
+                    label: <span style={{ fontWeight: 600 }}><TrophyOutlined /> Activity</span>,
+                    children: (
+                      <div style={{ background: '#ffffff', borderRadius: 12, padding: '16px', border: '1px solid #e2e8f0' }}>
+                        {detailCustomer.tenders && detailCustomer.tenders.length > 0 ? (
+                          <Timeline
+                            mode="left"
+                            style={{ marginTop: 8 }}
+                            items={detailCustomer.tenders.map((tender: any) => ({
+                              color: tender.stage === 'WON' || tender.status === 'WON' ? 'green' : '#3b82f6',
+                              children: (
+                                <div style={{ marginBottom: 12 }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                                    <Text strong style={{ fontSize: 13, color: '#0f172a' }}>{tender.title}</Text>
+                                    <Tag color={tender.stage === 'WON' || tender.status === 'WON' ? 'success' : 'processing'} style={{ borderRadius: 4, margin: 0, fontSize: 10 }}>
+                                      {tender.stage || tender.status || 'ACTIVE'}
+                                    </Tag>
+                                  </div>
+                                  {tender.estimated_budget && (
+                                    <div style={{ fontSize: 12, color: '#059669', fontWeight: 600, marginTop: 2 }}>
+                                      Rp {Number(tender.estimated_budget).toLocaleString('id-ID')}
+                                    </div>
+                                  )}
+                                  {tender.created_at && (
+                                    <Text type="secondary" style={{ fontSize: 11, display: 'block', marginTop: 2 }}>
+                                      {dayjs(tender.created_at).format('DD MMM YYYY, HH:mm')}
+                                    </Text>
+                                  )}
+                                </div>
+                              )
+                            }))}
+                          />
+                        ) : (
+                          <Empty 
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description={<Text type="secondary" style={{ fontSize: 12 }}>Belum ada aktivitas tender untuk customer ini.</Text>}
+                            style={{ margin: '24px 0' }}
+                          />
+                        )}
+                      </div>
+                    )
+                  },
+                  {
+                    key: 'notes',
+                    label: <span style={{ fontWeight: 600 }}><FileTextOutlined /> Notes</span>,
+                    children: (
+                      <div style={{ background: '#ffffff', borderRadius: 12, padding: '16px', border: '1px solid #e2e8f0' }}>
+                        <Empty 
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          description={<Text type="secondary" style={{ fontSize: 12 }}>Belum ada catatan untuk customer ini.</Text>}
+                          style={{ margin: '24px 0' }}
+                        />
+                      </div>
+                    )
+                  }
+                ]}
+              />
+            </div>
+          )}
+        </Drawer>
+      )}
+
+      {isEditModalOpen && (
+        <EditCustomerModal 
+          visible={isEditModalOpen} 
+          customer={selectedCustomer} 
+          onClose={() => setIsEditModalOpen(false)} 
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: ['customers'] })} 
+        />
+      )}
     </div>
   );
 };

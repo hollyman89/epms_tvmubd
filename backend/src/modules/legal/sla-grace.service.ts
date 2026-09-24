@@ -1,44 +1,24 @@
-import { Injectable, OnModuleInit, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Contract } from '../../entities/contract.entity';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
-export class SlaGraceService implements OnModuleInit {
+export class SlaGraceService {
   private readonly logger = new Logger(SlaGraceService.name);
 
   constructor(
     @InjectRepository(Contract) private contractRepo: Repository<Contract>,
-    private dataSource: DataSource,
     private eventEmitter: EventEmitter2,
   ) {}
 
   /**
-   * 1. NestJS Startup Runner: Ensure Grace Extension Columns Exist
-   */
-  async onModuleInit() {
-    try {
-      this.logger.log('Initializing SLA Grace Deadline Migration Runner...');
-      await this.dataSource.query(`
-        ALTER TABLE contracts ADD COLUMN IF NOT EXISTS grace_deadline TIMESTAMP NULL;
-        ALTER TABLE contracts ADD COLUMN IF NOT EXISTS grace_extended_by BIGINT NULL;
-        ALTER TABLE contracts ADD COLUMN IF NOT EXISTS grace_extended_at TIMESTAMP NULL;
-        ALTER TABLE contracts ADD COLUMN IF NOT EXISTS grace_extension_count INT DEFAULT 0;
-      `);
-      this.logger.log('✅ SLA Grace Extension columns verified on database startup.');
-    } catch (err: any) {
-      this.logger.warn(`SLA Grace Startup Migration Notice: ${err.message}`);
-    }
-  }
-
-  /**
-   * 2. Event Listener: Triggers automatic 3-day grace extension when contract status becomes REVISION_REQUESTED
+   * 2. Event Listener: Acknowledges 72h SLA grace period initialized when contract status becomes REVISION_REQUESTED
    */
   @OnEvent('contract.revision_requested')
   async handleRevisionRequested(payload: { contractId: number; userId: number; reason?: string }) {
-    this.logger.log(`Handling contract.revision_requested for Contract #${payload.contractId}`);
-    await this.requestGraceExtension(payload.contractId, 3, payload.userId, payload.reason || 'Revisi Dokumen dari Legal');
+    this.logger.log(`[Revision SLA] Contract #${payload.contractId} marked REVISION_REQUESTED. 72h SLA grace period active.`);
   }
 
   /**

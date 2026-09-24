@@ -12,7 +12,7 @@ export class User {
   @Column({ name: 'password_hash' })
   passwordHash: string;
 
-  @Column({ name: 'refresh_token', nullable: true })
+  @Column({ name: 'refresh_token', type: 'text', nullable: true })
   refreshToken: string;
 
   @Column({ name: 'full_name' })

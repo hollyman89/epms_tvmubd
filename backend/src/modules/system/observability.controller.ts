@@ -15,19 +15,13 @@ export class ObservabilityController {
     return this.observabilityService.getDeepHealthCheck();
   }
 
-  @Get('api/v1/health')
-  @ApiOperation({ summary: 'Deep Active Component Health Check Probe (API alias)' })
-  async getApiHealth() {
-    return this.observabilityService.getDeepHealthCheck();
-  }
-
-  @Get('api/v1/observability/dashboard')
+  @Get('observability/dashboard')
   @ApiOperation({ summary: 'Fetch Enterprise Observability Dashboard (SLI/SLO, Error Budget, Capacity, Security, Outbox)' })
   async getObservabilityDashboard() {
     return this.observabilityService.getOperationalDashboard();
   }
 
-  @Get('api/v1/observability/readiness-report')
+  @Get('observability/readiness-report')
   @ApiOperation({ summary: 'Fetch Production Readiness Report & Metrics Catalog' })
   async getReadinessReport() {
     const dashboard = await this.observabilityService.getOperationalDashboard();

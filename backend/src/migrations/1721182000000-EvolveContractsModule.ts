@@ -1,4 +1,4 @@
-import { MigrationInterface, QueryRunner, Table, TableColumn, TableIndex, TableForeignKey } from "typeorm";
+import { MigrationInterface, QueryRunner, Table, TableColumn, TableForeignKey } from "typeorm";
 
 export class EvolveContractsModule1721182000000 implements MigrationInterface {
     name = 'EvolveContractsModule1721182000000'

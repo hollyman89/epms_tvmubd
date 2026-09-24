@@ -54,7 +54,6 @@ export class SalesGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('join-sales-room')
   handleJoinSalesRoom(@ConnectedSocket() client: Socket) {
     client.join('room:sales');
-    console.log('🟢 Client join room:sales:', client.id);
     this.logger.log(`Client ${client.id} joined room:sales`);
     return { status: 'joined', room: 'room:sales' };
   }
@@ -82,8 +81,47 @@ export class SalesGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @OnEvent('marketing.tender.management_update')
   handleTenderUpdate(payload: any) {
     if (!this.server) return;
-    this.logger.log(`Broadcasting sales:pipeline_updated to namespace...`);
+    this.logger.log(`Broadcasting sales:pipeline_updated [action=${payload?.action || 'UNKNOWN'}] to namespace...`);
     this.server.emit('sales:pipeline_updated', payload);
+  }
+
+  @OnEvent('contract.revision_requested')
+  handleContractRevisionRequested(payload: any) {
+    if (!this.server || !payload?.tenderId) return;
+    this.logger.log(`Broadcasting sales:pipeline_updated for contract.revision_requested on Tender ID ${payload.tenderId}`);
+    this.broadcastTenderDelta(payload.tenderId, 'sales:pipeline_updated', {
+      action: 'LEGAL_REVISION_REQUESTED',
+      status: 'REVISION_NEEDED',
+      legalStatus: payload.legalStatus || 'REVISION_REQUESTED',
+      updaterId: payload.userId,
+    });
+  }
+
+  @OnEvent('contract.pm_returned')
+  handleContractPmReturned(payload: any) {
+    if (!this.server || !payload?.tenderId) return;
+    this.logger.log(`Broadcasting sales:pipeline_updated for contract.pm_returned on Tender ID ${payload.tenderId}`);
+    this.broadcastTenderDelta(payload.tenderId, 'sales:pipeline_updated', {
+      action: 'PM_RETURNED',
+      contract_status: 'PM_RETURNED',
+      contractStatus: 'PM_RETURNED',
+      legalStatus: payload.legalStatus || 'APPROVED',
+      legalNotes: payload.reason,
+      updaterId: payload.userId,
+    });
+  }
+
+  @OnEvent('contract.resubmitted')
+  handleContractResubmitted(payload: any) {
+    if (!this.server || !payload?.tenderId) return;
+    this.logger.log(`Broadcasting sales:pipeline_updated for contract.resubmitted on Tender ID ${payload.tenderId}`);
+    this.broadcastTenderDelta(payload.tenderId, 'sales:pipeline_updated', {
+      action: 'RESUBMITTED_TO_PM',
+      contract_status: 'ACTIVE',
+      contractStatus: 'ACTIVE',
+      legalStatus: 'APPROVED',
+      updaterId: payload.userId,
+    });
   }
 
   /**
@@ -92,12 +130,14 @@ export class SalesGateway implements OnGatewayConnection, OnGatewayDisconnect {
   broadcastTenderDelta(tenderId: number, event: string, deltaPayload: any) {
     if (!this.server) return;
     const roomName = `room:tender:${tenderId}`;
-    this.server.to(roomName).emit(event, {
-      tenderId,
-      timestamp: new Date().toISOString(),
-      delta: deltaPayload,
-    });
-    // Broadcast to room:sales and namespace /sales
+    if (event !== 'sales:pipeline_updated') {
+      this.server.to(roomName).emit(event, {
+        tenderId,
+        timestamp: new Date().toISOString(),
+        delta: deltaPayload,
+      });
+    }
+    // Broadcast exactly once to namespace /sales
     const payload = {
       tenderId,
       stage: deltaPayload?.stage,
@@ -105,7 +145,6 @@ export class SalesGateway implements OnGatewayConnection, OnGatewayDisconnect {
       updatedAt: new Date().toISOString(),
       delta: deltaPayload,
     };
-    this.server.to('room:sales').emit('sales:pipeline_updated', payload);
     this.server.emit('sales:pipeline_updated', payload);
   }
 }

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 import { NotificationGateway } from '../notification/notification.gateway';
 import { InjectQueue } from '@nestjs/bullmq';

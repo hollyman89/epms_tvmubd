@@ -22,31 +22,23 @@ export class ManagementNotificationConsumer {
     try {
       const { tenderId, title, customerName, estimatedBudget, updatedBy, action } = data;
 
-      // 1. Determine target users based on action (Using Parameterized Query and GROUP_CONCAT to prevent duplicates)
-      let query = `
+      // SPK_UPLOADED is a Legal workflow event, NOT a C-level management milestone notification.
+      if (action === 'SPK_UPLOADED') {
+        return;
+      }
+
+      // 1. Determine target users (Management roles ONLY, excluding the actor updaterId)
+      const query = `
         SELECT u.id, GROUP_CONCAT(r.name) as roles
         FROM users u 
         JOIN user_roles ur ON u.id = ur.user_id 
         JOIN roles r ON r.id = ur.role_id 
         WHERE r.name IN ('SUPER_ADMIN', 'GENERAL_MANAGER', 'DIRECTOR') 
+          AND u.id != ?
           AND u.deleted_at IS NULL
         GROUP BY u.id
       `;
-      let queryParams: any[] = [];
-
-      if (action === 'MARKED_WON' || action === 'UPDATED') {
-        // If WON or UPDATED, notify Management AND the specific user who updated it
-        query = `
-          SELECT u.id, GROUP_CONCAT(r.name) as roles
-          FROM users u 
-          JOIN user_roles ur ON u.id = ur.user_id 
-          JOIN roles r ON r.id = ur.role_id 
-          WHERE (r.name IN ('SUPER_ADMIN', 'GENERAL_MANAGER', 'DIRECTOR') OR u.id = ?) 
-            AND u.deleted_at IS NULL
-          GROUP BY u.id
-        `;
-        queryParams.push(data.updaterId || 0);
-      }
+      const queryParams: any[] = [data.updaterId || 0];
 
       const managers = await this.dataSource.query(query, queryParams);
 
@@ -74,11 +66,7 @@ export class ManagementNotificationConsumer {
           if (action === 'CREATED') {
             msg = `<span style="font-weight: 600; color: #0f172a;">${updatedBy}</span> membuat tender <span style="font-weight: 600; color: #0f172a;">${title}</span> dari <span style="font-weight: 600; color: #0f172a;">${customerName}</span> (${tier}).`;
           } else if (action === 'MARKED_WON') {
-            if (manager.id === data.updaterId) {
-              msg = `🎉 Selamat! Anda telah memenangkan tender <span style="font-weight: 600; color: #0f172a;">${title}</span> dari <span style="font-weight: 600; color: #0f172a;">${customerName}</span> (${tier}).`;
-            } else {
-              msg = `<span style="font-weight: 600; color: #0f172a;">${updatedBy}</span> memenangkan <span style="font-weight: 600; color: #0f172a;">${title}</span> dari <span style="font-weight: 600; color: #0f172a;">${customerName}</span> (${tier}).`;
-            }
+            msg = `<span style="font-weight: 600; color: #0f172a;">${updatedBy}</span> memenangkan <span style="font-weight: 600; color: #0f172a;">${title}</span> dari <span style="font-weight: 600; color: #0f172a;">${customerName}</span> (${tier}).`;
           } else if (action === 'MARKED_LOST') {
             msg = `<span style="font-weight: 600; color: #0f172a;">${updatedBy}</span> mengonfirmasi kekalahan tender <span style="font-weight: 600; color: #0f172a;">${title}</span> dari <span style="font-weight: 600; color: #0f172a;">${customerName}</span> (${tier}).`;
           } else if (action === 'UPDATED') {
@@ -106,7 +94,10 @@ export class ManagementNotificationConsumer {
           
           let requiresApproval = false;
           const userRoles = manager.roles ? manager.roles.split(',') : [];
-          if (userRoles.includes('DIRECTOR')) {
+          if (
+            userRoles.includes('DIRECTOR') &&
+            (action === 'GO_NOGO_SUBMITTED' || action === 'GO_NOGO_RESUBMITTED' || action === 'DISCOUNT_APPROVAL_REQUESTED')
+          ) {
             requiresApproval = true;
           }
 

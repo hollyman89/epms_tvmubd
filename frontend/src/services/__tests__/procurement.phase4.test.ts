@@ -19,6 +19,30 @@ describe('Phase 4 — Procurement Intake Frontend Operational Flow Tests', () =>
   });
 
   describe('1. Procurement Service API SSOT Contract', () => {
+    it('loads authoritative availability including exhausted items for read-only display', async () => {
+      const items = [{ id: 46, itemName: 'Kabel ADSS', availableQty: 0, availabilityStatus: 'FULLY_ALLOCATED' }];
+      (apiClient.get as jest.Mock).mockResolvedValueOnce({ data: { data: items } });
+      expect(await ProcurementService.getEligibleCostItems(21)).toEqual(items);
+      expect(apiClient.get).toHaveBeenCalledWith('/procurement/projects/21/eligible-cost-items');
+    });
+
+    it('creates and submits using one atomic request', async () => {
+      const payload = { projectId: 21, title: 'Tiang', items: [{ costItemId: 45, requestedQty: 2 }] };
+      (apiClient.post as jest.Mock).mockResolvedValueOnce({ data: { data: { id: 2, status: 'SUBMITTED' } } });
+      expect(await ProcurementService.saveAndSubmitPackage(payload)).toMatchObject({ status: 'SUBMITTED' });
+      expect(apiClient.post).toHaveBeenCalledTimes(1);
+      expect(apiClient.post).toHaveBeenCalledWith('/procurement/packages/create-and-submit', payload);
+    });
+
+    it('revises and resubmits using one atomic request', async () => {
+      const payload = { title: 'Tiang revisi', items: [{ costItemId: 45, requestedQty: 1 }] };
+      (apiClient.post as jest.Mock).mockResolvedValueOnce({ data: { id: 2, status: 'SUBMITTED' } });
+      await ProcurementService.saveAndSubmitPackage(payload, 2);
+      expect(apiClient.post).toHaveBeenCalledTimes(1);
+      expect(apiClient.post).toHaveBeenCalledWith('/procurement/packages/2/update-and-submit', payload);
+      expect(apiClient.put).not.toHaveBeenCalled();
+    });
+
     it('getPackages should query GET /procurement/packages with correct params', async () => {
       (apiClient.get as jest.Mock).mockResolvedValueOnce({
         data: [{ id: 1, packageNumber: 'PKG-2026-001', status: 'SUBMITTED' }],
@@ -314,6 +338,259 @@ describe('Phase 4 — Procurement Intake Frontend Operational Flow Tests', () =>
       expect(fs.existsSync(projectGovernancePath)).toBe(true);
       const content = fs.readFileSync(projectGovernancePath, 'utf8');
       expect(content).toContain('PmOperationalPlanReviewModal');
+    });
+  });
+
+  describe('5. PM Procurement Package Cost Item Selector Mapping', () => {
+    // Import canonical helpers directly from PmProcurementPackageModal
+    const {
+      filterEligibleCostItems,
+      buildWbsMap,
+      resolveWbsDisplay,
+    } = require('@/components/project/PmProcurementPackageModal');
+
+    const mockSurgeJatengCostEstimate = {
+      id: 11,
+      projectId: 21,
+      status: 'APPROVED',
+      version: 1,
+      totalPmEstimate: 332900000,
+      categories: [
+        {
+          categoryKey: 'MATERIAL',
+          categoryLabel: 'Material & Consumables',
+          groupKey: 'DIRECT',
+          mode: 'ITEMIZED',
+          directSubtotal: 0,
+          categoryTotal: 315000000,
+          items: [
+            {
+              id: 45,
+              itemName: 'Tiang',
+              quantity: 40,
+              uom: 'Unit',
+              unitPrice: 500000,
+              subtotal: 20000000,
+              assignmentScope: 'WBS',
+              wbsId: 45,
+            },
+            {
+              id: 46,
+              itemName: 'Kabel ADSS',
+              quantity: 3000,
+              uom: 'Meter',
+              unitPrice: 65000,
+              subtotal: 195000000,
+              assignmentScope: 'WBS',
+              wbsId: 45,
+            },
+            {
+              id: 47,
+              itemName: 'Acc Tiang',
+              quantity: 10000,
+              uom: 'Unit',
+              unitPrice: 10000,
+              subtotal: 100000000,
+              assignmentScope: 'WBS',
+              wbsId: 45,
+            },
+          ],
+        },
+        {
+          categoryKey: 'LABOR',
+          categoryLabel: 'Direct Labor',
+          groupKey: 'DIRECT',
+          mode: 'ITEMIZED',
+          directSubtotal: 0,
+          categoryTotal: 900000,
+          items: [
+            {
+              id: 48,
+              itemName: 'Mandor Civil',
+              quantity: 6,
+              uom: 'Orang/Hari',
+              unitPrice: 150000,
+              subtotal: 900000,
+              assignmentScope: 'WBS',
+              wbsId: 45,
+            },
+          ],
+        },
+        {
+          categoryKey: 'SUBCONTRACTOR',
+          categoryLabel: 'Subcontractor',
+          groupKey: 'DIRECT',
+          mode: 'DIRECT',
+          directSubtotal: 0,
+          categoryTotal: 0,
+          items: [],
+        },
+        {
+          categoryKey: 'EQUIPMENT',
+          categoryLabel: 'Equipment',
+          groupKey: 'INDIRECT',
+          mode: 'DIRECT',
+          directSubtotal: 0,
+          categoryTotal: 0,
+          items: [],
+        },
+        {
+          categoryKey: 'PERMIT',
+          categoryLabel: 'Permit & Retribution',
+          groupKey: 'INDIRECT',
+          mode: 'ITEMIZED',
+          directSubtotal: 0,
+          categoryTotal: 2000000,
+          items: [
+            {
+              id: 49,
+              itemName: 'Donasi Lingkungan',
+              quantity: 1,
+              uom: 'Unit',
+              unitPrice: 1000000,
+              subtotal: 1000000,
+              assignmentScope: 'WBS',
+              wbsId: 44,
+            },
+            {
+              id: 50,
+              itemName: 'Donasi Kelurahan',
+              quantity: 1,
+              uom: 'Unit',
+              unitPrice: 1000000,
+              subtotal: 1000000,
+              assignmentScope: 'WBS',
+              wbsId: 44,
+            },
+          ],
+        },
+        {
+          categoryKey: 'OPERATIONAL',
+          categoryLabel: 'Operational & Site',
+          groupKey: 'INDIRECT',
+          mode: 'ITEMIZED',
+          directSubtotal: 0,
+          categoryTotal: 5000000,
+          items: [
+            {
+              id: 51,
+              itemName: 'Patty Cash',
+              quantity: 1,
+              uom: 'Unit',
+              unitPrice: 5000000,
+              subtotal: 5000000,
+              assignmentScope: 'PROJECT',
+              wbsId: null,
+            },
+          ],
+        },
+        {
+          categoryKey: 'CONTINGENCY',
+          categoryLabel: 'Contingency Reserve',
+          groupKey: 'RISK',
+          mode: 'ITEMIZED',
+          directSubtotal: 0,
+          categoryTotal: 10000000,
+          items: [
+            {
+              id: 53,
+              itemName: 'Biaya Cadangan',
+              quantity: 1,
+              uom: 'Unit',
+              unitPrice: 10000000,
+              subtotal: 10000000,
+              assignmentScope: 'PROJECT',
+              wbsId: null,
+            },
+          ],
+        },
+      ],
+      wbsCostSummary: [
+        { wbsId: 44, wbsCode: '1.0', wbsName: 'Perizinan', level: 1, parentWbsId: null, totalCost: 2000000, itemCount: 2 },
+        { wbsId: 45, wbsCode: '2.0', wbsName: 'Pekerjaan Civil Work', level: 1, parentWbsId: null, totalCost: 315900000, itemCount: 4 },
+      ],
+    };
+
+    it('must correctly filter exactly 4 eligible CostItems (Tiang, Kabel ADSS, Acc Tiang, Patty Cash)', () => {
+      const eligibleItems = filterEligibleCostItems(mockSurgeJatengCostEstimate);
+      expect(eligibleItems).toHaveLength(4);
+
+      const names = eligibleItems.map((i) => i.itemName);
+      expect(names).toEqual(['Tiang', 'Kabel ADSS', 'Acc Tiang', 'Patty Cash']);
+    });
+
+    it('must strictly exclude LABOR, PERMIT, and CONTINGENCY categories', () => {
+      const eligibleItems = filterEligibleCostItems(mockSurgeJatengCostEstimate);
+      const categories = eligibleItems.map((i) => i.categoryKey);
+
+      expect(categories).not.toContain('LABOR');
+      expect(categories).not.toContain('PERMIT');
+      expect(categories).not.toContain('CONTINGENCY');
+
+      const names = eligibleItems.map((i) => i.itemName);
+      expect(names).not.toContain('Mandor Civil');
+      expect(names).not.toContain('Donasi Lingkungan');
+      expect(names).not.toContain('Donasi Kelurahan');
+      expect(names).not.toContain('Biaya Cadangan');
+    });
+
+    it('must include PROJECT-level items alongside WBS-level items', () => {
+      const eligibleItems = filterEligibleCostItems(mockSurgeJatengCostEstimate);
+      const projectLevelItem = eligibleItems.find((i) => i.itemName === 'Patty Cash');
+      expect(projectLevelItem).toBeDefined();
+      expect(projectLevelItem.assignmentScope).toBe('PROJECT');
+      expect(projectLevelItem.wbsId).toBeNull();
+
+      const wbsItems = eligibleItems.filter((i) => i.assignmentScope === 'WBS');
+      expect(wbsItems).toHaveLength(3);
+    });
+
+    it('must attach categoryKey, categoryLabel, and categoryMode metadata', () => {
+      const eligibleItems = filterEligibleCostItems(mockSurgeJatengCostEstimate);
+      for (const it of eligibleItems) {
+        expect(it.categoryKey).toBeDefined();
+        expect(it.categoryLabel).toBeDefined();
+        expect(it.categoryMode).toBe('ITEMIZED');
+      }
+    });
+
+    it('must resolve WBS label for WBS-scoped item and Project-Level for project-scoped item', () => {
+      const wbsMap = buildWbsMap(mockSurgeJatengCostEstimate.wbsCostSummary);
+
+      const tiangItem = { id: 45, assignmentScope: 'WBS' as const, wbsId: 45 };
+      const tiangDisplay = resolveWbsDisplay(tiangItem, wbsMap);
+      expect(tiangDisplay.isProjectLevel).toBe(false);
+      expect(tiangDisplay.label).toBe('WBS 2.0 — Pekerjaan Civil Work');
+
+      const pattyCashItem = { id: 51, assignmentScope: 'PROJECT' as const, wbsId: null };
+      const pattyCashDisplay = resolveWbsDisplay(pattyCashItem, wbsMap);
+      expect(pattyCashDisplay.isProjectLevel).toBe(true);
+      expect(pattyCashDisplay.label).toBe('Project-Level');
+    });
+
+    it('must gracefully fallback to WBS Node #<id> when WBS label is not in summary', () => {
+      const wbsMap = buildWbsMap(mockSurgeJatengCostEstimate.wbsCostSummary);
+
+      const unmappedWbsItem = { id: 999, assignmentScope: 'WBS' as const, wbsId: 999 };
+      const unmappedDisplay = resolveWbsDisplay(unmappedWbsItem, wbsMap);
+      expect(unmappedDisplay.isProjectLevel).toBe(false);
+      expect(unmappedDisplay.label).toBe('WBS Node #999');
+    });
+
+    it('must gracefully handle DIRECT mode categories or empty items without errors', () => {
+      const directModeData = [
+        {
+          categoryKey: 'MATERIAL',
+          categoryLabel: 'Material',
+          groupKey: 'DIRECT',
+          mode: 'DIRECT',
+          directSubtotal: 10000000,
+          categoryTotal: 10000000,
+          items: [],
+        },
+      ];
+      const items = filterEligibleCostItems(directModeData as any);
+      expect(items).toEqual([]);
     });
   });
 });

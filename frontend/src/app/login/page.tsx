@@ -1,45 +1,55 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { Form, Input, Button, Checkbox, Divider, message } from 'antd';
-import { UserOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
+import { Form, Input, Button, Checkbox, Divider, message, Spin } from 'antd';
+import { UserOutlined, LockOutlined, SafetyCertificateOutlined, BarChartOutlined, TeamOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/axios';
 import { useAuth } from '@/context/AuthContext';
 
 export default function LoginPage() {
+  const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const router = useRouter();
-  const { login, isAuthenticated, user } = useAuth();
+  const { login, isAuthenticated, user, isLoading } = useAuth();
 
-  useEffect(() => {
-    if (isAuthenticated && user) {
-      const roleName = user.roles?.[0];
-      switch (roleName) {
-        case 'SUPER_ADMIN':
-        case 'GENERAL_MANAGER':
-          router.push('/');
-          break;
-        case 'PROJECT_MANAGER':
-        case 'PMO':
-          router.push('/project-delivery');
-          break;
-        case 'FINANCE':
-          router.push('/inbox');
-          break;
-        case 'PROCUREMENT_STAFF':
-        case 'MANAGER':
-        case 'DIRECTOR':
-          router.push('/procurement');
-          break;
-        case 'MARKETING':
-          router.push('/sales');
-          break;
-        default:
-          router.push('/');
-      }
+  const getTargetRouteForUser = (userObj: any) => {
+    const roles: string[] = userObj?.roles || [];
+    if (roles.includes('SUPER_ADMIN') || roles.includes('DIRECTOR') || roles.includes('GENERAL_MANAGER')) {
+      return '/';
     }
-  }, [isAuthenticated, user, router]);
+    if (roles.includes('PROJECT_MANAGER') || roles.includes('PMO') || roles.includes('HEAD_OF_OPERATIONS')) {
+      return '/project-delivery';
+    }
+    if (roles.includes('PROCUREMENT') || roles.includes('PURCHASING') || roles.includes('MANAGER')) {
+      return '/procurement';
+    }
+    if (roles.includes('FINANCE')) {
+      return '/finance/invoices';
+    }
+    if (roles.includes('MARKETING')) {
+      return '/sales';
+    }
+    if (roles.includes('LEGAL')) {
+      return '/legal/review';
+    }
+    return '/';
+  };
+
+  // Redirect only if user arrived at /login while already authenticated (initial mount)
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && user) {
+      router.replace(getTargetRouteForUser(user));
+    }
+  }, [isLoading, isAuthenticated, user, router]);
+
+  if (isLoading) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f8fafc' }}>
+        <Spin size="large" tip="Memverifikasi sesi..." />
+      </div>
+    );
+  }
 
   const onFinish = async (values: any) => {
     try {
@@ -52,10 +62,12 @@ export default function LoginPage() {
       const payload = res.data.data || res.data;
       const token = payload.access_token || payload.accessToken;
       const loggedInUser = payload.user;
-      const refreshToken = payload.refresh_token || payload.refreshToken;
 
-      login(token, loggedInUser, refreshToken);
+      login(token, loggedInUser);
       message.success(`Selamat datang, ${loggedInUser.email}`);
+      
+      const targetRoute = getTargetRouteForUser(loggedInUser);
+      router.push(targetRoute);
     } catch (error: any) {
       const errorMsg = error.response?.data?.message;
       const msg = Array.isArray(errorMsg)
@@ -72,188 +84,455 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', width: '100%', backgroundColor: '#071836', fontFamily: 'Inter, system-ui, sans-serif' }}>
-      {/* SISI KIRI: BRANDING & HIGH-DETAIL BLUEPRINT SKYSCRAPER (55% Width) */}
-      <div
-        style={{
-          flex: '1.25',
-          backgroundColor: '#061633',
-          backgroundImage: `radial-gradient(circle at 10% 10%, #0d2854 0%, #051329 90%)`,
-          padding: '56px 64px',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: 'space-between',
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-        className="hidden md:flex"
-      >
-        {/* BLUEPRINT GRID BACKGROUND */}
-        <div style={{
-          position: 'absolute',
-          inset: 0,
-          backgroundImage: `
-            linear-gradient(to right, rgba(56, 189, 248, 0.05) 1px, transparent 1px),
-            linear-gradient(to bottom, rgba(56, 189, 248, 0.05) 1px, transparent 1px)
-          `,
-          backgroundSize: '40px 40px',
-          pointerEvents: 'none'
-        }} />
+    <div className="epms-login-container">
+      <style dangerouslySetInnerHTML={{ __html: `
+        .epms-login-container {
+          display: flex;
+          flex-direction: row;
+          min-height: 100dvh;
+          width: 100%;
+          background-color: #f8fafc;
+          font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+          overflow-x: hidden;
+        }
+        .epms-login-left-panel {
+          flex: 1;
+          width: 50%;
+          background-color: #0a2846;
+          background-image: linear-gradient(165deg, #0f355b 0%, #0a2846 100%);
+          padding: 48px;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          position: relative;
+          box-sizing: border-box;
+          overflow: hidden;
+        }
+        .epms-login-branding-header {
+          position: relative;
+          z-index: 10;
+          display: flex;
+          align-items: center;
+          gap: 22px;
+          margin-bottom: 8px;
+        }
+        .epms-login-branding-divider {
+          width: 1px;
+          height: 32px;
+          background: rgba(255, 255, 255, 0.15);
+          flex-shrink: 0;
+        }
+        .epms-login-ubd-logo {
+          height: 48px;
+          width: auto;
+          object-fit: contain;
+          flex-shrink: 0;
+          filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.35));
+        }
+        .epms-login-tvm-logo {
+          height: 64px;
+          width: auto;
+          object-fit: contain;
+          flex-shrink: 0;
+          filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.08)) drop-shadow(0 2px 8px rgba(0, 0, 0, 0.35));
+        }
+        .epms-login-hero-box {
+          position: relative;
+          z-index: 10;
+          max-width: 460px;
+          margin-top: auto;
+          margin-bottom: auto;
+          padding: 32px 0;
+        }
+        .epms-login-hero-title {
+          font-size: 54px;
+          font-weight: 800;
+          color: #ffffff;
+          letter-spacing: -1.5px;
+          line-height: 1.0;
+          margin: 0;
+        }
+        .epms-login-hero-subtitle {
+          font-size: 16px;
+          font-weight: 500;
+          color: #cbd5e1;
+          margin-top: 12px;
+          letter-spacing: -0.2px;
+        }
+        .epms-login-hero-desc {
+          color: #8da4be;
+          font-size: 14.5px;
+          font-weight: 400;
+          line-height: 1.65;
+          max-width: 420px;
+          margin: 20px 0 0 0;
+        }
+        .epms-login-bottom-section {
+          position: relative;
+          z-index: 10;
+          display: flex;
+          flex-direction: column;
+          gap: 14px;
+          border-top: 1px solid rgba(255, 255, 255, 0.08);
+          padding-top: 24px;
+        }
+        .epms-login-trust-row {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 16px;
+          color: #8da4be;
+          font-size: 12.5px;
+          font-weight: 500;
+        }
+        .epms-login-trust-item {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          color: #cbd5e1;
+        }
+        .epms-login-trust-dot {
+          color: rgba(255, 255, 255, 0.2);
+          font-size: 14px;
+        }
+        .epms-login-footer-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          color: #5a738e;
+          font-size: 11.5px;
+        }
+        .epms-login-right-panel {
+          flex: 1;
+          width: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 48px 36px;
+          background-color: #f8fafc;
+          box-sizing: border-box;
+        }
+        .epms-login-card {
+          width: 100%;
+          max-width: 460px;
+          background-color: #ffffff;
+          border-radius: 16px;
+          box-shadow: 0 4px 6px -1px rgba(15, 23, 42, 0.04), 0 20px 40px -10px rgba(15, 23, 42, 0.06);
+          border: 1px solid #e2e8f0;
+          padding: 44px 40px;
+          box-sizing: border-box;
+        }
+        .epms-login-card-title {
+          font-size: 26px;
+          font-weight: 700;
+          color: #0f172a;
+          margin: 0;
+          letter-spacing: -0.4px;
+        }
+        .epms-login-card-header {
+          margin-bottom: 28px;
+        }
+        .epms-login-divider {
+          color: #94a3b8;
+          font-size: 12.5px;
+          font-weight: 400;
+          margin: 20px 0 18px;
+          width: 100%;
+          min-width: 100%;
+        }
+        .epms-login-input {
+          width: 100%;
+          border-radius: 8px !important;
+          height: 44px !important;
+          border-color: #cbd5e1 !important;
+          font-size: 14px !important;
+          transition: all 0.2s ease-in-out !important;
+        }
+        .epms-login-input:hover {
+          border-color: #94a3b8 !important;
+        }
+        .epms-login-input:focus,
+        .epms-login-input-focused {
+          border-color: #0284c7 !important;
+          box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.12) !important;
+        }
+        .epms-login-primary-btn {
+          width: 100%;
+          height: 44px !important;
+          border-radius: 8px !important;
+          background: linear-gradient(180deg, #0284c7 0%, #0369a1 100%) !important;
+          border: 1px solid #0284c7 !important;
+          font-size: 14.5px !important;
+          font-weight: 600 !important;
+          box-shadow: 0 1px 3px rgba(2, 132, 199, 0.3) !important;
+          transition: all 0.2s ease-in-out !important;
+        }
+        .epms-login-primary-btn:hover {
+          background: linear-gradient(180deg, #0369a1 0%, #075985 100%) !important;
+          border-color: #0369a1 !important;
+          box-shadow: 0 2px 6px rgba(2, 132, 199, 0.4) !important;
+        }
+        .epms-login-primary-btn:active {
+          transform: translateY(1px);
+        }
+        .epms-login-sso-btn {
+          width: 100%;
+          height: 44px !important;
+          border-radius: 8px !important;
+          border-color: #cbd5e1 !important;
+          background-color: #ffffff !important;
+          color: #334155 !important;
+          font-size: 13.5px !important;
+          font-weight: 600 !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          gap: 10px !important;
+          margin-bottom: 20px !important;
+          box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
+          transition: all 0.2s ease-in-out !important;
+        }
+        .epms-login-sso-btn:hover {
+          background-color: #f8fafc !important;
+          border-color: #94a3b8 !important;
+          color: #0f172a !important;
+        }
+        .epms-login-link {
+          color: #0284c7;
+          font-size: 13px;
+          font-weight: 600;
+          text-decoration: none;
+          transition: color 0.15s ease;
+        }
+        .epms-login-link:hover {
+          color: #0369a1;
+          text-decoration: underline;
+        }
+        .epms-login-matrix-layer {
+          position: absolute;
+          top: 16%;
+          right: 5%;
+          width: 30%;
+          height: 24%;
+          pointer-events: none;
+          z-index: 1;
+          background-image: radial-gradient(circle, #38bdf8 1px, transparent 1px);
+          background-size: 16px 16px;
+          opacity: 0.03;
+          -webkit-mask-image: radial-gradient(ellipse at 65% 55%, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.4) 50%, transparent 75%);
+          mask-image: radial-gradient(ellipse at 65% 55%, rgba(0, 0, 0, 1) 0%, rgba(0, 0, 0, 0.4) 50%, transparent 75%);
+        }
+        .epms-login-fiber-layer {
+          position: absolute;
+          right: 4%;
+          bottom: 18%;
+          width: 65%;
+          height: 48%;
+          pointer-events: none;
+          z-index: 1;
+          overflow: hidden;
+          display: flex;
+          align-items: flex-end;
+          justify-content: flex-end;
+        }
+        .epms-login-fiber-svg {
+          width: 100%;
+          height: 100%;
+          pointer-events: none;
+        }
+        .epms-login-cityscape-layer {
+          position: absolute;
+          right: 2%;
+          bottom: 16%;
+          width: 70%;
+          height: 54%;
+          pointer-events: none;
+          z-index: 1;
+          overflow: hidden;
+          display: flex;
+          align-items: flex-end;
+          justify-content: flex-end;
+          -webkit-mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.4) 6%, rgba(0, 0, 0, 1) 18%);
+          mask-image: linear-gradient(to right, transparent 0%, rgba(0, 0, 0, 0.4) 6%, rgba(0, 0, 0, 1) 18%);
+        }
+        .epms-login-cityscape-img {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+          object-position: right bottom;
+          pointer-events: none;
+        }
 
-        {/* HIGH-DETAIL BLUEPRINT SKYSCRAPER & CRANE GRAPHIC (SVG OVERLAY RIGHT SIDE) */}
-        <svg
-          style={{
-            position: 'absolute',
-            bottom: '-20px',
-            right: '20px',
-            width: '520px',
-            height: '90%',
-            opacity: 0.35,
-            pointerEvents: 'none',
-            zIndex: 2
-          }}
-          viewBox="0 0 600 800"
-          fill="none"
-          xmlns="http://www.w3.org/2000/svg"
-        >
-          {/* Main Skyscraper Blueprint Frame */}
-          <rect x="220" y="140" width="280" height="660" stroke="#38bdf8" strokeWidth="2" strokeDasharray="6 4" />
-          <rect x="240" y="160" width="240" height="640" stroke="#0ea5e9" strokeWidth="1.5" />
-          
-          {/* Diagonal Structural Bracing */}
-          <line x1="240" y1="160" x2="480" y2="300" stroke="#0284c7" strokeWidth="1" />
-          <line x1="480" y1="160" x2="240" y2="300" stroke="#0284c7" strokeWidth="1" />
-          <line x1="240" y1="300" x2="480" y2="440" stroke="#0284c7" strokeWidth="1" />
-          <line x1="480" y1="300" x2="240" y2="440" stroke="#0284c7" strokeWidth="1" />
-          <line x1="240" y1="440" x2="480" y2="580" stroke="#0284c7" strokeWidth="1" />
-          <line x1="480" y1="440" x2="240" y2="580" stroke="#0284c7" strokeWidth="1" />
-          <line x1="240" y1="580" x2="480" y2="720" stroke="#0284c7" strokeWidth="1" />
-          <line x1="480" y1="580" x2="240" y2="720" stroke="#0284c7" strokeWidth="1" />
+        @media (max-width: 900px) {
+          .epms-login-container {
+            flex-direction: column;
+          }
+          .epms-login-left-panel {
+            flex: none;
+            width: 100%;
+            padding: 32px 24px;
+          }
+          .epms-login-matrix-layer,
+          .epms-login-fiber-layer,
+          .epms-login-cityscape-layer {
+            display: none;
+          }
+          .epms-login-branding-header {
+            gap: 16px;
+            margin-bottom: 0;
+          }
+          .epms-login-branding-divider {
+            height: 24px;
+          }
+          .epms-login-ubd-logo {
+            height: 38px;
+            width: auto;
+          }
+          .epms-login-tvm-logo {
+            height: 48px;
+            width: auto;
+          }
+          .epms-login-hero-box {
+            margin-top: 20px;
+            margin-bottom: 0;
+            padding: 0;
+          }
+          .epms-login-hero-title {
+            font-size: 38px;
+          }
+          .epms-login-hero-subtitle {
+            font-size: 15px;
+            margin-top: 6px;
+          }
+          .epms-login-hero-desc {
+            font-size: 13.5px;
+            margin-top: 12px;
+          }
+          .epms-login-bottom-section {
+            display: none;
+          }
+          .epms-login-right-panel {
+            flex: none;
+            width: 100%;
+            padding: 32px 20px 48px;
+          }
+          .epms-login-card {
+            border-radius: 16px;
+            padding: 28px 20px;
+          }
+          .epms-login-card-title {
+            font-size: 22px;
+          }
+          .epms-login-card-header {
+            margin-bottom: 20px;
+          }
+          .epms-login-divider {
+            margin: 16px 0 14px;
+          }
+        }
+      ` }} />
 
-          {/* Window Columns */}
-          <line x1="280" y1="160" x2="280" y2="800" stroke="#38bdf8" strokeWidth="0.8" strokeDasharray="3 3" />
-          <line x1="320" y1="160" x2="320" y2="800" stroke="#38bdf8" strokeWidth="0.8" strokeDasharray="3 3" />
-          <line x1="360" y1="160" x2="360" y2="800" stroke="#38bdf8" strokeWidth="0.8" strokeDasharray="3 3" />
-          <line x1="400" y1="160" x2="400" y2="800" stroke="#38bdf8" strokeWidth="0.8" strokeDasharray="3 3" />
-          <line x1="440" y1="160" x2="440" y2="800" stroke="#38bdf8" strokeWidth="0.8" strokeDasharray="3 3" />
+      {/* LEFT PANEL: BRANDING & PRODUCT IDENTITY (50% WIDTH) */}
+      <div className="epms-login-left-panel">
+        {/* SUBTLE DIGITAL MATRIX (AMBIENT BACKGROUND TEXTURE) */}
+        <div className="epms-login-matrix-layer" aria-hidden="true" />
 
-          {/* Floor Slab Rows */}
-          {Array.from({ length: 25 }).map((_, i) => (
-            <line key={i} x1="220" y1={180 + i * 24} x2="500" y2={180 + i * 24} stroke="#0ea5e9" strokeWidth="0.8" opacity="0.7" />
-          ))}
+        {/* FIBER OPTIC NETWORK PATH (SECONDARY DECORATIVE INFRASTRUCTURE LAYER) */}
+        <div className="epms-login-fiber-layer" aria-hidden="true">
+          <svg
+            className="epms-login-fiber-svg"
+            viewBox="0 0 650 350"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            {/* 1. Fiber Optic Connection Paths (Visual weight ~30% relative to cityscape) */}
+            <g stroke="#38bdf8" strokeWidth="1" opacity="0.30" fill="none">
+              {/* Path 1: Transition trunk to mid-rise core */}
+              <path d="M 50 240 Q 120 230 180 200 T 310 180" />
+              {/* Path 2: Uplink branch to main tower node */}
+              <path d="M 310 180 Q 370 140 430 110" />
+              {/* Path 3: Mid-rise horizontal distribution link */}
+              <path d="M 310 180 Q 340 230 380 240 L 520 240" strokeDasharray="6 3" />
+              {/* Path 4: Right wing commercial interconnect */}
+              <path d="M 520 240 Q 560 240 600 210" />
+            </g>
 
-          {/* Tower Crane Top Structure */}
-          <path d="M 360 140 V 20 H 120 M 360 40 L 480 140 M 360 20 L 520 20 M 360 40 L 140 20" stroke="#f59e0b" strokeWidth="2.5" />
-          <path d="M 200 20 V 120" stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="3 3" />
-          <circle cx="200" cy="120" r="4" fill="#fbbf24" />
-
-          {/* Perspective Ground Grid Projections */}
-          <path d="M0 720 L600 780 M0 760 L600 800 M0 680 L600 750" stroke="#38bdf8" strokeWidth="0.8" opacity="0.4" />
-          <path d="M100 800 L300 650 M250 800 L450 650 M400 800 L600 650" stroke="#38bdf8" strokeWidth="0.8" opacity="0.4" />
-        </svg>
-
-        {/* TOP LEFT: VECTOR GOLD 3D SKYSCRAPER LOGO */}
-        <div style={{ position: 'relative', zIndex: 10, display: 'flex', alignItems: 'center', gap: '14px' }}>
-          {/* Vector 3D Gold Tower Emblem */}
-          <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect width="40" height="40" rx="10" fill="url(#gold_grad)" />
-            <path d="M14 28V16L18 13V28H14Z" fill="#071938" />
-            <path d="M19 28V10L24 7V28H19Z" fill="#071938" />
-            <path d="M25 28V18L28 16V28H25Z" fill="#071938" opacity="0.8" />
-            <defs>
-              <linearGradient id="gold_grad" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
-                <stop stopColor="#fbbf24" />
-                <stop offset="1" stopColor="#d97706" />
-              </linearGradient>
-            </defs>
+            {/* 2. Fiber Network Splice / Connection Nodes (Subtle, ~55% opacity) */}
+            <g fill="#38bdf8" opacity="0.55">
+              <circle cx="50" cy="240" r="2.5" />
+              <circle cx="180" cy="200" r="2.5" />
+              <circle cx="310" cy="180" r="3" />
+              <circle cx="430" cy="110" r="3" />
+              <circle cx="380" cy="240" r="2.5" />
+              <circle cx="520" cy="240" r="2.5" />
+              <circle cx="600" cy="210" r="2.5" />
+            </g>
           </svg>
-          <div>
-            <div style={{ color: '#ffffff', fontSize: '15px', fontWeight: 800, letterSpacing: '0.5px', lineHeight: 1.1 }}>
-              UBD & TVM
-            </div>
-            <div style={{ color: '#94a3b8', fontSize: '9.5px', fontWeight: 700, letterSpacing: '1.8px', textTransform: 'uppercase', marginTop: '2px' }}>
-              CONSTRUCTION GROUP
-            </div>
-          </div>
         </div>
 
-        {/* MAIN HEADLINE & DESKRIPSI */}
-        <div style={{ position: 'relative', zIndex: 10, maxWidth: '500px', marginTop: 'auto', marginBottom: 'auto', paddingTop: '40px' }}>
-          <h1 style={{ color: '#ffffff', fontSize: '60px', fontWeight: 900, lineHeight: 1.0, letterSpacing: '-1.5px', margin: 0 }}>
-            EPMS
-          </h1>
-          <div style={{ color: '#cbd5e1', fontSize: '22px', fontWeight: 500, marginTop: '8px', letterSpacing: '-0.2px' }}>
+        {/* LARGE ARCHITECTURAL CITYSCAPE SKYLINE (DECORATIVE STATIC SVG) */}
+        <div className="epms-login-cityscape-layer" aria-hidden="true">
+          <img 
+            src="/epms-cityscape.svg" 
+            alt="" 
+            className="epms-login-cityscape-img"
+          />
+        </div>
+
+        {/* COMPANY LOGO HEADER: [ UBD LOGO ] | [ TVM LOGO ] */}
+        <div className="epms-login-branding-header">
+          <img 
+            src="/logo-ubd-clean.png" 
+            alt="UBD Logo" 
+            className="epms-login-ubd-logo"
+          />
+          <div className="epms-login-branding-divider" />
+          <img 
+            src="/TVM.png" 
+            alt="TVM Logo" 
+            className="epms-login-tvm-logo"
+          />
+        </div>
+
+        {/* MAIN PRODUCT IDENTITY & HERO CONTENT */}
+        <div className="epms-login-hero-box">
+          <h1 className="epms-login-hero-title">EPMS</h1>
+          <div className="epms-login-hero-subtitle">
             Enterprise Project Management System
           </div>
-
-          {/* BARIS AKSEN EMAS */}
-          <div style={{ width: '48px', height: '4px', background: '#f59e0b', borderRadius: '2px', margin: '24px 0' }} />
-
-          <p style={{ color: '#94a3b8', fontSize: '15px', fontWeight: 400, lineHeight: 1.6, maxWidth: '440px', margin: 0 }}>
-            Integrated Platform to Manage the Entire Project Lifecycle with Efficiency, Transparency and Control.
+          <p className="epms-login-hero-desc">
+            Integrated platform to manage the entire project lifecycle with efficiency, transparency and control.
           </p>
         </div>
 
-        {/* BOTTOM FOOTER BAR */}
-        <div style={{ position: 'relative', zIndex: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '24px' }}>
-          {/* Security Badge */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <SafetyCertificateOutlined style={{ color: '#38bdf8', fontSize: '22px' }} />
-            <div>
-              <div style={{ color: '#e2e8f0', fontSize: '12px', fontWeight: 600 }}>Secure. Reliable. Scalable.</div>
-              <div style={{ color: '#64748b', fontSize: '11px' }}>Enterprise Grade Security & Performance</div>
-            </div>
-          </div>
-
-          {/* Copyright */}
-          <div style={{ color: '#64748b', fontSize: '12px', textAlign: 'center' }}>
-            &copy; 2026 UBD & TVM Construction Group. All rights reserved.
-          </div>
-
-          {/* Version Badge */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <span style={{ color: '#94a3b8', fontSize: '12px', fontWeight: 500 }}>Version 1.0.0</span>
-            <span style={{
-              padding: '4px 10px',
-              borderRadius: '6px',
-              border: '1px solid rgba(245, 158, 11, 0.4)',
-              background: 'rgba(15, 23, 42, 0.6)',
-              color: '#fbbf24',
-              fontSize: '11px',
-              fontWeight: 700,
-              letterSpacing: '0.5px'
-            }}>
-              Enterprise Edition
+        {/* BOTTOM METADATA & TRUST STRIP */}
+        <div className="epms-login-bottom-section">
+          <div className="epms-login-trust-row">
+            <span className="epms-login-trust-item">
+              <SafetyCertificateOutlined style={{ color: '#38bdf8' }} /> Enterprise Grade Security
             </span>
+            <span className="epms-login-trust-dot">·</span>
+            <span className="epms-login-trust-item">
+              <BarChartOutlined style={{ color: '#38bdf8' }} /> High Availability
+            </span>
+            <span className="epms-login-trust-dot">·</span>
+            <span className="epms-login-trust-item">
+              <TeamOutlined style={{ color: '#38bdf8' }} /> Built for Scale
+            </span>
+          </div>
+          <div className="epms-login-footer-row">
+            <span>&copy; 2026 UBD & TVM Construction Group. All rights reserved.</span>
+            <span>v1.0.0</span>
           </div>
         </div>
       </div>
 
-      {/* SISI KANAN: FORM LOGIN CARD ("WELCOME BACK") */}
-      <div
-        style={{
-          flex: '1',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '32px 24px',
-          backgroundColor: '#f8fafc',
-        }}
-      >
-        <div
-          style={{
-            width: '100%',
-            maxWidth: '430px',
-            backgroundColor: '#ffffff',
-            borderRadius: '24px',
-            boxShadow: '0 25px 50px -12px rgba(15, 23, 42, 0.12)',
-            border: '1px solid #f1f5f9',
-            padding: '44px 40px',
-          }}
-        >
+      {/* RIGHT LOGIN PANEL (50% WIDTH) */}
+      <div className="epms-login-right-panel">
+        <div className="epms-login-card">
           {/* Card Header: Welcome Back */}
-          <div style={{ marginBottom: '32px' }}>
-            <h2 style={{ fontSize: '30px', fontWeight: 800, color: '#0f172a', margin: 0, letterSpacing: '-0.5px' }}>
+          <div className="epms-login-card-header">
+            <h2 className="epms-login-card-title">
               Welcome Back
             </h2>
             <div style={{ color: '#64748b', fontSize: '14px', marginTop: '6px', fontWeight: 400 }}>
@@ -263,6 +542,7 @@ export default function LoginPage() {
 
           {/* Form Login */}
           <Form
+            form={form}
             name="login_form"
             layout="vertical"
             initialValues={{ remember: false }}
@@ -275,12 +555,12 @@ export default function LoginPage() {
               name="email"
               label={<span style={{ color: '#334155', fontSize: '13px', fontWeight: 600 }}>Email or Username</span>}
               rules={[{ required: true, message: 'Masukkan email atau username Anda!' }]}
-              style={{ marginBottom: '20px', width: '100%' }}
+              style={{ marginBottom: '18px', width: '100%' }}
             >
               <Input
-                prefix={<UserOutlined style={{ color: '#94a3b8', marginRight: '6px' }} />}
+                prefix={<UserOutlined style={{ color: '#94a3b8', marginRight: '8px' }} />}
                 placeholder="Enter your email or username"
-                style={{ width: '100%', borderRadius: '10px', height: '48px', borderColor: '#cbd5e1', fontSize: '14px' }}
+                className="epms-login-input"
               />
             </Form.Item>
 
@@ -291,46 +571,37 @@ export default function LoginPage() {
               style={{ marginBottom: '16px', width: '100%' }}
             >
               <Input.Password
-                prefix={<LockOutlined style={{ color: '#94a3b8', marginRight: '6px' }} />}
+                prefix={<LockOutlined style={{ color: '#94a3b8', marginRight: '8px' }} />}
                 placeholder="Enter your password"
-                style={{ width: '100%', borderRadius: '10px', height: '48px', borderColor: '#cbd5e1', fontSize: '14px' }}
+                className="epms-login-input"
               />
             </Form.Item>
 
-            {/* Checkbox Remember Me (UNCHECKED BY DEFAULT) & Forgot Password */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '28px', width: '100%' }}>
+            {/* Checkbox Remember Me & Forgot Password */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px', marginBottom: '22px', width: '100%' }}>
               <Form.Item name="remember" valuePropName="checked" noStyle>
                 <Checkbox style={{ color: '#64748b', fontSize: '13px', fontWeight: 500 }}>Remember me</Checkbox>
               </Form.Item>
-              <a style={{ color: '#0284c7', fontSize: '13px', fontWeight: 600, textDecoration: 'none' }} href="#">
+              <a className="epms-login-link" href="#">
                 Forgot Password?
               </a>
             </div>
 
             {/* Primary Sign In Button */}
-            <Form.Item style={{ marginBottom: '20px', width: '100%' }}>
+            <Form.Item style={{ marginBottom: '18px', width: '100%' }}>
               <Button
                 type="primary"
                 htmlType="submit"
                 block
                 loading={loading}
-                style={{
-                  width: '100%',
-                  height: '48px',
-                  borderRadius: '12px',
-                  background: 'linear-gradient(135deg, #0284c7 0%, #1e40af 100%)',
-                  borderColor: '#0284c7',
-                  fontSize: '15px',
-                  fontWeight: 700,
-                  boxShadow: '0 4px 14px rgba(2, 132, 199, 0.3)',
-                }}
+                className="epms-login-primary-btn"
               >
                 Sign In
               </Button>
             </Form.Item>
 
             {/* Divider Or Continue With */}
-            <Divider style={{ color: '#94a3b8', fontSize: '13px', fontWeight: 400, margin: '24px 0 20px', width: '100%', minWidth: '100%' }}>
+            <Divider className="epms-login-divider">
               or continue with
             </Divider>
 
@@ -338,22 +609,7 @@ export default function LoginPage() {
             <Button
               block
               onClick={handleMicrosoftSSO}
-              style={{
-                width: '100%',
-                height: '46px',
-                borderRadius: '10px',
-                borderColor: '#cbd5e1',
-                backgroundColor: '#ffffff',
-                color: '#334155',
-                fontSize: '14px',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '10px',
-                marginBottom: '24px',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-              }}
+              className="epms-login-sso-btn"
             >
               {/* Microsoft 4-Color Icon */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2px', width: '16px', height: '16px' }}>
@@ -369,7 +625,7 @@ export default function LoginPage() {
             <div style={{ textAlign: 'center' }}>
               <span style={{ fontSize: '13px', color: '#64748b' }}>
                 Need help?{' '}
-                <a style={{ color: '#0284c7', fontWeight: 600, textDecoration: 'none' }} href="#">
+                <a className="epms-login-link" href="#">
                   Contact System Administrator
                 </a>
               </span>

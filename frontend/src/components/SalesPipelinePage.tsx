@@ -1,22 +1,63 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
-import { Tabs, Table, Typography, Button, Modal, Form, Input, InputNumber, DatePicker, Select, Tag, message, Row, Col, Card, Spin, Skeleton, Space, Tooltip, Dropdown, Radio, Steps, Avatar, Empty } from 'antd';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import dynamic from 'next/dynamic';
+import { Tabs, Table, Typography, Button, Modal, Form, Input, InputNumber, DatePicker, Select, Tag, message, Row, Col, Card, Spin, Skeleton, Space, Tooltip, Radio, Steps, Avatar, Empty } from 'antd';
 import type { MenuProps } from 'antd';
-import { RocketOutlined, AuditOutlined, RightOutlined, CheckCircleOutlined, CloseCircleOutlined, MoreOutlined, ExclamationCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, UserOutlined, CalendarOutlined, BankOutlined, FolderOpenOutlined, RightCircleFilled, PieChartOutlined, ClockCircleOutlined, ArrowRightOutlined, InfoCircleOutlined, PlayCircleOutlined } from '@ant-design/icons';
-import { Line, Pie, Area, Funnel } from '@ant-design/charts';
+import { PlusOutlined, EyeOutlined, RocketOutlined, AuditOutlined, ExclamationCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, CalendarOutlined, FolderOpenOutlined, PieChartOutlined, ClockCircleOutlined, ArrowRightOutlined, InfoCircleOutlined, PlayCircleOutlined } from '@ant-design/icons';
 import CountUp from 'react-countup';
 import { io } from 'socket.io-client';
 import dayjs from 'dayjs';
+
+const Line = dynamic(
+  () => import('@ant-design/charts').then((mod) => mod.Line),
+  { ssr: false }
+);
+
+const Pie = dynamic(
+  () => import('@ant-design/charts').then((mod) => mod.Pie),
+  { ssr: false }
+);
+
+const Area = dynamic(
+  () => import('@ant-design/charts').then((mod) => mod.Area),
+  { ssr: false }
+);
+
+const Funnel = dynamic(
+  () => import('@ant-design/charts').then((mod) => mod.Funnel),
+  { ssr: false }
+);
 import { useAuth } from '../context/AuthContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import styles from './SalesPipelinePage.module.css';
-import { KanbanBoard } from './KanbanBoard';
+const KanbanBoard = dynamic(
+  () => import('./KanbanBoard').then((mod) => mod.KanbanBoard),
+  {
+    ssr: false,
+    loading: () => (
+      <Spin
+        size="large"
+        style={{ display: 'block', margin: '40px auto' }}
+      />
+    ),
+  }
+);
 import type { DashboardAnalyticsResponse } from '../types/analytics';
 import { useTendersQuery } from '../hooks/useTendersQuery';
+import { useCustomersQuery, useUsersQuery } from '../hooks/useMasterDataQuery';
+import { SalesKpiSummaryCards } from './marketing/SalesKpiSummaryCards';
+import { MarketingActionItemsCard } from './marketing/MarketingActionItemsCard';
+import { PipelineAnalyticsView } from './marketing/PipelineAnalyticsView';
+import { CreateTenderModal } from './marketing/CreateTenderModal';
+import { LegalReviewModal } from './marketing/LegalReviewModal';
+import {
+  useDashboardSummaryQuery,
+  useAnalyticsDashboardQuery,
+  usePendingContractsQuery,
+} from '../hooks/useDashboardQuery';
 import { apiClient } from '@/lib/axios';
-import { AuthService } from '@/services/auth.service';
-import { queryClient, updateAllTenderCaches } from '../lib/queryClient';
+import { queryClient, updateAllTenderCaches, appendTenderToCache } from '../lib/queryClient';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -71,150 +112,95 @@ const BUSINESS_SECTORS = [
 
 export const SalesPipelinePage = () => {
   const router = useRouter();
-  const { user } = useAuth();
-  const userRoles = user?.roles || [];
-  const canReview = userRoles.includes('SUPER_ADMIN') || userRoles.includes('LEGAL');
+  const { user, isLoading: authLoading } = useAuth();
+  const userRoles = useMemo(() => user?.roles || [], [user]);
+
+  // Canonical Legal and Admin authorization check (no phantom LEGAL_REVIEWER)
+  const canAccessLegalTracking = useMemo(() => {
+    return userRoles.some((role: string) =>
+      ['LEGAL', 'SUPER_ADMIN', 'ADMIN', 'DIRECTOR'].includes(role)
+    );
+  }, [userRoles]);
+
+  // Decoupled Review permission (approving/rejecting/requesting revision)
+  const canReviewContract = useMemo(() => {
+    return userRoles.some((role: string) =>
+      ['LEGAL', 'SUPER_ADMIN', 'ADMIN', 'DIRECTOR'].includes(role)
+    );
+  }, [userRoles]);
 
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
-  const [activeTab, setActiveTab] = useState(tabParam || '1');
+  const [activeTab, setActiveTab] = useState('1');
 
   useEffect(() => {
+    if (authLoading) return; // Wait for authentication and roles to resolve!
+
     if (tabParam === '3') {
       router.replace('/project-delivery');
-    } else if (tabParam) {
+      return;
+    }
+
+    if (tabParam === '2' || activeTab === '2') {
+      if (!canAccessLegalTracking) {
+        // Marketing or unauthorized role attempting to access Legal Tracking
+        setActiveTab('1');
+        if (tabParam === '2') {
+          // Preserve other URL parameters while sanitizing tab
+          const params = new URLSearchParams(searchParams.toString());
+          params.set('tab', '1');
+          const newQuery = params.toString();
+          router.replace(`/sales${newQuery ? `?${newQuery}` : ''}`);
+        }
+        return;
+      }
+    }
+
+    if (tabParam) {
       setActiveTab(tabParam);
     }
-  }, [tabParam, router]);
+  }, [authLoading, tabParam, canAccessLegalTracking, searchParams, router]);
 
   const [currentStep, setCurrentStep] = useState(0);
   const [viewMode, setViewMode] = useState('kanban');
   const [periodFilter, setPeriodFilter] = useState('all');
-  
-  // Priority 1: React Query as Single Source of Truth
-  const { data: reactQueryTenders = [], isLoading: isLoadingQuery } = useTendersQuery({ period: periodFilter });
-  const activeTendersData = reactQueryTenders;
-
-  // DETEKTIF: Cek siapa yang dipakai UI
-  if (typeof window !== 'undefined') {
-    console.log("🔍 SUMBER DATA UI:", {
-      pakaiReactQuery: true,
-      panjangDataReactQuery: reactQueryTenders?.length || 0,
-      isiPertama: reactQueryTenders?.[0]?.title || "KOSONG"
-    });
-  }
-
-  // 1. EKSPOS QueryClient ke window untuk debugging
-  if (typeof window !== 'undefined') {
-    (window as any).__queryClient = queryClient;
-  }
-
-
-
-  const [customers, setCustomers] = useState([]);
-  const [users, setUsers] = useState([]);
-  const [pendingContracts, setPendingContracts] = useState([]);
-  const [dashboardSummary, setDashboardSummary] = useState<any>(null);
-  const [analyticsData, setAnalyticsData] = useState<DashboardAnalyticsResponse | null>(null);
   const [analyticsPeriodFilter, setAnalyticsPeriodFilter] = useState('YEAR_TO_DATE');
-  
-  // Loading States
-  const [loadingDashboard, setLoadingDashboard] = useState(true);
-  const [loadingAnalytics, setLoadingAnalytics] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   // Modals state
   const [isTenderModalVisible, setIsTenderModalVisible] = useState(false);
   const [isLegalModalVisible, setIsLegalModalVisible] = useState(false);
   const [selectedContract, setSelectedContract] = useState<any>(null);
-  const [isCustomSector, setIsCustomSector] = useState(false);
-  const [isCustomSource, setIsCustomSource] = useState(false);
   
-  const [form] = Form.useForm();
-  const [legalForm] = Form.useForm();
+  // 1. Mandatory Data for Initial Active Tab (Tab 1 Kanban)
+  const { data: reactQueryTenders = [], isLoading: isLoadingQuery } = useTendersQuery({ period: periodFilter });
+  const activeTendersData = reactQueryTenders;
 
-  useEffect(() => {
-    fetchCustomers();
-    fetchUsers();
-    if (activeTab === '1') {
-      fetchDashboardSummary();
-    } else if (activeTab === '2') {
-      fetchPendingContracts();
-    } else if (activeTab === '4') {
-      fetchAnalyticsData(analyticsPeriodFilter);
-    }
+  // 2. Lazy Data: Master Customers (Only fetched when "+ Input Tender" modal is open)
+  const { data: rawCustomers = [] } = useCustomersQuery('/marketing/customers', undefined, { enabled: isTenderModalVisible });
+  const customers = Array.isArray(rawCustomers) ? rawCustomers : [];
 
+  // 3. Lazy Data: Master Users / PICs (Only fetched when "+ Input Tender" modal is open)
+  const { data: rawUsers = [] } = useUsersQuery({ enabled: isTenderModalVisible });
+  const users = Array.isArray(rawUsers) ? rawUsers : [];
 
-  }, [activeTab, periodFilter, analyticsPeriodFilter]);
+  // 4. Tab 1 Dashboard Summary Query (Cached / Enabled on Tab 1)
+  const { data: dashboardSummary = null, isLoading: loadingDashboard, refetch: refetchDashboardSummary } = useDashboardSummaryQuery(
+    periodFilter,
+    '/marketing/dashboard/summary',
+    { enabled: activeTab === '1' }
+  );
 
-  const handleNext = async () => {
-    try {
-      const values = await form.validateFields(['projectName', 'estimatedBudget', 'customerId', 'expectedClosingDate', 'bidSubmissionDeadline']);
-      
-      const errors: string[] = [];
+  // 5. Lazy Data: Tab 2 Legal Tracking (Only fetched when authorized, auth is loaded, and on Tab 2 or Legal modal)
+  const { data: rawPendingContracts = [], refetch: refetchPendingContracts } = usePendingContractsQuery({
+    enabled: !authLoading && canAccessLegalTracking && (activeTab === '2' || isLegalModalVisible),
+  });
+  const pendingContracts = Array.isArray(rawPendingContracts) ? rawPendingContracts : [];
 
-      if (values.estimatedBudget <= 0) {
-        errors.push('Estimated Budget harus lebih besar dari 0.');
-      }
-
-      const today = dayjs().startOf('day');
-      const closingDate = dayjs(values.expectedClosingDate).startOf('day');
-      const bidDeadline = dayjs(values.bidSubmissionDeadline).startOf('day');
-
-      if (closingDate.isBefore(today) || bidDeadline.isBefore(today)) {
-        errors.push('Tanggal tidak boleh kurang dari hari ini.');
-      }
-
-      if (bidDeadline.isAfter(closingDate)) {
-        errors.push('Batas Kirim Penawaran harus sebelum atau sama dengan Tanggal Closing.');
-      }
-
-      if (errors.length > 0) {
-        errors.forEach(err => message.error(err));
-        return;
-      }
-
-      setCurrentStep(currentStep + 1);
-    } catch (error) {
-      message.error('Harap lengkapi semua field wajib bertanda bintang merah (*).');
-    }
-  };
-
-  /**
-   * Fetch dashboard analytics data from API
-   * @param period - Time period filter (e.g., 'YEAR_TO_DATE', 'LAST_MONTH')
-   * @returns Promise<void>
-   */
-  const fetchAnalyticsData = async (period: string) => {
-    setLoadingAnalytics(true);
-    try {
-      const res = await apiClient.get(`/analytics/dashboard?period=${period}`);
-      // Response structure: { meta: {...}, data: { status, data: { kpi, trendLine, ... } } }
-      setAnalyticsData(res.data?.data?.data || res.data?.data || res.data);
-    } catch (err) {
-      console.error('Failed to fetch analytics', err);
-      // Fallback or empty state will handle null data gracefully
-      setAnalyticsData(null);
-    } finally {
-      setLoadingAnalytics(false);
-    }
-  };
-
-  const fetchDashboardSummary = async () => {
-    setLoadingDashboard(true);
-    try {
-      const url = periodFilter === 'all' 
-        ? '/marketing/dashboard/summary'
-        : `/marketing/dashboard/summary?period=${periodFilter}`;
-        
-      const res = await apiClient.get(url);
-      setDashboardSummary(res.data.data || res.data); // Adjust based on your API wrapper
-    } catch (err) {
-      console.error('Failed to fetch dashboard summary', err);
-    } finally {
-      setLoadingDashboard(false);
-    }
-  };
+  // 6. Lazy Data: Tab 4 Analytics (Only fetched when user switches to Tab 4)
+  const { data: analyticsData = null, isLoading: loadingAnalytics } = useAnalyticsDashboardQuery(
+    analyticsPeriodFilter,
+    { enabled: activeTab === '4' }
+  );
 
   const computePremiumKpis = () => {
     const now = new Date();
@@ -359,7 +345,7 @@ export const SalesPipelinePage = () => {
   };
 
   // --- CHART HELPERS ---
-  const computeLineChartData = () => {
+  const lineChartData = useMemo(() => {
     const months = [];
     const now = new Date();
     for (let i = 11; i >= 0; i--) {
@@ -394,9 +380,9 @@ export const SalesPipelinePage = () => {
     });
 
     return data;
-  };
+  }, [activeTendersData]);
 
-  const computePieChartData = () => {
+  const pieChartData = useMemo(() => {
     const sectors: Record<string, number> = {};
     let total = 0;
     activeTendersData.forEach((t: any) => {
@@ -417,9 +403,9 @@ export const SalesPipelinePage = () => {
         percentage: percentage
       };
     }).filter(item => item.value > 0);
-  };
+  }, [activeTendersData]);
 
-  const computeActionItems = () => {
+  const actionItemsData = useMemo(() => {
     const items = activeTendersData.filter((t: any) => {
       const stage = t.stage?.toUpperCase();
       if (t.status === 'WON' || t.status === 'LOST' || stage === 'WON' || stage === 'LOST') return false;
@@ -467,9 +453,9 @@ export const SalesPipelinePage = () => {
       if (!isOverdueA && isOverdueB) return 1;
       return dateA.getTime() - dateB.getTime();
     }).slice(0, 10);
-  };
+  }, [activeTendersData]);
 
-  const actionItemsColumns = [
+  const actionItemsColumns = useMemo(() => [
     { title: 'Project Name', dataIndex: 'title', key: 'title', render: (text: string) => <Text strong style={{ fontSize: 12, color: '#1f2329' }}>{text}</Text> },
     { title: 'Customer', key: 'customer', render: (text: any, record: any) => <Text style={{ fontSize: 12, color: '#4b5563' }}>{record.customer?.name || `ID: ${record.customer_id}`}</Text> },
     { title: 'Stage', dataIndex: 'stage', key: 'stage', render: (val: string) => <Tag color={getStageColor(val)} style={{ borderRadius: 10, fontSize: 10, fontWeight: 600 }}>{val}</Tag> },
@@ -495,7 +481,7 @@ export const SalesPipelinePage = () => {
             {isOverdue && (
               <Tooltip title={`Tender ini telah melewati deadline selama ${daysOverdue} hari!`}>
                 <Tag style={{ borderRadius: 10, fontSize: 9, color: '#f53f3f', backgroundColor: '#ffece6', border: 'none', fontWeight: 700 }}>
-                  ⚠️ LEWAT JATUH TEMPO ({daysOverdue}d)
+                  LEWAT JATUH TEMPO ({daysOverdue}d)
                 </Tag>
               </Tooltip>
             )}
@@ -518,114 +504,23 @@ export const SalesPipelinePage = () => {
         </Button>
       ) 
     }
-  ];
-
-  const fetchCustomers = async () => {
-    try {
-      const res = await apiClient.get('/marketing/customers');
-      setCustomers(res.data.data || res.data);
-    } catch (err) {}
-  };
-
-  const fetchUsers = async () => {
-    try {
-      const res = await apiClient.get('/marketing/pics');
-      setUsers(res.data.data || res.data);
-    } catch (err) {}
-  };
-
-  const fetchPendingContracts = async () => {
-    try {
-      const res = await apiClient.get('/legal/contracts/pending');
-      setPendingContracts(res.data.data || res.data);
-    } catch (err) {}
-  };
-
-  const handleCustomerChange = (customerId: number) => {
-    const selectedCustomer: any = customers.find((c: any) => c.id === customerId);
-    if (selectedCustomer) {
-      const isCustomSector = selectedCustomer.business_sector && !BUSINESS_SECTORS.includes(selectedCustomer.business_sector);
-      setIsCustomSector(!!isCustomSector);
-
-      form.setFieldsValue({
-        picCustomerName: selectedCustomer.contact_person,
-        picCustomerPhone: selectedCustomer.phone,
-        picCustomerEmail: selectedCustomer.email,
-        businessSectorSelect: isCustomSector ? 'Lainnya' : selectedCustomer.business_sector,
-        businessSectorCustom: isCustomSector ? selectedCustomer.business_sector : undefined,
-      });
-    }
-  };
-
-  const handleCreateTender = async (values: any) => {
-    setIsSubmitting(true);
-    const hide = message.loading('Saving opportunity...', 0);
-    try {
-      const payload = {
-        customerId: Number(values.customerId),
-        projectName: values.projectName,
-        marketingPicId: values.marketingPicId ? Number(values.marketingPicId) : undefined,
-        picCustomerName: values.picCustomerName,
-        picCustomerPhone: values.picCustomerPhone,
-        picCustomerEmail: values.picCustomerEmail,
-        businessSector: values.businessSectorSelect === 'Lainnya' 
-          ? values.businessSectorCustom 
-          : values.businessSectorSelect,
-        stage: values.stage || 'LEAD',
-        probabilityPercentage: values.probabilityPercentage || 0,
-        priority: values.priority || 'MEDIUM',
-        source: values.sourceSelect === 'Lainnya' ? values.sourceCustom : values.sourceSelect,
-        notes: values.notes,
-        estimatedBudget: values.estimatedBudget,
-        expectedClosingDate: values.expectedClosingDate ? values.expectedClosingDate.toISOString() : undefined,
-        procurementType: values.procurementType || 'TENDER',
-        projectLocation: values.projectLocation,
-        bidSubmissionDeadline: values.bidSubmissionDeadline ? values.bidSubmissionDeadline.toISOString() : undefined
-      };
-
-      console.log("Payload yang dikirim ke Backend:", payload);
-
-      await apiClient.post('/marketing/tenders', payload);
-      hide();
-      message.success('Tender berhasil dibuat!');
-      setIsTenderModalVisible(false);
-      form.resetFields();
-      await queryClient.invalidateQueries({ queryKey: ['tenders'] });
-      fetchDashboardSummary(); // Refresh KPI cards
-    } catch (err: any) {
-      hide();
-      const errMsg = err.response?.data?.message || 'Error creating opportunity';
-      message.error(errMsg);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  ], [router]);
 
   const updateTenderStatus = async (id: number, status: string) => {
     try {
       const stage = status === 'WON' ? 'Won' : status === 'LOST' ? 'Lost' : status;
       await apiClient.patch(`/marketing/tenders/${id}/status`, { stage });
       message.success(`Tender stage updated`);
+
+      // Immediate UI update for current actor (optimistic cache update)
+      updateAllTenderCaches(queryClient, id, { stage });
+
+      if (refetchDashboardSummary) refetchDashboardSummary();
+
+      // Background synchronization with server. Not primary UI update mechanism.
       queryClient.invalidateQueries({ queryKey: ['tenders'] });
-      fetchDashboardSummary();
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Error updating tender');
-    }
-  };
-
-  const handleLegalReview = async (values: any) => {
-    try {
-      await apiClient.post('/legal/contracts/review', {
-        proposalId: selectedContract.proposal_id,
-        legalStatus: values.legalStatus,
-        legalNotes: values.legalNotes
-      });
-      message.success('Legal review submitted successfully');
-      setIsLegalModalVisible(false);
-      legalForm.resetFields();
-      fetchPendingContracts();
-    } catch (err: any) {
-      message.error(err.response?.data?.message || 'Error submitting review');
     }
   };
 
@@ -643,14 +538,23 @@ export const SalesPipelinePage = () => {
 
   const tenderColumns = [
     { 
-      title: 'Project', 
+      title: 'Code / Tender ID', 
+      key: 'code', 
+      width: 130,
+      render: (_: any, record: any) => (
+        <Text code style={{ fontWeight: 600, color: '#1e40af', backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 11, padding: '2px 8px' }}>
+          TND-{String(record.id).padStart(4, '0')}
+        </Text>
+      )
+    },
+    { 
+      title: 'Project Name', 
       key: 'project', 
       render: (_: any, record: any) => (
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '4px 0' }}>
-          <Avatar size={36} icon={<FolderOpenOutlined />} style={{ background: '#e0e7ff', color: '#4f46e5', flexShrink: 0 }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Avatar size={32} icon={<FolderOpenOutlined />} style={{ background: '#e0e7ff', color: '#4f46e5', flexShrink: 0 }} />
           <div>
-            <div style={{ fontWeight: 600, color: '#1e293b', fontSize: '14px' }}>{record.title}</div>
-            <div style={{ fontSize: '12px', color: '#64748b', marginTop: '2px' }}>ID: {record.id}</div>
+            <Text strong style={{ color: '#0f172a', fontSize: 13 }}>{record.title}</Text>
           </div>
         </div>
       )
@@ -661,80 +565,48 @@ export const SalesPipelinePage = () => {
       render: (_: any, record: any) => {
         const customerName = record.customer?.name || `Customer ID: ${record.customer_id}`;
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Avatar size={24} icon={<BankOutlined />} style={{ background: '#f1f5f9', color: '#64748b' }} />
-            <Text style={{ color: '#334155', fontWeight: 500 }}>{customerName}</Text>
-          </div>
+          <Text style={{ color: '#64748b', fontSize: 12 }}>{customerName}</Text>
         );
       }
     },
     { 
-      title: 'Value', 
-      key: 'value', 
+      title: 'Budget Awal', 
+      key: 'estimated_budget', 
       render: (_: any, record: any) => {
-        const val = Number(record.estimated_budget);
-        let formattedVal = '';
-        if (val >= 1000000000) {
-          formattedVal = `Rp ${(val / 1000000000).toFixed(1)} M`;
-        } else {
-          formattedVal = `Rp ${val.toLocaleString('id-ID')}`;
-        }
+        const val = Number(record.estimated_budget != null && !isNaN(Number(record.estimated_budget)) ? record.estimated_budget : 0);
         return (
-          <Text style={{ fontWeight: 700, color: '#10b981', fontSize: '14px' }}>{formattedVal}</Text>
+          <Text style={{ fontWeight: 600, color: '#475569', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
+            Rp {val.toLocaleString('id-ID')}
+          </Text>
         );
+      }
+    },
+    { 
+      title: 'Harga Negosiasi', 
+      key: 'negotiated_price', 
+      render: (_: any, record: any) => {
+        if (record.negotiated_price != null && !isNaN(Number(record.negotiated_price))) {
+          return (
+            <Text style={{ fontWeight: 700, color: '#10b981', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
+              Rp {Number(record.negotiated_price).toLocaleString('id-ID')}
+            </Text>
+          );
+        }
+        return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
       }
     },
     { 
       title: 'Tahap (Stage)', 
       dataIndex: 'stage', 
       key: 'stage', 
-      render: (stage: string, record: any) => {
-        let bgColor = '#e0e7ff';
-        let textColor = '#4338ca';
-        
-        switch (stage) {
-          case 'WON':
-            bgColor = '#dcfce7';
-            textColor = '#166534';
-            break;
-          case 'LOST':
-            bgColor = '#fee2e2';
-            textColor = '#991b1b';
-            break;
-          case 'NEGOTIATION':
-            bgColor = '#fef3c7';
-            textColor = '#92400e';
-            break;
-          case 'PROPOSAL':
-            bgColor = '#f3e8ff';
-            textColor = '#6b21a8';
-            break;
-          case 'QUALIFICATION':
-            bgColor = '#ccfbf1';
-            textColor = '#115e59';
-            break;
-          case 'LEAD':
-          default:
-            bgColor = '#e0f2fe';
-            textColor = '#075985';
-            break;
-        }
-
-        return (
-          <div style={{ 
-            background: bgColor, 
-            color: textColor, 
-            padding: '4px 12px', 
-            borderRadius: '9999px', 
-            display: 'inline-flex',
-            fontWeight: 600,
-            fontSize: '12px',
-            textTransform: 'uppercase',
-            letterSpacing: '0.5px'
-          }}>
-            {stage || 'LEAD'}
-          </div>
-        );
+      render: (stage: string) => {
+        const s = (stage || 'LEAD').toUpperCase();
+        if (s === 'WON') return <Tag color="success" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>WON</Tag>;
+        if (s === 'LOST') return <Tag color="error" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>LOST</Tag>;
+        if (s === 'NEGOTIATION') return <Tag color="warning" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>NEGOTIATION</Tag>;
+        if (s === 'PROPOSAL') return <Tag color="purple" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>PROPOSAL</Tag>;
+        if (s === 'QUALIFICATION') return <Tag color="processing" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>QUALIFICATION</Tag>;
+        return <Tag color="default" style={{ fontWeight: 500, borderRadius: 10, padding: '2px 8px' }}>{s}</Tag>;
       }
     },
     { 
@@ -745,8 +617,8 @@ export const SalesPipelinePage = () => {
         const initial = picName !== 'Unassigned' ? picName.charAt(0).toUpperCase() : '?';
         return (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Avatar size={28} style={{ background: '#3b82f6', fontSize: '13px', fontWeight: 600 }}>{initial}</Avatar>
-            <Text style={{ color: '#475569', fontWeight: 500 }}>{picName}</Text>
+            <Avatar size={26} style={{ background: '#3b82f6', fontSize: '12px', fontWeight: 600 }}>{initial}</Avatar>
+            <Text style={{ color: '#475569', fontSize: 12, fontWeight: 500 }}>{picName}</Text>
           </div>
         );
       }
@@ -756,31 +628,32 @@ export const SalesPipelinePage = () => {
       dataIndex: 'expected_closing_date', 
       key: 'closeDate', 
       render: (date: string) => {
-        if (!date) return <Text type="secondary">-</Text>;
+        if (!date) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
         const dateObj = new Date(date);
         const isOverdue = dateObj < new Date();
         const formattedDate = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
         
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: isOverdue ? '#ef4444' : '#64748b' }}>
-            <CalendarOutlined />
-            <Text style={{ color: isOverdue ? '#ef4444' : '#475569', fontWeight: isOverdue ? 600 : 400 }}>{formattedDate}</Text>
-          </div>
+          <Space size={4} style={{ color: isOverdue ? '#ef4444' : '#64748b' }}>
+            <CalendarOutlined style={{ fontSize: 12 }} />
+            <Text style={{ fontSize: 12, color: isOverdue ? '#ef4444' : '#475569', fontWeight: isOverdue ? 600 : 400 }}>{formattedDate}</Text>
+          </Space>
         );
       }
     },
     { 
-      title: '', 
+      title: 'Action', 
       key: 'action', 
-      align: 'right' as const,
+      width: 90,
+      align: 'center' as const,
       render: (_: any, record: any) => (
         <Tooltip title="Lihat Detail Proyek">
           <Button 
-            shape="circle" 
             type="text" 
-            icon={<RightCircleFilled style={{ color: '#94a3b8', fontSize: '24px' }} />} 
+            size="small"
+            icon={<EyeOutlined style={{ color: '#2563eb' }} />} 
             onClick={() => router.push(`/sales/tenders/${record.id}`)}
-            className="action-btn"
+            style={{ backgroundColor: '#eff6ff', borderRadius: 6 }}
           />
         </Tooltip>
       )
@@ -790,17 +663,34 @@ export const SalesPipelinePage = () => {
   const contractColumns = [
     { title: 'Project Name', dataIndex: 'title', key: 'title', render: (text: string, record: any) => <Text strong style={{ fontSize: 13, color: '#1f2329' }}>{text || record.project_name || record.name}</Text> },
     { title: 'Customer', key: 'customer', render: (text: any, record: any) => record.customer?.name || record.customerName || `ID: ${record.customer_id}` },
-    { title: 'Harga Negosiasi', key: 'price', render: (text: any, record: any) => <Text style={{ fontWeight: 700, color: '#10b981', fontSize: 13 }}>Rp {Number(record.negotiated_price || record.estimated_budget || 0).toLocaleString('id-ID')}</Text> },
+    { 
+      title: 'Harga Negosiasi', 
+      key: 'price', 
+      render: (text: any, record: any) => {
+        if (record.negotiated_price != null && !isNaN(Number(record.negotiated_price))) {
+          return (
+            <Text style={{ fontWeight: 700, color: '#10b981', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
+              Rp {Number(record.negotiated_price).toLocaleString('id-ID')}
+            </Text>
+          );
+        }
+        return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+      }
+    },
     { 
       title: 'Legal Status', 
       key: 'legal_status', 
       render: (_: any, record: any) => {
+        if (record.contract_status === 'PM_RETURNED' || record.contractStatus === 'PM_RETURNED') {
+          return <Tag color="warning" style={{ fontWeight: 700, borderRadius: 10, backgroundColor: '#fffbe6', color: '#d97706', borderColor: '#ffe58f' }}>DIKEMBALIKAN PM</Tag>;
+        }
         const val = record.legal_status || record.spk_verification_status || 'UNVERIFIED';
-        if (val === 'VERIFIED') return <Tag color="success" style={{ fontWeight: 700, borderRadius: 10 }}>VERIFIED ✅</Tag>;
-        if (val === 'PENDING_REVIEW' || val === 'MENUNGGU_REVIEW') return <Tag color="warning" style={{ fontWeight: 600, borderRadius: 10 }}>MENUNGGU REVIEW ⏳</Tag>;
-        if (val === 'REVISION_NEEDED') return <Tag color="error" style={{ fontWeight: 700, borderRadius: 10 }}>REVISI KONTRAK ❌</Tag>;
-        if (val === 'REJECTED') return <Tag color="error" style={{ fontWeight: 700, borderRadius: 10 }}>DITOLAK ❌</Tag>;
-        if (val === 'PROJECT_STARTED') return <Tag color="processing" style={{ fontWeight: 700, borderRadius: 10 }}>PROYEK AKTIF 🚀</Tag>;
+        if (val === 'VERIFIED') return <Tag color="success" style={{ fontWeight: 700, borderRadius: 10 }}>VERIFIED</Tag>;
+        if (val === 'PENDING_REVIEW' || val === 'MENUNGGU_REVIEW') return <Tag color="warning" style={{ fontWeight: 600, borderRadius: 10 }}>MENUNGGU REVIEW</Tag>;
+        if (val === 'REVISION_NEEDED') return <Tag color="error" style={{ fontWeight: 700, borderRadius: 10 }}>REVISI KONTRAK</Tag>;
+        if (val === 'REJECTED') return <Tag color="error" style={{ fontWeight: 700, borderRadius: 10 }}>SPK Ditolak</Tag>;
+        if (val === 'SPK_REQUIRED') return <Tag color="warning" style={{ fontWeight: 700, borderRadius: 10, backgroundColor: '#fff7ed', color: '#c2410c', borderColor: '#ffbb96' }}>Upload SPK Diperlukan</Tag>;
+        if (val === 'PROJECT_STARTED') return <Tag color="processing" style={{ fontWeight: 700, borderRadius: 10 }}>PROYEK AKTIF</Tag>;
         return <Tag color="default" style={{ fontWeight: 500, borderRadius: 10 }}>{val}</Tag>;
       }
     },
@@ -809,7 +699,7 @@ export const SalesPipelinePage = () => {
       key: 'reviewer',
       render: (_: any, record: any) => {
         const name = record.legal_reviewer_name || record.reviewerName;
-        return name ? <Text style={{ fontSize: 12, color: '#3b82f6' }}>👤 {name}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>Belum Di-assign</Text>;
+        return name ? <Text style={{ fontSize: 12, color: '#3b82f6' }}>{name}</Text> : <Text type="secondary" style={{ fontSize: 11 }}>Belum Di-assign</Text>;
       }
     },
     {
@@ -835,34 +725,29 @@ export const SalesPipelinePage = () => {
         const status = record.legal_status || record.spk_verification_status || 'UNVERIFIED';
         const isPmoRole = userRoles.includes('PMO') || userRoles.includes('PROJECT_MANAGER') || userRoles.includes('ADMIN') || userRoles.includes('SUPER_ADMIN');
         const isMarketingRole = userRoles.includes('MARKETING') || userRoles.includes('SALES');
-        const isLegalRole = userRoles.includes('LEGAL') || userRoles.includes('LEGAL_REVIEWER') || userRoles.includes('ADMIN') || userRoles.includes('SUPER_ADMIN');
 
-        if (status === 'UNVERIFIED' || status === 'DRAFT') {
+        if (record.contract_status === 'PM_RETURNED' || record.contractStatus === 'PM_RETURNED') {
           if (isMarketingRole) {
             return (
-              <Button
-                size="small"
-                type="primary"
-                style={{ backgroundColor: '#3b82f6', borderRadius: 6, fontSize: 11, fontWeight: 600 }}
-                onClick={async () => {
-                  try {
-                    await apiClient.patch(`/marketing/tenders/${record.id}/send-to-legal`, {});
-                    message.success('Tender dikirim ke Legal & SPK siap dibuat!');
-                    queryClient.invalidateQueries({ queryKey: ['tenders'] });
-                  } catch (err: any) {
-                    message.error(err.response?.data?.message || 'Gagal mengirim ke Legal');
-                  }
-                }}
+              <Button 
+                size="small" 
+                type="primary" 
+                style={{ backgroundColor: '#d97706', borderColor: '#d97706', borderRadius: 6, fontSize: 11, fontWeight: 600 }}
+                onClick={() => router.push(`/sales/tenders/${record.id}`)}
               >
-                Kirim ke Legal
+                Revisi Charter (PM)
               </Button>
             );
           }
-          return <Button size="small" disabled style={{ borderRadius: 6, fontSize: 11 }}>Belum Dikirim</Button>;
+          return <Tag color="warning" style={{ borderRadius: 6, fontSize: 11, fontWeight: 600 }}>Dikembalikan PM</Tag>;
+        }
+
+        if (status === 'UNVERIFIED' || status === 'DRAFT') {
+          return <Button size="small" disabled style={{ borderRadius: 6, fontSize: 11 }}>Menunggu Upload SPK</Button>;
         }
 
         if (status === 'MENUNGGU_REVIEW' || status === 'PENDING_REVIEW') {
-          if (isLegalRole) {
+          if (canReviewContract) {
             return (
               <Button
                 size="small"
@@ -897,7 +782,6 @@ export const SalesPipelinePage = () => {
                       try {
                         await apiClient.post('/legal/start-project', { tenderId: record.id });
                         message.success('Proyek operasional berhasil diinisiasi!');
-                        queryClient.invalidateQueries({ queryKey: ['tenders'] });
                       } catch (err: any) {
                         message.error(err.response?.data?.message || 'Gagal menginisiasi proyek');
                       }
@@ -909,12 +793,12 @@ export const SalesPipelinePage = () => {
               </Button>
             );
           }
-          return <Tag color="success" style={{ borderRadius: 6, fontSize: 11, fontWeight: 600 }}>Siap Dikelola PMO ✅</Tag>;
+          return <Tag color="success" style={{ borderRadius: 6, fontSize: 11, fontWeight: 600 }}>Siap Dikelola PMO</Tag>;
         }
 
         if (status === 'REVISION_NEEDED') {
           if (isMarketingRole) {
-            return <Button size="small" type="primary" danger style={{ borderRadius: 6, fontSize: 11, fontWeight: 600 }} onClick={() => router.push(`/marketing/tenders/${record.id}/edit-contract`)}>Revisi Kontrak</Button>;
+            return <Button size="small" type="primary" danger style={{ borderRadius: 6, fontSize: 11, fontWeight: 600 }} onClick={() => router.push(`/sales/tenders/${record.id}`)}>Revisi Kontrak</Button>;
           }
           return <Button size="small" disabled style={{ borderRadius: 6, fontSize: 11 }}>Menunggu Revisi</Button>;
         }
@@ -924,138 +808,99 @@ export const SalesPipelinePage = () => {
         }
 
         if (status === 'PROJECT_STARTED') {
-          return <Button size="small" disabled style={{ borderRadius: 6, fontSize: 11 }}>Proyek Berjalan 🚀</Button>;
+          return <Button size="small" disabled style={{ borderRadius: 6, fontSize: 11 }}>Proyek Berjalan</Button>;
         }
 
         return <Button size="small" disabled style={{ borderRadius: 6, fontSize: 11 }}>Status Unknown</Button>;
     }}
   ];
 
-  return (
-    <div style={{ padding: '24px', background: '#fff', borderRadius: '12px', minHeight: '80vh' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <Title level={3} style={{ margin: 0 }} className={styles.titleGradient}>
-          {userRoles.includes('MARKETING') ? 'Sales Command Center' : 'Sales & Legal Pipeline'}
-        </Title>
-        {activeTab === '1' && (
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
-            <Radio.Group value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value)} optionType="button" buttonStyle="solid">
-              <Radio.Button value="all">Semua Waktu</Radio.Button>
-              <Radio.Button value="month">Bulan Ini</Radio.Button>
-              <Radio.Button value="quarter">Kuartal Ini</Radio.Button>
-              <Radio.Button value="year">Tahun Ini</Radio.Button>
-            </Radio.Group>
-            <Button type="primary" onClick={() => {
-              form.resetFields();
-              setIsCustomSector(false);
-              setCurrentStep(0);
-              setIsTenderModalVisible(true);
-            }}>
-              + Input Tender
-            </Button>
-          </div>
-        )}
+  if (authLoading) {
+    return (
+      <div 
+        style={{ 
+          display: 'flex', 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          minHeight: '60vh',
+          background: '#ffffff',
+          borderRadius: '16px',
+          padding: '24px',
+          border: '1px solid #f1f5f9'
+        }}
+      >
+        <Spin size="large" tip="Memverifikasi hak akses..." />
       </div>
+    );
+  }
+
+  return (
+    <div style={{ 
+      background: '#ffffff', 
+      borderRadius: '16px', 
+      padding: '24px', 
+      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02)',
+      border: '1px solid #f1f5f9',
+      minHeight: '80vh' 
+    }}>
+      <Row justify="space-between" align="middle" style={{ marginBottom: 20 }}>
+        <Col>
+          <Space direction="vertical" size={2}>
+            <Space align="center" size={8}>
+              <RocketOutlined style={{ fontSize: 22, color: '#0f172a' }} />
+              <Title level={4} style={{ margin: 0, color: '#0f172a', fontWeight: 700 }}>
+                {canAccessLegalTracking ? 'Sales & Legal Pipeline' : 'Sales Pipeline'}
+              </Title>
+            </Space>
+            <Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>
+              {canAccessLegalTracking
+                ? 'Kelola direktori pipeline tender, status kualifikasi, analitik prospek, dan integrasi legal'
+                : 'Kelola direktori pipeline tender, status kualifikasi, dan analitik prospek'}
+            </Text>
+          </Space>
+        </Col>
+        <Col>
+          {activeTab === '1' && (
+            <Space size={12} wrap align="center">
+              <Radio.Group value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value)} optionType="button" buttonStyle="solid">
+                <Radio.Button value="all">Semua Waktu</Radio.Button>
+                <Radio.Button value="month">Bulan Ini</Radio.Button>
+                <Radio.Button value="quarter">Kuartal Ini</Radio.Button>
+                <Radio.Button value="year">Tahun Ini</Radio.Button>
+              </Radio.Group>
+              <Button 
+                type="primary" 
+                icon={<PlusOutlined />}
+                onClick={() => setIsTenderModalVisible(true)}
+                style={{
+                  backgroundColor: '#1677ff',
+                  borderColor: '#1677ff',
+                  borderRadius: 8,
+                  fontWeight: 600,
+                  boxShadow: '0 2px 6px rgba(22, 119, 255, 0.2)'
+                }}
+              >
+                Input Tender
+              </Button>
+            </Space>
+          )}
+        </Col>
+      </Row>
 
       {activeTab === '1' && (
         <div style={{ marginBottom: '24px' }}>
-          {loadingDashboard ? (
+          {isLoadingQuery ? (
             <Skeleton active paragraph={{ rows: 2 }} />
-          ) : (() => {
-            const kpis = computePremiumKpis();
-            return (
-            <Row gutter={[16, 16]} className={styles.kpiRibbon}>
-              <Col xs={12} sm={6}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text className={styles.kpiTitle}>Total Tenders</Text>
-                    {renderTrendBadge(kpis.count.growth)}
-                  </div>
-                  <div className={styles.kpiValue} style={{ color: '#1677ff' }}>
-                    <CountUp preserveValue end={kpis.count.value} separator="." />
-                  </div>
-              </Col>
-              
-              <Col xs={12} sm={6}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text className={styles.kpiTitle}>Revenue Secured</Text>
-                    {renderTrendBadge(kpis.won.growth)}
-                  </div>
-                  <div className={styles.kpiValue} style={{ color: '#52c41a' }}>
-                    Rp <CountUp preserveValue end={kpis.won.value} separator="." />
-                  </div>
-              </Col>
-
-              <Col xs={12} sm={6}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text className={styles.kpiTitle}>Active Pipeline</Text>
-                    {renderTrendBadge(kpis.active.growth)}
-                  </div>
-                  <div className={styles.kpiValue} style={{ color: '#faad14' }}>
-                    Rp <CountUp preserveValue end={kpis.active.value} separator="." />
-                  </div>
-              </Col>
-
-              <Col xs={12} sm={6}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Space size={4}>
-                      <Text className={styles.kpiTitle}>Win Rate</Text>
-                      <Tooltip title="Weighted Revenue Win Rate">
-                        <InfoCircleOutlined style={{ fontSize: 11, color: '#8f959e' }} />
-                      </Tooltip>
-                    </Space>
-                    {renderTrendBadge(kpis.winRate.growth, true)}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                    <div className={styles.kpiValue} style={{ color: '#eb2f96' }}>
-                      <CountUp preserveValue end={kpis.winRate.value} decimals={1} />%
-                    </div>
-                    <Text type="secondary" style={{ fontSize: 10 }}>
-                      (by count: {kpis.winRate.countValue}%)
-                    </Text>
-                  </div>
-              </Col>
-            </Row>
-            );
-          })()}
-
-          {!loadingDashboard && computeActionItems().length > 0 && (
-            <Card
-              title={
-                <Space size={8}>
-                  <ClockCircleOutlined style={{ color: '#faad14', fontSize: 16 }} />
-                  <Text strong style={{ fontSize: 13, color: '#1f2329' }}>
-                    Tender yang Perlu Perhatian (Action Items)
-                  </Text>
-                  <Tooltip title="Diprioritaskan berdasarkan tender yang paling lama menunggu (FIFO Overdue)">
-                    <InfoCircleOutlined style={{ color: '#8f959e', fontSize: 12, cursor: 'pointer' }} />
-                  </Tooltip>
-                </Space>
-              }
-              style={{
-                borderRadius: 10,
-                border: '1px solid #ffe7ba',
-                boxShadow: '0 2px 8px rgba(250, 173, 20, 0.08)',
-                marginTop: 24,
-                marginBottom: 24,
-                overflow: 'hidden',
-              }}
-              headStyle={{
-                backgroundColor: '#fffbe6',
-                borderBottom: '1px solid #ffe7ba',
-                padding: '10px 16px',
-              }}
-              bodyStyle={{ padding: 0 }}
-            >
-              <Table 
-                dataSource={computeActionItems()} 
-                columns={actionItemsColumns} 
-                rowKey="id" 
-                pagination={false} 
-                size="small"
-              />
-            </Card>
+          ) : (
+            <SalesKpiSummaryCards kpis={computePremiumKpis()} renderTrendBadge={renderTrendBadge} />
           )}
 
+          {!isLoadingQuery && (
+            <MarketingActionItemsCard
+              actionItemsData={actionItemsData}
+              actionItemsColumns={actionItemsColumns}
+            />
+          )}
         </div>
       )}
 
@@ -1098,10 +943,29 @@ export const SalesPipelinePage = () => {
                     dataSource={activeTendersData} 
                     columns={tenderColumns} 
                     rowKey="id" 
-                    pagination={{ pageSize: 10, position: ['bottomRight'] }} 
+                    pagination={{ 
+                      pageSize: 10, 
+                      position: ['bottomRight'],
+                      showSizeChanger: true,
+                      showTotal: (total, range) => `Menampilkan ${range[0]}-${range[1]} dari ${total} tender`
+                    }} 
                     loading={isLoadingQuery} 
                     rowClassName={() => 'modern-table-row'}
                     style={{ overflowX: 'auto' }}
+                    locale={{
+                      emptyText: (
+                        <Empty 
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                          description={
+                            <Space direction="vertical" size={4}>
+                              <Text strong style={{ color: '#475569' }}>Belum Ada Data Tender</Text>
+                              <Text type="secondary" style={{ fontSize: 12 }}>Gunakan tombol "+ Input Tender" untuk menambahkan tender baru.</Text>
+                            </Space>
+                          }
+                          style={{ margin: '32px 0' }}
+                        />
+                      )
+                    }}
                   />
                   <style>{`
                     .modern-table-row:hover > td {
@@ -1110,25 +974,25 @@ export const SalesPipelinePage = () => {
                     }
                     .modern-table-row > td {
                       border-bottom: 1px solid #f1f5f9;
-                      padding: 16px 16px !important;
+                      padding: 14px 16px !important;
                     }
                     .ant-table-thead > tr > th {
-                      background-color: #ffffff !important;
-                      border-bottom: 2px solid #f1f5f9 !important;
-                      color: #64748b !important;
+                      background-color: #102A43 !important;
+                      color: #ffffff !important;
                       font-weight: 600 !important;
                       text-transform: uppercase;
-                      font-size: 12px;
+                      font-size: 11px;
                       letter-spacing: 0.5px;
+                      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+                      padding: 14px 16px !important;
                     }
-                    .action-btn {
-                      opacity: 0.4;
-                      transition: all 0.3s ease;
+                    .ant-table-thead > tr > th::before {
+                      display: none !important;
                     }
-                    .modern-table-row:hover .action-btn {
-                      opacity: 1;
-                      color: #3b82f6 !important;
-                      transform: translateX(4px);
+                    .ant-table {
+                      border-radius: 12px;
+                      overflow: hidden;
+                      border: 1px solid #e2e8f0;
                     }
                   `}</style>
                 </div>
@@ -1136,7 +1000,7 @@ export const SalesPipelinePage = () => {
             </div>
           )
         },
-        {
+        ...(canAccessLegalTracking ? [{
           key: '2',
           label: <span><AuditOutlined /> Legal Tracking</span>,
           children: (
@@ -1150,396 +1014,55 @@ export const SalesPipelinePage = () => {
               />
             </div>
           )
-        },
+        }] : []),
         {
           key: '4',
           label: <span><PieChartOutlined /> Analytics</span>,
-          children: (
-            <div style={{ marginTop: 16 }}>
-              {/* Filter Area */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-                <Radio.Group value={analyticsPeriodFilter} onChange={e => setAnalyticsPeriodFilter(e.target.value)} buttonStyle="solid">
-                  <Radio.Button value="LAST_MONTH">Bulan Lalu</Radio.Button>
-                  <Radio.Button value="THIS_MONTH">Bulan Ini</Radio.Button>
-                  <Radio.Button value="THIS_QUARTER">Kuartal Ini</Radio.Button>
-                  <Radio.Button value="YEAR_TO_DATE">Tahun Ini</Radio.Button>
-                </Radio.Group>
-              </div>
-
-              {loadingAnalytics ? (
-                <div style={{ padding: 24, background: '#fff', borderRadius: 8 }}>
-                  <Skeleton active paragraph={{ rows: 2 }} />
-                  <Row gutter={[16, 16]} style={{ marginTop: 24 }}>
-                    <Col span={16}><Skeleton.Button active style={{ width: '100%', height: 300 }} /></Col>
-                    <Col span={8}><Skeleton.Button active style={{ width: '100%', height: 300 }} /></Col>
-                  </Row>
-                </div>
-              ) : analyticsData ? (
-                <>
-                  {/* KPI Cards */}
-                  <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-                    <Col span={8}>
-                      <Card style={{ borderRadius: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-                        <Text type="secondary">Total Pipeline</Text>
-                        <Title level={3} style={{ marginTop: 4, marginBottom: 4 }}>
-                          Rp {(analyticsData.kpi?.totalPipeline || 0).toLocaleString('id-ID')}
-                        </Title>
-                        <Text type={analyticsData.kpi?.momGrowth >= 0 ? "success" : "danger"}>
-                          {analyticsData.kpi?.momGrowth >= 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />} 
-                          {Math.abs(analyticsData.kpi?.momGrowth * 100).toFixed(1)}% dari bulan lalu
-                        </Text>
-                      </Card>
-                    </Col>
-                    <Col span={8}>
-                      <Card style={{ borderRadius: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-                        <Text type="secondary">Win Rate</Text>
-                        <Title level={3} style={{ marginTop: 4, marginBottom: 4 }}>
-                          {((analyticsData.kpi?.winRate || 0) * 100).toFixed(1)}%
-                        </Title>
-                        <Text type="secondary">
-                          Dari total {analyticsData.kpi?.totalDeals || 0} Deals
-                        </Text>
-                      </Card>
-                    </Col>
-                    <Col span={8}>
-                      <Card style={{ borderRadius: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-                        <Text type="secondary">Avg Deal Size</Text>
-                        <Title level={3} style={{ marginTop: 4, marginBottom: 4 }}>
-                          Rp {(analyticsData.kpi?.avgDealSize || 0).toLocaleString('id-ID')}
-                        </Title>
-                        <Text type="secondary">Rata-rata per tender</Text>
-                      </Card>
-                    </Col>
-                  </Row>
-
-                  {/* Charts Grid */}
-                  <Row gutter={[16, 16]}>
-                    <Col xs={24} lg={16}>
-                      <Card title="Tren Pipeline 12 Bulan Terakhir" bordered={false} style={{ borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-                        <ChartErrorBoundary>
-                          {analyticsData.trendLine?.length > 0 ? (
-                            <Line 
-                              data={analyticsData.trendLine || []} 
-                              xField="month" 
-                              yField="value"
-                              smooth={true}
-                              style={{ stroke: '#1677ff', lineWidth: 2 }}
-                              axis={{
-                                y: {
-                                  labelFormatter: (v: any) => `Rp ${(Number(v) / 1000000000).toFixed(1)}M`
-                                }
-                              }}
-                              tooltip={{
-                                items: [
-                                  {
-                                    name: 'Total Pipeline',
-                                    field: 'value',
-                                    valueFormatter: (v: any) => `Rp ${Number(v).toLocaleString('id-ID')}`
-                                  }
-                                ]
-                              }}
-                            />
-                          ) : <EmptyChart />}
-                        </ChartErrorBoundary>
-                      </Card>
-                    </Col>
-                    <Col xs={24} lg={8}>
-                      <Card title="Distribusi Pipeline per Sektor" bordered={false} style={{ borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', marginBottom: 16 }}>
-                        <ChartErrorBoundary>
-                          {analyticsData.sectorDistribution?.filter((item: any) => Number(item.value) > 0)?.length > 0 ? (
-                            <Pie 
-                              data={analyticsData.sectorDistribution.filter((item: any) => Number(item.value) > 0)} 
-                              angleField="value" 
-                              colorField="sector" 
-                              radius={0.8}
-                              innerRadius={0.6}
-                              label={{
-                                text: (datum: any) => datum.value > 0 ? `${datum.sector}\n${datum.percentage}%` : '',
-                                style: { fontSize: 11, textAlign: 'center' }
-                              }}
-                              tooltip={{
-                                items: [
-                                  {
-                                    name: 'Nilai',
-                                    field: 'value',
-                                    valueFormatter: (v: any) => `Rp ${Number(v).toLocaleString('id-ID')}`
-                                  }
-                                ]
-                              }}
-                              legend={{ color: { position: 'bottom', layout: { justifyContent: 'center' } } }}
-                            />
-                          ) : <EmptyChart />}
-                        </ChartErrorBoundary>
-                      </Card>
-                    </Col>
-                    <Col xs={24} lg={12}>
-                      <Card title="Sales Funnel Conversion" bordered={false} style={{ borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-                        <ChartErrorBoundary>
-                          {analyticsData.funnel?.length > 0 ? (
-                            (() => {
-                              const stageLabelMap: Record<string, string> = {
-                                LEAD: 'Prospek', QUALIFICATION: 'Kualifikasi',
-                                PROPOSAL: 'Proposal', NEGOTIATION: 'Negosiasi', WON: 'Menang'
-                              };
-                              const funnelData = analyticsData.funnel.map((item: any) => ({
-                                ...item,
-                                stage: stageLabelMap[item.stage] || item.stage
-                              }));
-                              return (
-                                <Funnel
-                                  data={funnelData}
-                                  xField="stage"
-                                  yField="count"
-                                  dynamicHeight={true}
-                                />
-                              );
-                            })()
-                          ) : <EmptyChart />}
-                        </ChartErrorBoundary>
-                      </Card>
-                    </Col>
-                    <Col xs={24} lg={12}>
-                      <Card title="AI Executive Summary" bordered={false} style={{ borderRadius: '10px', boxShadow: '0 2px 8px rgba(0,0,0,0.05)', background: '#f8faff', height: '100%' }}>
-                        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                          <RocketOutlined style={{ fontSize: 24, color: '#1677ff' }} />
-                          <div>
-                            <Paragraph style={{ fontWeight: 500, fontSize: 15, marginBottom: 8 }}>
-                              {analyticsData.insights?.topInsight || "Memuat insight..."}
-                            </Paragraph>
-                            <Paragraph type="warning" style={{ margin: 0 }}>
-                              <ExclamationCircleOutlined /> {analyticsData.insights?.warningInsight || "-"}
-                            </Paragraph>
-                          </div>
-                        </div>
-                      </Card>
-                    </Col>
-                  </Row>
-                </>
-              ) : (
-                <EmptyChart />
-              )}
-            </div>
-          )
+          children: activeTab === '4' ? (
+            <PipelineAnalyticsView
+              analyticsPeriodFilter={analyticsPeriodFilter}
+              setAnalyticsPeriodFilter={setAnalyticsPeriodFilter}
+              loadingAnalytics={loadingAnalytics}
+              analyticsData={analyticsData}
+              LineChart={Line}
+              PieChart={Pie}
+              FunnelChart={Funnel}
+              ChartErrorBoundary={ChartErrorBoundary}
+              EmptyChart={EmptyChart}
+            />
+          ) : null
         }
       ]} />
 
       {/* CREATE TENDER MODAL */}
-      <Modal 
-        title="Create Marketing Opportunity" 
-        open={isTenderModalVisible} 
-        onCancel={() => {
-          setIsTenderModalVisible(false);
-          setCurrentStep(0);
-        }} 
-        width={800}
-        footer={[
-          <Button key="back" onClick={() => setIsTenderModalVisible(false)}>
-            Cancel
-          </Button>,
-          currentStep > 0 && (
-            <Button key="prev" onClick={() => setCurrentStep(currentStep - 1)}>
-              Previous
-            </Button>
-          ),
-          currentStep < 1 && (
-            <Button key="next" type="primary" onClick={handleNext}>
-              Next
-            </Button>
-          ),
-          currentStep === 1 && (
-            <Button key="submit" type="primary" onClick={() => form.submit()} loading={isSubmitting} disabled={isSubmitting}>
-              Create Opportunity
-            </Button>
-          ),
-        ].filter(Boolean)}
-      >
-        <Steps current={currentStep} style={{ marginBottom: 24 }}>
-          <Steps.Step title="Project Basic Info" />
-          <Steps.Step title="Technical Details" />
-        </Steps>
-
-        <Form form={form} layout="vertical" onFinish={handleCreateTender}>
-          <div style={{ display: currentStep === 0 ? 'block' : 'none' }}>
-            <Row gutter={16}>
-              <Col span={24}>
-                <Form.Item name="projectName" label="Project Name" rules={[{ required: true, message: 'Please enter project name' }]}>
-                  <Input placeholder="e.g. IT Infrastructure Project 2026" />
-                </Form.Item>
-              </Col>
-            </Row>
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item name="estimatedBudget" label="Estimated Budget (Rp)" rules={[{ required: true }]}>
-                  <InputNumber 
-                    style={{ width: '100%' }} 
-                    addonBefore="Rp"
-                    formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}
-                    parser={value => value!.replace(/\./g, '') as any}
-                    onKeyPress={(event) => {
-                      if (!/[0-9]/.test(event.key)) {
-                        event.preventDefault();
-                      }
-                    }}
-                    placeholder="150.000.000"
-                  />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="customerId" label="Customer" rules={[{ required: true }]}>
-                  <Select placeholder="Select Customer" showSearch optionFilterProp="children" onChange={handleCustomerChange}>
-                    {customers.map((c: any) => <Option key={c.id} value={c.id}>{c.name}</Option>)}
-                  </Select>
-                </Form.Item>
-              </Col>
-            </Row>
-
-            <Row gutter={16}>
-              <Col span={24}>
-                <Form.Item name="marketingPicId" label="Marketing PIC">
-                  <Select placeholder="Select PIC (Optional, defaults to you)" showSearch optionFilterProp="children" allowClear>
-                    {users.map((u: any) => <Option key={u.id} value={u.id}>{u.full_name}</Option>)}
-                  </Select>
-                </Form.Item>
-              </Col>
-            </Row>
-            
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item name="expectedClosingDate" label="Expected Closing Date" rules={[{ required: true, message: 'Harap isi tanggal' }]}>
-                  <DatePicker style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="bidSubmissionDeadline" label="Bid Submission Deadline" rules={[{ required: true, message: 'Harap isi deadline' }]}>
-                  <DatePicker style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-            </Row>
-          </div>
-
-          <div style={{ display: currentStep === 1 ? 'block' : 'none' }}>
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item name="priority" label="Priority" initialValue="MEDIUM">
-                  <Select>
-                    <Option value="LOW">Low</Option>
-                    <Option value="MEDIUM">Medium</Option>
-                    <Option value="HIGH">High</Option>
-                    <Option value="CRITICAL">Critical</Option>
-                  </Select>
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="procurementType" label="Procurement Type" initialValue="TENDER">
-                  <Select>
-                    <Option value="TENDER">Tender</Option>
-                    <Option value="DIRECT_APPOINTMENT">Direct Appointment</Option>
-                  </Select>
-                </Form.Item>
-              </Col>
-            </Row>
-            
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item name="picCustomerName" label="PIC Customer Name">
-                  <Input placeholder="e.g. Budi Santoso" />
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item name="picCustomerPhone" label="PIC Customer Phone">
-                  <Input placeholder="e.g. 08123456789" />
-                </Form.Item>
-              </Col>
-            </Row>
-
-            <Row gutter={16}>
-              <Col span={12}>
-                <Form.Item label="Business Sector" style={{ marginBottom: 0 }}>
-                  <div style={{ display: 'flex', width: '100%' }}>
-                    <Form.Item name="businessSectorSelect" style={{ width: isCustomSector ? '40%' : '100%', margin: 0 }}>
-                      <Select 
-                        showSearch 
-                        placeholder="Select Sector" 
-                        dropdownMatchSelectWidth={false}
-                        popupMatchSelectWidth={false}
-                        onChange={(val) => setIsCustomSector(val === 'Lainnya')}
-                      >
-                        {BUSINESS_SECTORS.map(sector => (
-                          <Option key={sector} value={sector}>{sector}</Option>
-                        ))}
-                        <Option value="Lainnya">Lainnya</Option>
-                      </Select>
-                    </Form.Item>
-                    {isCustomSector && (
-                      <Form.Item name="businessSectorCustom" style={{ width: '60%', margin: 0, paddingLeft: '8px' }} rules={[{ required: true, message: 'Harap diisi' }]}>
-                        <Input placeholder="Ketik sektor lain" />
-                      </Form.Item>
-                    )}
-                  </div>
-                </Form.Item>
-              </Col>
-              <Col span={12}>
-                <Form.Item label="Source (Asal Prospek)" style={{ marginBottom: 0 }}>
-                  <div style={{ display: 'flex', width: '100%' }}>
-                    <Form.Item name="sourceSelect" initialValue="LPSE" style={{ width: isCustomSource ? '40%' : '100%', margin: 0 }}>
-                      <Select onChange={(val) => setIsCustomSource(val === 'Lainnya')}>
-                        <Option value="LPSE">LPSE / e-Procurement</Option>
-                        <Option value="Referensi Internal">Referensi Internal</Option>
-                        <Option value="Referensi Eksternal">Referensi Eksternal</Option>
-                        <Option value="Direct Call / Email">Direct Call / Email</Option>
-                        <Option value="Website / Social Media">Website / Social Media</Option>
-                        <Option value="Lainnya">Lainnya</Option>
-                      </Select>
-                    </Form.Item>
-                    {isCustomSource && (
-                      <Form.Item name="sourceCustom" style={{ width: '60%', margin: 0, paddingLeft: '8px' }} rules={[{ required: true, message: 'Harap diisi' }]}>
-                        <Input placeholder="Ketik sumber lain" />
-                      </Form.Item>
-                    )}
-                  </div>
-                </Form.Item>
-              </Col>
-            </Row>
-
-            <Row gutter={16}>
-              <Col span={24}>
-                <Form.Item name="projectLocation" label="Project Location">
-                  <Input placeholder="e.g. Jakarta Selatan" />
-                </Form.Item>
-              </Col>
-            </Row>
-
-            <Row gutter={16}>
-              <Col span={24}>
-                <Form.Item name="notes" label="Notes">
-                  <TextArea rows={3} placeholder="Additional details about this opportunity..." />
-                </Form.Item>
-              </Col>
-            </Row>
-          </div>
-        </Form>
-      </Modal>
+      <CreateTenderModal
+        open={isTenderModalVisible}
+        onClose={() => setIsTenderModalVisible(false)}
+        onSuccess={(resData) => {
+          if (resData) {
+            appendTenderToCache(queryClient, resData, { customers, users, currentUser: user });
+          }
+          if (refetchDashboardSummary) refetchDashboardSummary();
+          queryClient.invalidateQueries({ queryKey: ['tenders'] });
+        }}
+        customers={customers}
+        users={users}
+        currentUser={user}
+      />
 
       {/* LEGAL REVIEW MODAL */}
-      <Modal title="Legal Contract Review" open={isLegalModalVisible} onCancel={() => setIsLegalModalVisible(false)} onOk={() => legalForm.submit()}>
-        <div style={{ marginBottom: '16px', padding: '12px', background: '#f5f5f5', borderRadius: '8px' }}>
-          <p><strong>Contract No:</strong> {selectedContract?.contract_number}</p>
-          <p><strong>Customer:</strong> {selectedContract?.customer?.name}</p>
-          <p><strong>Proposal Amount:</strong> Rp {selectedContract?.proposal?.proposed_amount || 0}</p>
-        </div>
-        <Form form={legalForm} layout="vertical" onFinish={handleLegalReview}>
-          <Form.Item name="legalStatus" label="Legal Decision" rules={[{ required: true }]}>
-            <Select>
-              <Option value="APPROVED">APPROVE Contract</Option>
-              <Option value="REJECTED">REJECT Contract</Option>
-              <Option value="ON_REVIEW">KEEP on Review</Option>
-            </Select>
-          </Form.Item>
-          <Form.Item name="legalNotes" label="Legal Notes (Optional)">
-            <TextArea rows={4} placeholder="Type any feedback or clauses to revise..." />
-          </Form.Item>
-        </Form>
-      </Modal>
+      {canReviewContract && (
+        <LegalReviewModal
+          open={isLegalModalVisible}
+          contract={selectedContract}
+          onClose={() => setIsLegalModalVisible(false)}
+          onSuccess={() => {
+            if (canAccessLegalTracking && refetchPendingContracts) {
+              refetchPendingContracts();
+            }
+          }}
+        />
+      )}
 
     </div>
   );

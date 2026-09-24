@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Vendor } from './vendor.entity';
 
 @Entity('vendor_comparisons')
 export class VendorComparison {
@@ -28,4 +29,8 @@ export class VendorComparison {
 
   @DeleteDateColumn({ name: 'deleted_at' })
   deletedAt: Date;
+
+  @ManyToOne(() => Vendor, { onDelete: 'RESTRICT' })
+  @JoinColumn({ name: 'vendor_id' })
+  vendor: Vendor;
 }

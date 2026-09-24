@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Table, Button, Modal, Form, Input, Select, message, Space, Popconfirm, Tag, Typography } from 'antd';
-import { UserOutlined, MailOutlined, LockOutlined, EditOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import React, { useState, useMemo, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Table, Button, Tag, Space, Modal, Form, Input, Select, message, Popconfirm, Typography } from 'antd';
+import { EditOutlined, DeleteOutlined, UserOutlined, MailOutlined, LockOutlined, PlusOutlined } from '@ant-design/icons';
+import { apiClient } from '@/lib/axios';
 
 const { Title } = Typography;
+const { Option } = Select;
 
 interface Role {
   id: number;
@@ -20,62 +22,81 @@ interface User {
 }
 
 export const AdminUserPage: React.FC = () => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  const [isEditRoleModalVisible, setIsEditRoleModalVisible] = useState(false);
+  const queryClient = useQueryClient();
+  const [isModalVisible, setIsModalVisible] = useState<boolean>(false);
+  const [isEditRoleModalVisible, setIsEditRoleModalVisible] = useState<boolean>(false);
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null);
+
   const [form] = Form.useForm();
   const [roleForm] = Form.useForm();
 
-  // Assuming roles are fetched from another endpoint or hardcoded for now
-  const availableRoles = [
-    { id: 1, name: 'SUPER_ADMIN' },
-    { id: 2, name: 'PROJECT_MANAGER' },
-    { id: 3, name: 'FINANCE' },
-    { id: 4, name: 'DIRECTOR' },
-    { id: 5, name: 'MANAGER' },
-    { id: 6, name: 'GENERAL_MANAGER' },
-    { id: 7, name: 'MARKETING' },
-    { id: 8, name: 'LEGAL' },
-    { id: 9, name: 'PURCHASING' },
-  ];
-
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('access_token');
-      const res = await axios.get('http://localhost:4000/api/v1/admin/users', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      // Handle global interceptor format { data: [...] } or direct array
-      const data = res.data?.data || res.data;
-      setUsers(Array.isArray(data) ? data : []);
-    } catch (error: any) {
-      if (error.response?.status === 403) {
-        message.error('Anda tidak memiliki akses (Bukan SUPER_ADMIN)');
-      } else {
-        message.error('Gagal mengambil data user');
+  const { data: rolesData, isLoading: rolesLoading } = useQuery<Role[]>({
+    queryKey: ['admin-roles'],
+    queryFn: async () => {
+      try {
+        const res = await apiClient.get('/admin/roles');
+        const body = res.data;
+        if (Array.isArray(body)) return body;
+        if (Array.isArray(body?.data)) return body.data;
+        return [];
+      } catch (err) {
+        console.error('Gagal mengambil master roles dari backend:', err);
+        message.error('Gagal memuat master role dari server');
+        return [];
       }
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    staleTime: 10 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
+  const availableRoles = useMemo(() => rolesData || [], [rolesData]);
+
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
+
+  const { data: queryData, isLoading: loading } = useQuery<{ users: User[]; total: number }>({
+    queryKey: ['admin-users', pagination.current, pagination.pageSize],
+    queryFn: async () => {
+      try {
+        const res = await apiClient.get('/admin/users', {
+          params: { page: pagination.current, limit: pagination.pageSize },
+        });
+        const body = res.data;
+        let userList: User[] = [];
+        let totalCount = 0;
+
+        if (Array.isArray(body)) {
+          userList = body;
+          totalCount = body.length;
+        } else if (Array.isArray(body?.data)) {
+          userList = body.data;
+          totalCount = body.total ?? userList.length;
+        } else if (body?.data && Array.isArray(body.data.data)) {
+          userList = body.data.data;
+          totalCount = body.data.total ?? userList.length;
+        }
+
+        return { users: userList, total: totalCount };
+      } catch (error: any) {
+        if (error.response?.status === 403) {
+          message.error('Anda tidak memiliki akses (Bukan SUPER_ADMIN)');
+        } else {
+          message.error('Gagal mengambil data user');
+        }
+        throw error;
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const users = queryData?.users || [];
+  const totalUsers = queryData?.total || 0;
 
   const handleCreateUser = async (values: any) => {
     try {
-      const token = localStorage.getItem('access_token');
-      await axios.post('http://localhost:4000/api/v1/admin/users', values, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.post('/admin/users', values);
       message.success('User berhasil dibuat');
       setIsModalVisible(false);
       form.resetFields();
-      fetchUsers();
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
     } catch (error: any) {
       message.error(error.response?.data?.message || 'Gagal membuat user');
     }
@@ -84,33 +105,27 @@ export const AdminUserPage: React.FC = () => {
   const handleUpdateRole = async (values: any) => {
     try {
       if (!selectedUserId) return;
-      const token = localStorage.getItem('access_token');
-      await axios.patch(`http://localhost:4000/api/v1/admin/users/${selectedUserId}/roles`, values, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.patch(`/admin/users/${selectedUserId}/roles`, values);
       message.success('Role berhasil diperbarui');
       setIsEditRoleModalVisible(false);
       setSelectedUserId(null);
-      fetchUsers();
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
     } catch (error: any) {
       message.error('Gagal memperbarui role');
     }
   };
 
-  const handleDeleteUser = async (id: number) => {
+  const handleDeleteUser = useCallback(async (id: number) => {
     try {
-      const token = localStorage.getItem('access_token');
-      await axios.delete(`http://localhost:4000/api/v1/admin/users/${id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
+      await apiClient.delete(`/admin/users/${id}`);
       message.success('User berhasil dihapus (Soft Delete)');
-      fetchUsers();
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
     } catch (error: any) {
       message.error('Gagal menghapus user');
     }
-  };
+  }, [queryClient]);
 
-  const columns = [
+  const columns = useMemo(() => [
     {
       title: 'Nama Lengkap',
       dataIndex: 'fullName',
@@ -170,7 +185,7 @@ export const AdminUserPage: React.FC = () => {
         </Space>
       ),
     },
-  ];
+  ], [handleDeleteUser, roleForm]);
 
   return (
     <div style={{ padding: 24, background: '#fff', borderRadius: 8, minHeight: 600 }}>
@@ -190,85 +205,108 @@ export const AdminUserPage: React.FC = () => {
         dataSource={users} 
         rowKey="id" 
         loading={loading}
-        pagination={{ pageSize: 10 }}
+        pagination={{
+          current: pagination.current,
+          pageSize: pagination.pageSize,
+          total: totalUsers,
+          showSizeChanger: true,
+          onChange: (page, pageSize) => {
+            setPagination({ current: page, pageSize: pageSize || 10 });
+          },
+        }}
+        scroll={{ x: 800 }}
       />
 
-      {/* Modal Tambah User */}
-      <Modal
-        title="Buat User Baru"
-        open={isModalVisible}
-        onCancel={() => {
-          setIsModalVisible(false);
-          form.resetFields();
-        }}
-        onOk={() => form.submit()}
-      >
-        <Form form={form} layout="vertical" onFinish={handleCreateUser}>
-          <Form.Item 
-            name="fullName" 
-            label="Nama Lengkap" 
-            rules={[{ required: true, message: 'Masukkan nama lengkap' }]}
-          >
-            <Input prefix={<UserOutlined />} placeholder="John Doe" />
-          </Form.Item>
-          
-          <Form.Item 
-            name="email" 
-            label="Email" 
-            rules={[
-              { required: true, message: 'Masukkan email' },
-              { type: 'email', message: 'Email tidak valid' }
-            ]}
-          >
-            <Input prefix={<MailOutlined />} placeholder="john@epms.com" />
-          </Form.Item>
+      {/* Modal Tambah User (Lazy Mount) */}
+      {isModalVisible && (
+        <Modal
+          title="Buat User Baru"
+          open={isModalVisible}
+          destroyOnClose
+          onCancel={() => {
+            setIsModalVisible(false);
+            form.resetFields();
+          }}
+          onOk={() => form.submit()}
+        >
+          <Form form={form} layout="vertical" onFinish={handleCreateUser}>
+            <Form.Item 
+              name="fullName" 
+              label="Nama Lengkap" 
+              rules={[{ required: true, message: 'Masukkan nama lengkap' }]}
+            >
+              <Input prefix={<UserOutlined />} placeholder="John Doe" />
+            </Form.Item>
+            
+            <Form.Item 
+              name="email" 
+              label="Email" 
+              rules={[
+                { required: true, message: 'Masukkan email' },
+                { type: 'email', message: 'Email tidak valid' }
+              ]}
+            >
+              <Input prefix={<MailOutlined />} placeholder="john@epms.com" />
+            </Form.Item>
 
-          <Form.Item 
-            name="password" 
-            label="Password" 
-            rules={[{ required: true, message: 'Masukkan password (min 6 karakter)', min: 6 }]}
-          >
-            <Input.Password prefix={<LockOutlined />} placeholder="Password123" />
-          </Form.Item>
+            <Form.Item 
+              name="password" 
+              label="Password" 
+              rules={[{ required: true, message: 'Masukkan password (min 6 karakter)', min: 6 }]}
+            >
+              <Input.Password prefix={<LockOutlined />} placeholder="Password123" />
+            </Form.Item>
 
-          <Form.Item 
-            name="roleId" 
-            label="Role" 
-            rules={[{ required: true, message: 'Pilih role' }]}
-          >
-            <Select placeholder="Pilih Role">
-              {availableRoles.map(r => (
-                <Select.Option key={r.id} value={r.id}>{r.name}</Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-        </Form>
-      </Modal>
+            <Form.Item 
+              name="roleId" 
+              label="Role" 
+              rules={[{ required: true, message: 'Pilih role' }]}
+            >
+              <Select 
+                placeholder={rolesLoading ? "Memuat master role..." : "Pilih Role"}
+                loading={rolesLoading}
+                disabled={rolesLoading || availableRoles.length === 0}
+              >
+                {availableRoles.map(r => (
+                  <Select.Option key={r.id} value={r.id}>{r.name}</Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Form>
+        </Modal>
+      )}
 
-      {/* Modal Edit Role */}
-      <Modal
-        title="Ubah Role User"
-        open={isEditRoleModalVisible}
-        onCancel={() => {
-          setIsEditRoleModalVisible(false);
-          setSelectedUserId(null);
-        }}
-        onOk={() => roleForm.submit()}
-      >
-        <Form form={roleForm} layout="vertical" onFinish={handleUpdateRole}>
-          <Form.Item 
-            name="roleId" 
-            label="Pilih Role Baru" 
-            rules={[{ required: true, message: 'Pilih role' }]}
-          >
-            <Select placeholder="Pilih Role">
-              {availableRoles.map(r => (
-                <Select.Option key={r.id} value={r.id}>{r.name}</Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-        </Form>
-      </Modal>
+      {/* Modal Edit Role (Lazy Mount) */}
+      {isEditRoleModalVisible && (
+        <Modal
+          title="Ubah Role User"
+          open={isEditRoleModalVisible}
+          destroyOnClose
+          onCancel={() => {
+            setIsEditRoleModalVisible(false);
+            setSelectedUserId(null);
+          }}
+          onOk={() => roleForm.submit()}
+        >
+          <Form form={roleForm} layout="vertical" onFinish={handleUpdateRole}>
+            <Form.Item 
+              name="roleId" 
+              label="Pilih Role Baru" 
+              rules={[{ required: true, message: 'Pilih role' }]}
+            >
+              <Select 
+                placeholder={rolesLoading ? "Memuat master role..." : "Pilih Role"}
+                loading={rolesLoading}
+                disabled={rolesLoading || availableRoles.length === 0}
+              >
+                {availableRoles.map(r => (
+                  <Select.Option key={r.id} value={r.id}>{r.name}</Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Form>
+        </Modal>
+      )}
     </div>
   );
 };
