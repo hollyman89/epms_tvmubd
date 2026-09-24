@@ -7,6 +7,7 @@ import { InboxService, TodoItem } from '@/services/inbox.service';
 import { resolveTodoActionTarget } from '@/lib/todoActionResolver';
 import { setupTodoSync } from '@/lib/todoSync';
 import { setupNotificationBellSync } from '@/lib/notificationSync';
+import { extractUnreadNotificationCount } from '@/lib/notificationCount';
 import { useSocket } from '@/context/SocketProvider';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -49,14 +50,27 @@ export const NotificationBell: React.FC = () => {
 
   const getAuthToken = useCallback(() => localStorage.getItem('access_token') || '', []);
 
-  // Fetch summary counts (To-Do count and unread notification count)
-  const fetchSummaryCounts = useCallback(async () => {
+  // Fetch authoritative unread notification count directly
+  const fetchUnreadNotificationCount = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/notifications/count/unread');
+      const count = extractUnreadNotificationCount(res.data);
+      setUnreadNotificationCount(count);
+    } catch (error) {
+      console.error('Failed to fetch unread notification count', error);
+      setUnreadNotificationCount(0);
+    }
+  }, []);
+
+  // Fetch To-Do summary count for popover tab label
+  const fetchTodoCount = useCallback(async () => {
     try {
       const summary = await InboxService.getSummary();
-      setTodoCount(summary.todoCount);
-      setUnreadNotificationCount(summary.unreadNotificationCount);
+      const count = Number(summary.todoCount);
+      setTodoCount(Number.isFinite(count) && count >= 0 ? count : 0);
     } catch (error) {
-      console.error('Failed to fetch inbox summary counts', error);
+      console.error('Failed to fetch todo count', error);
+      setTodoCount(0);
     }
   }, []);
 
@@ -89,12 +103,13 @@ export const NotificationBell: React.FC = () => {
     }
   }, []);
 
-  // Initial mount: fetch counts
+  // Initial mount: fetch unread notification count and todo count
   useEffect(() => {
     if (getAuthToken()) {
-      fetchSummaryCounts();
+      fetchUnreadNotificationCount();
+      fetchTodoCount();
     }
-  }, [fetchSummaryCounts, getAuthToken]);
+  }, [fetchUnreadNotificationCount, fetchTodoCount, getAuthToken]);
 
   // When popover opens: fetch lists
   useEffect(() => {
@@ -105,16 +120,17 @@ export const NotificationBell: React.FC = () => {
   }, [open, fetchTodos, fetchNotifications]);
 
   // Realtime Sync for To-Do: Listen to canonical business events & reconnect
+  // MUST NOT touch unreadNotificationCount (locked UX rule)
   useEffect(() => {
     return setupTodoSync({
       onRefresh: () => {
-        fetchSummaryCounts();
+        fetchTodoCount();
         if (open) {
           fetchTodos();
         }
       },
     });
-  }, [fetchSummaryCounts, fetchTodos, open]);
+  }, [fetchTodoCount, fetchTodos, open]);
 
   // Realtime Sync for Notifications: Listen to socket new_notification & reconnect
   useEffect(() => {
@@ -128,13 +144,13 @@ export const NotificationBell: React.FC = () => {
         setUnreadNotificationCount((prev) => prev + 1);
       },
       onReconnectResync: () => {
-        fetchSummaryCounts();
+        fetchUnreadNotificationCount();
         if (open) {
           fetchNotifications();
         }
       },
     });
-  }, [notificationSocket, fetchSummaryCounts, fetchNotifications, open]);
+  }, [notificationSocket, fetchUnreadNotificationCount, fetchNotifications, open]);
 
   const markAsRead = useCallback(async (id: number) => {
     try {
@@ -393,8 +409,6 @@ export const NotificationBell: React.FC = () => {
     [markAsRead, router]
   );
 
-  const totalAttentionCount = todoCount + unreadNotificationCount;
-
   const popoverContent = useMemo(
     () => (
       <div
@@ -410,9 +424,9 @@ export const NotificationBell: React.FC = () => {
         <div style={{ padding: '16px 20px 0 20px', borderBottom: `1px solid #f1f5f9`, backgroundColor: '#ffffff' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <Text style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>Inbox</Text>
-            {totalAttentionCount > 0 && (
+            {unreadNotificationCount > 0 && (
               <Badge
-                count={totalAttentionCount}
+                count={unreadNotificationCount}
                 style={{ backgroundColor: '#10b981', color: '#fff', fontWeight: 600, boxShadow: '0 0 0 1px #fff' }}
               />
             )}
@@ -501,7 +515,6 @@ export const NotificationBell: React.FC = () => {
       </div>
     ),
     [
-      totalAttentionCount,
       activeTab,
       todoCount,
       unreadNotificationCount,
@@ -531,7 +544,7 @@ export const NotificationBell: React.FC = () => {
       }}
       arrow={false}
     >
-      <Badge count={totalAttentionCount} overflowCount={99} size="small" style={{ cursor: 'pointer' }}>
+      <Badge count={unreadNotificationCount} overflowCount={99} size="small" style={{ cursor: 'pointer' }}>
         <BellOutlined style={{ fontSize: '20px', cursor: 'pointer', color: token.colorTextSecondary }} />
       </Badge>
     </Popover>

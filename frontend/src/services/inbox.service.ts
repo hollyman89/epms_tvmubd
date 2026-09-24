@@ -41,6 +41,15 @@ export class InboxService {
    */
   static async getSummary(): Promise<InboxSummary> {
     const res = await apiClient.get('/inbox/summary');
-    return res.data?.data || { todoCount: 0, unreadNotificationCount: 0 };
+    const raw = res.data?.data?.data || res.data?.data || {};
+    const todoCount = Number(raw.todoCount);
+    const unreadNotificationCount = Number(raw.unreadNotificationCount);
+    return {
+      todoCount: Number.isFinite(todoCount) && todoCount >= 0 ? todoCount : 0,
+      unreadNotificationCount:
+        Number.isFinite(unreadNotificationCount) && unreadNotificationCount >= 0
+          ? unreadNotificationCount
+          : 0,
+    };
   }
 }

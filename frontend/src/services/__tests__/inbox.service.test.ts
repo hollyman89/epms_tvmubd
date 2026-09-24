@@ -66,9 +66,42 @@ describe('InboxService (Frontend API Client)', () => {
       expect(result).toEqual(mockSummary);
     });
 
-    it('returns default fallback object when data is missing', async () => {
+    it('correctly parses double-wrapped TransformInterceptor response', async () => {
+      (apiClient.get as jest.Mock).mockResolvedValue({
+        data: {
+          meta: { code: 200, status: 'success', message: 'Request successful' },
+          data: {
+            statusCode: 200,
+            message: 'Inbox summary retrieved successfully',
+            data: {
+              todoCount: 5,
+              unreadNotificationCount: 12,
+            },
+          },
+        },
+      });
+
+      const result = await InboxService.getSummary();
+      expect(result).toEqual({ todoCount: 5, unreadNotificationCount: 12 });
+    });
+
+    it('returns default fallback object when data is missing or invalid', async () => {
       (apiClient.get as jest.Mock).mockResolvedValue({
         data: {},
+      });
+
+      const result = await InboxService.getSummary();
+      expect(result).toEqual({ todoCount: 0, unreadNotificationCount: 0 });
+    });
+
+    it('returns zero for NaN or non-numeric counts', async () => {
+      (apiClient.get as jest.Mock).mockResolvedValue({
+        data: {
+          data: {
+            todoCount: 'invalid',
+            unreadNotificationCount: null,
+          },
+        },
       });
 
       const result = await InboxService.getSummary();
