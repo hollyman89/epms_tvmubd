@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -15,6 +15,8 @@ import { BusinessEvent, RoutingMetadata } from '../../shared/contracts/business-
 
 @Injectable()
 export class LegalService {
+  private readonly logger = new Logger(LegalService.name);
+
   constructor(
     @InjectRepository(Contract) private contractRepo: Repository<Contract>,
     private readonly dataSource: DataSource,
@@ -356,14 +358,14 @@ export class LegalService {
           contractId: savedContract.id,
           action: 'REVIEWED',
         });
-      } catch (evtErr) {
-        console.error('EventEmitter error on legal review:', evtErr);
+      } catch (evtErr: any) {
+        this.logger.error(`EventEmitter error on legal review: ${evtErr?.message || evtErr}`);
       }
 
       return savedContract;
     } catch (err: any) {
       await queryRunner.rollbackTransaction();
-      console.error('LEGAL REVIEW ERROR DETAIL:', err?.message || err);
+      this.logger.error(`LEGAL REVIEW ERROR DETAIL: ${err?.message || err}`);
       if (err instanceof BadRequestException || err instanceof NotFoundException || err instanceof ForbiddenException) {
         throw err;
       }

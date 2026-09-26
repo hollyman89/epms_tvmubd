@@ -1015,8 +1015,8 @@ export class ProjectService {
               );
             }
           }
-        } catch (e) {
-          // ignore
+        } catch (e: any) {
+          this.logger.warn(`Failed to query active baselines for kickoff date: ${e?.message || e}`);
         }
       }
     }
@@ -3451,7 +3451,9 @@ export class ProjectService {
             }
             actualKickoffDate = val?.actualKickoffDate || (rawKickoffs[0].created_at ? new Date(rawKickoffs[0].created_at).toISOString().split('T')[0] : null);
           }
-        } catch {}
+        } catch (e: any) {
+          this.logger.warn(`Failed to query kickoff audit log for project ${projectId}: ${e?.message || e}`);
+        }
       }
 
       if (!actualKickoffDate && this.baselineRepo) {
@@ -3462,7 +3464,9 @@ export class ProjectService {
           if (activeBaseline?.activated_at) {
             actualKickoffDate = new Date(activeBaseline.activated_at).toISOString().split('T')[0];
           }
-        } catch {}
+        } catch (e: any) {
+          this.logger.warn(`Failed to query active baseline for project ${projectId}: ${e?.message || e}`);
+        }
       }
 
       if (!actualKickoffDate && project.startDate) {

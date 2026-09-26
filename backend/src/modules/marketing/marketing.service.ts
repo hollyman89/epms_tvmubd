@@ -225,7 +225,7 @@ export class MarketingService {
         created_by: Number(userId),
       });
       contract = await manager.save(Contract, contract);
-      console.log(`[AUTO CONTRACT] Contract #${contract.id} (${contract.contract_number}) created for WON Tender #${tender.id}`);
+      this.logger.log(`[AUTO CONTRACT] Contract #${contract.id} (${contract.contract_number}) created for WON Tender #${tender.id}`);
     } else {
       let updated = false;
       const isReentryFromExpired = contract.status === 'REVISION_EXPIRED';
@@ -298,7 +298,7 @@ export class MarketingService {
       return await this.customerRepo.save(customer);
     } catch (e: any) {
       if (e instanceof BadRequestException || e instanceof ConflictException) throw e;
-      console.error('Error in createCustomer:', e);
+      this.logger.error(`Error in createCustomer: ${e?.message || e}`);
       throw new BadRequestException(e.message || 'Failed to create customer');
     }
   }
@@ -536,7 +536,7 @@ export class MarketingService {
         };
       });
     } catch (e: any) {
-      console.error('Error fetching tenders:', e);
+      this.logger.error(`Error fetching tenders: ${e?.message || e}`);
       throw e;
     }
   }
@@ -1114,8 +1114,8 @@ export class MarketingService {
 
         return { message: `Tender stage updated to ${dto.stage}`, tender };
       }
-    } catch (err) {
-      console.error('[EXACT UPDATE WON ERROR]:', err);
+    } catch (err: any) {
+      this.logger.error(`[EXACT UPDATE WON ERROR]: ${err?.message || err}`);
       await queryRunner.rollbackTransaction();
       throw err;
     } finally {
@@ -2289,8 +2289,8 @@ export class MarketingService {
           action: 'GRACE_PERIOD_ACTIVATED',
           timestamp: new Date().toISOString(),
         });
-      } catch (eventErr) {
-        console.error(`[Event Error] Failed to emit marketing.tender.management_update for tender ${tender.id}:`, eventErr);
+      } catch (eventErr: any) {
+        this.logger.error(`[Event Error] Failed to emit marketing.tender.management_update for tender ${tender.id}: ${eventErr?.message || eventErr}`);
       }
 
       return { status: 'success', message: 'Grace period SPK diaktifkan 2x24 jam', tender };
@@ -2369,8 +2369,8 @@ export class MarketingService {
         type: 'TENDER_DELETED',
         tenderId: id,
       });
-    } catch (eventErr) {
-      console.error(`[Event Error] Failed to emit management_update/legal.queue.updated for tender ${id}:`, eventErr);
+    } catch (eventErr: any) {
+      this.logger.error(`[Event Error] Failed to emit management_update/legal.queue.updated for tender ${id}: ${eventErr?.message || eventErr}`);
     }
 
     return {
@@ -2396,9 +2396,9 @@ export class MarketingService {
         publicUrl = `${baseUrl}${publicUrlParam.startsWith('/') ? '' : '/'}${publicUrlParam}`;
       }
 
-      console.log('[UPLOAD] Menyimpan URL SPK:', publicUrl);
-      console.log('[SPK Upload] Upload dimulai untuk tender ID:', tenderIdParam);
-      console.log('[SPK Upload] URL Absolut SPK:', publicUrl);
+      this.logger.log(`[UPLOAD] Menyimpan URL SPK: ${publicUrl}`);
+      this.logger.log(`[SPK Upload] Upload dimulai untuk tender ID: ${tenderIdParam}`);
+      this.logger.log(`[SPK Upload] URL Absolut SPK: ${publicUrl}`);
 
       // 1. PASTIKAN ID ADALAH NUMBER (BigInt / Integer)
       const tenderId = typeof tenderIdParam === 'number' ? tenderIdParam : parseInt(String(tenderIdParam), 10);
@@ -2408,8 +2408,8 @@ export class MarketingService {
       if (!userId) {
         throw new UnauthorizedException('Identitas pengguna diperlukan untuk mengunggah SPK');
       }
-      console.log('[SPK Upload] ID Tender valid (Number):', tenderId);
-      console.log('[SPK Upload] URL Absolut disimpan:', publicUrl);
+      this.logger.log(`[SPK Upload] ID Tender valid (Number): ${tenderId}`);
+      this.logger.log(`[SPK Upload] URL Absolut disimpan: ${publicUrl}`);
 
       // ATOMIC TRANSACTION FOR ALL DATABASE MUTATIONS
       const txResult = await this.dataSource.transaction(async (manager) => {
@@ -2422,7 +2422,7 @@ export class MarketingService {
           .orWhere('contract.proposal_id IN (SELECT id FROM proposals WHERE tender_id = :tenderId)', { tenderId })
           .getOne();
 
-        console.log('[SPK Upload] Contract existing found?', !!existingContract);
+        this.logger.log(`[SPK Upload] Contract existing found? ${!!existingContract}`);
 
         // 3. AMBIL ESTIMATED BUDGET, CUSTOMER ID, DAN GO_NOGO_STATUS DARI TENDERS
         const [tenderRow] = await manager.query(
@@ -2466,7 +2466,7 @@ export class MarketingService {
             );
           }
           contract = existingContract;
-          console.log('[SPK Upload] Contract existing diupdate via raw SQL, tender_id, customer_id & spk_file_url terisi');
+          this.logger.log('[SPK Upload] Contract existing diupdate via raw SQL, tender_id, customer_id & spk_file_url terisi');
         } else {
           // BUAT BARU JIKA BENAR-BENAR BELUM ADA
           if (!proposal) {
@@ -2505,7 +2505,7 @@ export class MarketingService {
           );
 
           contract = { id: newId, contract_number: finalContractNumber };
-          console.log(`[SPK Upload] Contract baru (ID #${newId}) dibuat dengan nomor: ${finalContractNumber}`);
+          this.logger.log(`[SPK Upload] Contract baru (ID #${newId}) dibuat dengan nomor: ${finalContractNumber}`);
         }
 
         // 4. UPDATE STATUS TENDER MENJADI WON (PAKAI QUERY BUILDER / MANAGER)
@@ -2522,7 +2522,7 @@ export class MarketingService {
           .where('id = :tenderId', { tenderId })
           .execute();
 
-        console.log('[SPK Upload] Status Tender berhasil diupdate ke WON');
+        this.logger.log('[SPK Upload] Status Tender berhasil diupdate ke WON');
 
         const updatedTender = await manager.findOne(Tender, { where: { id: tenderId }, relations: ['customer'] });
 
@@ -2679,8 +2679,8 @@ export class MarketingService {
           tenderId,
           action: 'SPK_UPLOADED'
         });
-      } catch (eventErr) {
-        console.error(`[Event Error] Failed to emit events for tender ${tenderId}:`, eventErr);
+      } catch (eventErr: any) {
+        this.logger.error(`[Event Error] Failed to emit events for tender ${tenderId}: ${eventErr?.message || eventErr}`);
       }
 
       return {
@@ -2690,18 +2690,15 @@ export class MarketingService {
         contractId: contract?.id
       };
     } catch (error: any) {
-      console.error('========================================');
-      console.error('[UPLOAD ERROR] Transaction failed:');
-      console.error('Pesan:', error?.message);
-      console.error('========================================');
+      this.logger.error(`[UPLOAD ERROR] Transaction failed: ${error?.message || error}`);
 
       // Clean up newly uploaded physical file on transaction failure / rollback
       if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
         try {
           fs.unlinkSync(uploadedFilePath);
-          console.log(`[CLEANUP] Deleted uploaded file on error: ${uploadedFilePath}`);
-        } catch (unlinkErr) {
-          console.error(`Failed to delete file on rollback: ${uploadedFilePath}`, unlinkErr);
+          this.logger.log(`[CLEANUP] Deleted uploaded file on error: ${uploadedFilePath}`);
+        } catch (unlinkErr: any) {
+          this.logger.error(`Failed to delete file on rollback: ${uploadedFilePath}: ${unlinkErr?.message || unlinkErr}`);
         }
       }
 

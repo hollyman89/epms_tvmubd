@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
   Optional,
   Inject,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -25,6 +26,7 @@ import { LegalService } from '../legal/legal.service';
 
 @Injectable()
 export class ContractService {
+  private readonly logger = new Logger(ContractService.name);
   private readonly s3Client: S3Client;
 
   constructor(
@@ -167,8 +169,9 @@ export class ContractService {
           created_by: userId ? Number(userId) : null,
         });
         await this.contractRepo.manager.save(AuditLog, auditLog);
-      } catch (err) {
+      } catch (err: any) {
         // Safe fallback in test environments without full entity manager
+        this.logger.warn(`Failed to persist contract update audit log: ${err?.message || err}`);
       }
     }
 
@@ -220,8 +223,9 @@ export class ContractService {
           created_by: userId ? Number(userId) : null,
         });
         await this.amendmentRepo.manager.save(AuditLog, auditLog);
-      } catch (err) {
+      } catch (err: any) {
         // Safe fallback
+        this.logger.warn(`Failed to persist contract amendment audit log: ${err?.message || err}`);
       }
     }
 
