@@ -13,6 +13,7 @@ import { TenderDetailResponseDto } from './dto/tender-detail-response.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { CreateTenderActivityDto } from './dto/tender-activity.dto';
+import { SubmitGoNoGoReviewDto } from './dto/submit-go-no-go-review.dto';
 
 import { IsNumber, IsString, IsBoolean, IsOptional, IsIn, IsPositive } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -403,9 +404,14 @@ export class MarketingController {
   @Post('tenders/:id/submit-go-no-go')
   @Roles('MARKETING', 'GENERAL_MANAGER', 'SUPER_ADMIN', 'DIRECTOR')
   @ApiOperation({ summary: 'Submit Tender for GO / NO GO Review (Marketing)' })
-  async submitGoNoGoReview(@Param('id', ParseIntPipe) id: number, @Request() req) {
+  async submitGoNoGoReview(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: SubmitGoNoGoReviewDto,
+    @Request() req,
+  ) {
     const userId = req.user?.userId || req.user?.sub || req.user?.id;
-    return await this.marketingService.submitGoNoGoReview(id, userId);
+    const userRoles: string[] = req.user?.roles || (req.user?.role ? [req.user.role] : []);
+    return await this.marketingService.submitGoNoGoReview(id, dto, userId, userRoles);
   }
 
   @Post('tenders/:id/go-no-go')
@@ -413,7 +419,8 @@ export class MarketingController {
   @ApiOperation({ summary: 'Submit GO / NO GO decision for a tender (Director/Exec)' })
   async submitGoNoGo(@Param('id', ParseIntPipe) id: number, @Body() dto: GoNoGoDto, @Request() req) {
     const userId = req.user?.userId || req.user?.sub || req.user?.id;
-    return await this.marketingService.submitGoNoGo(id, dto, userId);
+    const userRoles: string[] = req.user?.roles || (req.user?.role ? [req.user.role] : []);
+    return await this.marketingService.submitGoNoGo(id, dto, userId, userRoles);
   }
 
   @Get('tenders/proposals/:filename')

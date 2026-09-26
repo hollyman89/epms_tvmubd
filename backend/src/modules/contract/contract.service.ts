@@ -277,12 +277,7 @@ export class ContractService {
       userId: userId,
     });
     
-    this.eventEmitter.emit('notification.send', {
-      recipientId: userId,
-      title: 'Draft Kontrak Tergenerate',
-      message: `Draft kontrak untuk Tender "${tender.title}" telah dibuat otomatis.`,
-      type: 'INFO',
-    });
+    // Legacy notification.send removed in Phase N8.1 (contract.generate path is obsolete; canonical notifications handled via marketing.spk.uploaded)
     
     return contract;
   }

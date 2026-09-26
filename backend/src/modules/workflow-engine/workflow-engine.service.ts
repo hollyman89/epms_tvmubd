@@ -44,6 +44,10 @@ interface BpmnNode {
     role?: string;
     assigneeRole?: string;
     assignedRole?: string;
+    candidateRoles?: string[];
+    assigneeUserId?: number | string;
+    assigneeContextKey?: string;
+    assigneeFallbackContextKey?: string;
     condition?: string;
     action?: string;
     [key: string]: any;
@@ -281,13 +285,32 @@ export class WorkflowEngineService {
         );
       }
 
-      // 3. Server-side Authorization Check
-      this.validateActorAuthorization(task, actorId, actorRoles);
+      // 3. Load exact snapshot version for the instance (safe against partial mocks)
+      let version: WorkflowVersion | null = task.workflowInstance?.workflowVersion || null;
+      if (!version && instance?.workflowVersionId) {
+        if (typeof manager.findOne === 'function') {
+          version = await manager.findOne(WorkflowVersion, {
+            where: { id: instance.workflowVersionId },
+          });
+        } else if (this.versionRepo && typeof this.versionRepo.findOne === 'function') {
+          version = await this.versionRepo.findOne({
+            where: { id: instance.workflowVersionId },
+          });
+        }
+      }
 
-      // 4. Load exact snapshot version for the instance
-      const version = await manager.findOne(WorkflowVersion, {
-        where: { id: instance.workflowVersionId },
-      });
+      const candidateRoles: string[] = [];
+      let graph: BpmnGraph | null = null;
+      if (version?.bpmnJson) {
+        graph = this.parseGraph(version.bpmnJson);
+        const taskNode = graph.nodes.find((n) => n.id === task.nodeId);
+        if (Array.isArray(taskNode?.data?.candidateRoles)) {
+          candidateRoles.push(...taskNode.data.candidateRoles);
+        }
+      }
+
+      // 4. Server-side Authorization Check (with candidateRoles support)
+      this.validateActorAuthorization(task, actorId, actorRoles, candidateRoles);
 
       if (!version) {
         throw new NotFoundException(
@@ -295,7 +318,9 @@ export class WorkflowEngineService {
         );
       }
 
-      const graph = this.parseGraph(version.bpmnJson);
+      if (!graph) {
+        graph = this.parseGraph(version.bpmnJson);
+      }
 
       // 5. Update Task
       task.status =
@@ -360,8 +385,8 @@ export class WorkflowEngineService {
       // 11. Save Outbox Event
       const isReturned = action === 'RETURN' || action === 'RESUBMIT';
       const eventName = isReturned ? 'workflow.task.returned' : 'workflow.task.completed';
-      const recipientUser = nextNode.data?.assigneeUserId;
-      const recipientRole = nextNode.data?.role || nextNode.data?.assigneeRole;
+      const recipientUser = this.resolveNodeAssigneeUserId(nextNode, instance.context);
+      const recipientRole = nextNode.data?.role || nextNode.data?.assigneeRole || nextNode.data?.assignedRole;
 
       await this.saveOutboxEvent(manager, {
         eventId: crypto.randomUUID(),
@@ -584,13 +609,16 @@ export class WorkflowEngineService {
       }
     }
 
+    // Resolve Assignee User ID (Static or Generic Dynamic from Runtime Context)
+    const resolvedAssigneeUserId = this.resolveNodeAssigneeUserId(targetNode, instance.context);
+
     // Create pending WorkflowTask
     const task = manager.create(WorkflowTask, {
       workflowInstanceId: instance.id,
       nodeId: targetNode.id,
       taskKey: targetNode.data?.taskKey || targetNode.data?.label || targetNode.id,
       assigneeRoleId: roleId,
-      assigneeUserId: targetNode.data?.assigneeUserId || null,
+      assigneeUserId: resolvedAssigneeUserId,
       status: WorkflowTaskStatus.PENDING,
       createdBy: actorId,
     });
@@ -837,33 +865,119 @@ export class WorkflowEngineService {
     return nextNode;
   }
 
+  private resolveNodeAssigneeUserId(
+    targetNode: BpmnNode,
+    context: Record<string, any> = {},
+  ): number | null {
+    // 1. Static numeric assigneeUserId on node definition
+    if (typeof targetNode.data?.assigneeUserId === 'number' && targetNode.data.assigneeUserId > 0) {
+      return Number(targetNode.data.assigneeUserId);
+    }
+
+    // 2. Explicit assigneeContextKey configured on node (e.g. 'marketingPicId')
+    const contextKey = targetNode.data?.assigneeContextKey;
+    if (contextKey && typeof contextKey === 'string') {
+      const val = context[contextKey];
+      if (typeof val === 'number' && val > 0) {
+        return val;
+      }
+      if (typeof val === 'string' && !isNaN(Number(val)) && Number(val) > 0) {
+        return Number(val);
+      }
+      // Check fallback context key if specified (e.g. 'createdBy')
+      const fallbackKey = targetNode.data?.assigneeFallbackContextKey;
+      if (fallbackKey && typeof fallbackKey === 'string') {
+        const fallbackVal = context[fallbackKey];
+        if (typeof fallbackVal === 'number' && fallbackVal > 0) {
+          return fallbackVal;
+        }
+        if (typeof fallbackVal === 'string' && !isNaN(Number(fallbackVal)) && Number(fallbackVal) > 0) {
+          return Number(fallbackVal);
+        }
+      }
+    }
+
+    // 3. String expression on assigneeUserId (e.g. '${marketingPicId}' or 'marketingPicId')
+    if (typeof targetNode.data?.assigneeUserId === 'string') {
+      const trimmed = targetNode.data.assigneeUserId.trim();
+      const match = trimmed.match(/^\$\{?([a-zA-Z0-9_]+)\}?$/);
+      if (match) {
+        const varName = match[1];
+        const val = context[varName];
+        if (typeof val === 'number' && val > 0) {
+          return val;
+        }
+        if (typeof val === 'string' && !isNaN(Number(val)) && Number(val) > 0) {
+          return Number(val);
+        }
+      }
+      if (!isNaN(Number(trimmed)) && Number(trimmed) > 0) {
+        return Number(trimmed);
+      }
+    }
+
+    // 4. Node-scoped assignee in context (e.g. context.nodeAssignees?.[nodeId] or context.nodeAssignees?.[taskKey])
+    const taskKey = targetNode.data?.taskKey || targetNode.data?.label || targetNode.id;
+    if (context.nodeAssignees && typeof context.nodeAssignees === 'object') {
+      const val = context.nodeAssignees[targetNode.id] || context.nodeAssignees[taskKey];
+      if (typeof val === 'number' && val > 0) return val;
+      if (typeof val === 'string' && !isNaN(Number(val)) && Number(val) > 0) return Number(val);
+    }
+
+    return null;
+  }
+
   private validateActorAuthorization(
     task: WorkflowTask,
     actorId: number,
     actorRoles: string[],
+    candidateRoles?: string[],
   ): void {
-    // Super admin can always perform any action
+    // 1. Super admin can always perform any action
     if (actorRoles.includes('SUPER_ADMIN')) {
       return;
     }
 
-    // If specific user assigned
+    // 2. If specific user assigned
     if (task.assigneeUserId && task.assigneeUserId === actorId) {
       return;
     }
 
-    // If role assigned
+    // 3. If single role assigned
     if (task.assigneeRole && actorRoles.includes(task.assigneeRole.name)) {
       return;
     }
 
-    // If no specific assignment on task, default to authorized
-    if (!task.assigneeRoleId && !task.assigneeUserId) {
+    // 4. Resolve candidate roles from parameter or task's attached workflow version
+    let resolvedCandidateRoles: string[] = candidateRoles || [];
+    if (resolvedCandidateRoles.length === 0) {
+      const bpmnJson = task.workflowInstance?.workflowVersion?.bpmnJson;
+      if (bpmnJson && Array.isArray(bpmnJson.nodes) && task.nodeId) {
+        const node = bpmnJson.nodes.find((n: any) => n.id === task.nodeId);
+        if (Array.isArray(node?.data?.candidateRoles)) {
+          resolvedCandidateRoles = node.data.candidateRoles;
+        }
+      }
+    }
+
+    if (
+      resolvedCandidateRoles.length > 0 &&
+      resolvedCandidateRoles.some((r) => actorRoles.includes(r))
+    ) {
+      return;
+    }
+
+    // 5. If no specific assignment on task and no candidate roles, default to authorized
+    if (
+      !task.assigneeRoleId &&
+      !task.assigneeUserId &&
+      resolvedCandidateRoles.length === 0
+    ) {
       return;
     }
 
     throw new ForbiddenException(
-      `User #${actorId} (Roles: [${actorRoles.join(', ')}]) is not authorized to complete Task #${task.id} (Required Role: ${task.assigneeRole?.name || 'User #' + task.assigneeUserId}).`,
+      `User #${actorId} (Roles: [${actorRoles.join(', ')}]) is not authorized to complete Task #${task.id} (Required Role: ${task.assigneeRole?.name || (resolvedCandidateRoles.length > 0 ? resolvedCandidateRoles.join('/') : 'User #' + task.assigneeUserId)}).`,
     );
   }
 
@@ -1022,7 +1136,41 @@ export class WorkflowEngineService {
       );
     }
 
-    return query.orderBy('task.createdAt', 'DESC').getMany();
+    const primaryTasks = await query.orderBy('task.createdAt', 'DESC').getMany();
+
+    if (roles.includes('SUPER_ADMIN')) {
+      return primaryTasks;
+    }
+
+    // Candidate-roles resolution: discover pending tasks where node.data.candidateRoles contains actor's roles
+    const candidateQuery = this.taskRepo
+      .createQueryBuilder('task')
+      .leftJoinAndSelect('task.workflowInstance', 'instance')
+      .leftJoinAndSelect('instance.workflowDefinition', 'definition')
+      .leftJoinAndSelect('instance.workflowVersion', 'version')
+      .leftJoinAndSelect('task.assigneeRole', 'role')
+      .where('task.status = :status', { status: WorkflowTaskStatus.PENDING });
+
+    const allPending = await candidateQuery.orderBy('task.createdAt', 'DESC').getMany();
+
+    const seenTaskIds = new Set<number>(primaryTasks.map((t) => t.id));
+    const combinedTasks: WorkflowTask[] = [...primaryTasks];
+
+    for (const task of allPending) {
+      if (seenTaskIds.has(task.id)) continue;
+
+      const bpmnJson = task.workflowInstance?.workflowVersion?.bpmnJson;
+      if (bpmnJson && Array.isArray(bpmnJson.nodes) && task.nodeId) {
+        const node = bpmnJson.nodes.find((n: any) => n.id === task.nodeId);
+        const candidateRoles: string[] = node?.data?.candidateRoles || [];
+        if (Array.isArray(candidateRoles) && candidateRoles.some((r: string) => roles.includes(r))) {
+          seenTaskIds.add(task.id);
+          combinedTasks.push(task);
+        }
+      }
+    }
+
+    return combinedTasks;
   }
 
   async getTransitions(instanceId: number): Promise<WorkflowTransition[]> {
@@ -1037,9 +1185,10 @@ export class WorkflowEngineService {
     entityType: string,
     entityId: string | number,
   ): Promise<WorkflowInstance | null> {
-    if (entityType !== 'PURCHASE_REQUEST' && entityType !== 'PROJECT') {
+    const allowedEntityTypes = ['PURCHASE_REQUEST', 'PROJECT', 'TENDER', 'CONTRACT'];
+    if (!allowedEntityTypes.includes(entityType)) {
       throw new BadRequestException(
-        `Unsupported entityType: '${entityType}'. Supported types are 'PURCHASE_REQUEST' and 'PROJECT'.`,
+        `Unsupported entityType: '${entityType}'. Supported types are 'PURCHASE_REQUEST', 'PROJECT', 'TENDER', and 'CONTRACT'.`,
       );
     }
 

@@ -3,26 +3,19 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { NotificationController } from './notification.controller';
 import { NotificationService } from './notification.service';
 import { ManagementNotificationConsumer } from './management-notification.consumer';
-import { NotificationEventListener } from './notification-event.listener';
 import { Notification } from '../../entities/notification.entity';
-import { PurchaseOrder } from '../../entities/purchase-order.entity';
-import { PurchaseRequest } from '../../entities/purchase-request.entity';
-import { Project } from '../../entities/project.entity';
-import { Payment } from '../../entities/payment.entity';
 
 import { NotificationGateway } from './notification.gateway';
 import { NotificationListener } from './notification.listener';
 import { BusinessSyncConsumer } from './business-sync.consumer';
+import { CanonicalNotificationWriter } from './canonical-notification.writer';
+import { CanonicalNotificationConsumer } from './canonical-notification.consumer';
 import { QueueModule } from '../queue/queue.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([
       Notification,
-      PurchaseOrder,
-      PurchaseRequest,
-      Project,
-      Payment
     ]),
     QueueModule
   ],
@@ -30,12 +23,20 @@ import { QueueModule } from '../queue/queue.module';
   providers: [
     NotificationService,
     NotificationGateway,
-    NotificationEventListener,
     ManagementNotificationConsumer,
     NotificationListener,
     BusinessSyncConsumer,
+    CanonicalNotificationWriter,
+    CanonicalNotificationConsumer,
   ],
-  exports: [NotificationService, NotificationGateway, NotificationListener, BusinessSyncConsumer],
+  exports: [
+    NotificationService,
+    NotificationGateway,
+    NotificationListener,
+    BusinessSyncConsumer,
+    CanonicalNotificationWriter,
+    CanonicalNotificationConsumer,
+  ],
 })
 export class NotificationModule {}
 

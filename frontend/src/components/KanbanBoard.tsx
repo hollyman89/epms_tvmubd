@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useSearchParams, useRouter, usePathname } from 'next/navigation';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { Card, Typography, Tag, Avatar, Modal, Upload, Button, message, Input, InputNumber, Radio, Drawer, Spin, Dropdown, Form, Select, DatePicker, Space} from 'antd';
-import { UserOutlined, ClockCircleOutlined, UploadOutlined, LockOutlined, ExclamationCircleOutlined, EditOutlined, DeleteOutlined, EyeOutlined, BankOutlined, SendOutlined } from '@ant-design/icons';
+import { Card, Typography, Tag, Avatar, Modal, Upload, Button, message, Input, InputNumber, Radio, Drawer, Spin, Dropdown, Form, Select, DatePicker, Space, Checkbox } from 'antd';
+import { UserOutlined, ClockCircleOutlined, UploadOutlined, LockOutlined, ExclamationCircleOutlined, EditOutlined, DeleteOutlined, EyeOutlined, BankOutlined, SendOutlined, AuditOutlined, InfoCircleOutlined, CheckCircleOutlined } from '@ant-design/icons';
 import { TenderActivityStream } from './TenderActivityStream';
 import dayjs from 'dayjs';
 import { useAuth } from '../context/AuthContext';
 import { apiClient } from '@/lib/axios';
 import { queryClient, updateAllTenderCaches, removeTenderFromCache } from '../lib/queryClient';
+import { consumePendingSalesDrawerRequest, clearPendingSalesDrawerRequest } from '@/lib/salesNavigation';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -276,7 +278,7 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
             }}
           >
             {items.map((item, index) => (
-              <Draggable key={item.id.toString()} draggableId={item.id.toString()} index={index} isDragDisabled={item.isLocked || item.status === 'PENDING_APPROVAL'}>
+              <Draggable key={item.id.toString()} draggableId={item.id.toString()} index={index} isDragDisabled={item.isLocked || item.status === 'PENDING_APPROVAL' || item.stage === 'WAITING_GO_NO_GO' || column.id === 'WAITING_GO_NO_GO'}>
                 {(provided, snapshot) => (
                   <div
                     ref={provided.innerRef}
@@ -309,7 +311,19 @@ export const KanbanColumn: React.FC<KanbanColumnProps> = ({
   );
 };
 
-export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStageChange: (id: number, stage: string) => void }) => {
+export interface KanbanBoardProps {
+  tenders: any[];
+  onStageChange: (id: number, stage: string) => void;
+  targetTenderId?: number | null;
+  targetAction?: string | null;
+}
+
+export const KanbanBoard: React.FC<KanbanBoardProps> = ({
+  tenders,
+  onStageChange,
+  targetTenderId,
+  targetAction,
+}) => {
   const data = useMemo(() => {
     const grouped: Record<string, any[]> = {
       LEAD: [], WAITING_GO_NO_GO: [], QUALIFICATION: [], PROPOSAL: [], NEGOTIATION: [], WON: [], LOST: []
@@ -326,6 +340,17 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
     return grouped;
   }, [tenders]);
   
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  // Drawer State & Internal Drawer Target (URL IS NOT DRAWER STATE)
+  const [drawerVisible, setDrawerVisible] = useState(false);
+  const [drawerTender, setDrawerTender] = useState<any>(null);
+  const [drawerAction, setDrawerAction] = useState<string | null>(null);
+  const [isDrawerLoading, setIsDrawerLoading] = useState(false);
+  const resolvingTenderIdRef = useRef<number | null>(null);
+
   const [pendingMove, setPendingMove] = useState<any>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isResubmittingToPm, setIsResubmittingToPm] = useState(false);
@@ -333,13 +358,216 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
   const [isSubmittingGoNoGo, setIsSubmittingGoNoGo] = useState(false);
   const [goNoGoNotes, setGoNoGoNotes] = useState('');
   const [isSubmittingDecision, setIsSubmittingDecision] = useState(false);
+  const [discountNotes, setDiscountNotes] = useState('');
+  const [isSubmittingDiscount, setIsSubmittingDiscount] = useState(false);
   const [highlightedTenderId, setHighlightedTenderId] = useState<number | null>(null);
 
-  const { user } = useAuth();
-  const userRoles = (user?.roles || []).map((r: any) => String(r).toUpperCase());
+  const { user, isLoading: authLoading } = useAuth();
+  const userRoles = useMemo(() => {
+    if (authLoading || !user?.roles) return [];
+    return (user.roles || []).map((r: any) => String(r.name || r).toUpperCase());
+  }, [user, authLoading]);
   const isSuperAdmin = userRoles.includes('SUPER_ADMIN');
   const isMarketing = userRoles.includes('MARKETING');
-  const isDirectorOrExec = userRoles.some((r: string) => ['DIRECTOR', 'GENERAL_MANAGER', 'SUPER_ADMIN'].includes(r));
+  const isDirectorOrExec = !authLoading && userRoles.some((r: string) => ['DIRECTOR', 'GENERAL_MANAGER', 'SUPER_ADMIN'].includes(r));
+
+  // Canonical Drawer Opener (Pure local UI state — NEVER manipulates browser URL)
+  const openTenderDrawer = useCallback((tender: any, action?: string | null) => {
+    if (!tender) return;
+
+    setDrawerTender(tender);
+    setDrawerAction(action ?? (tender.stage === 'WAITING_GO_NO_GO' ? 'go-nogo' : null));
+    setDrawerVisible(true);
+    setIsDrawerLoading(false);
+    resolvingTenderIdRef.current = Number(tender.id);
+
+    // URL IS NOT DRAWER STATE:
+    // Do NOT write tenderId, action, or tab to the browser URL!
+    // Visible URL remains strictly clean (e.g. /sales).
+  }, []);
+
+  // Canonical Drawer Closer (Pure local UI state — NEVER manipulates browser URL)
+  const closeTenderDrawer = useCallback(() => {
+    setDrawerVisible(false);
+    setDrawerTender(null);
+    setDrawerAction(null);
+    setIsDrawerLoading(false);
+    resolvingTenderIdRef.current = null;
+    clearPendingSalesDrawerRequest();
+
+    // URL IS NOT DRAWER STATE:
+    // Do NOT manipulate router or searchParams. URL remains unchanged.
+  }, []);
+
+  // Exact Tender Resolver (Used for To-Do deep-links & direct URL legacy compatibility)
+  const resolveAndOpenTender = useCallback((targetId: number, action?: string | null) => {
+    if (!targetId || targetId <= 0) return;
+
+    // Idempotency: if drawer is already displaying this exact tender, avoid redundant work
+    if (drawerTender && Number(drawerTender.id) === targetId && drawerVisible) {
+      resolvingTenderIdRef.current = targetId;
+      return;
+    }
+
+    // Guard against duplicate fetch in flight
+    if (resolvingTenderIdRef.current === targetId && (drawerTender || isDrawerLoading)) {
+      return;
+    }
+
+    // Stale state protection: clear old tender so wrong tender never flashes
+    if (drawerTender && Number(drawerTender.id) !== targetId) {
+      setDrawerTender(null);
+    }
+
+    resolvingTenderIdRef.current = targetId;
+
+    // STEP 1: In-memory tenders prop (immediate 0ms resolution)
+    const inMemoryMatch = (tenders || []).find((t: any) => Number(t.id) === targetId);
+    if (inMemoryMatch) {
+      openTenderDrawer(inMemoryMatch, action);
+      return;
+    }
+
+    // STEP 2: React Query cache for exact tender
+    let cachedMatch: any = null;
+    try {
+      const allCachedQueries = queryClient.getQueriesData<any[]>({ queryKey: ['tenders'] });
+      for (const [, queryData] of allCachedQueries) {
+        if (Array.isArray(queryData)) {
+          const found = queryData.find((t: any) => Number(t?.id) === targetId);
+          if (found) {
+            cachedMatch = found;
+            break;
+          }
+        }
+      }
+    } catch {
+      // queryClient read fallback
+    }
+
+    if (cachedMatch) {
+      openTenderDrawer(cachedMatch, action);
+      return;
+    }
+
+    // STEP 3: Fallback fetch ONE tender by ID (no broad pipeline refetch)
+    let isCancelled = false;
+    setIsDrawerLoading(true);
+    setDrawerVisible(true);
+    setDrawerAction(action ?? null);
+
+    apiClient.get(`/marketing/tenders/${targetId}`)
+      .then((res: any) => {
+        if (isCancelled) return;
+        const fetchedTender = res.data?.data || res.data;
+        if (fetchedTender && Number(fetchedTender.id) === targetId) {
+          openTenderDrawer(fetchedTender, action);
+          updateAllTenderCaches(queryClient, targetId, fetchedTender);
+        } else {
+          message.error('Data tender tidak ditemukan.');
+          closeTenderDrawer();
+        }
+      })
+      .catch((err: any) => {
+        if (isCancelled) return;
+        const errMsg = err.response?.data?.message || 'Tender tidak ditemukan.';
+        message.error(errMsg);
+        closeTenderDrawer();
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsDrawerLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [tenders, drawerTender, drawerVisible, isDrawerLoading, openTenderDrawer, closeTenderDrawer]);
+
+  // 1. Consume transient pending request (from To-Do "Buka" navigation)
+  useEffect(() => {
+    const pending = consumePendingSalesDrawerRequest();
+    if (pending && pending.tenderId) {
+      resolveAndOpenTender(pending.tenderId, pending.action);
+    }
+  }, [resolveAndOpenTender]);
+
+  // 2. Real-time event listener (if To-Do "Buka" is triggered while already on /sales)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleOpenDrawerEvent = (e: any) => {
+      const detail = e?.detail;
+      if (detail && detail.tenderId) {
+        resolveAndOpenTender(Number(detail.tenderId), detail.action);
+      }
+    };
+
+    window.addEventListener('epms:open_sales_drawer', handleOpenDrawerEvent);
+    return () => {
+      window.removeEventListener('epms:open_sales_drawer', handleOpenDrawerEvent);
+    };
+  }, [resolveAndOpenTender]);
+
+  // 3. Direct URL legacy compatibility (e.g. external link / bookmark / direct navigation)
+  useEffect(() => {
+    const tenderIdFromUrl = searchParams?.get('tenderId');
+    const actionFromUrl = searchParams?.get('action');
+
+    if (tenderIdFromUrl) {
+      const parsedId = Number(tenderIdFromUrl);
+      if (!isNaN(parsedId) && parsedId > 0) {
+        // Immediately normalize visible URL to /sales without query parameters
+        router.replace(pathname, { scroll: false });
+        // Open drawer internally
+        resolveAndOpenTender(parsedId, actionFromUrl);
+      }
+    }
+  }, [searchParams, pathname, router, resolveAndOpenTender]);
+
+  // 4. targetTenderId prop (if provided directly by parent)
+  useEffect(() => {
+    if (targetTenderId && targetTenderId > 0) {
+      resolveAndOpenTender(targetTenderId, targetAction);
+    }
+  }, [targetTenderId, targetAction, resolveAndOpenTender]);
+
+  const handleDiscountDecision = async (tenderId: number, is_approved: boolean) => {
+    setIsSubmittingDiscount(true);
+    try {
+      const payload = {
+        is_approved,
+        notes: discountNotes.trim() || undefined,
+      };
+      const res = await apiClient.patch(`/marketing/tenders/${tenderId}/approve-discount`, payload);
+      message.success(res.data?.message || (is_approved ? 'Diskon berhasil disetujui' : 'Diskon ditolak, harga dikembalikan ke estimasi'));
+
+      const newPrice = is_approved ? drawerTender?.negotiated_price : drawerTender?.estimated_budget;
+      const updatedFields = {
+        status: 'NEGOTIATION',
+        negotiated_price: newPrice,
+      };
+
+      if (drawerTender && drawerTender.id === tenderId) {
+        setDrawerTender({
+          ...drawerTender,
+          ...updatedFields,
+        });
+      }
+
+      updateAllTenderCaches(queryClient, tenderId, updatedFields);
+      setDiscountNotes('');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('epms:refetch_all'));
+      }
+    } catch (err: any) {
+      const errMsg = err.response?.data?.message || err.message || 'Gagal memproses persetujuan diskon';
+      message.error(errMsg);
+    } finally {
+      setIsSubmittingDiscount(false);
+    }
+  };
 
   // Edit Modal State
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
@@ -393,34 +621,180 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
     }
   };
 
-  const handleSubmitGoNoGoReview = async (tenderId: number) => {
-    setIsSubmittingGoNoGo(true);
+  // Executive Decision Pack Submission Modal State
+  const [isGoNoGoSubmitModalVisible, setIsGoNoGoSubmitModalVisible] = useState(false);
+  const [goNoGoSubmittingTender, setGoNoGoSubmittingTender] = useState<any>(null);
+  const [noMaterialConcern, setNoMaterialConcern] = useState(false);
+  const [goNoGoSubmitForm] = Form.useForm();
+
+  const handleOpenGoNoGoSubmitModal = (tender: any) => {
+    setGoNoGoSubmittingTender(tender);
+    const existingPack = tender?.decisionPack || tender?.decision_pack || tender?.goNoGoReview || tender?.go_nogo_review;
+    if (existingPack) {
+      const isNoConcern = existingPack.keyConcerns?.[0] === 'Tidak ada concern material';
+      setNoMaterialConcern(isNoConcern);
+      goNoGoSubmitForm.setFieldsValue({
+        executiveSummary: existingPack.executiveSummary || '',
+        concern1: isNoConcern ? 'Tidak ada concern material' : (existingPack.keyConcerns?.[0] || ''),
+        concern2: isNoConcern ? '' : (existingPack.keyConcerns?.[1] || ''),
+        concern3: isNoConcern ? '' : (existingPack.keyConcerns?.[2] || ''),
+        customerRequirement: existingPack.readiness?.customerRequirement || 'CLEAR',
+        commercialInformation: existingPack.readiness?.commercialInformation || 'READY',
+        timeline: existingPack.readiness?.timeline || 'FEASIBLE',
+        marketingRecommendation: existingPack.marketingRecommendation || existingPack.recommendation || 'GO',
+        marketingRecommendationReason: existingPack.marketingRecommendationReason || existingPack.recommendationReason || '',
+      });
+    } else {
+      setNoMaterialConcern(false);
+      goNoGoSubmitForm.resetFields();
+      goNoGoSubmitForm.setFieldsValue({
+        customerRequirement: 'CLEAR',
+        commercialInformation: 'READY',
+        timeline: 'FEASIBLE',
+        marketingRecommendation: 'GO',
+      });
+    }
+    setIsGoNoGoSubmitModalVisible(true);
+  };
+
+  const handleToggleNoMaterialConcern = (e: any) => {
+    const checked = e.target.checked;
+    setNoMaterialConcern(checked);
+    if (checked) {
+      goNoGoSubmitForm.setFieldsValue({
+        concern1: 'Tidak ada concern material',
+        concern2: '',
+        concern3: '',
+      });
+    } else {
+      goNoGoSubmitForm.setFieldsValue({
+        concern1: '',
+      });
+    }
+  };
+
+  const handleConfirmGoNoGoSubmit = async () => {
     try {
-      const res = await apiClient.post(`/marketing/tenders/${tenderId}/submit-go-no-go`);
+      const values = await goNoGoSubmitForm.validateFields();
+      if (!goNoGoSubmittingTender) return;
+
+      const tenderId = goNoGoSubmittingTender.id;
+      let keyConcerns: string[] = [];
+      if (noMaterialConcern) {
+        keyConcerns = ['Tidak ada concern material'];
+      } else {
+        keyConcerns = [values.concern1, values.concern2, values.concern3]
+          .map((c) => (c ? String(c).trim() : ''))
+          .filter(Boolean)
+          .slice(0, 3);
+        if (keyConcerns.length === 0) {
+          keyConcerns.push('Tidak ada concern material');
+        }
+      }
+
+      const payload = {
+        executiveSummary: values.executiveSummary.trim(),
+        keyConcerns,
+        readiness: {
+          customerRequirement: values.customerRequirement,
+          commercialInformation: values.commercialInformation,
+          timeline: values.timeline,
+        },
+        marketingRecommendation: values.marketingRecommendation,
+        marketingRecommendationReason: values.marketingRecommendationReason.trim(),
+      };
+
+      setIsSubmittingGoNoGo(true);
+      const res = await apiClient.post(`/marketing/tenders/${tenderId}/submit-go-no-go`, payload);
       message.success(res.data?.message || 'Tender berhasil diajukan untuk GO / NO GO review');
-      
+
+      setIsGoNoGoSubmitModalVisible(false);
+      setGoNoGoSubmittingTender(null);
+
+      const updatedData = {
+        stage: 'WAITING_GO_NO_GO',
+        go_nogo_status: 'PENDING',
+        decisionPack: payload,
+        decision_pack: payload,
+        goNoGoReview: payload,
+        go_nogo_review: payload,
+      };
+
       if (drawerTender && drawerTender.id === tenderId) {
         setDrawerTender({
           ...drawerTender,
-          stage: 'WAITING_GO_NO_GO',
-          go_nogo_status: 'PENDING'
+          ...updatedData,
         });
       }
 
-      updateAllTenderCaches(queryClient, tenderId, { stage: 'WAITING_GO_NO_GO', go_nogo_status: 'PENDING' });
-      if (onStageChange) onStageChange(tenderId, 'WAITING_GO_NO_GO');
+      updateAllTenderCaches(queryClient, tenderId, updatedData);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('epms:refetch_all'));
+      }
+    } catch (err: any) {
+      if (err.errorFields) {
+        return;
+      }
+      const errMsg = err.response?.data?.message || err.message || 'Gagal mengajukan GO/NO-GO review';
+      message.error(errMsg);
+      queryClient.invalidateQueries({ queryKey: ['tenders'] });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('epms:refetch_all'));
+      }
+    } finally {
+      setIsSubmittingGoNoGo(false);
+    }
+  };
+
+  const handleSubmitGoNoGoReview = async (tenderId: number, directPayload?: any) => {
+    if (!directPayload) {
+      const target = (tenders || []).find((t: any) => t.id === tenderId) || (drawerTender?.id === tenderId ? drawerTender : { id: tenderId });
+      handleOpenGoNoGoSubmitModal(target);
+      return;
+    }
+
+    setIsSubmittingGoNoGo(true);
+    try {
+      const res = await apiClient.post(`/marketing/tenders/${tenderId}/submit-go-no-go`, directPayload);
+      message.success(res.data?.message || 'Tender berhasil diajukan untuk GO / NO GO review');
+      
+      const updatedData = {
+        stage: 'WAITING_GO_NO_GO',
+        go_nogo_status: 'PENDING',
+        decisionPack: directPayload,
+        decision_pack: directPayload,
+        goNoGoReview: directPayload,
+        go_nogo_review: directPayload,
+      };
+
+      if (drawerTender && drawerTender.id === tenderId) {
+        setDrawerTender({
+          ...drawerTender,
+          ...updatedData,
+        });
+      }
+
+      updateAllTenderCaches(queryClient, tenderId, updatedData);
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('epms:refetch_all'));
       }
     } catch (err: any) {
       const errMsg = err.response?.data?.message || err.message || 'Gagal mengajukan GO/NO-GO review';
       message.error(errMsg);
+      queryClient.invalidateQueries({ queryKey: ['tenders'] });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('epms:refetch_all'));
+      }
     } finally {
       setIsSubmittingGoNoGo(false);
     }
   };
 
   const handleDirectorDecision = async (tenderId: number, decision: 'GO' | 'NO_GO') => {
+    if (decision === 'NO_GO' && (!goNoGoNotes || !goNoGoNotes.trim())) {
+      message.error('Alasan NO_GO wajib diisi agar Marketing mengetahui hal yang perlu direvisi.');
+      return;
+    }
     setIsSubmittingDecision(true);
     try {
       const payload = { decision, notes: goNoGoNotes.trim() || undefined };
@@ -489,9 +863,6 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
     });
   };
 
-  // Drawer State
-  const [drawerVisible, setDrawerVisible] = useState(false);
-  const [drawerTender, setDrawerTender] = useState<any>(null);
 
   // Modal Upload State (Proposal)
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -604,9 +975,21 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
       return;
     }
 
+    // WAITING_GO_NO_GO is workflow-controlled and cannot be dragged
+    if (sourceColumn === 'WAITING_GO_NO_GO') {
+      message.warning('Tender sedang dalam proses review GO/NO-GO.');
+      return;
+    }
+
     // GO / NO GO Gate Drag Protection
-    if ((sourceColumn === 'LEAD' || sourceColumn === 'WAITING_GO_NO_GO') && destColumn !== 'LEAD' && destColumn !== 'WAITING_GO_NO_GO' && destColumn !== 'LOST' && movedItem.go_nogo_status !== 'GO') {
+    if (sourceColumn === 'LEAD' && destColumn !== 'LEAD' && destColumn !== 'WAITING_GO_NO_GO' && destColumn !== 'LOST' && movedItem.go_nogo_status !== 'GO') {
       message.warning('Tender belum melewati GO/NO GO Gate. Ajukan review terlebih dahulu.');
+      return;
+    }
+
+    // Intercept LEAD -> WAITING_GO_NO_GO to use authoritative Go/No-Go submission
+    if (sourceColumn === 'LEAD' && destColumn === 'WAITING_GO_NO_GO') {
+      handleSubmitGoNoGoReview(movedItem.id);
       return;
     }
     
@@ -1017,8 +1400,7 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
             highlightedTenderId={highlightedTenderId}
             isSuperAdmin={isSuperAdmin}
             onSelectCard={(selected) => {
-              setDrawerTender(selected);
-              setDrawerVisible(true);
+              openTenderDrawer(selected);
             }}
             onOpenEditModal={handleOpenEditModal}
             onConfirmDelete={handleConfirmDelete}
@@ -1222,15 +1604,18 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
         title={<span style={{ fontWeight: 700, fontSize: 16, color: '#0f172a' }}>Detail Proyek</span>}
         placement="right"
         width={480}
-        onClose={() => {
-          setDrawerVisible(false);
-          setDrawerTender(null);
-        }}
+        onClose={closeTenderDrawer}
         open={drawerVisible}
         bodyStyle={{ padding: 0, display: 'flex', flexDirection: 'column', height: '100%', background: '#f8fafc', overflow: 'hidden' }}
         headerStyle={{ borderBottom: '1px solid #e2e8f0', padding: '16px 20px', background: '#ffffff' }}
       >
-        {drawerTender && (
+        {isDrawerLoading && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: 12 }}>
+            <Spin size="large" />
+            <div style={{ fontSize: 13, color: '#64748b' }}>Memuat data tender #{resolvingTenderIdRef.current || ''}...</div>
+          </div>
+        )}
+        {!isDrawerLoading && drawerTender && (
           <TenderActivityStream 
             tenderId={drawerTender.id}
             tender={drawerTender}
@@ -1449,37 +1834,42 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
                   </div>
                 )}
 
-                {isDirectorOrExec && drawerTender.stage === 'WAITING_GO_NO_GO' && (drawerTender.go_nogo_status === 'PENDING' || !drawerTender.go_nogo_status) && (
+                {/* CASE C: DISCOUNT APPROVAL */}
+                {isDirectorOrExec && drawerTender.status === 'PENDING_APPROVAL' && (
                   <div style={{ 
                     marginBottom: 16, 
-                    background: '#ffffff', 
+                    background: '#fff7ed', 
                     padding: '16px', 
                     borderRadius: 12, 
-                    border: '1px solid #cbd5e1',
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)' 
+                    border: '1px solid #fed7aa',
+                    boxShadow: '0 2px 8px rgba(194, 65, 12, 0.06)' 
                   }}>
-                    <Text strong style={{ color: '#0f172a', fontSize: 14, display: 'block', marginBottom: 8 }}>
-                      GO / NO-GO REVIEW (DECISION EXECUTIVE)
+                    <Text strong style={{ color: '#c2410c', fontSize: 14, display: 'block', marginBottom: 8 }}>
+                      PERSETUJUAN DISKON (DISCOUNT APPROVAL)
                     </Text>
                     
-                    <div style={{ fontSize: 12, color: '#475569', marginBottom: 12, background: '#f8fafc', padding: '10px 12px', borderRadius: 8, border: '1px solid #f1f5f9' }}>
+                    <div style={{ fontSize: 12, color: '#475569', marginBottom: 12, background: '#ffffff', padding: '10px 12px', borderRadius: 8, border: '1px solid #ffedd5' }}>
                       <div><strong>Tender:</strong> {drawerTender.title}</div>
                       <div><strong>Customer:</strong> {drawerTender.customer?.name || `Client ID: ${drawerTender.customer_id}`}</div>
-                      <div><strong>Value:</strong> Rp {(Number(drawerTender.estimated_budget) || 0).toLocaleString('id-ID')}</div>
-                      <div><strong>Risk / Priority:</strong> <Tag color={getPriorityColor(drawerTender.priority)} style={{ fontSize: 10 }}>{drawerTender.priority || 'MEDIUM'}</Tag></div>
-                      <div><strong>Recommendation / Notes:</strong> {drawerTender.notes || '-'}</div>
+                      <div><strong>Budget Awal:</strong> Rp {Number(drawerTender.estimated_budget != null && !isNaN(Number(drawerTender.estimated_budget)) ? drawerTender.estimated_budget : 0).toLocaleString('id-ID')}</div>
+                      <div><strong>Harga Negosiasi:</strong> Rp {Number(drawerTender.negotiated_price != null && !isNaN(Number(drawerTender.negotiated_price)) ? drawerTender.negotiated_price : 0).toLocaleString('id-ID')}</div>
+                      {drawerTender.estimated_budget && drawerTender.negotiated_price && (
+                        <div style={{ marginTop: 4 }}>
+                          <strong>Diskon Diajukan:</strong> {(((Number(drawerTender.estimated_budget) - Number(drawerTender.negotiated_price)) / Number(drawerTender.estimated_budget)) * 100).toFixed(1)}% <Tag color="orange" style={{ fontSize: 10, marginLeft: 4 }}>Batas Wewenang: {drawerTender.max_discount_rate || 20}%</Tag>
+                        </div>
+                      )}
                     </div>
 
                     <div style={{ marginBottom: 12 }}>
                       <Text type="secondary" style={{ fontSize: 11, fontWeight: 600, display: 'block', marginBottom: 4 }}>
-                        Catatan Pertimbangan (Opsional):
+                        Catatan Persetujuan Diskon (Opsional):
                       </Text>
                       <TextArea 
                         rows={2} 
-                        placeholder="Berikan alasan atau catatan keputusan GO / NO-GO..."
-                        value={goNoGoNotes}
-                        onChange={(e) => setGoNoGoNotes(e.target.value)}
-                        disabled={isSubmittingDecision}
+                        placeholder="Berikan alasan atau catatan persetujuan/penolakan diskon..."
+                        value={discountNotes}
+                        onChange={(e) => setDiscountNotes(e.target.value)}
+                        disabled={isSubmittingDiscount}
                         style={{ borderRadius: 6 }}
                       />
                     </div>
@@ -1488,26 +1878,527 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
                       <Button 
                         danger 
                         size="small" 
-                        loading={isSubmittingDecision}
-                        onClick={() => handleDirectorDecision(drawerTender.id, 'NO_GO')}
+                        loading={isSubmittingDiscount}
+                        onClick={() => handleDiscountDecision(drawerTender.id, false)}
                         style={{ borderRadius: 6, fontWeight: 600 }}
                       >
-                        REJECT NO_GO
+                        Tolak Diskon
                       </Button>
                       <Button 
                         type="primary" 
                         size="small" 
-                        loading={isSubmittingDecision}
-                        onClick={() => handleDirectorDecision(drawerTender.id, 'GO')}
+                        loading={isSubmittingDiscount}
+                        onClick={() => handleDiscountDecision(drawerTender.id, true)}
                         style={{ background: '#16a34a', borderColor: '#16a34a', borderRadius: 6, fontWeight: 600 }}
                       >
-                        APPROVE GO
+                        Setujui Diskon
                       </Button>
                     </div>
                   </div>
                 )}
 
-                {isMarketing && drawerTender.stage === 'LEAD' && (drawerTender.go_nogo_status === 'PENDING' || !drawerTender.go_nogo_status) && drawerTender.go_nogo_status !== 'GO' && drawerTender.go_nogo_status !== 'NO_GO' && (
+                {isDirectorOrExec && (drawerAction === 'go-nogo' || drawerTender.stage === 'WAITING_GO_NO_GO') && (drawerTender.go_nogo_status === 'PENDING' || !drawerTender.go_nogo_status) && (() => {
+                  const pack = drawerTender.decisionPack || drawerTender.decision_pack || drawerTender.goNoGoReview || drawerTender.go_nogo_review || null;
+                  const executiveSummary = pack?.executiveSummary || null;
+                  const keyConcerns = Array.isArray(pack?.keyConcerns) ? pack.keyConcerns : null;
+                  const readiness = pack?.readiness || null;
+                  const marketingRecommendation = pack?.marketingRecommendation || pack?.recommendation || null;
+                  const marketingRecommendationReason = pack?.marketingRecommendationReason || pack?.recommendationReason || null;
+                  const submitter = pack?.submittedBy || drawerTender.go_nogo_submitted_by_name || drawerTender.submitted_by_name || drawerTender.submittedByName || null;
+                  const submittedAt = pack?.submittedAt || drawerTender.go_nogo_submitted_at || drawerTender.submitted_at || drawerTender.submittedAt || null;
+
+                  return (
+                    <div style={{ 
+                      marginBottom: 16, 
+                      background: '#ffffff', 
+                      padding: '16px', 
+                      borderRadius: 12, 
+                      border: '1px solid #cbd5e1',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.05)' 
+                    }}>
+                      {/* HEADER */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                        <div style={{
+                          width: 36,
+                          height: 36,
+                          borderRadius: 10,
+                          background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#1d4ed8',
+                          fontSize: 18,
+                          border: '1px solid #bfdbfe',
+                          flexShrink: 0
+                        }}>
+                          <AuditOutlined />
+                        </div>
+                        <div>
+                          <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 15, letterSpacing: 0.2 }}>
+                            GO / NO-GO EXECUTIVE REVIEW
+                          </div>
+                          <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 1 }}>
+                            Review Executive Decision Pack yang diajukan oleh Marketing.
+                          </div>
+                        </div>
+                      </div>
+                      
+                      {/* PROJECT SUMMARY CARD */}
+                      <div style={{
+                        marginBottom: 14,
+                        background: '#f8fafc',
+                        borderRadius: 10,
+                        border: '1px solid #e2e8f0',
+                        padding: '12px 14px',
+                        boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.02)',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13.5, lineHeight: 1.35 }}>
+                              {drawerTender.title}
+                            </div>
+                            <div style={{ fontSize: 12, color: '#475569', marginTop: 2, fontWeight: 500 }}>
+                              {drawerTender.customer?.name || (drawerTender.customer_id ? `Client ID: ${drawerTender.customer_id}` : 'Customer')}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                            {drawerTender.priority && (
+                              <Tag 
+                                color={drawerTender.priority === 'HIGH' ? 'red' : drawerTender.priority === 'MEDIUM' ? 'orange' : 'blue'}
+                                style={{ fontWeight: 600, borderRadius: 4, margin: 0, fontSize: 11 }}
+                              >
+                                {drawerTender.priority}
+                              </Tag>
+                            )}
+                          </div>
+                        </div>
+
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                          gap: 8,
+                          background: '#ffffff',
+                          padding: '8px 12px',
+                          borderRadius: 8,
+                          border: '1px solid #f1f5f9',
+                        }}>
+                          <div>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              Opportunity Value
+                            </div>
+                            <div style={{ fontSize: 12.5, fontWeight: 700, color: '#0f172a', marginTop: 1 }}>
+                              Rp {(Number(drawerTender.estimated_budget) || 0).toLocaleString('id-ID')}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              Bid Deadline
+                            </div>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#334155', marginTop: 1 }}>
+                              {(drawerTender.bid_submission_deadline || drawerTender.submission_deadline)
+                                ? dayjs(drawerTender.bid_submission_deadline || drawerTender.submission_deadline).format('DD MMM YYYY')
+                                : '-'}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              PIC Marketing
+                            </div>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: '#334155', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              {drawerTender.marketing_pic_name || drawerTender.marketingPicName || '-'}
+                            </div>
+                          </div>
+                          {drawerTender.business_sector && (
+                            <div>
+                              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                                Sector
+                              </div>
+                              <div style={{ fontSize: 12, fontWeight: 500, color: '#475569', marginTop: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {drawerTender.business_sector}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* SECTION 1 — RINGKASAN EKSEKUTIF */}
+                      {executiveSummary && (
+                        <div style={{
+                          background: '#ffffff',
+                          borderRadius: 10,
+                          border: '1px solid #e2e8f0',
+                          padding: '12px 14px',
+                          marginBottom: 12,
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: '50%',
+                              background: '#eff6ff',
+                              color: '#2563eb',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '1px solid #bfdbfe'
+                            }}>1</span>
+                            <span style={{ fontWeight: 700, fontSize: 12.5, color: '#0f172a' }}>
+                              Ringkasan Eksekutif
+                            </span>
+                          </div>
+                          <div style={{
+                            fontSize: 12.5,
+                            color: '#1e293b',
+                            background: '#f8fafc',
+                            padding: '10px 12px',
+                            borderRadius: 6,
+                            border: '1px solid #e2e8f0',
+                            borderLeft: '3px solid #2563eb',
+                            lineHeight: 1.55,
+                            marginLeft: 28,
+                          }}>
+                            {executiveSummary}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* SECTION 2 — CONCERN UTAMA */}
+                      {keyConcerns && keyConcerns.length > 0 && (
+                        <div style={{
+                          background: '#ffffff',
+                          borderRadius: 10,
+                          border: '1px solid #e2e8f0',
+                          padding: '12px 14px',
+                          marginBottom: 12,
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: '50%',
+                              background: '#fffbeb',
+                              color: '#b45309',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '1px solid #fde68a'
+                            }}>2</span>
+                            <span style={{ fontWeight: 700, fontSize: 12.5, color: '#0f172a' }}>
+                              Concern Utama
+                            </span>
+                          </div>
+
+                          <div style={{ marginLeft: 28 }}>
+                            {keyConcerns[0] === 'Tidak ada concern material' ? (
+                              <div style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: 6,
+                                padding: '5px 12px',
+                                background: '#f8fafc',
+                                border: '1px solid #e2e8f0',
+                                borderRadius: 6,
+                                fontSize: 12,
+                                color: '#475569',
+                                fontWeight: 500
+                              }}>
+                                <CheckCircleOutlined style={{ color: '#16a34a' }} />
+                                <span>Tidak ada concern material</span>
+                              </div>
+                            ) : (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                                {keyConcerns.slice(0, 3).map((concern: string, idx: number) => (
+                                  <div key={idx} style={{
+                                    display: 'flex',
+                                    alignItems: 'flex-start',
+                                    gap: 8,
+                                    fontSize: 12.5,
+                                    color: '#334155',
+                                    background: '#f8fafc',
+                                    padding: '6px 10px',
+                                    borderRadius: 6,
+                                    border: '1px solid #f1f5f9'
+                                  }}>
+                                    <span style={{ fontWeight: 700, color: '#b45309', minWidth: 16 }}>{idx + 1}.</span>
+                                    <span style={{ lineHeight: 1.45 }}>{concern}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* SECTION 3 — KESIAPAN OPPORTUNITY */}
+                      {readiness && (
+                        <div style={{
+                          background: '#ffffff',
+                          borderRadius: 10,
+                          border: '1px solid #e2e8f0',
+                          padding: '12px 14px',
+                          marginBottom: 12,
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                            <span style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: '50%',
+                              background: '#f0fdf4',
+                              color: '#15803d',
+                              fontSize: 11,
+                              fontWeight: 700,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              border: '1px solid #bbf7d0'
+                            }}>3</span>
+                            <span style={{ fontWeight: 700, fontSize: 12.5, color: '#0f172a' }}>
+                              Kesiapan Opportunity
+                            </span>
+                          </div>
+
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+                            gap: 8,
+                            marginLeft: 28,
+                          }}>
+                            {/* CARD A: Customer Requirement */}
+                            <div style={{
+                              background: '#f8fafc',
+                              borderRadius: 8,
+                              border: '1px solid #e2e8f0',
+                              padding: '8px 10px',
+                            }}>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: '#1e293b' }}>
+                                Kebutuhan Customer
+                              </div>
+                              <div style={{ fontSize: 10, color: '#64748b', marginBottom: 6 }}>
+                                (Customer Requirement)
+                              </div>
+                              <Tag
+                                color={
+                                  readiness.customerRequirement === 'CLEAR' ? 'success' :
+                                  readiness.customerRequirement === 'PARTIAL' ? 'warning' : 'error'
+                                }
+                                style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}
+                              >
+                                {readiness.customerRequirement}
+                              </Tag>
+                            </div>
+
+                            {/* CARD B: Commercial Information */}
+                            <div style={{
+                              background: '#f8fafc',
+                              borderRadius: 8,
+                              border: '1px solid #e2e8f0',
+                              padding: '8px 10px',
+                            }}>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: '#1e293b' }}>
+                                Informasi Komersial
+                              </div>
+                              <div style={{ fontSize: 10, color: '#64748b', marginBottom: 6 }}>
+                                (Commercial Information)
+                              </div>
+                              <Tag
+                                color={
+                                  readiness.commercialInformation === 'READY' ? 'success' :
+                                  readiness.commercialInformation === 'PARTIAL' ? 'warning' : 'error'
+                                }
+                                style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}
+                              >
+                                {readiness.commercialInformation}
+                              </Tag>
+                            </div>
+
+                            {/* CARD C: Timeline */}
+                            <div style={{
+                              background: '#f8fafc',
+                              borderRadius: 8,
+                              border: '1px solid #e2e8f0',
+                              padding: '8px 10px',
+                            }}>
+                              <div style={{ fontSize: 11, fontWeight: 600, color: '#1e293b' }}>
+                                Timeline Proyek
+                              </div>
+                              <div style={{ fontSize: 10, color: '#64748b', marginBottom: 6 }}>
+                                (Project Schedule)
+                              </div>
+                              <Tag
+                                color={readiness.timeline === 'FEASIBLE' ? 'success' : 'error'}
+                                style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}
+                              >
+                                {readiness.timeline}
+                              </Tag>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* SECTION 4 — REKOMENDASI MARKETING */}
+                      {(() => {
+                        const rec = marketingRecommendation;
+                        const reason = marketingRecommendationReason;
+                        if (!rec && !reason) return null;
+                        return (
+                          <div style={{
+                            background: '#ffffff',
+                            borderRadius: 10,
+                            border: '1px solid #e2e8f0',
+                            padding: '12px 14px',
+                            marginBottom: 12,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                              <span style={{
+                                width: 20,
+                                height: 20,
+                                borderRadius: '50%',
+                                background: '#f5f3ff',
+                                color: '#7c3aed',
+                                fontSize: 11,
+                                fontWeight: 700,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                border: '1px solid #ddd6fe'
+                              }}>4</span>
+                              <span style={{ fontWeight: 700, fontSize: 12.5, color: '#0f172a' }}>
+                                Rekomendasi Marketing
+                              </span>
+                            </div>
+
+                            <div style={{ marginLeft: 28, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {rec && (
+                                <div>
+                                  <Tag 
+                                    color={rec === 'GO' ? 'success' : 'warning'}
+                                    style={{ fontWeight: 700, fontSize: 12, padding: '2px 10px', borderRadius: 4, margin: 0 }}
+                                  >
+                                    {rec === 'GO' ? 'GO — LANJUTKAN' : 'REVIEW — PERLU TINJAUAN KHUSUS'}
+                                  </Tag>
+                                </div>
+                              )}
+                              {reason && (
+                                <div style={{
+                                  background: '#f8fafc',
+                                  padding: '8px 12px',
+                                  borderRadius: 6,
+                                  border: '1px solid #f1f5f9',
+                                  fontSize: 12,
+                                  color: '#334155',
+                                  fontStyle: 'italic',
+                                  lineHeight: 1.5
+                                }}>
+                                  "{reason}"
+                                </div>
+                              )}
+                              <div style={{
+                                fontSize: 11,
+                                color: '#64748b',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 6
+                              }}>
+                                <InfoCircleOutlined style={{ color: '#3b82f6', fontSize: 12 }} />
+                                <span>Rekomendasi ini bersifat advisory dari Marketing. Keputusan final GO / NO-GO sepenuhnya berada pada Direksi.</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* LEGACY FALLBACK: If no decisionPack, show notes if present */}
+                      {!pack && drawerTender.notes && (
+                        <div style={{
+                          background: '#ffffff',
+                          borderRadius: 10,
+                          border: '1px solid #e2e8f0',
+                          padding: '12px 14px',
+                          marginBottom: 12,
+                        }}>
+                          <div style={{ fontWeight: 700, fontSize: 12, color: '#475569', marginBottom: 6 }}>
+                            Catatan / Notes Pengajuan
+                          </div>
+                          <div style={{ fontSize: 12, color: '#334155', background: '#f8fafc', padding: '8px 12px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                            "{drawerTender.notes}"
+                          </div>
+                        </div>
+                      )}
+
+                      {/* SUBMISSION METADATA */}
+                      {(submitter || submittedAt) && (
+                        <div style={{
+                          background: '#f8fafc',
+                          borderRadius: 8,
+                          border: '1px solid #e2e8f0',
+                          padding: '8px 12px',
+                          marginBottom: 14,
+                          fontSize: 11.5,
+                          color: '#475569',
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          justifyContent: 'space-between',
+                          gap: 6
+                        }}>
+                          {submitter && (
+                            <div><strong>Diajukan oleh:</strong> {submitter}</div>
+                          )}
+                          {submittedAt && (
+                            <div><strong>Diajukan pada:</strong> {dayjs(submittedAt).format('DD MMM YYYY, HH:mm')}</div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* DIRECTOR DECISION SECTION */}
+                      <div style={{
+                        background: '#ffffff',
+                        borderRadius: 10,
+                        border: '1px solid #cbd5e1',
+                        padding: '14px',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.04)'
+                      }}>
+                        <Text style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.5, display: 'block', marginBottom: 6, color: '#334155', textTransform: 'uppercase' }}>
+                          CATATAN KEPUTUSAN DIRECTOR
+                        </Text>
+                        <TextArea 
+                          rows={2} 
+                          placeholder="Berikan alasan atau catatan keputusan GO / NO-GO..."
+                          value={goNoGoNotes}
+                          onChange={(e) => setGoNoGoNotes(e.target.value)}
+                          disabled={isSubmittingDecision}
+                          style={{ borderRadius: 6, marginBottom: 12, fontSize: 13 }}
+                        />
+
+                        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                          <Button 
+                            danger 
+                            size="middle" 
+                            loading={isSubmittingDecision}
+                            onClick={() => handleDirectorDecision(drawerTender.id, 'NO_GO')}
+                            style={{ borderRadius: 6, fontWeight: 600 }}
+                          >
+                            REJECT NO_GO
+                          </Button>
+                          <Button 
+                            type="primary" 
+                            size="middle" 
+                            loading={isSubmittingDecision}
+                            onClick={() => handleDirectorDecision(drawerTender.id, 'GO')}
+                            style={{ background: '#16a34a', borderColor: '#16a34a', borderRadius: 6, fontWeight: 600 }}
+                          >
+                            APPROVE GO
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {isMarketing && drawerTender.stage === 'LEAD' && drawerTender.go_nogo_status !== 'GO' && (
                   <div style={{ 
                     marginBottom: 16, 
                     background: '#eff6ff', 
@@ -1520,17 +2411,27 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
                     boxShadow: '0 2px 6px rgba(59,130,246,0.06)'
                   }}>
                     <div>
-                      <Text strong style={{ color: '#1d4ed8', display: 'block', fontSize: 13 }}>GO / NO GO Gate Review</Text>
-                      <Text style={{ fontSize: 11, color: '#3b82f6' }}>Ajukan tender ini ke Direksi untuk review keputusan.</Text>
+                      <Text strong style={{ color: '#1d4ed8', display: 'block', fontSize: 13 }}>
+                        {drawerTender.go_nogo_status === 'NO_GO' || drawerTender.revision_status === 'REQUIRED'
+                          ? 'Revisi GO / NO GO Review'
+                          : 'GO / NO GO Gate Review'}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#3b82f6' }}>
+                        {drawerTender.go_nogo_status === 'NO_GO' || drawerTender.revision_status === 'REQUIRED'
+                          ? 'Perbarui Executive Decision Pack dan ajukan kembali ke Direksi.'
+                          : 'Lengkapi Executive Decision Pack dan ajukan tender ke Direksi.'}
+                      </Text>
                     </div>
                     <Button 
                       type="primary" 
                       size="small" 
                       loading={isSubmittingGoNoGo}
-                      onClick={() => handleSubmitGoNoGoReview(drawerTender.id)}
+                      onClick={() => handleOpenGoNoGoSubmitModal(drawerTender)}
                       style={{ background: '#2563eb', borderColor: '#2563eb', borderRadius: 6, fontWeight: 600 }}
                     >
-                      Ajukan Review
+                      {drawerTender.go_nogo_status === 'NO_GO' || drawerTender.revision_status === 'REQUIRED'
+                        ? 'Ajukan Ulang'
+                        : 'Ajukan Review'}
                     </Button>
                   </div>
                 )}
@@ -1574,6 +2475,516 @@ export const KanbanBoard = ({ tenders, onStageChange }: { tenders: any[], onStag
           />
         )}
       </Drawer>
+
+      {/* Modal Pengajuan GO / NO-GO Review (Executive Decision Pack V1.1 Premium) */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              background: 'linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#1d4ed8',
+              fontSize: 18,
+              border: '1px solid #bfdbfe',
+              flexShrink: 0
+            }}>
+              <AuditOutlined />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 16, lineHeight: 1.25 }}>
+                Pengajuan GO / NO-GO Review
+              </div>
+              <div style={{ fontSize: 12, color: '#64748b', marginTop: 3 }}>
+                Lengkapi informasi berikut sebelum diajukan ke Direksi.
+              </div>
+            </div>
+          </div>
+        }
+        open={isGoNoGoSubmitModalVisible}
+        onCancel={() => {
+          setIsGoNoGoSubmitModalVisible(false);
+          setGoNoGoSubmittingTender(null);
+        }}
+        footer={
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '12px 22px',
+            borderTop: '1px solid #f1f5f9',
+            background: '#ffffff',
+          }}>
+            <Button
+              onClick={() => {
+                setIsGoNoGoSubmitModalVisible(false);
+                setGoNoGoSubmittingTender(null);
+              }}
+              disabled={isSubmittingGoNoGo}
+              style={{ borderRadius: 6, fontWeight: 500 }}
+            >
+              Batal
+            </Button>
+            <Button
+              type="primary"
+              onClick={handleConfirmGoNoGoSubmit}
+              loading={isSubmittingGoNoGo}
+              style={{
+                borderRadius: 6,
+                fontWeight: 600,
+                background: '#2563eb',
+                borderColor: '#2563eb',
+                boxShadow: '0 1px 2px 0 rgba(37, 99, 235, 0.2)'
+              }}
+            >
+              Ajukan ke Direksi
+            </Button>
+          </div>
+        }
+        width={720}
+        style={{ top: 20, maxWidth: 'calc(100vw - 32px)', paddingBottom: 0 }}
+        styles={{
+          content: {
+            padding: 0,
+            borderRadius: 14,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            maxHeight: 'calc(100vh - 40px)',
+            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)',
+            border: '1px solid #e2e8f0',
+          },
+          header: {
+            padding: '16px 22px',
+            margin: 0,
+            borderBottom: '1px solid #f1f5f9',
+            background: '#ffffff',
+          },
+          body: {
+            padding: '20px 22px',
+            overflowY: 'auto',
+            maxHeight: 'calc(100vh - 165px)',
+            flex: 1,
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#cbd5e1 transparent',
+          },
+          footer: {
+            margin: 0,
+            padding: 0,
+          }
+        }}
+        destroyOnClose
+      >
+        {/* PROJECT SUMMARY CARD */}
+        {goNoGoSubmittingTender && (
+          <div style={{
+            marginBottom: 16,
+            background: '#f8fafc',
+            borderRadius: 10,
+            border: '1px solid #e2e8f0',
+            padding: '14px 16px',
+            boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.02)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+              <div>
+                <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 14, lineHeight: 1.35 }}>
+                  {goNoGoSubmittingTender.title}
+                </div>
+                <div style={{ fontSize: 12, color: '#475569', marginTop: 3, fontWeight: 500 }}>
+                  {goNoGoSubmittingTender.customer?.name || (goNoGoSubmittingTender.customer_id ? `Client ID: ${goNoGoSubmittingTender.customer_id}` : 'Customer')}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                {goNoGoSubmittingTender.priority && (
+                  <Tag 
+                    color={
+                      goNoGoSubmittingTender.priority === 'HIGH' ? 'red' : 
+                      goNoGoSubmittingTender.priority === 'MEDIUM' ? 'orange' : 'blue'
+                    }
+                    style={{ fontWeight: 600, borderRadius: 4, margin: 0, fontSize: 11 }}
+                  >
+                    {goNoGoSubmittingTender.priority}
+                  </Tag>
+                )}
+              </div>
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 12,
+              background: '#ffffff',
+              padding: '10px 14px',
+              borderRadius: 8,
+              border: '1px solid #f1f5f9',
+            }}>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Estimasi Nilai
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginTop: 2 }}>
+                  Rp {(Number(goNoGoSubmittingTender.estimated_budget) || 0).toLocaleString('id-ID')}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Bid Deadline
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#334155', marginTop: 2 }}>
+                  {goNoGoSubmittingTender.bid_submission_deadline ? dayjs(goNoGoSubmittingTender.bid_submission_deadline).format('DD MMM YYYY') : '-'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                  Stage Saat Ini
+                </div>
+                <div style={{ marginTop: 2 }}>
+                  <Tag color="geekblue" style={{ fontWeight: 600, borderRadius: 4, margin: 0, fontSize: 11 }}>
+                    {goNoGoSubmittingTender.stage || 'LEAD'}
+                  </Tag>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <Form form={goNoGoSubmitForm} layout="vertical">
+          {/* SECTION 1 — RINGKASAN EKSEKUTIF */}
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 10,
+            border: '1px solid #e2e8f0',
+            padding: '14px 16px',
+            marginBottom: 14,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: '#eff6ff',
+                color: '#2563eb',
+                fontSize: 11,
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid #bfdbfe'
+              }}>1</span>
+              <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
+                Ringkasan Eksekutif <span style={{ color: '#ef4444' }}>*</span>
+              </span>
+            </div>
+            <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 10, paddingLeft: 28 }}>
+              Jelaskan secara singkat mengapa opportunity ini layak dilanjutkan ke tahap berikutnya.
+            </div>
+            <Form.Item
+              name="executiveSummary"
+              rules={[{ required: true, message: 'Ringkasan eksekutif wajib diisi' }]}
+              style={{ marginBottom: 0, paddingLeft: 28 }}
+            >
+              <TextArea
+                rows={3}
+                showCount
+                maxLength={500}
+                placeholder="Contoh: Opportunity bernilai strategis dengan repeat customer BUMN dan margin 18%."
+                style={{ borderRadius: 6, fontSize: 13 }}
+              />
+            </Form.Item>
+          </div>
+
+          {/* SECTION 2 — CONCERN UTAMA */}
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 10,
+            border: '1px solid #e2e8f0',
+            padding: '14px 16px',
+            marginBottom: 14,
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: '50%',
+                  background: '#fffbeb',
+                  color: '#b45309',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: '1px solid #fde68a'
+                }}>2</span>
+                <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
+                  Concern Utama (Maksimal 3) <span style={{ color: '#ef4444' }}>*</span>
+                </span>
+              </div>
+              <Checkbox 
+                checked={noMaterialConcern} 
+                onChange={handleToggleNoMaterialConcern}
+                style={{ fontSize: 12, color: '#475569' }}
+              >
+                Tidak ada concern material
+              </Checkbox>
+            </div>
+            <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 10, paddingLeft: 28 }}>
+              Risiko / concern yang perlu diketahui manajemen sekarang.
+            </div>
+
+            <div style={{ paddingLeft: 28 }}>
+              <Form.Item
+                name="concern1"
+                rules={[
+                  {
+                    validator: async (_, value) => {
+                      if (noMaterialConcern) return Promise.resolve();
+                      if (!value || !value.trim()) {
+                        return Promise.reject(new Error('Concern 1 wajib diisi (atau centang Tidak ada concern material)'));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+                style={{ marginBottom: 8 }}
+              >
+                <Input
+                  disabled={noMaterialConcern}
+                  prefix={<span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', marginRight: 4 }}>1</span>}
+                  placeholder="Concern 1 (Contoh: Timeline delivery 3 bulan cukup ketat)"
+                  style={{ borderRadius: 6, fontSize: 13 }}
+                />
+              </Form.Item>
+              <Form.Item name="concern2" style={{ marginBottom: 8 }}>
+                <Input
+                  disabled={noMaterialConcern}
+                  prefix={<span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', marginRight: 4 }}>2</span>}
+                  placeholder="Concern 2 (Opsional)"
+                  style={{ borderRadius: 6, fontSize: 13 }}
+                />
+              </Form.Item>
+              <Form.Item name="concern3" style={{ marginBottom: 0 }}>
+                <Input
+                  disabled={noMaterialConcern}
+                  prefix={<span style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', marginRight: 4 }}>3</span>}
+                  placeholder="Concern 3 (Opsional)"
+                  style={{ borderRadius: 6, fontSize: 13 }}
+                />
+              </Form.Item>
+            </div>
+          </div>
+
+          {/* SECTION 3 — KESIAPAN OPPORTUNITY (READINESS) */}
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 10,
+            border: '1px solid #e2e8f0',
+            padding: '14px 16px',
+            marginBottom: 14,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: '#f0fdf4',
+                color: '#15803d',
+                fontSize: 11,
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid #bbf7d0'
+              }}>3</span>
+              <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
+                Kesiapan Opportunity (Readiness) <span style={{ color: '#ef4444' }}>*</span>
+              </span>
+            </div>
+            <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 12, paddingLeft: 28 }}>
+              Status kesiapan berdasarkan penilaian tim Marketing.
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
+              gap: 10,
+              paddingLeft: 28,
+            }}>
+              {/* CARD A */}
+              <div style={{
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+                padding: '10px 12px',
+              }}>
+                <div style={{ fontWeight: 600, fontSize: 12, color: '#1e293b' }}>
+                  Kebutuhan Customer
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+                  (Customer Requirement)
+                </div>
+                <Form.Item
+                  name="customerRequirement"
+                  rules={[{ required: true, message: 'Pilih kesiapan kebutuhan customer' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Radio.Group buttonStyle="solid" size="small" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <Radio.Button value="CLEAR" style={{ borderRadius: 4, textAlign: 'center', fontSize: 11.5, fontWeight: 500 }}>CLEAR (Jelas)</Radio.Button>
+                    <Radio.Button value="PARTIAL" style={{ borderRadius: 4, textAlign: 'center', fontSize: 11.5, fontWeight: 500 }}>PARTIAL (Sebagian)</Radio.Button>
+                    <Radio.Button value="UNCLEAR" style={{ borderRadius: 4, textAlign: 'center', fontSize: 11.5, fontWeight: 500 }}>UNCLEAR (Belum Jelas)</Radio.Button>
+                  </Radio.Group>
+                </Form.Item>
+              </div>
+
+              {/* CARD B */}
+              <div style={{
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+                padding: '10px 12px',
+              }}>
+                <div style={{ fontWeight: 600, fontSize: 12, color: '#1e293b' }}>
+                  Informasi Komersial
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+                  (Commercial Information)
+                </div>
+                <Form.Item
+                  name="commercialInformation"
+                  rules={[{ required: true, message: 'Pilih kesiapan informasi komersial' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Radio.Group buttonStyle="solid" size="small" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <Radio.Button value="READY" style={{ borderRadius: 4, textAlign: 'center', fontSize: 11.5, fontWeight: 500 }}>READY (Siap)</Radio.Button>
+                    <Radio.Button value="PARTIAL" style={{ borderRadius: 4, textAlign: 'center', fontSize: 11.5, fontWeight: 500 }}>PARTIAL (Sebagian)</Radio.Button>
+                    <Radio.Button value="NOT_READY" style={{ borderRadius: 4, textAlign: 'center', fontSize: 11.5, fontWeight: 500 }}>NOT_READY (Belum Siap)</Radio.Button>
+                  </Radio.Group>
+                </Form.Item>
+              </div>
+
+              {/* CARD C */}
+              <div style={{
+                background: '#f8fafc',
+                borderRadius: 8,
+                border: '1px solid #e2e8f0',
+                padding: '10px 12px',
+              }}>
+                <div style={{ fontWeight: 600, fontSize: 12, color: '#1e293b' }}>
+                  Timeline Proyek
+                </div>
+                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8 }}>
+                  (Project Schedule)
+                </div>
+                <Form.Item
+                  name="timeline"
+                  rules={[{ required: true, message: 'Pilih kesiapan timeline' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Radio.Group buttonStyle="solid" size="small" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <Radio.Button value="FEASIBLE" style={{ borderRadius: 4, textAlign: 'center', fontSize: 11.5, fontWeight: 500 }}>FEASIBLE (Layak)</Radio.Button>
+                    <Radio.Button value="AT_RISK" style={{ borderRadius: 4, textAlign: 'center', fontSize: 11.5, fontWeight: 500 }}>AT_RISK (Berisiko)</Radio.Button>
+                  </Radio.Group>
+                </Form.Item>
+              </div>
+            </div>
+          </div>
+
+          {/* SECTION 4 — REKOMENDASI MARKETING */}
+          <div style={{
+            background: '#ffffff',
+            borderRadius: 10,
+            border: '1px solid #e2e8f0',
+            padding: '14px 16px',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <span style={{
+                width: 20,
+                height: 20,
+                borderRadius: '50%',
+                background: '#f5f3ff',
+                color: '#7c3aed',
+                fontSize: 11,
+                fontWeight: 700,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: '1px solid #ddd6fe'
+              }}>4</span>
+              <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
+                Rekomendasi Marketing <span style={{ color: '#ef4444' }}>*</span>
+              </span>
+            </div>
+            <div style={{ fontSize: 11.5, color: '#64748b', marginBottom: 12, paddingLeft: 28 }}>
+              Rekomendasi tim Marketing untuk pertimbangan Direksi.
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '200px 1fr',
+              gap: 16,
+              paddingLeft: 28,
+            }}>
+              <div>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+                  Rekomendasi
+                </div>
+                <Form.Item
+                  name="marketingRecommendation"
+                  rules={[{ required: true, message: 'Pilih rekomendasi marketing' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <Radio.Group buttonStyle="solid" size="middle" style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <Radio.Button value="GO" style={{ borderRadius: 6, textAlign: 'center', fontWeight: 600, color: '#166534' }}>
+                      GO (Lanjutkan)
+                    </Radio.Button>
+                    <Radio.Button value="REVIEW" style={{ borderRadius: 6, textAlign: 'center', fontWeight: 600, color: '#b45309' }}>
+                      REVIEW (Perlu Tinjauan)
+                    </Radio.Button>
+                  </Radio.Group>
+                </Form.Item>
+              </div>
+
+              <div>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: '#334155', marginBottom: 6 }}>
+                  Alasan Rekomendasi <span style={{ color: '#ef4444' }}>*</span>
+                </div>
+                <Form.Item
+                  name="marketingRecommendationReason"
+                  rules={[{ required: true, message: 'Alasan rekomendasi marketing wajib diisi' }]}
+                  style={{ marginBottom: 0 }}
+                >
+                  <TextArea
+                    rows={3}
+                    placeholder="Contoh: Opportunity layak dilanjutkan karena customer kredibel dan budget siap."
+                    style={{ borderRadius: 6, fontSize: 13 }}
+                  />
+                </Form.Item>
+              </div>
+            </div>
+
+            <div style={{
+              marginTop: 12,
+              marginLeft: 28,
+              padding: '8px 12px',
+              background: '#f8fafc',
+              borderRadius: 6,
+              border: '1px solid #f1f5f9',
+              fontSize: 11,
+              color: '#64748b',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6
+            }}>
+              <InfoCircleOutlined style={{ color: '#3b82f6', fontSize: 12 }} />
+              <span>Rekomendasi ini bersifat advisory untuk pertimbangan Direksi. Keputusan final GO / NO-GO sepenuhnya diputuskan oleh Direksi.</span>
+            </div>
+          </div>
+        </Form>
+      </Modal>
 
       {/* Modal Edit Tender */}
       <Modal

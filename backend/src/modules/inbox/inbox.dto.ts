@@ -17,6 +17,11 @@ export class TodoReadModelDto {
   dueAt?: string;
   createdAt: string;
   updatedAt?: string;
+  projectName?: string;
+  customerName?: string;
+  submittedByName?: string;
+  returnedByName?: string;
+  returnReason?: string;
 }
 
 export class InboxSummaryDto {

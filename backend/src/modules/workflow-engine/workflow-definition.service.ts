@@ -52,6 +52,7 @@ export class WorkflowDefinitionService implements OnModuleInit {
 
   async onModuleInit() {
     await this.ensureProjectGovernanceWorkflow();
+    await this.ensureTenderGoNoGoWorkflow();
   }
 
   async createDefinition(dto: CreateWorkflowDefinitionDto, userId?: number): Promise<WorkflowDefinition> {
@@ -549,6 +550,139 @@ export class WorkflowDefinitionService implements OnModuleInit {
       }
     } catch (err) {
       this.logger.warn(`ensureProjectGovernanceWorkflow warning: ${err.message}`);
+      return null;
+    }
+  }
+
+  async ensureTenderGoNoGoWorkflow(): Promise<WorkflowDefinition | null> {
+    try {
+      const existing = await this.definitionRepo.findOne({
+        where: { workflowKey: 'TENDER_GO_NOGO_WORKFLOW' },
+        relations: ['versions'],
+      });
+
+      const bpmnJson = {
+        entityType: 'TENDER',
+        nodes: [
+          {
+            id: 'node_start',
+            type: 'customNode',
+            position: { x: 100, y: 200 },
+            data: {
+              type: 'START',
+              role: 'MARKETING',
+              label: 'Submit Go/No-Go',
+            },
+          },
+          {
+            id: 'node_go_nogo_approval',
+            type: 'customNode',
+            position: { x: 350, y: 200 },
+            data: {
+              type: 'TASK',
+              taskKey: 'GO_NOGO_APPROVAL',
+              role: 'DIRECTOR',
+              candidateRoles: ['DIRECTOR', 'GENERAL_MANAGER'],
+              label: 'Persetujuan GO / NO GO',
+            },
+          },
+          {
+            id: 'node_go_nogo_revision',
+            type: 'customNode',
+            position: { x: 350, y: 380 },
+            data: {
+              type: 'TASK',
+              taskKey: 'GO_NOGO_REVISION',
+              role: 'MARKETING',
+              label: 'Revisi GO / NO GO',
+              assigneeContextKey: 'marketing_pic_id',
+              assigneeFallbackContextKey: 'created_by',
+            },
+          },
+          {
+            id: 'node_end',
+            type: 'customNode',
+            position: { x: 650, y: 200 },
+            data: {
+              type: 'END',
+              label: 'Approved (GO)',
+            },
+          },
+        ],
+        edges: [
+          {
+            id: 'e_start_to_approval',
+            source: 'node_start',
+            target: 'node_go_nogo_approval',
+          },
+          {
+            id: 'e_approval_to_end',
+            source: 'node_go_nogo_approval',
+            target: 'node_end',
+            label: 'APPROVE',
+            data: { action: 'APPROVE' },
+          },
+          {
+            id: 'e_approval_to_rev',
+            source: 'node_go_nogo_approval',
+            target: 'node_go_nogo_revision',
+            label: 'RETURN',
+            data: { action: 'RETURN' },
+          },
+          {
+            id: 'e_rev_to_approval',
+            source: 'node_go_nogo_revision',
+            target: 'node_go_nogo_approval',
+            label: 'RESUBMIT',
+            data: { action: 'RESUBMIT' },
+          },
+        ],
+      };
+
+      if (existing && existing.activeVersion && existing.status === 'PUBLISHED') {
+        const v1 = existing.versions?.find((v) => v.version === existing.activeVersion);
+        const approvalNode = v1?.bpmnJson?.nodes?.find((n: any) => n.id === 'node_go_nogo_approval');
+        if (approvalNode?.data?.candidateRoles && Array.isArray(approvalNode.data.candidateRoles)) {
+          return existing;
+        }
+        if (v1) {
+          v1.bpmnJson = bpmnJson;
+          await this.versionRepo.save(v1);
+          return await this.getDefinitionByKey('TENDER_GO_NOGO_WORKFLOW');
+        }
+        return existing;
+      }
+
+      if (!existing) {
+        await this.createDefinition({
+          workflowKey: 'TENDER_GO_NOGO_WORKFLOW',
+          name: 'Tender Go/No-Go Approval Workflow',
+          description: 'Marketing Tender Go/No-Go Approval Workflow (Director Review -> Approve/Return -> Marketing Revision -> Resubmit)',
+          domain: 'MARKETING',
+        });
+        await this.updateVersion('TENDER_GO_NOGO_WORKFLOW', 1, bpmnJson);
+        await this.publishVersion('TENDER_GO_NOGO_WORKFLOW', 1);
+        this.logger.log('Successfully registered and published TENDER_GO_NOGO_WORKFLOW v1.');
+        return await this.getDefinitionByKey('TENDER_GO_NOGO_WORKFLOW');
+      } else {
+        let v1 = existing.versions?.find((v) => v.version === 1);
+        if (!v1) {
+          v1 = await this.createVersion('TENDER_GO_NOGO_WORKFLOW', { bpmnJson });
+        } else {
+          const approvalNode = v1.bpmnJson?.nodes?.find((n: any) => n.id === 'node_go_nogo_approval');
+          if (!approvalNode?.data?.candidateRoles || v1.status !== 'PUBLISHED') {
+            v1.bpmnJson = bpmnJson;
+            await this.versionRepo.save(v1);
+          }
+        }
+        if (v1.status !== 'PUBLISHED') {
+          await this.publishVersion('TENDER_GO_NOGO_WORKFLOW', 1);
+          return await this.getDefinitionByKey('TENDER_GO_NOGO_WORKFLOW');
+        }
+        return await this.getDefinitionByKey('TENDER_GO_NOGO_WORKFLOW');
+      }
+    } catch (err) {
+      this.logger.warn(`ensureTenderGoNoGoWorkflow warning: ${err.message}`);
       return null;
     }
   }

@@ -1883,4 +1883,792 @@ describe('WorkflowEngineService (Phase 3 Core Tests)', () => {
       });
     });
   });
+
+  describe('WF-1: Workflow Engine Core Capability (Entity Lookup & Dynamic Assignee)', () => {
+    describe('Target 1: Entity Lookup (getInstanceByEntity)', () => {
+      it('allows PURCHASE_REQUEST and returns active instance', async () => {
+        const mockInstance = {
+          id: 101,
+          entityType: 'PURCHASE_REQUEST',
+          entityId: 55,
+          status: WorkflowInstanceStatus.IN_PROGRESS,
+        };
+        instanceRepo.findOne = jest.fn().mockResolvedValue(mockInstance);
+
+        const result = await service.getInstanceByEntity('PURCHASE_REQUEST', 55);
+        expect(result).toBe(mockInstance);
+        expect(instanceRepo.findOne).toHaveBeenCalledWith({
+          where: { entityType: 'PURCHASE_REQUEST', entityId: 55, status: WorkflowInstanceStatus.IN_PROGRESS },
+          relations: [
+            'tasks',
+            'tasks.assigneeRole',
+            'transitions',
+            'transitions.actor',
+            'workflowDefinition',
+            'workflowVersion',
+          ],
+          order: { id: 'DESC' },
+        });
+      });
+
+      it('allows PROJECT and returns active instance', async () => {
+        const mockInstance = {
+          id: 102,
+          entityType: 'PROJECT',
+          entityId: 42,
+          status: WorkflowInstanceStatus.IN_PROGRESS,
+        };
+        instanceRepo.findOne = jest.fn().mockResolvedValue(mockInstance);
+
+        const result = await service.getInstanceByEntity('PROJECT', 42);
+        expect(result).toBe(mockInstance);
+        expect(instanceRepo.findOne).toHaveBeenCalledWith({
+          where: { entityType: 'PROJECT', entityId: 42, status: WorkflowInstanceStatus.IN_PROGRESS },
+          relations: [
+            'tasks',
+            'tasks.assigneeRole',
+            'transitions',
+            'transitions.actor',
+            'workflowDefinition',
+            'workflowVersion',
+          ],
+          order: { id: 'DESC' },
+        });
+      });
+
+      it('allows TENDER and returns active instance', async () => {
+        const mockInstance = {
+          id: 103,
+          entityType: 'TENDER',
+          entityId: 77,
+          status: WorkflowInstanceStatus.IN_PROGRESS,
+        };
+        instanceRepo.findOne = jest.fn().mockResolvedValue(mockInstance);
+
+        const result = await service.getInstanceByEntity('TENDER', 77);
+        expect(result).toBe(mockInstance);
+        expect(instanceRepo.findOne).toHaveBeenCalledWith({
+          where: { entityType: 'TENDER', entityId: 77, status: WorkflowInstanceStatus.IN_PROGRESS },
+          relations: [
+            'tasks',
+            'tasks.assigneeRole',
+            'transitions',
+            'transitions.actor',
+            'workflowDefinition',
+            'workflowVersion',
+          ],
+          order: { id: 'DESC' },
+        });
+      });
+
+      it('allows CONTRACT and returns active instance', async () => {
+        const mockInstance = {
+          id: 104,
+          entityType: 'CONTRACT',
+          entityId: 88,
+          status: WorkflowInstanceStatus.IN_PROGRESS,
+        };
+        instanceRepo.findOne = jest.fn().mockResolvedValue(mockInstance);
+
+        const result = await service.getInstanceByEntity('CONTRACT', 88);
+        expect(result).toBe(mockInstance);
+        expect(instanceRepo.findOne).toHaveBeenCalledWith({
+          where: { entityType: 'CONTRACT', entityId: 88, status: WorkflowInstanceStatus.IN_PROGRESS },
+          relations: [
+            'tasks',
+            'tasks.assigneeRole',
+            'transitions',
+            'transitions.actor',
+            'workflowDefinition',
+            'workflowVersion',
+          ],
+          order: { id: 'DESC' },
+        });
+      });
+
+      it('rejects unsupported entity types with BadRequestException', async () => {
+        await expect(service.getInstanceByEntity('INVOICE', 1)).rejects.toThrow(BadRequestException);
+        await expect(service.getInstanceByEntity('PURCHASE_ORDER', 2)).rejects.toThrow(BadRequestException);
+        await expect(service.getInstanceByEntity('VENDOR', 3)).rejects.toThrow(BadRequestException);
+      });
+    });
+
+    describe('Target 2: Dynamic Assignee Resolution & Authorization', () => {
+      const dynamicAssigneeBpmn = {
+        nodes: [
+          { id: 'node_start', type: 'customNode', data: { label: 'Start', type: 'START' } },
+          {
+            id: 'node_marketing_review',
+            type: 'customNode',
+            data: {
+              label: 'Marketing Review',
+              type: 'TASK',
+              role: 'MARKETING',
+              assigneeContextKey: 'marketingPicId',
+              assigneeFallbackContextKey: 'createdBy',
+            },
+          },
+          {
+            id: 'node_director_approval',
+            type: 'customNode',
+            data: { label: 'Director Approval', type: 'TASK', role: 'DIRECTOR' },
+          },
+          {
+            id: 'node_marketing_revision',
+            type: 'customNode',
+            data: {
+              label: 'Marketing Revision',
+              type: 'TASK',
+              role: 'MARKETING',
+              assigneeContextKey: 'marketingPicId',
+              assigneeFallbackContextKey: 'createdBy',
+            },
+          },
+          { id: 'node_end', type: 'customNode', data: { label: 'End', type: 'END' } },
+        ],
+        edges: [
+          { id: 'e1', source: 'node_start', target: 'node_marketing_review' },
+          { id: 'e2', source: 'node_marketing_review', target: 'node_director_approval', label: 'APPROVE' },
+          { id: 'e3_dir_approve', source: 'node_director_approval', target: 'node_end', label: 'APPROVE' },
+          { id: 'e3_dir_return', source: 'node_director_approval', target: 'node_marketing_revision', label: 'RETURN' },
+          { id: 'e4_mkt_resubmit', source: 'node_marketing_revision', target: 'node_director_approval', label: 'RESUBMIT' },
+        ],
+      };
+
+      const dynamicDef: any = {
+        id: 70,
+        workflowKey: 'GENERIC_DYNAMIC_WORKFLOW',
+        name: 'Generic Dynamic Workflow',
+        domain: 'MARKETING',
+        activeVersion: 1,
+        status: 'PUBLISHED',
+        versions: [
+          {
+            id: 701,
+            workflowDefinitionId: 70,
+            version: 1,
+            bpmnJson: dynamicAssigneeBpmn,
+            status: 'PUBLISHED',
+          },
+        ],
+      };
+
+      it('Test A: Static role assignment remains completely unaffected when no dynamic keys match', async () => {
+        definitionRepo.findOne = jest.fn().mockResolvedValue(sampleDefinition);
+        instanceRepo.findOne = jest.fn().mockResolvedValue(null);
+
+        const savedTasks: WorkflowTask[] = [];
+        const mockMgr = {
+          create: jest.fn((cls, d) => ({ ...d, id: Math.floor(Math.random() * 1000) + 1 })),
+          save: jest.fn(async (entity) => {
+            if (entity instanceof WorkflowTask || entity?.taskKey) {
+              savedTasks.push(entity);
+            }
+            return entity;
+          }),
+          findOne: jest.fn(async (entityClass, opts: any) => {
+            if (entityClass === Role) {
+              return { id: 2, name: 'PROJECT_MANAGER' };
+            }
+            if (entityClass === WorkflowVersion) {
+              return sampleDefinition.versions[0];
+            }
+            return null;
+          }),
+          createQueryBuilder: jest.fn(),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        const instance = await service.startInstance(
+          {
+            workflowKey: 'PR_APPROVAL',
+            entityType: 'PURCHASE_REQUEST',
+            entityId: 901,
+            context: { amount: 50000000 },
+          },
+          10,
+        );
+
+        expect(instance).toBeDefined();
+        const initialTask = savedTasks.find((t) => t.nodeId === 'node_pm_review');
+        expect(initialTask).toBeDefined();
+        expect(initialTask?.assigneeRoleId).toBe(2);
+        expect(initialTask?.assigneeUserId).toBeNull();
+      });
+
+      it('Test B: Dynamic Assignee via assigneeContextKey resolves user ID from runtime context', async () => {
+        definitionRepo.findOne = jest.fn().mockResolvedValue(dynamicDef);
+        instanceRepo.findOne = jest.fn().mockResolvedValue(null);
+
+        const savedTasks: WorkflowTask[] = [];
+        const mockMgr = {
+          create: jest.fn((cls, d) => ({ ...d, id: Math.floor(Math.random() * 1000) + 1 })),
+          save: jest.fn(async (entity) => {
+            if (entity instanceof WorkflowTask || entity?.taskKey) {
+              savedTasks.push(entity);
+            }
+            return entity;
+          }),
+          findOne: jest.fn(async (entityClass, opts: any) => {
+            if (entityClass === Role) {
+              return { id: 5, name: 'MARKETING' };
+            }
+            if (entityClass === WorkflowVersion) {
+              return dynamicDef.versions[0];
+            }
+            return null;
+          }),
+          createQueryBuilder: jest.fn(),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        await service.startInstance(
+          {
+            workflowKey: 'GENERIC_DYNAMIC_WORKFLOW',
+            entityType: 'TENDER',
+            entityId: 902,
+            context: {
+              marketingPicId: 25,
+              createdBy: 10,
+            },
+          },
+          10,
+        );
+
+        const task = savedTasks.find((t) => t.nodeId === 'node_marketing_review');
+        expect(task).toBeDefined();
+        expect(task?.assigneeRoleId).toBe(5);
+        expect(task?.assigneeUserId).toBe(25);
+      });
+
+      it('Test C: Dynamic Assignee fallback via assigneeFallbackContextKey when primary context key is absent', async () => {
+        definitionRepo.findOne = jest.fn().mockResolvedValue(dynamicDef);
+        instanceRepo.findOne = jest.fn().mockResolvedValue(null);
+
+        const savedTasks: WorkflowTask[] = [];
+        const mockMgr = {
+          create: jest.fn((cls, d) => ({ ...d, id: Math.floor(Math.random() * 1000) + 1 })),
+          save: jest.fn(async (entity) => {
+            if (entity instanceof WorkflowTask || entity?.taskKey) {
+              savedTasks.push(entity);
+            }
+            return entity;
+          }),
+          findOne: jest.fn(async (entityClass, opts: any) => {
+            if (entityClass === Role) {
+              return { id: 5, name: 'MARKETING' };
+            }
+            if (entityClass === WorkflowVersion) {
+              return dynamicDef.versions[0];
+            }
+            return null;
+          }),
+          createQueryBuilder: jest.fn(),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        await service.startInstance(
+          {
+            workflowKey: 'GENERIC_DYNAMIC_WORKFLOW',
+            entityType: 'TENDER',
+            entityId: 903,
+            context: {
+              createdBy: 15,
+            },
+          },
+          15,
+        );
+
+        const task = savedTasks.find((t) => t.nodeId === 'node_marketing_review');
+        expect(task).toBeDefined();
+        expect(task?.assigneeRoleId).toBe(5);
+        expect(task?.assigneeUserId).toBe(15);
+      });
+
+      it('Test D: Dynamic Assignee via template expression ${marketingPicId}', async () => {
+        const templateBpmn = {
+          nodes: [
+            { id: 'node_start', type: 'customNode', data: { label: 'Start', type: 'START' } },
+            {
+              id: 'node_custom_task',
+              type: 'customNode',
+              data: {
+                label: 'Custom Task',
+                type: 'TASK',
+                role: 'MARKETING',
+                assigneeUserId: '${marketingPicId}',
+              },
+            },
+            { id: 'node_end', type: 'customNode', data: { label: 'End', type: 'END' } },
+          ],
+          edges: [
+            { id: 'e1', source: 'node_start', target: 'node_custom_task' },
+            { id: 'e2', source: 'node_custom_task', target: 'node_end' },
+          ],
+        };
+
+        const templateDef: any = {
+          id: 71,
+          workflowKey: 'TEMPLATE_WORKFLOW',
+          name: 'Template Workflow',
+          domain: 'MARKETING',
+          activeVersion: 1,
+          status: 'PUBLISHED',
+          versions: [
+            {
+              id: 711,
+              workflowDefinitionId: 71,
+              version: 1,
+              bpmnJson: templateBpmn,
+              status: 'PUBLISHED',
+            },
+          ],
+        };
+
+        definitionRepo.findOne = jest.fn().mockResolvedValue(templateDef);
+        instanceRepo.findOne = jest.fn().mockResolvedValue(null);
+
+        const savedTasks: WorkflowTask[] = [];
+        const mockMgr = {
+          create: jest.fn((cls, d) => ({ ...d, id: Math.floor(Math.random() * 1000) + 1 })),
+          save: jest.fn(async (entity) => {
+            if (entity instanceof WorkflowTask || entity?.taskKey) {
+              savedTasks.push(entity);
+            }
+            return entity;
+          }),
+          findOne: jest.fn(async (entityClass, opts: any) => {
+            if (entityClass === Role) return { id: 5, name: 'MARKETING' };
+            if (entityClass === WorkflowVersion) return templateDef.versions[0];
+            return null;
+          }),
+          createQueryBuilder: jest.fn(),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        await service.startInstance(
+          {
+            workflowKey: 'TEMPLATE_WORKFLOW',
+            entityType: 'TENDER',
+            entityId: 904,
+            context: { marketingPicId: 35 },
+          },
+          1,
+        );
+
+        const task = savedTasks.find((t) => t.nodeId === 'node_custom_task');
+        expect(task).toBeDefined();
+        expect(task?.assigneeUserId).toBe(35);
+      });
+
+      it('Test E: Static assigneeUserId on node definition is preserved when explicitly defined', async () => {
+        const staticBpmn = {
+          nodes: [
+            { id: 'node_start', type: 'customNode', data: { label: 'Start', type: 'START' } },
+            {
+              id: 'node_static_user_task',
+              type: 'customNode',
+              data: {
+                label: 'Static Task',
+                type: 'TASK',
+                role: 'MARKETING',
+                assigneeUserId: 42,
+              },
+            },
+            { id: 'node_end', type: 'customNode', data: { label: 'End', type: 'END' } },
+          ],
+          edges: [
+            { id: 'e1', source: 'node_start', target: 'node_static_user_task' },
+            { id: 'e2', source: 'node_static_user_task', target: 'node_end' },
+          ],
+        };
+
+        const staticDef: any = {
+          id: 72,
+          workflowKey: 'STATIC_USER_WORKFLOW',
+          name: 'Static User Workflow',
+          domain: 'MARKETING',
+          activeVersion: 1,
+          status: 'PUBLISHED',
+          versions: [
+            {
+              id: 721,
+              workflowDefinitionId: 72,
+              version: 1,
+              bpmnJson: staticBpmn,
+              status: 'PUBLISHED',
+            },
+          ],
+        };
+
+        definitionRepo.findOne = jest.fn().mockResolvedValue(staticDef);
+        instanceRepo.findOne = jest.fn().mockResolvedValue(null);
+
+        const savedTasks: WorkflowTask[] = [];
+        const mockMgr = {
+          create: jest.fn((cls, d) => ({ ...d, id: Math.floor(Math.random() * 1000) + 1 })),
+          save: jest.fn(async (entity) => {
+            if (entity instanceof WorkflowTask || entity?.taskKey) {
+              savedTasks.push(entity);
+            }
+            return entity;
+          }),
+          findOne: jest.fn(async (entityClass, opts: any) => {
+            if (entityClass === Role) return { id: 5, name: 'MARKETING' };
+            if (entityClass === WorkflowVersion) return staticDef.versions[0];
+            return null;
+          }),
+          createQueryBuilder: jest.fn(),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        await service.startInstance(
+          {
+            workflowKey: 'STATIC_USER_WORKFLOW',
+            entityType: 'CONTRACT',
+            entityId: 905,
+            context: {},
+          },
+          1,
+        );
+
+        const task = savedTasks.find((t) => t.nodeId === 'node_static_user_task');
+        expect(task).toBeDefined();
+        expect(task?.assigneeUserId).toBe(42);
+      });
+
+      it('Test F: Dynamic Assignee in context.nodeAssignees map', async () => {
+        const nodeMapBpmn = {
+          nodes: [
+            { id: 'node_start', type: 'customNode', data: { label: 'Start', type: 'START' } },
+            {
+              id: 'node_scoped_task',
+              type: 'customNode',
+              data: {
+                label: 'Scoped Task',
+                type: 'TASK',
+                role: 'MARKETING',
+              },
+            },
+            { id: 'node_end', type: 'customNode', data: { label: 'End', type: 'END' } },
+          ],
+          edges: [
+            { id: 'e1', source: 'node_start', target: 'node_scoped_task' },
+            { id: 'e2', source: 'node_scoped_task', target: 'node_end' },
+          ],
+        };
+
+        const mapDef: any = {
+          id: 73,
+          workflowKey: 'NODE_MAP_WORKFLOW',
+          name: 'Node Map Workflow',
+          domain: 'MARKETING',
+          activeVersion: 1,
+          status: 'PUBLISHED',
+          versions: [
+            {
+              id: 731,
+              workflowDefinitionId: 73,
+              version: 1,
+              bpmnJson: nodeMapBpmn,
+              status: 'PUBLISHED',
+            },
+          ],
+        };
+
+        definitionRepo.findOne = jest.fn().mockResolvedValue(mapDef);
+        instanceRepo.findOne = jest.fn().mockResolvedValue(null);
+
+        const savedTasks: WorkflowTask[] = [];
+        const mockMgr = {
+          create: jest.fn((cls, d) => ({ ...d, id: Math.floor(Math.random() * 1000) + 1 })),
+          save: jest.fn(async (entity) => {
+            if (entity instanceof WorkflowTask || entity?.taskKey) {
+              savedTasks.push(entity);
+            }
+            return entity;
+          }),
+          findOne: jest.fn(async (entityClass, opts: any) => {
+            if (entityClass === Role) return { id: 5, name: 'MARKETING' };
+            if (entityClass === WorkflowVersion) return mapDef.versions[0];
+            return null;
+          }),
+          createQueryBuilder: jest.fn(),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        await service.startInstance(
+          {
+            workflowKey: 'NODE_MAP_WORKFLOW',
+            entityType: 'TENDER',
+            entityId: 906,
+            context: {
+              nodeAssignees: {
+                node_scoped_task: 77,
+              },
+            },
+          },
+          1,
+        );
+
+        const task = savedTasks.find((t) => t.nodeId === 'node_scoped_task');
+        expect(task).toBeDefined();
+        expect(task?.assigneeUserId).toBe(77);
+      });
+
+      it('Test G: Authorization: user matching assigneeUserId can complete task even without matching role', async () => {
+        const dynamicTask: any = {
+          id: 501,
+          nodeId: 'node_marketing_review',
+          status: WorkflowTaskStatus.PENDING,
+          assigneeUserId: 25,
+          assigneeRoleId: 5,
+          assigneeRole: { id: 5, name: 'MARKETING' },
+          workflowInstance: {
+            id: 902,
+            status: WorkflowInstanceStatus.IN_PROGRESS,
+            workflowVersionId: 701,
+            currentNodeId: 'node_marketing_review',
+            context: { marketingPicId: 25 },
+          },
+        };
+
+        const mockQb = {
+          setLock: jest.fn().mockReturnThis(),
+          leftJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(dynamicTask),
+        };
+
+        const mockMgr = {
+          createQueryBuilder: jest.fn().mockReturnValue(mockQb),
+          findOne: jest.fn(async (entityClass) => {
+            if (entityClass === WorkflowVersion) return dynamicDef.versions[0];
+            if (entityClass === Role) return { id: 4, name: 'DIRECTOR' };
+            return null;
+          }),
+          save: jest.fn(async (e) => e),
+          create: jest.fn((cls, d) => d),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        // Actor ID is 25 (matches assigneeUserId), roles do NOT include MARKETING
+        const result = await service.completeTask(501, { action: 'APPROVE' }, 25, ['NON_MARKETING_ROLE']);
+        expect(result.task.status).toBe(WorkflowTaskStatus.COMPLETED);
+      });
+
+      it('Test H: Authorization: user matching assigneeRole can complete task even if user ID differs', async () => {
+        const dynamicTask: any = {
+          id: 502,
+          nodeId: 'node_marketing_review',
+          status: WorkflowTaskStatus.PENDING,
+          assigneeUserId: 25,
+          assigneeRoleId: 5,
+          assigneeRole: { id: 5, name: 'MARKETING' },
+          workflowInstance: {
+            id: 902,
+            status: WorkflowInstanceStatus.IN_PROGRESS,
+            workflowVersionId: 701,
+            currentNodeId: 'node_marketing_review',
+            context: { marketingPicId: 25 },
+          },
+        };
+
+        const mockQb = {
+          setLock: jest.fn().mockReturnThis(),
+          leftJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(dynamicTask),
+        };
+
+        const mockMgr = {
+          createQueryBuilder: jest.fn().mockReturnValue(mockQb),
+          findOne: jest.fn(async (entityClass) => {
+            if (entityClass === WorkflowVersion) return dynamicDef.versions[0];
+            if (entityClass === Role) return { id: 4, name: 'DIRECTOR' };
+            return null;
+          }),
+          save: jest.fn(async (e) => e),
+          create: jest.fn((cls, d) => d),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        // Actor ID is 99 (different user ID), but has MARKETING role
+        const result = await service.completeTask(502, { action: 'APPROVE' }, 99, ['MARKETING']);
+        expect(result.task.status).toBe(WorkflowTaskStatus.COMPLETED);
+      });
+
+      it('Test I: Authorization: SUPER_ADMIN can complete task regardless of userId or role', async () => {
+        const dynamicTask: any = {
+          id: 503,
+          nodeId: 'node_marketing_review',
+          status: WorkflowTaskStatus.PENDING,
+          assigneeUserId: 25,
+          assigneeRoleId: 5,
+          assigneeRole: { id: 5, name: 'MARKETING' },
+          workflowInstance: {
+            id: 902,
+            status: WorkflowInstanceStatus.IN_PROGRESS,
+            workflowVersionId: 701,
+            currentNodeId: 'node_marketing_review',
+            context: { marketingPicId: 25 },
+          },
+        };
+
+        const mockQb = {
+          setLock: jest.fn().mockReturnThis(),
+          leftJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(dynamicTask),
+        };
+
+        const mockMgr = {
+          createQueryBuilder: jest.fn().mockReturnValue(mockQb),
+          findOne: jest.fn(async (entityClass) => {
+            if (entityClass === WorkflowVersion) return dynamicDef.versions[0];
+            if (entityClass === Role) return { id: 4, name: 'DIRECTOR' };
+            return null;
+          }),
+          save: jest.fn(async (e) => e),
+          create: jest.fn((cls, d) => d),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        // Actor ID is 888 (different user), role is SUPER_ADMIN
+        const result = await service.completeTask(503, { action: 'APPROVE' }, 888, ['SUPER_ADMIN']);
+        expect(result.task.status).toBe(WorkflowTaskStatus.COMPLETED);
+      });
+
+      it('Test J: Authorization: unauthorized user is rejected with ForbiddenException', async () => {
+        const dynamicTask: any = {
+          id: 504,
+          nodeId: 'node_marketing_review',
+          status: WorkflowTaskStatus.PENDING,
+          assigneeUserId: 25,
+          assigneeRoleId: 5,
+          assigneeRole: { id: 5, name: 'MARKETING' },
+          workflowInstance: {
+            id: 902,
+            status: WorkflowInstanceStatus.IN_PROGRESS,
+            workflowVersionId: 701,
+            currentNodeId: 'node_marketing_review',
+            context: { marketingPicId: 25 },
+          },
+        };
+
+        const mockQb = {
+          setLock: jest.fn().mockReturnThis(),
+          leftJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(dynamicTask),
+        };
+
+        const mockMgr = {
+          createQueryBuilder: jest.fn().mockReturnValue(mockQb),
+        };
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        // Actor ID is 777 (not 25), roles do NOT have MARKETING or SUPER_ADMIN
+        await expect(
+          service.completeTask(504, { action: 'APPROVE' }, 777, ['FINANCE']),
+        ).rejects.toThrow(ForbiddenException);
+      });
+
+      it('Test K: Task Return lifecycle dynamically resolves revision task assignee to Marketing PIC with outbox event', async () => {
+        const directorTask: any = {
+          id: 505,
+          nodeId: 'node_director_approval',
+          status: WorkflowTaskStatus.PENDING,
+          assigneeRoleId: 4,
+          assigneeRole: { id: 4, name: 'DIRECTOR' },
+          workflowInstance: {
+            id: 905,
+            workflowDefinitionId: 70,
+            workflowVersionId: 701,
+            entityType: 'TENDER',
+            entityId: 555,
+            status: WorkflowInstanceStatus.IN_PROGRESS,
+            currentNodeId: 'node_director_approval',
+            context: {
+              marketingPicId: 25,
+              createdBy: 10,
+            },
+          },
+        };
+
+        const savedTasks: WorkflowTask[] = [];
+        const savedOutbox: any[] = [];
+        const mockQb = {
+          setLock: jest.fn().mockReturnThis(),
+          leftJoinAndSelect: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(directorTask),
+        };
+
+        const mockMgr = {
+          createQueryBuilder: jest.fn().mockReturnValue(mockQb),
+          findOne: jest.fn(async (cls: any) => {
+            if (cls === WorkflowVersion) return dynamicDef.versions[0];
+            if (cls === Role) return { id: 5, name: 'MARKETING' };
+            return null;
+          }),
+          save: jest.fn(async (clsOrEntity: any, entity?: any) => {
+            const item = entity || clsOrEntity;
+            if (clsOrEntity === WorkflowTask || item instanceof WorkflowTask || item?.taskKey) {
+              savedTasks.push(item);
+            }
+            if (clsOrEntity === OutboxEvent || item instanceof OutboxEvent || item?.event_name) {
+              savedOutbox.push(item);
+            }
+            return item;
+          }),
+          create: jest.fn((cls, d) => d),
+          update: jest.fn().mockResolvedValue({ affected: 1 }),
+        };
+
+        dataSource.transaction = jest.fn(async (cb) => cb(mockMgr));
+
+        const result = await service.completeTask(
+          505,
+          { action: 'RETURN', reason: 'Perlu revisi margin komersial' },
+          41,
+          ['DIRECTOR'],
+        );
+
+        // Advances to node_marketing_revision
+        expect(result.instance.currentNodeId).toBe('node_marketing_revision');
+
+        // Revision task created and dynamically assigned to marketingPicId (25)
+        const revisionTask = savedTasks.find((t) => t.nodeId === 'node_marketing_revision');
+        expect(revisionTask).toBeDefined();
+        expect(revisionTask?.assigneeUserId).toBe(25);
+        expect(revisionTask?.assigneeRoleId).toBe(5);
+
+        // Outbox event has routing to recipientUser = 25
+        const returnEvent = savedOutbox.find((e) => e.event_name === 'workflow.task.returned');
+        expect(returnEvent).toBeDefined();
+        expect(returnEvent.payload.routing.userIds).toContain(25);
+        expect(returnEvent.payload.businessPayload.action).toBe('RETURN');
+      });
+
+      it('Test L: Duplicate instance protection works for TENDER and CONTRACT', async () => {
+        definitionRepo.findOne = jest.fn().mockResolvedValue(dynamicDef);
+        instanceRepo.findOne = jest.fn().mockResolvedValue({
+          id: 888,
+          entityType: 'TENDER',
+          entityId: 907,
+          status: WorkflowInstanceStatus.IN_PROGRESS,
+        });
+
+        await expect(
+          service.startInstance({
+            workflowKey: 'GENERIC_DYNAMIC_WORKFLOW',
+            entityType: 'TENDER',
+            entityId: 907,
+          }),
+        ).rejects.toThrow(ConflictException);
+      });
+    });
+  });
 });
+

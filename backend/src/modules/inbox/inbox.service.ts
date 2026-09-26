@@ -7,7 +7,7 @@ import { Contract, LegalStatus } from '../../entities/contract.entity';
 import { Tender, TenderStage, GoNoGoStatus } from '../../entities/tender.entity';
 import { TodoReadModelDto, InboxSummaryDto } from './inbox.dto';
 
-const LEGAL_REVIEW_ROLES = ['LEGAL', 'SUPER_ADMIN', 'ADMIN', 'DIRECTOR'];
+const LEGAL_REVIEW_ROLES = ['LEGAL', 'SUPER_ADMIN', 'ADMIN'];
 const TENDER_GO_NOGO_ROLES = ['DIRECTOR', 'GENERAL_MANAGER', 'SUPER_ADMIN'];
 
 export const GOVERNANCE_MANAGEMENT_REVIEW_NODES = [
@@ -56,6 +56,11 @@ export class InboxService {
         let actionTarget: string | null = null;
         let title = `Tugas Alur Kerja: ${task.taskKey || task.id}`;
         let projectId: number | undefined;
+        let projectName: string | undefined;
+        let customerName: string | undefined;
+        let submittedByName: string | undefined;
+        let returnedByName: string | undefined;
+        let returnReason: string | undefined;
 
         if (entityType === 'PURCHASE_REQUEST') {
           actionType = 'PURCHASE_REQUEST_APPROVAL';
@@ -90,6 +95,37 @@ export class InboxService {
             actionTarget = null;
             title = `Tugas Proyek: ${task.taskKey || task.id}`;
           }
+        } else if (entityType === 'TENDER') {
+          if (task.taskKey === 'GO_NOGO_APPROVAL') {
+            actionType = 'GO_NOGO_APPROVAL';
+            actionTarget = entityId > 0 ? `/sales?tab=1&tenderId=${entityId}&action=go-nogo` : null;
+            title = 'Persetujuan GO / NO-GO';
+
+            const context = await this.enrichTenderBusinessContext(
+              entityId,
+              task.workflowInstance?.id ? Number(task.workflowInstance.id) : undefined,
+            );
+            projectName = context.projectName;
+            customerName = context.customerName;
+            submittedByName = context.submittedByName;
+          } else if (task.taskKey === 'GO_NOGO_REVISION') {
+            actionType = 'GO_NOGO_REVISION';
+            actionTarget = entityId > 0 ? `/sales?tab=1&tenderId=${entityId}&action=go-nogo` : null;
+            title = 'Revisi GO / NO-GO';
+
+            const context = await this.enrichTenderBusinessContext(
+              entityId,
+              task.workflowInstance?.id ? Number(task.workflowInstance.id) : undefined,
+            );
+            projectName = context.projectName;
+            customerName = context.customerName;
+            returnedByName = context.returnedByName;
+            returnReason = context.returnReason;
+          } else {
+            actionType = task.taskKey || 'WORKFLOW_TASK';
+            actionTarget = null;
+            title = `Tugas Tender: ${task.taskKey || task.id}`;
+          }
         } else {
           // Generic unmapped workflow task: explicit unresolved state (no /inbox fallback)
           actionType = task.taskKey || 'WORKFLOW_TASK';
@@ -114,6 +150,11 @@ export class InboxService {
           dueAt: task.dueAt ? new Date(task.dueAt).toISOString() : undefined,
           createdAt: task.createdAt ? new Date(task.createdAt).toISOString() : new Date().toISOString(),
           updatedAt: task.updatedAt ? new Date(task.updatedAt).toISOString() : undefined,
+          projectName,
+          customerName,
+          submittedByName,
+          returnedByName,
+          returnReason,
         });
       }
     } catch (err: any) {
@@ -168,6 +209,20 @@ export class InboxService {
           .getMany();
 
         for (const tender of pendingTenders) {
+          // Transitional Deduplication: Suppress DOMAIN_TENDER only when WORKFLOW_TASK for the same tender approval is present
+          const hasMatchingWorkflowTask = todos.some(
+            (t) =>
+              t.sourceType === 'WORKFLOW_TASK' &&
+              t.entityType === 'TENDER' &&
+              Number(t.entityId) === Number(tender.id) &&
+              t.actionType === 'GO_NOGO_APPROVAL',
+          );
+          if (hasMatchingWorkflowTask) {
+            continue;
+          }
+
+          const context = await this.enrichTenderBusinessContext(tender.id);
+
           todos.push({
             todoId: `tender-${tender.id}`,
             sourceType: 'DOMAIN_TENDER',
@@ -176,14 +231,16 @@ export class InboxService {
             entityType: 'TENDER',
             entityId: Number(tender.id),
             actionType: 'GO_NOGO_APPROVAL',
-            // TARGET_REQUIRES_ACTION_UI: sales/tenders/[id] lacks actionable Go/No-Go decision UI
-            actionTarget: null,
-            title: `Persetujuan GO / NO GO: ${tender.title || `Tender #${tender.id}`}`,
+            actionTarget: `/sales?tab=1&tenderId=${tender.id}&action=go-nogo`,
+            title: 'Persetujuan GO / NO-GO',
             description: (tender as any).notes || undefined,
             status: 'WAITING_GO_NO_GO',
             dueAt: tender.submission_deadline ? new Date(tender.submission_deadline).toISOString() : undefined,
             createdAt: tender.created_at ? new Date(tender.created_at).toISOString() : new Date().toISOString(),
             updatedAt: tender.updated_at ? new Date(tender.updated_at).toISOString() : undefined,
+            projectName: context.projectName || tender.title || undefined,
+            customerName: context.customerName || tender.customer?.name || undefined,
+            submittedByName: context.submittedByName,
           });
         }
       } catch (err: any) {
@@ -235,5 +292,168 @@ export class InboxService {
       todoCount: todos.length,
       unreadNotificationCount,
     };
+  }
+
+  /**
+   * Authoritative business context enrichment for Tender Go/No-Go To-Do cards.
+   * Resolves actual Tender Title (Project Name), Customer Name, authoritative Submitter Name,
+   * and authoritative Return Actor / Return Reason (for revisions).
+   */
+  private async enrichTenderBusinessContext(
+    tenderId: number,
+    workflowInstanceId?: number,
+  ): Promise<{
+    projectName?: string;
+    customerName?: string;
+    submittedByName?: string;
+    returnedByName?: string;
+    returnReason?: string;
+  }> {
+    try {
+      let projectName: string | undefined;
+      let customerName: string | undefined;
+      let submittedByName: string | undefined;
+      let returnedByName: string | undefined;
+      let returnReason: string | undefined;
+
+      let tenderEntity: Tender | null = null;
+      if (typeof this.tenderRepo.findOne === 'function') {
+        tenderEntity = await this.tenderRepo.findOne({
+          where: { id: tenderId },
+          relations: ['customer'],
+        });
+        if (tenderEntity) {
+          projectName = tenderEntity.title || undefined;
+          customerName = tenderEntity.customer?.name || undefined;
+        }
+      }
+
+      // --- SUBMISSION ACTOR RESOLUTION (for GO_NOGO_APPROVAL) ---
+      // 1. Authoritative transition record (START or RESUBMIT action)
+      if (workflowInstanceId && this.tenderRepo.manager && typeof this.tenderRepo.manager.createQueryBuilder === 'function') {
+        try {
+          const transition = await this.tenderRepo.manager
+            .createQueryBuilder('workflow_transitions', 'wt')
+            .leftJoin('users', 'u', 'u.id = wt.actor_id')
+            .select(['wt.actor_id AS actorId', 'u.full_name AS fullName'])
+            .where('wt.instance_id = :instanceId', { instanceId: workflowInstanceId })
+            .andWhere('wt.action IN (:...actions)', { actions: ['START', 'RESUBMIT'] })
+            .orderBy('wt.id', 'DESC')
+            .getRawOne();
+
+          if (transition?.fullName) {
+            submittedByName = transition.fullName;
+          }
+        } catch {
+          // ignore error and proceed to fallback
+        }
+      }
+
+      // 2. Authoritative TenderActivity submission log
+      if (!submittedByName && this.tenderRepo.manager && typeof this.tenderRepo.manager.createQueryBuilder === 'function') {
+        try {
+          const activity = await this.tenderRepo.manager
+            .createQueryBuilder('tender_activities', 'ta')
+            .leftJoin('users', 'u', 'u.id = ta.user_id')
+            .select(['ta.user_id AS userId', 'u.full_name AS fullName'])
+            .where('ta.tender_id = :tenderId', { tenderId })
+            .andWhere('ta.content LIKE :pattern', { pattern: '%submitted tender for GO / NO GO review%' })
+            .orderBy('ta.id', 'DESC')
+            .getRawOne();
+
+          if (activity?.fullName) {
+            submittedByName = activity.fullName;
+          }
+        } catch {
+          // ignore error and proceed to fallback
+        }
+      }
+
+      // 3. WorkflowInstance creator fallback
+      if (!submittedByName && workflowInstanceId && this.tenderRepo.manager && typeof this.tenderRepo.manager.createQueryBuilder === 'function') {
+        try {
+          const instance = await this.tenderRepo.manager
+            .createQueryBuilder('workflow_instances', 'wi')
+            .leftJoin('users', 'u', 'u.id = wi.created_by')
+            .select(['wi.created_by AS createdBy', 'u.full_name AS fullName'])
+            .where('wi.id = :instanceId', { instanceId: workflowInstanceId })
+            .getRawOne();
+
+          if (instance?.fullName) {
+            submittedByName = instance.fullName;
+          }
+        } catch {
+          // ignore error
+        }
+      }
+
+      // --- RETURN ACTOR & RETURN REASON RESOLUTION (for GO_NOGO_REVISION) ---
+      // 1. Authoritative transition record (RETURN action)
+      if (workflowInstanceId && this.tenderRepo.manager && typeof this.tenderRepo.manager.createQueryBuilder === 'function') {
+        try {
+          const returnTransition = await this.tenderRepo.manager
+            .createQueryBuilder('workflow_transitions', 'wt')
+            .leftJoin('users', 'u', 'u.id = wt.actor_id')
+            .select(['wt.actor_id AS actorId', 'u.full_name AS fullName', 'wt.reason AS reason'])
+            .where('wt.instance_id = :instanceId', { instanceId: workflowInstanceId })
+            .andWhere('wt.action = :action', { action: 'RETURN' })
+            .orderBy('wt.id', 'DESC')
+            .getRawOne();
+
+          if (returnTransition) {
+            if (returnTransition.fullName) returnedByName = returnTransition.fullName;
+            if (returnTransition.reason) returnReason = returnTransition.reason;
+          }
+        } catch {
+          // ignore error and proceed to fallback
+        }
+      }
+
+      // 2. Authoritative completed RETURN task fallback
+      if ((!returnedByName || !returnReason) && workflowInstanceId && this.tenderRepo.manager && typeof this.tenderRepo.manager.createQueryBuilder === 'function') {
+        try {
+          const returnTask = await this.tenderRepo.manager
+            .createQueryBuilder('workflow_tasks', 'wt')
+            .leftJoin('users', 'u', 'u.id = wt.decided_by')
+            .select(['wt.decided_by AS actorId', 'u.full_name AS fullName', 'wt.comments AS comments'])
+            .where('wt.workflow_instance_id = :instanceId', { instanceId: workflowInstanceId })
+            .andWhere('wt.task_key = :taskKey', { taskKey: 'GO_NOGO_APPROVAL' })
+            .andWhere('wt.action = :action', { action: 'RETURN' })
+            .orderBy('wt.id', 'DESC')
+            .getRawOne();
+
+          if (returnTask) {
+            if (!returnedByName && returnTask.fullName) returnedByName = returnTask.fullName;
+            if (!returnReason && returnTask.comments) returnReason = returnTask.comments;
+          }
+        } catch {
+          // ignore error and proceed to fallback
+        }
+      }
+
+      // 3. Domain tender go_nogo_notes / go_nogo_by fallback
+      if ((!returnedByName || !returnReason) && this.tenderRepo.manager && typeof this.tenderRepo.manager.createQueryBuilder === 'function') {
+        try {
+          const tenderRow = await this.tenderRepo.manager
+            .createQueryBuilder('tenders', 't')
+            .leftJoin('users', 'u', 'u.id = t.go_nogo_by')
+            .select(['t.go_nogo_by AS goNoGoBy', 'u.full_name AS fullName', 't.go_nogo_notes AS goNoGoNotes'])
+            .where('t.id = :tenderId', { tenderId })
+            .getRawOne();
+
+          if (tenderRow) {
+            if (!returnedByName && tenderRow.fullName) returnedByName = tenderRow.fullName;
+            if (!returnReason && tenderRow.goNoGoNotes) returnReason = tenderRow.goNoGoNotes;
+          }
+        } catch {
+          // ignore error
+        }
+      }
+
+      return { projectName, customerName, submittedByName, returnedByName, returnReason };
+    } catch (err: any) {
+      this.logger.error(`Failed to enrich tender business context for tender #${tenderId}: ${err.message}`, err.stack);
+      return {};
+    }
   }
 }

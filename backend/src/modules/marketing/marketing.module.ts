@@ -10,14 +10,17 @@ import { Contract } from '../../entities/contract.entity';
 import { TenderActivity } from '../../entities/tender-activity.entity';
 import { TenderPriceHistory } from '../../entities/tender-price-history.entity';
 import { User } from '../../entities/user.entity';
+import { OutboxEvent } from '../../entities/outbox-event.entity';
 import { NotificationModule } from '../notification/notification.module';
+import { WorkflowModule } from '../workflow-engine/workflow.module';
 
 import { SalesGateway } from './sales.gateway';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Customer, Tender, Proposal, Contract, TenderActivity, TenderPriceHistory, User]),
+    TypeOrmModule.forFeature([Customer, Tender, Proposal, Contract, TenderActivity, TenderPriceHistory, User, OutboxEvent]),
     NotificationModule, // Replaces RabbitMQ — uses EventEmitter2 + WebSocket
+    WorkflowModule,
   ],
   controllers: [MarketingController],
   providers: [MarketingService, TenderScheduler, SalesGateway],

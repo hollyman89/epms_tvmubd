@@ -1,9 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan } from 'typeorm';
+import { Repository, LessThan, EntityManager } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { Tender, TenderStatus, TenderStage } from '../../entities/tender.entity';
 import { Contract, LegalStatus } from '../../entities/contract.entity';
+import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { BusinessEvent } from '../../shared/contracts/business-event.contract';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { emitLegalQueueUpdated } from '../../shared/helpers/legal-event.helper';
 
@@ -16,6 +19,34 @@ export class TenderScheduler {
     private readonly tenderRepo: Repository<Tender>,
     private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * Helper: Save canonical BusinessEvent to transactional Outbox
+   */
+  private async saveOutboxEvent(
+    manager: EntityManager,
+    event: BusinessEvent<any>,
+  ): Promise<OutboxEvent> {
+    const outbox = manager.create(OutboxEvent, {
+      event_id: event.eventId,
+      event_name: event.eventName,
+      event_version: String(event.eventVersion),
+      aggregate_type: event.aggregateType,
+      aggregate_id: Number(event.aggregateId),
+      correlation_id: event.correlationId || null,
+      payload: {
+        occurredAt: event.occurredAt,
+        projectId: event.projectId,
+        actor: event.actor,
+        routing: event.routing,
+        notificationPolicy: event.notificationPolicy,
+        businessPayload: event.payload,
+      },
+      status: OutboxStatus.PENDING,
+      retry_count: 0,
+    });
+    return await manager.save(OutboxEvent, outbox);
+  }
 
   /**
    * Helper: Resolve validated recipients (Marketing PIC + active Directors) deduplicated
@@ -129,32 +160,8 @@ export class TenderScheduler {
 
       if (!tender.spk_file_key) {
         this.logger.warn(`Demoting Tender ${tender.id} due to SPK Grace Period expiry.`);
-        tender.status = TenderStatus.NEGOTIATION;
-        tender.stage = TenderStage.NEGOTIATION;
-        tender.spk_verification_status = 'SPK_REQUIRED';
-        tender.grace_deadline = null; // reset
-        tender.spk_file_key = null;
-        await this.tenderRepo.save(tender);
 
-        // Soft delete any orphan contract for this tender without SPK
-        const contractRepo = this.tenderRepo.manager.getRepository(Contract);
-        const orphanContracts = await contractRepo.find({
-          where: { tender_id: tender.id }
-        });
-
-        for (const contract of orphanContracts) {
-          if (!contract.spk_file_url) {
-            await contractRepo.softDelete(contract.id);
-            this.logger.warn(`Soft deleted orphan contract #${contract.id} for expired Tender #${tender.id}`);
-          }
-        }
-
-        emitLegalQueueUpdated(this.eventEmitter, {
-          action: 'GRACE_EXPIRED',
-          tenderId: tender.id
-        });
-
-        // Resolve recipients
+        // Resolve recipients first
         const marketingPicId = tender.marketing_pic_id ? Number(tender.marketing_pic_id) : null;
         const finalRecipientIds = await this.resolveTargetRecipients(
           marketingPicId,
@@ -162,28 +169,70 @@ export class TenderScheduler {
           'SLA Overdue'
         );
 
-        if (finalRecipientIds.length > 0) {
-          for (const recipientId of finalRecipientIds) {
-            this.eventEmitter.emit('notification.send', {
-              recipientId: recipientId,
-              title: 'SPK Belum Diunggah',
-              message: 'Grace Period 2x24 jam telah berakhir. Tender dikembalikan ke NEGOTIATION. Silakan unggah SPK untuk melanjutkan proses menuju WON dan Legal Review.',
-              type: 'WARNING',
-              tenderId: tender.id,
-              metaData: {
-                action_type: 'SPK_REQUIRED',
-                category: 'MARKETING',
-                priority: 'HIGH',
-                tender_id: tender.id,
-                marketing_pic_id: marketingPicId,
-              }
-            });
+        await this.tenderRepo.manager.transaction(async (manager) => {
+          tender.status = TenderStatus.NEGOTIATION;
+          tender.stage = TenderStage.NEGOTIATION;
+          tender.spk_verification_status = 'SPK_REQUIRED';
+          tender.grace_deadline = null; // reset
+          tender.spk_file_key = null;
+          await manager.save(Tender, tender);
+
+          // Soft delete any orphan contract for this tender without SPK
+          const contractRepo = manager.getRepository(Contract);
+          const orphanContracts = await contractRepo.find({
+            where: { tender_id: tender.id }
+          });
+
+          for (const contract of orphanContracts) {
+            if (!contract.spk_file_url) {
+              await contractRepo.softDelete(contract.id);
+              this.logger.warn(`Soft deleted orphan contract #${contract.id} for expired Tender #${tender.id}`);
+            }
           }
-        } else {
+
+          // Record in Tender Activity History (for UI "Riwayat Aktivitas")
+          await manager.query(
+            `INSERT INTO tender_activities (tender_id, user_id, type, content, created_at)
+             VALUES (?, NULL, 'SYSTEM', ?, NOW())`,
+            [
+              tender.id,
+              'Tender dikembalikan ke NEGOTIATION karena Grace Period SPK 2x24 jam telah berakhir.',
+            ]
+          );
+
+          // Phase N8: Transactional Outbox Canonical Event (replaces legacy notification.send)
+          if (finalRecipientIds.length > 0) {
+            const canonicalEvent: BusinessEvent = {
+              eventId: randomUUID(),
+              eventName: 'system.sla.spk_grace_expired',
+              eventVersion: 1,
+              occurredAt: new Date().toISOString(),
+              aggregateType: 'Tender',
+              aggregateId: tender.id,
+              routing: { userIds: finalRecipientIds },
+              payload: {
+                tenderId: tender.id,
+                tenderTitle: tender.title,
+                marketingPicId,
+                reason: 'SPK_GRACE_PERIOD_EXPIRED',
+                previousStatus: TenderStatus.WON,
+                currentStatus: TenderStatus.NEGOTIATION,
+              },
+            };
+            await this.saveOutboxEvent(manager, canonicalEvent);
+          }
+        });
+
+        if (finalRecipientIds.length === 0) {
           this.logger.warn(
             `[SLA Overdue] Notification skipped for Tender #${tender.id}: No valid Marketing PIC or Director recipients found.`
           );
         }
+
+        emitLegalQueueUpdated(this.eventEmitter, {
+          action: 'GRACE_EXPIRED',
+          tenderId: tender.id
+        });
 
         // Catat mutasi Audit Log
         this.eventEmitter.emit('audit.log', {
@@ -192,16 +241,6 @@ export class TenderScheduler {
           entityName: 'tenders',
           reason: 'Auto-revert: Grace Period Expired. Stage returned to NEGOTIATION. Notifications dispatched to PIC and Director.'
         });
-
-        // Record in Tender Activity History (for UI "Riwayat Aktivitas")
-        await this.tenderRepo.manager.query(
-          `INSERT INTO tender_activities (tender_id, user_id, type, content, created_at)
-           VALUES (?, NULL, 'SYSTEM', ?, NOW())`,
-          [
-            tender.id,
-            'Tender dikembalikan ke NEGOTIATION karena Grace Period SPK 2x24 jam telah berakhir.',
-          ]
-        );
 
         this.eventEmitter.emit('marketing.tender.management_update', {
           tenderId: tender.id,
@@ -247,67 +286,80 @@ export class TenderScheduler {
             `[Revision SLA] Legal Revision SLA Expired for Contract #${contractId} (Tender #${tenderId}). Demoting to NEGOTIATION.`
           );
 
-          // 1. Mutate Tender
-          await this.tenderRepo
-            .createQueryBuilder()
-            .update(Tender)
-            .set({
-              status: TenderStatus.NEGOTIATION,
-              stage: TenderStage.NEGOTIATION,
-              spk_verification_status: 'SPK_REQUIRED',
-              grace_deadline: () => 'NULL',
-              spk_file_key: () => 'NULL',
-            })
-            .where('id = :tenderId', { tenderId })
-            .execute();
-
-          // 2. Mutate Contract (preserve physical SPK file on disk)
-          await this.tenderRepo.manager.query(
-            `UPDATE contracts 
-             SET status = 'REVISION_EXPIRED', legal_status = 'DRAFT'
-             WHERE id = ?`,
-            [contractId]
-          );
-
-          // 3. Emit Legal Queue Update
-          emitLegalQueueUpdated(this.eventEmitter, {
-            action: 'REVISION_EXPIRED',
-            tenderId: tenderId,
-            contractId: contractId,
-          });
-
-          // 4. Resolve Overdue Recipients (Marketing PIC + Directors deduplicated)
+          // Resolve Overdue Recipients (Marketing PIC + Directors deduplicated)
           const overdueRecipientIds = await this.resolveTargetRecipients(
             marketingPicId,
             tenderId,
             'Revision SLA Overdue'
           );
 
-          if (overdueRecipientIds.length > 0) {
-            const tenderTitle = row.tender_title || `Tender #${tenderId}`;
-            for (const recipientId of overdueRecipientIds) {
-              this.eventEmitter.emit('notification.send', {
-                recipientId: recipientId,
-                title: 'Tender Dikembalikan ke Negotiation',
-                message: `${tenderTitle} telah dikembalikan dari WON ke NEGOTIATION karena batas waktu revisi SPK 3 hari telah berakhir dan dokumen revisi belum diunggah.`,
-                type: 'WARNING',
-                tenderId: tenderId,
-                metaData: {
-                  action_type: 'DEMOTION',
-                  reason: 'LEGAL_REVISION_SLA_EXPIRED',
-                  from_stage: 'WON',
-                  to_stage: 'NEGOTIATION',
-                  category: 'LEGAL',
-                  priority: 'HIGH',
-                  tender_id: tenderId,
-                  contract_id: contractId,
-                  marketing_pic_id: marketingPicId,
-                },
-              });
-            }
-          }
+          const tenderTitle = row.tender_title || `Tender #${tenderId}`;
 
-          // 5. Emit Audit Logs
+          await this.tenderRepo.manager.transaction(async (manager) => {
+            // 1. Mutate Tender
+            await manager
+              .createQueryBuilder()
+              .update(Tender)
+              .set({
+                status: TenderStatus.NEGOTIATION,
+                stage: TenderStage.NEGOTIATION,
+                spk_verification_status: 'SPK_REQUIRED',
+                grace_deadline: () => 'NULL',
+                spk_file_key: () => 'NULL',
+              })
+              .where('id = :tenderId', { tenderId })
+              .execute();
+
+            // 2. Mutate Contract (preserve physical SPK file on disk)
+            await manager.query(
+              `UPDATE contracts 
+               SET status = 'REVISION_EXPIRED', legal_status = 'DRAFT'
+               WHERE id = ?`,
+              [contractId]
+            );
+
+            // 3. Record in Tender Activity History (for UI "Riwayat Aktivitas")
+            await manager.query(
+              `INSERT INTO tender_activities (tender_id, user_id, type, content, created_at)
+               VALUES (?, NULL, 'SYSTEM', ?, NOW())`,
+              [
+                tenderId,
+                'Tender dikembalikan dari WON ke NEGOTIATION karena batas waktu revisi SPK 3 hari telah berakhir.',
+              ]
+            );
+
+            // 4. Phase N8: Transactional Outbox Canonical Event (replaces legacy notification.send)
+            if (overdueRecipientIds.length > 0) {
+              const canonicalEvent: BusinessEvent = {
+                eventId: randomUUID(),
+                eventName: 'system.sla.revision_expired',
+                eventVersion: 1,
+                occurredAt: new Date().toISOString(),
+                aggregateType: 'Contract',
+                aggregateId: contractId,
+                routing: { userIds: overdueRecipientIds },
+                payload: {
+                  contractId,
+                  tenderId,
+                  tenderTitle,
+                  marketingPicId,
+                  reason: 'LEGAL_REVISION_SLA_EXPIRED',
+                  previousStage: 'WON',
+                  currentStage: 'NEGOTIATION',
+                },
+              };
+              await this.saveOutboxEvent(manager, canonicalEvent);
+            }
+          });
+
+          // 5. Emit Legal Queue Update
+          emitLegalQueueUpdated(this.eventEmitter, {
+            action: 'REVISION_EXPIRED',
+            tenderId: tenderId,
+            contractId: contractId,
+          });
+
+          // 6. Emit Audit Logs
           this.eventEmitter.emit('audit.log', {
             action: 'REVISION_SLA_EXPIRED',
             entityId: contractId,
@@ -321,16 +373,6 @@ export class TenderScheduler {
             entityName: 'tenders',
             reason: 'Auto-revert: Legal Revision SLA Expired (3 Days). Stage returned to NEGOTIATION.',
           });
-
-          // 6. Record in Tender Activity History (for UI "Riwayat Aktivitas")
-          await this.tenderRepo.manager.query(
-            `INSERT INTO tender_activities (tender_id, user_id, type, content, created_at)
-             VALUES (?, NULL, 'SYSTEM', ?, NOW())`,
-            [
-              tenderId,
-              'Tender dikembalikan dari WON ke NEGOTIATION karena batas waktu revisi SPK 3 hari telah berakhir.',
-            ]
-          );
 
           // 7. Emit realtime management update event for Chat-Ops timeline
           this.eventEmitter.emit('marketing.tender.management_update', {
@@ -364,23 +406,23 @@ export class TenderScheduler {
             );
 
             if (reminderRecipientIds.length > 0) {
-              for (const recipientId of reminderRecipientIds) {
-                this.eventEmitter.emit('notification.send', {
-                  recipientId: recipientId,
-                  title: 'Pengingat: Batas Waktu Revisi SPK H-1',
-                  message: 'Batas waktu revisi dokumen SPK tersisa kurang dari 24 jam. Segera unggah dokumen revisi agar tender tidak dikembalikan ke NEGOTIATION.',
-                  type: 'WARNING',
-                  tenderId: tenderId,
-                  metaData: {
-                    action_type: 'REVISION_REMINDER_H1',
-                    category: 'LEGAL',
-                    priority: 'HIGH',
-                    tender_id: tenderId,
-                    contract_id: contractId,
-                    marketing_pic_id: marketingPicId,
-                  },
-                });
-              }
+              const canonicalEvent: BusinessEvent = {
+                eventId: randomUUID(),
+                eventName: 'system.sla.revision_reminder_h1',
+                eventVersion: 1,
+                occurredAt: new Date().toISOString(),
+                aggregateType: 'Contract',
+                aggregateId: contractId,
+                routing: { userIds: reminderRecipientIds },
+                payload: {
+                  contractId,
+                  tenderId,
+                  tenderTitle: row.tender_title || `Tender #${tenderId}`,
+                  marketingPicId,
+                  hoursRemaining: 24,
+                },
+              };
+              await this.saveOutboxEvent(this.tenderRepo.manager, canonicalEvent);
             }
 
             this.eventEmitter.emit('audit.log', {
@@ -407,17 +449,50 @@ export class TenderScheduler {
 
     for (const tender of pendingTenders) {
       this.logger.warn(`Auto-Escalating Tender ${tender.id} due to 2 hours Approval Timeout.`);
-      
-      // Aturan 3: Auto-Escalate, status tetap PENDING_APPROVAL
-      tender.updated_at = now;
-      await this.tenderRepo.save(tender);
 
-      // Kirim Notifikasi Auto-Escalate ke CEO/VP Sales
-      this.eventEmitter.emit('notification.send', {
-        recipientId: 'C-LEVEL', // Identifier handled by notification gateway
-        title: 'URGENT: Tender Approval Escalated',
-        message: `Tender ${tender.title} memerlukan persetujuan diskon lebih dari 20%. Tidak ada respon dari Direktur dalam 2 jam terakhir.`,
-        type: 'EMAIL_EMERGENCY'
+      // Resolve C-Level users
+      let cLevelUserIds: number[] = [];
+      try {
+        const cLevelRows = await this.tenderRepo.manager.query(
+          `SELECT DISTINCT u.id
+           FROM users u
+           JOIN user_roles ur ON u.id = ur.user_id
+           JOIN roles r ON r.id = ur.role_id
+           WHERE r.name IN ('SUPER_ADMIN', 'GENERAL_MANAGER', 'DIRECTOR')
+             AND (u.is_active = 1 OR u.is_active = true)
+             AND u.deleted_at IS NULL
+             AND r.deleted_at IS NULL`
+        );
+        cLevelUserIds = cLevelRows.map((r: any) => Number(r.id));
+      } catch (err: any) {
+        this.logger.error(`Error resolving C-Level users: ${err?.message}`);
+      }
+
+      await this.tenderRepo.manager.transaction(async (manager) => {
+        // Aturan 3: Auto-Escalate, status tetap PENDING_APPROVAL
+        tender.updated_at = now;
+        await manager.save(Tender, tender);
+
+        // Phase N8: Transactional Outbox Canonical Event (replaces legacy notification.send)
+        const canonicalEvent: BusinessEvent = {
+          eventId: randomUUID(),
+          eventName: 'system.sla.discount_timeout',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Tender',
+          aggregateId: tender.id,
+          routing: {
+            roles: ['SUPER_ADMIN', 'GENERAL_MANAGER', 'DIRECTOR'],
+            userIds: cLevelUserIds.length > 0 ? cLevelUserIds : undefined,
+          },
+          payload: {
+            tenderId: tender.id,
+            tenderTitle: tender.title,
+            discountPercentage: tender.max_discount_rate || 20,
+            timeoutHours: 2,
+          },
+        };
+        await this.saveOutboxEvent(manager, canonicalEvent);
       });
 
       // Catat mutasi Audit Log

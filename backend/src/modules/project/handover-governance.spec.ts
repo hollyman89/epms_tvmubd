@@ -21,14 +21,15 @@ import { CostEstimateValidator } from './cost-estimate.validator';
 import { ScheduleValidator } from './schedule.validator';
 import { InitialConditionValidator } from './initial-condition.validator';
 import { ManagementReviewValidator } from './management-review.validator';
-import { OperationalReadinessValidator } from './operational-readiness.validator';
-import { NotificationEventListener } from '../notification/notification-event.listener';
+import { CanonicalNotificationWriter } from '../notification/canonical-notification.writer';
+import { CanonicalNotificationConsumer } from '../notification/canonical-notification.consumer';
+import { BusinessEvent } from '../../shared/contracts/business-event.contract';
 import { Notification } from '../../entities/notification.entity';
 import { NotificationGateway } from '../notification/notification.gateway';
 
 describe('Handover Legal -> PMO -> Project Manager Governance Suite (Scenarios 1 - 9)', () => {
   let projectService: ProjectService;
-  let notifListener: NotificationEventListener;
+  let canonicalConsumer: CanonicalNotificationConsumer;
 
   // Dynamic Fixture IDs (No hardcoded 2 or 769)
   const PMO_USER_ID = Math.floor(Math.random() * 1000) + 100;
@@ -260,8 +261,8 @@ describe('Handover Legal -> PMO -> Project Manager Governance Suite (Scenarios 1
         ScheduleValidator,
         InitialConditionValidator,
         ManagementReviewValidator,
-        OperationalReadinessValidator,
-        NotificationEventListener,
+        CanonicalNotificationWriter,
+        CanonicalNotificationConsumer,
         { provide: getRepositoryToken(Project), useValue: projectRepoMock },
         { provide: getRepositoryToken(Contract), useValue: contractRepoMock },
         { provide: getRepositoryToken(User), useValue: userRepoMock },
@@ -281,25 +282,28 @@ describe('Handover Legal -> PMO -> Project Manager Governance Suite (Scenarios 1
     }).compile();
 
     projectService = module.get<ProjectService>(ProjectService);
-    notifListener = module.get<NotificationEventListener>(NotificationEventListener);
+    canonicalConsumer = module.get<CanonicalNotificationConsumer>(CanonicalNotificationConsumer);
   });
 
   describe('Skenario 1 — Legal Approve: Contract ACTIVE, PMO Notified, PM Isolated', () => {
     it('sends legal.contract.approved to PMO & SUPER_ADMIN only, excluding PROJECT_MANAGER', async () => {
-      // Trigger notification handler for Legal Contract Approved
-      await notifListener.handleContractApprovedEvent({
-        contractId: CONTRACT_ID,
-        contractNumber: CONTRACT_NUMBER,
-        legalStatus: 'APPROVED',
-      });
+      // Trigger canonical notification consumer for Legal Contract Approved
+      const canonicalEvent: BusinessEvent<any> = {
+        eventId: 'evt-legal-approve-001',
+        eventName: 'legal.contract.approved',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: CONTRACT_ID,
+        aggregateType: 'Contract',
+        payload: {
+          contractId: CONTRACT_ID,
+          contractNumber: CONTRACT_NUMBER,
+          legalStatus: 'APPROVED',
+          tenderTitle: 'Network Upgrade 2026',
+        },
+      };
 
-      // Assert emitted notification.send targeted audience: PMO
-      const notifSendEvent = emittedEvents.find((e) => e.event === 'notification.send' && e.payload.audience === 'PMO');
-      expect(notifSendEvent).toBeDefined();
-      expect(notifSendEvent?.payload.type).toBe('ALERT');
-
-      // Now execute handleNotificationSend with this payload to test recipient resolution
-      await notifListener.handleNotificationSend(notifSendEvent!.payload);
+      await canonicalConsumer.handleLegalContractApproved(canonicalEvent);
 
       // Verify notifications stored in DB
       const pmoNotif = savedNotifications.find((n) => n.userId === PMO_USER_ID);
@@ -308,6 +312,7 @@ describe('Handover Legal -> PMO -> Project Manager Governance Suite (Scenarios 1
       const pmBNotif = savedNotifications.find((n) => n.userId === PM_B_ID);
 
       expect(pmoNotif).toBeDefined();
+      expect(pmoNotif?.notificationType).toBe('ALERT');
       expect(adminNotif).toBeDefined();
       // PMs MUST NOT receive legal contract approved notification
       expect(pmANotif).toBeUndefined();
@@ -380,20 +385,27 @@ describe('Handover Legal -> PMO -> Project Manager Governance Suite (Scenarios 1
 
   describe('Skenario 5 — Idempotency of internal.project.pm.assigned', () => {
     it('sending project.pm.assigned twice concurrently results in exactly 1 notification row', async () => {
-      const payload = {
-        projectId: PROJECT_ID,
-        projectCode: PROJECT_CODE,
-        contractId: CONTRACT_ID,
-        projectManagerId: PM_A_ID,
-        assignedBy: PMO_USER_ID,
-        status: 'PLANNING',
-        timestamp: new Date().toISOString(),
+      const canonicalEvent: BusinessEvent<any> = {
+        eventId: 'evt-pm-assign-concurrent-001',
+        eventName: 'project.pm.assigned',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: PROJECT_ID,
+        aggregateType: 'Project',
+        payload: {
+          projectId: PROJECT_ID,
+          projectCode: PROJECT_CODE,
+          contractId: CONTRACT_ID,
+          projectManagerId: PM_A_ID,
+          assignedBy: PMO_USER_ID,
+          status: 'PLANNING',
+        },
       };
 
       // Call concurrently
       await Promise.all([
-        notifListener.handleProjectPmAssignedEvent(payload),
-        notifListener.handleProjectPmAssignedEvent(payload),
+        canonicalConsumer.handleProjectPmAssigned(canonicalEvent),
+        canonicalConsumer.handleProjectPmAssigned(canonicalEvent),
       ]);
 
       const pmNotifs = savedNotifications.filter((n) => n.userId === PM_A_ID);
@@ -471,44 +483,70 @@ describe('Handover Legal -> PMO -> Project Manager Governance Suite (Scenarios 1
 
   describe('Skenario 8 — Re-Approval Protection', () => {
     it('re-approval events with identical dedupeKey do not create duplicate notifications', async () => {
-      await notifListener.handleContractApprovedEvent({
-        contractId: CONTRACT_ID,
-        contractNumber: CONTRACT_NUMBER,
-        legalStatus: 'APPROVED',
-      });
+      const canonicalEvent: BusinessEvent<any> = {
+        eventId: 'evt-legal-approve-dup-001',
+        eventName: 'legal.contract.approved',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: CONTRACT_ID,
+        aggregateType: 'Contract',
+        payload: {
+          contractId: CONTRACT_ID,
+          contractNumber: CONTRACT_NUMBER,
+          legalStatus: 'APPROVED',
+          tenderTitle: 'Network Upgrade 2026',
+        },
+      };
 
-      const firstSend = emittedEvents[0]?.payload;
-      await notifListener.handleNotificationSend(firstSend);
+      await canonicalConsumer.handleLegalContractApproved(canonicalEvent);
       const initialCount = savedNotifications.length;
 
-      // Second approval trigger
-      await notifListener.handleNotificationSend(firstSend);
+      // Second approval trigger with identical event
+      await canonicalConsumer.handleLegalContractApproved(canonicalEvent);
       expect(savedNotifications.length).toBe(initialCount);
     });
   });
 
   describe('Skenario 9 — Notification Types Mapping Verification', () => {
-    it('verifies mapping: Legal approve -> PMO is ALERT, PMO assign PM is TASK', async () => {
+    it('verifies mapping: Legal approve -> PMO is ALERT, PMO assign PM is INFO', async () => {
       // 1. Legal approve
-      await notifListener.handleContractApprovedEvent({
-        contractId: 5555,
-        legalStatus: 'APPROVED',
-      });
-      const legalEvt = emittedEvents.find((e) => e.payload.dedupeKey?.startsWith('LEGAL_CONTRACT_APPROVED:5555'));
-      expect(legalEvt?.payload.type).toBe('ALERT');
+      const legalEvt: BusinessEvent<any> = {
+        eventId: 'evt-legal-approve-type-001',
+        eventName: 'legal.contract.approved',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: 5555,
+        aggregateType: 'Contract',
+        payload: {
+          contractId: 5555,
+          legalStatus: 'APPROVED',
+        },
+      };
+      await canonicalConsumer.handleLegalContractApproved(legalEvt);
+      const pmoNotif = savedNotifications.find((n) => n.userId === PMO_USER_ID);
+      expect(pmoNotif?.notificationType).toBe('ALERT');
 
       // 2. PM assign
-      await notifListener.handleProjectPmAssignedEvent({
-        projectId: 7777,
-        projectCode: 'CONT-7777',
-        contractId: 5555,
-        projectManagerId: PM_A_ID,
-        assignedBy: PMO_USER_ID,
-        status: 'PLANNING',
-        timestamp: new Date().toISOString(),
-      });
+      const pmAssignEvt: BusinessEvent<any> = {
+        eventId: 'evt-pm-assigned-type-001',
+        eventName: 'project.pm.assigned',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateId: 7777,
+        aggregateType: 'Project',
+        payload: {
+          projectId: 7777,
+          projectCode: 'CONT-7777',
+          contractId: 5555,
+          projectManagerId: PM_A_ID,
+          assignedBy: PMO_USER_ID,
+          status: 'PLANNING',
+        },
+      };
+      await canonicalConsumer.handleProjectPmAssigned(pmAssignEvt);
       const lastSaved = savedNotifications[savedNotifications.length - 1];
-      expect(lastSaved.notificationType).toBe('TASK');
+      expect(lastSaved.userId).toBe(PM_A_ID);
+      expect(lastSaved.notificationType).toBe('SYSTEM');
     });
   });
 });

@@ -191,11 +191,23 @@ function LegalReviewContent() {
 
       setPendingContracts(mappedData);
 
-      // Filter contracts berdasarkan activeTab agar auto-select sesuai dengan tab yang terbuka
+      // Derive visible tab from authoritative loaded contract state if queryContractId is present
+      let effectiveTab = activeTab;
+      if (queryContractId) {
+        const targetContract = mappedData.find((d) => d.id === Number(queryContractId));
+        if (targetContract && targetContract.status) {
+          effectiveTab = targetContract.status as 'WAITING' | 'REVISION' | 'APPROVED';
+          if (effectiveTab !== activeTab) {
+            setActiveTab(effectiveTab);
+          }
+        }
+      }
+
+      // Filter contracts berdasarkan effectiveTab agar auto-select sesuai dengan tab yang terbuka
       const visibleContracts = mappedData.filter((item) => {
-        if (activeTab === 'WAITING' && item.status !== 'WAITING') return false;
-        if (activeTab === 'REVISION' && item.status !== 'REVISION') return false;
-        if (activeTab === 'APPROVED' && item.status !== 'APPROVED') return false;
+        if (effectiveTab === 'WAITING' && item.status !== 'WAITING') return false;
+        if (effectiveTab === 'REVISION' && item.status !== 'REVISION') return false;
+        if (effectiveTab === 'APPROVED' && item.status !== 'APPROVED') return false;
         return true;
       });
 

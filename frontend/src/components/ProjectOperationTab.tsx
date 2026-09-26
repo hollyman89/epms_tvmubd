@@ -105,8 +105,10 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
 
   const searchParams = useSearchParams();
   const projectIdParam = searchParams.get('projectId');
+  const contractIdParam = searchParams.get('contractId');
   const actionParam = searchParams.get('action');
   const autoOpenedPlanRef = useRef<string | null>(null);
+  const autoOpenedAssignRef = useRef<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<string>('1');
   const [loading, setLoading] = useState<boolean>(true);
@@ -775,10 +777,32 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
         console.warn(`Failed to resolve project #${pidNum} for deep link:`, err);
       });
 
-    return () => {
-      isCancelled = true;
-    };
   }, [actionParam, projectIdParam, pendingKickoff, activeProjects, loading]);
+
+  // Deep-link support: auto open PMO PM Assignment modal if action=assign-pm & contractId is provided
+  useEffect(() => {
+    if (actionParam !== 'assign-pm' || !contractIdParam || loading) return;
+    if (autoOpenedAssignRef.current === contractIdParam) return;
+
+    // RBAC: Actionable UI visible only when user actually has PMO authorization required by backend
+    if (!isPmoUser) return;
+
+    const cidNum = Number(contractIdParam);
+    if (!Number.isFinite(cidNum) || cidNum <= 0) return;
+
+    // Find exact approved ACTIVE unassigned contract in pendingKickoff
+    const matchingCharter = pendingKickoff.find((c) => {
+      const isMatch = Number(c.contractId) === cidNum || Number(c.id) === cidNum;
+      const recordPmId = c.managerId ?? c.projectManagerId ?? (c as any).project_manager_id ?? null;
+      const isUnassigned = !recordPmId && !c.pmName;
+      return isMatch && isUnassigned;
+    });
+
+    if (matchingCharter) {
+      autoOpenedAssignRef.current = contractIdParam;
+      handleOpenClaimModal(matchingCharter);
+    }
+  }, [actionParam, contractIdParam, pendingKickoff, loading, isPmoUser]);
 
   const setupKickoffOrClaimModal = async (charter: ProjectCharter, isFormal: boolean = false) => {
     setSelectedCharter(charter);

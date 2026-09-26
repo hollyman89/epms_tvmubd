@@ -139,11 +139,12 @@ describe('LegalService - State Machine Transitions & SPK Prerequisite (P0-4E2 / 
         status: 'ACTIVE',
         legal_reviewer_id: 99,
       }));
-      expect(eventEmitterMock.emit).toHaveBeenCalledWith('legal.contract.approved', expect.objectContaining({
-        contractId: 101,
-        legalStatus: LegalStatus.APPROVED,
-        status: 'ACTIVE',
+      expect(queryRunnerMock.manager.save).toHaveBeenCalledWith(OutboxEvent, expect.objectContaining({
+        event_name: 'legal.contract.approved',
+        aggregate_type: 'Contract',
+        aggregate_id: 101,
       }));
+      expect(eventEmitterMock.emit).not.toHaveBeenCalledWith('legal.contract.approved', expect.anything());
     });
 
     it('2. ON_REVIEW + PENDING_LEGAL_REVIEW → APPROVED + valid SPK = PASS', async () => {
@@ -203,10 +204,12 @@ describe('LegalService - State Machine Transitions & SPK Prerequisite (P0-4E2 / 
       expect(result.grace_extension_count).toBe(1);
       expect(result.grace_deadline).toBeDefined();
       expect(queryRunnerMock.commitTransaction).toHaveBeenCalledTimes(1);
-      expect(eventEmitterMock.emit).toHaveBeenCalledWith('contract.revision_requested', expect.objectContaining({
-        contractId: 101,
-        legalStatus: LegalStatus.REVISION_REQUESTED,
+      expect(queryRunnerMock.manager.save).toHaveBeenCalledWith(OutboxEvent, expect.objectContaining({
+        event_name: 'legal.contract.revision_requested',
+        aggregate_type: 'Contract',
+        aggregate_id: 101,
       }));
+      expect(eventEmitterMock.emit).not.toHaveBeenCalledWith('contract.revision_requested', expect.anything());
     });
 
     it('5. ON_REVIEW + PENDING_LEGAL_REVIEW → REJECTED = PASS', async () => {
@@ -1086,10 +1089,20 @@ describe('LegalService - Start Project Validation (P0-4E4 / SEC-11-06)', () => {
     expect(result.project).toBeDefined();
     expect(result.project.code).toBe('CONT-2026-1002');
     expect(queryRunnerMock.commitTransaction).toHaveBeenCalledTimes(1);
-    expect(eventEmitterMock.emit).toHaveBeenCalledWith('project.started', expect.objectContaining({
-      projectId: 999,
-      tenderId: 1001,
-    }));
+    // Phase N8.1.1: Canonical Outbox event verified inside transaction; zero direct EventEmitter
+    expect(queryRunnerMock.manager.save).toHaveBeenCalledWith(
+      OutboxEvent,
+      expect.objectContaining({
+        event_name: 'project.started',
+        payload: expect.objectContaining({
+          businessPayload: expect.objectContaining({
+            projectId: 999,
+            tenderId: 1001,
+          }),
+        }),
+      }),
+    );
+    expect(eventEmitterMock.emit).not.toHaveBeenCalledWith('project.started', expect.anything());
   });
 
   it('8. should reuse existing project without re-creating if already initiated', async () => {

@@ -66,4 +66,22 @@ export class TenderDetailResponseDto {
 
   @ApiPropertyOptional()
   legalNotes?: string | null;
+
+  @ApiPropertyOptional()
+  submittedByName?: string | null;
+
+  @ApiPropertyOptional()
+  submittedAt?: Date | null;
+
+  @ApiPropertyOptional()
+  decisionPack?: any | null;
+
+  @ApiPropertyOptional()
+  decision_pack?: any | null;
+
+  @ApiPropertyOptional()
+  goNoGoReview?: any | null;
+
+  @ApiPropertyOptional()
+  go_nogo_review?: any | null;
 }

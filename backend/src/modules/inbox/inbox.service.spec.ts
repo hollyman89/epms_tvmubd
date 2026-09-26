@@ -231,6 +231,14 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       expect(todos.some((t) => t.sourceType === 'DOMAIN_CONTRACT')).toBe(false);
     });
 
+    it('should NOT include pending contracts for DIRECTOR role (Legal review operational To-Do excluded for Director)', async () => {
+      const todos = await service.getTodos(5, ['DIRECTOR']);
+
+      expect(mockContractRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(todos.some((t) => t.sourceType === 'DOMAIN_CONTRACT')).toBe(false);
+      expect(todos.some((t) => t.actionType === 'LEGAL_REVIEW')).toBe(false);
+    });
+
     it('should include pending tender Go/No-Go decisions for DIRECTOR role', async () => {
       const mockTender: Partial<Tender> = {
         id: 88,
@@ -249,7 +257,80 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       const tenderTodo = todos.find((t) => t.todoId === 'tender-88');
       expect(tenderTodo).toBeDefined();
       expect(tenderTodo?.actionType).toBe('GO_NOGO_APPROVAL');
-      expect(tenderTodo?.actionTarget).toBeNull();
+      expect(tenderTodo?.actionTarget).toBe('/sales?tab=1&tenderId=88&action=go-nogo');
+    });
+
+    it('should map WorkflowTask with entityType TENDER and taskKey GO_NOGO_APPROVAL to sales deep-link', async () => {
+      const tenderTask: Partial<WorkflowTask> = {
+        id: 202,
+        taskKey: 'GO_NOGO_APPROVAL',
+        status: WorkflowTaskStatus.PENDING,
+        assigneeUserId: 10,
+        assigneeRole: { id: 2, name: 'DIRECTOR' } as any,
+        dueAt: new Date('2026-10-02T10:00:00Z'),
+        createdAt: new Date('2026-09-24T08:00:00Z'),
+        workflowInstance: {
+          id: 60,
+          entityType: 'TENDER',
+          entityId: 99,
+        } as any,
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([tenderTask]);
+
+      const todos = await service.getTodos(10, ['DIRECTOR']);
+
+      const wfTodo = todos.find((t) => t.todoId === 'wf-202');
+      expect(wfTodo).toBeDefined();
+      expect(wfTodo?.entityType).toBe('TENDER');
+      expect(wfTodo?.actionType).toBe('GO_NOGO_APPROVAL');
+      expect(wfTodo?.actionTarget).toBe('/sales?tab=1&tenderId=99&action=go-nogo');
+      expect(wfTodo?.title).toBe('Persetujuan GO / NO-GO');
+    });
+
+    it('should enrich GO_NOGO_APPROVAL with Project Name, Customer, and actual Submitter Name', async () => {
+      const tenderTask: Partial<WorkflowTask> = {
+        id: 203,
+        taskKey: 'GO_NOGO_APPROVAL',
+        status: WorkflowTaskStatus.PENDING,
+        assigneeRole: { id: 2, name: 'DIRECTOR' } as any,
+        createdAt: new Date('2026-09-24T08:00:00Z'),
+        workflowInstance: {
+          id: 75,
+          entityType: 'TENDER',
+          entityId: 33,
+        } as any,
+      };
+
+      mockTenderRepo.findOne = jest.fn().mockResolvedValue({
+        id: 33,
+        title: 'Project Gudang Jakarta Selatan',
+        customer: { id: 14, name: 'J&T Express' },
+      });
+
+      mockTenderRepo.manager = {
+        createQueryBuilder: jest.fn().mockReturnValue({
+          leftJoin: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          orderBy: jest.fn().mockReturnThis(),
+          getRawOne: jest.fn().mockResolvedValue({ actorId: 7, fullName: 'Lukas Kurniawan' }),
+        }),
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([tenderTask]);
+
+      const todos = await service.getTodos(10, ['DIRECTOR']);
+
+      const todo = todos.find((t) => t.todoId === 'wf-203');
+      expect(todo).toBeDefined();
+      expect(todo?.title).toBe('Persetujuan GO / NO-GO');
+      expect(todo?.title).not.toContain('Tender #33');
+      expect(todo?.projectName).toBe('Project Gudang Jakarta Selatan');
+      expect(todo?.customerName).toBe('J&T Express');
+      expect(todo?.submittedByName).toBe('Lukas Kurniawan');
+      expect(todo?.actionTarget).toBe('/sales?tab=1&tenderId=33&action=go-nogo');
     });
 
     it('should NOT query pending tenders if user does NOT have director/gm/super_admin roles', async () => {
@@ -397,4 +478,191 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       expect(todos[0].actionTarget).toBeNull();
     });
   });
+
+  describe('11. WF-3B Section 20: Transitional Deduplication: Tender Go/No-Go DOMAIN_TENDER vs WORKFLOW_TASK', () => {
+    it('WorkflowTask exists -> WORKFLOW_TASK returned & DOMAIN_TENDER suppressed (DIRECTOR)', async () => {
+      const wfTask: Partial<WorkflowTask> = {
+        id: 501,
+        taskKey: 'GO_NOGO_APPROVAL',
+        status: WorkflowTaskStatus.PENDING,
+        createdAt: new Date('2026-09-24T10:00:00Z'),
+        workflowInstance: {
+          id: 301,
+          entityType: 'TENDER',
+          entityId: 99,
+        } as any,
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([wfTask]);
+
+      const mockTender = {
+        id: 99,
+        title: 'Pengadaan Server DC',
+        stage: TenderStage.WAITING_GO_NO_GO,
+        go_nogo_status: GoNoGoStatus.PENDING,
+        submission_deadline: new Date('2026-10-15T00:00:00Z'),
+        created_at: new Date('2026-09-24T09:00:00Z'),
+      };
+
+      mockTenderRepo.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockTender]),
+      });
+
+      const todos = await service.getTodos(10, ['DIRECTOR']);
+
+      // Exactly 1 todo returned (no duplicate card)
+      expect(todos).toHaveLength(1);
+      expect(todos[0].sourceType).toBe('WORKFLOW_TASK');
+      expect(todos[0].entityType).toBe('TENDER');
+      expect(todos[0].entityId).toBe(99);
+      expect(todos[0].actionType).toBe('GO_NOGO_APPROVAL');
+      expect(todos[0].actionTarget).toBe('/sales?tab=1&tenderId=99&action=go-nogo');
+    });
+
+    it('WorkflowTask exists -> WORKFLOW_TASK returned & DOMAIN_TENDER suppressed (GENERAL_MANAGER)', async () => {
+      const wfTask: Partial<WorkflowTask> = {
+        id: 502,
+        taskKey: 'GO_NOGO_APPROVAL',
+        status: WorkflowTaskStatus.PENDING,
+        createdAt: new Date('2026-09-24T10:00:00Z'),
+        workflowInstance: {
+          id: 302,
+          entityType: 'TENDER',
+          entityId: 100,
+        } as any,
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([wfTask]);
+
+      const mockTender = {
+        id: 100,
+        title: 'Pengadaan Switch Core',
+        stage: TenderStage.WAITING_GO_NO_GO,
+        go_nogo_status: GoNoGoStatus.PENDING,
+        submission_deadline: new Date('2026-10-15T00:00:00Z'),
+        created_at: new Date('2026-09-24T09:00:00Z'),
+      };
+
+      mockTenderRepo.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockTender]),
+      });
+
+      const todos = await service.getTodos(20, ['GENERAL_MANAGER']);
+
+      expect(todos).toHaveLength(1);
+      expect(todos[0].sourceType).toBe('WORKFLOW_TASK');
+      expect(todos[0].entityType).toBe('TENDER');
+      expect(todos[0].entityId).toBe(100);
+      expect(todos[0].actionType).toBe('GO_NOGO_APPROVAL');
+    });
+
+    it('WorkflowTask absent -> DOMAIN_TENDER returned (migration safety net)', async () => {
+      // Empty workflow tasks (e.g. startInstance failed)
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([]);
+
+      const mockTender = {
+        id: 105,
+        title: 'Tender Cadangan',
+        stage: TenderStage.WAITING_GO_NO_GO,
+        go_nogo_status: GoNoGoStatus.PENDING,
+        submission_deadline: new Date('2026-10-15T00:00:00Z'),
+        created_at: new Date('2026-09-24T09:00:00Z'),
+      };
+
+      mockTenderRepo.createQueryBuilder.mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockTender]),
+      });
+
+      const todos = await service.getTodos(10, ['DIRECTOR']);
+
+      expect(todos).toHaveLength(1);
+      expect(todos[0].sourceType).toBe('DOMAIN_TENDER');
+      expect(todos[0].entityType).toBe('TENDER');
+      expect(todos[0].entityId).toBe(105);
+      expect(todos[0].actionType).toBe('GO_NOGO_APPROVAL');
+      expect(todos[0].actionTarget).toBe('/sales?tab=1&tenderId=105&action=go-nogo');
+    });
+
+    it('maps GO_NOGO_REVISION workflow task to sales actionTarget with action=go-nogo', async () => {
+      const revTask: Partial<WorkflowTask> = {
+        id: 503,
+        taskKey: 'GO_NOGO_REVISION',
+        status: WorkflowTaskStatus.PENDING,
+        createdAt: new Date('2026-09-24T10:00:00Z'),
+        workflowInstance: {
+          id: 303,
+          entityType: 'TENDER',
+          entityId: 101,
+        } as any,
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([revTask]);
+
+      const todos = await service.getTodos(30, ['MARKETING']);
+
+      expect(todos).toHaveLength(1);
+      expect(todos[0].sourceType).toBe('WORKFLOW_TASK');
+      expect(todos[0].actionType).toBe('GO_NOGO_REVISION');
+      expect(todos[0].actionTarget).toBe('/sales?tab=1&tenderId=101&action=go-nogo');
+      expect(todos[0].title).toBe('Revisi GO / NO-GO');
+    });
+
+    it('enriches GO_NOGO_REVISION with projectName, customerName, returnedByName, and returnReason', async () => {
+      const revTask: Partial<WorkflowTask> = {
+        id: 504,
+        taskKey: 'GO_NOGO_REVISION',
+        status: WorkflowTaskStatus.PENDING,
+        createdAt: new Date('2026-09-24T10:00:00Z'),
+        workflowInstance: {
+          id: 304,
+          entityType: 'TENDER',
+          entityId: 102,
+        } as any,
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([revTask]);
+
+      mockTenderRepo.findOne = jest.fn().mockResolvedValue({
+        id: 102,
+        title: 'Renovasi Kantor HQ J&T Indonesia',
+        customer: { name: 'J&T Express' },
+      });
+
+      const qbMock = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({
+          actorId: 4,
+          fullName: 'Budi Director',
+          reason: 'masih salah nominalnya',
+        }),
+      };
+
+      mockTenderRepo.manager = {
+        createQueryBuilder: jest.fn().mockReturnValue(qbMock),
+      };
+
+      const todos = await service.getTodos(30, ['MARKETING']);
+
+      expect(todos).toHaveLength(1);
+      expect(todos[0].title).toBe('Revisi GO / NO-GO');
+      expect(todos[0].projectName).toBe('Renovasi Kantor HQ J&T Indonesia');
+      expect(todos[0].customerName).toBe('J&T Express');
+      expect(todos[0].returnedByName).toBe('Budi Director');
+      expect(todos[0].returnReason).toBe('masih salah nominalnya');
+    });
+  });
 });
+

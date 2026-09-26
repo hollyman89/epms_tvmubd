@@ -4,7 +4,7 @@ import { CheckOutlined, DeleteOutlined, ArrowRightOutlined, ClockCircleOutlined 
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/axios';
 import { InboxService, TodoItem } from '@/services/inbox.service';
-import { resolveTodoActionTarget } from '@/lib/todoActionResolver';
+import { resolveTodoActionTarget, navigateTodoAction } from '@/lib/todoActionResolver';
 import { setupTodoSync } from '@/lib/todoSync';
 import { setupInboxSync } from '@/lib/notificationSync';
 import { useSocket } from '@/context/SocketProvider';
@@ -316,6 +316,10 @@ export const InboxPage: React.FC = () => {
                   const targetUrl = resolveTodoActionTarget(item);
                   const isActionAvailable = Boolean(targetUrl);
 
+                  const isGoNoGoApproval = item.actionType === 'GO_NOGO_APPROVAL';
+                  const isGoNoGoRevision = item.actionType === 'GO_NOGO_REVISION';
+                  const isGoNoGoAny = isGoNoGoApproval || isGoNoGoRevision;
+
                   return (
                     <List.Item
                       key={item.todoId}
@@ -326,7 +330,7 @@ export const InboxPage: React.FC = () => {
                           icon={<ArrowRightOutlined />}
                           disabled={!isActionAvailable}
                           onClick={() => {
-                            if (targetUrl) router.push(targetUrl);
+                            if (targetUrl) navigateTodoAction(targetUrl, router);
                           }}
                         >
                           {isActionAvailable ? 'Buka' : 'Aksi Belum Tersedia'}
@@ -343,22 +347,50 @@ export const InboxPage: React.FC = () => {
                       }}
                     >
                       <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            flexWrap: 'wrap',
-                            gap: '6px',
-                            marginBottom: '6px',
-                          }}
-                        >
-                          {renderEntityTypeTag(item.entityType)}
-                          {item.assignedRole && (
-                            <Tag color="gold">{item.assignedRole}</Tag>
-                          )}
-                          <Tag color="processing">{item.status}</Tag>
-                          {renderDueBadge(item.dueAt)}
-                        </div>
+                        {isGoNoGoApproval ? (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              gap: '6px',
+                              marginBottom: '6px',
+                            }}
+                          >
+                            <Tag color="green">Tender</Tag>
+                            <Tag color="gold">Director</Tag>
+                          </div>
+                        ) : isGoNoGoRevision ? (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              gap: '6px',
+                              marginBottom: '6px',
+                            }}
+                          >
+                            <Tag color="green">Tender</Tag>
+                            <Tag color="gold">Marketing</Tag>
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              gap: '6px',
+                              marginBottom: '6px',
+                            }}
+                          >
+                            {renderEntityTypeTag(item.entityType)}
+                            {item.assignedRole && (
+                              <Tag color="gold">{item.assignedRole}</Tag>
+                            )}
+                            <Tag color="processing">{item.status}</Tag>
+                            {renderDueBadge(item.dueAt)}
+                          </div>
+                        )}
 
                         <div style={{ marginBottom: '4px' }}>
                           <Text
@@ -369,28 +401,131 @@ export const InboxPage: React.FC = () => {
                               display: 'block',
                             }}
                           >
-                            {item.title}
+                            {isGoNoGoApproval
+                              ? 'Persetujuan GO / NO-GO'
+                              : isGoNoGoRevision
+                              ? 'Revisi GO / NO-GO'
+                              : item.title}
                           </Text>
                         </div>
 
-                        {item.description && (
-                          <div style={{ marginBottom: '6px' }}>
-                            <Text
-                              style={{
-                                fontSize: '13px',
-                                color: token.colorTextSecondary,
-                                lineHeight: '1.5',
-                                display: 'block',
-                              }}
-                            >
-                              {item.description}
-                            </Text>
+                        {isGoNoGoApproval ? (
+                          <div style={{ marginBottom: '8px' }}>
+                            {item.projectName && (
+                              <Text
+                                style={{
+                                  fontSize: '14px',
+                                  fontWeight: 600,
+                                  color: token.colorTextHeading,
+                                  display: 'block',
+                                  marginBottom: '2px',
+                                }}
+                              >
+                                {item.projectName}
+                              </Text>
+                            )}
+                            {item.customerName && (
+                              <Text
+                                type="secondary"
+                                style={{
+                                  fontSize: '13px',
+                                  color: token.colorTextSecondary,
+                                  display: 'block',
+                                  lineHeight: '1.4',
+                                }}
+                              >
+                                Customer: {item.customerName}
+                              </Text>
+                            )}
+                            {item.submittedByName && (
+                              <Text
+                                type="secondary"
+                                style={{
+                                  fontSize: '13px',
+                                  color: token.colorTextSecondary,
+                                  display: 'block',
+                                  lineHeight: '1.4',
+                                }}
+                              >
+                                Diajukan oleh: {item.submittedByName}
+                              </Text>
+                            )}
                           </div>
+                        ) : isGoNoGoRevision ? (
+                          <div style={{ marginBottom: '8px' }}>
+                            {item.projectName && (
+                              <Text
+                                style={{
+                                  fontSize: '14px',
+                                  fontWeight: 600,
+                                  color: token.colorTextHeading,
+                                  display: 'block',
+                                  marginBottom: '2px',
+                                }}
+                              >
+                                {item.projectName}
+                              </Text>
+                            )}
+                            {item.customerName && (
+                              <Text
+                                type="secondary"
+                                style={{
+                                  fontSize: '13px',
+                                  color: token.colorTextSecondary,
+                                  display: 'block',
+                                  lineHeight: '1.4',
+                                }}
+                              >
+                                Customer: {item.customerName}
+                              </Text>
+                            )}
+                            {item.returnedByName && (
+                              <Text
+                                type="secondary"
+                                style={{
+                                  fontSize: '13px',
+                                  color: token.colorTextSecondary,
+                                  display: 'block',
+                                  lineHeight: '1.4',
+                                }}
+                              >
+                                Dikembalikan oleh: {item.returnedByName}
+                              </Text>
+                            )}
+                            {item.returnReason && (
+                              <Text
+                                type="secondary"
+                                style={{
+                                  fontSize: '13px',
+                                  color: token.colorTextSecondary,
+                                  display: 'block',
+                                  lineHeight: '1.4',
+                                }}
+                              >
+                                Alasan: {item.returnReason}
+                              </Text>
+                            )}
+                          </div>
+                        ) : (
+                          item.description && (
+                            <div style={{ marginBottom: '6px' }}>
+                              <Text
+                                style={{
+                                  fontSize: '13px',
+                                  color: token.colorTextSecondary,
+                                  lineHeight: '1.5',
+                                  display: 'block',
+                                }}
+                              >
+                                {item.description}
+                              </Text>
+                            </div>
+                          )
                         )}
 
                         <div>
                           <Text type="secondary" style={{ fontSize: '12px' }}>
-                            Dibuat {dayjs(item.createdAt).fromNow()}
+                            {isGoNoGoAny ? dayjs(item.createdAt).fromNow() : `Dibuat ${dayjs(item.createdAt).fromNow()}`}
                           </Text>
                         </div>
                       </div>

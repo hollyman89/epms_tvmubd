@@ -4,7 +4,7 @@ import { BellOutlined, CheckOutlined, ArrowRightOutlined, ClockCircleOutlined } 
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/axios';
 import { InboxService, TodoItem } from '@/services/inbox.service';
-import { resolveTodoActionTarget } from '@/lib/todoActionResolver';
+import { resolveTodoActionTarget, navigateTodoAction } from '@/lib/todoActionResolver';
 import { setupTodoSync } from '@/lib/todoSync';
 import { setupNotificationBellSync } from '@/lib/notificationSync';
 import { extractUnreadNotificationCount } from '@/lib/notificationCount';
@@ -244,6 +244,8 @@ export const NotificationBell: React.FC = () => {
       const isActionAvailable = Boolean(targetUrl);
       const dueTime = item.dueAt ? new Date(item.dueAt).getTime() : null;
       const isOverdue = dueTime !== null && dueTime < Date.now();
+      const isGoNoGoApproval = item.actionType === 'GO_NOGO_APPROVAL';
+      const isGoNoGoRevision = item.actionType === 'GO_NOGO_REVISION';
 
       return (
         <List.Item
@@ -276,33 +278,92 @@ export const NotificationBell: React.FC = () => {
           }}
         >
           <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
-              <Tag color="blue" style={{ fontSize: '10px' }}>{item.entityType}</Tag>
-              {item.assignedRole && <Tag color="gold" style={{ fontSize: '10px' }}>{item.assignedRole}</Tag>}
-              {item.dueAt && (
-                <Tag
-                  color={isOverdue ? 'error' : 'warning'}
-                  icon={<ClockCircleOutlined />}
-                  style={{ fontSize: '10px', fontWeight: 600 }}
-                >
-                  {isOverdue ? 'Terlambat' : dayjs(item.dueAt).fromNow()}
-                </Tag>
+              {isGoNoGoApproval ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                  <Tag color="green" style={{ fontSize: '10px' }}>Tender</Tag>
+                  <Tag color="gold" style={{ fontSize: '10px' }}>Director</Tag>
+                </div>
+              ) : isGoNoGoRevision ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                  <Tag color="green" style={{ fontSize: '10px' }}>Tender</Tag>
+                  <Tag color="gold" style={{ fontSize: '10px' }}>Marketing</Tag>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                  <Tag color="blue" style={{ fontSize: '10px' }}>{item.entityType}</Tag>
+                  {item.assignedRole && <Tag color="gold" style={{ fontSize: '10px' }}>{item.assignedRole}</Tag>}
+                  {item.dueAt && (
+                    <Tag
+                      color={isOverdue ? 'error' : 'warning'}
+                      icon={<ClockCircleOutlined />}
+                      style={{ fontSize: '10px', fontWeight: 600 }}
+                    >
+                      {isOverdue ? 'Terlambat' : dayjs(item.dueAt).fromNow()}
+                    </Tag>
+                  )}
+                </div>
               )}
-            </div>
 
-            <div style={{ marginBottom: '2px' }}>
-              <Text strong style={{ fontSize: '13px', color: '#0f172a', display: 'block' }}>
-                {item.title}
-              </Text>
-            </div>
-
-            {item.description && (
-              <div style={{ marginBottom: '4px' }}>
-                <Text style={{ fontSize: '11px', color: '#64748b', display: 'block', lineHeight: '1.4' }}>
-                  {item.description}
+              <div style={{ marginBottom: '2px' }}>
+                <Text strong style={{ fontSize: '13px', color: '#0f172a', display: 'block' }}>
+                  {isGoNoGoApproval
+                    ? 'Persetujuan GO / NO-GO'
+                    : isGoNoGoRevision
+                    ? 'Revisi GO / NO-GO'
+                    : item.title}
                 </Text>
               </div>
-            )}
+
+              {isGoNoGoApproval ? (
+                <div style={{ marginBottom: '4px' }}>
+                  {item.projectName && (
+                    <Text strong style={{ fontSize: '12px', color: '#1e293b', display: 'block', marginBottom: '1px' }}>
+                      {item.projectName}
+                    </Text>
+                  )}
+                  {item.customerName && (
+                    <Text type="secondary" style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>
+                      Customer: {item.customerName}
+                    </Text>
+                  )}
+                  {item.submittedByName && (
+                    <Text type="secondary" style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>
+                      Diajukan oleh: {item.submittedByName}
+                    </Text>
+                  )}
+                </div>
+              ) : isGoNoGoRevision ? (
+                <div style={{ marginBottom: '4px' }}>
+                  {item.projectName && (
+                    <Text strong style={{ fontSize: '12px', color: '#1e293b', display: 'block', marginBottom: '1px' }}>
+                      {item.projectName}
+                    </Text>
+                  )}
+                  {item.customerName && (
+                    <Text type="secondary" style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>
+                      Customer: {item.customerName}
+                    </Text>
+                  )}
+                  {item.returnedByName && (
+                    <Text type="secondary" style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>
+                      Dikembalikan oleh: {item.returnedByName}
+                    </Text>
+                  )}
+                  {item.returnReason && (
+                    <Text type="secondary" style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>
+                      Alasan: {item.returnReason}
+                    </Text>
+                  )}
+                </div>
+              ) : (
+                item.description && (
+                  <div style={{ marginBottom: '4px' }}>
+                    <Text style={{ fontSize: '11px', color: '#64748b', display: 'block', lineHeight: '1.4' }}>
+                      {item.description}
+                    </Text>
+                  </div>
+                )
+              )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
               <Text type="secondary" style={{ fontSize: '10px', color: '#94a3b8' }}>
@@ -317,7 +378,7 @@ export const NotificationBell: React.FC = () => {
                 onClick={(e) => {
                   e.stopPropagation();
                   if (targetUrl) {
-                    router.push(targetUrl);
+                    navigateTodoAction(targetUrl, router);
                     setOpen(false);
                   }
                 }}

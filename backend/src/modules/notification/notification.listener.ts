@@ -8,39 +8,58 @@ export class NotificationListener {
 
   constructor(private readonly notificationGateway: NotificationGateway) {}
 
-  @OnEvent('marketing.tender.won')
-  handleTenderWonEvent(payload: { contractId?: number; tenderId: number; customerId?: number; title?: string }) {
-    this.logger.log(`Event diterima: Tender WON - Tender ID ${payload.tenderId}`);
-
-    if (this.notificationGateway?.server && payload.contractId) {
+  @OnEvent('marketing.spk.uploaded')
+  handleSpkUploadedEvent(event: any) {
+    const payload = event?.payload || event;
+    const contractId = payload.contractId || event?.aggregateId;
+    if (this.notificationGateway?.server && contractId) {
       this.notificationGateway.server.emit('legal.queue.updated', {
-        type: 'NEW_CONTRACT',
-        contractId: payload.contractId,
+        type: payload.isRevision ? 'REVISED_CONTRACT' : 'NEW_CONTRACT',
+        contractId,
         tenderId: payload.tenderId,
         title: payload.title,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
-      this.logger.log(`Broadcast Socket.io 'legal.queue.updated' sent to all connected clients.`);
+      this.logger.log(`Broadcast Socket.io 'legal.queue.updated' sent for SPK upload.`);
     }
   }
 
   @OnEvent('legal.contract.approved')
-  handleContractApprovedEvent(payload: any) {
-    this.logger.log(`Event diterima: Legal Contract Approved - Contract ID ${payload.contractId}`);
+  handleContractApprovedEvent(event: any) {
+    const payload = event?.payload || event;
+    const contractId = payload.contractId || event?.aggregateId;
+    this.logger.log(`Event diterima: Legal Contract Approved - Contract ID ${contractId}`);
 
-    if (this.notificationGateway?.server) {
+    if (this.notificationGateway?.server && contractId) {
       this.notificationGateway.server.emit('legal.queue.updated', {
         type: 'CONTRACT_APPROVED',
-        contractId: payload.contractId,
-        legalStatus: payload.legalStatus,
-        timestamp: new Date().toISOString()
+        contractId,
+        legalStatus: payload.legalStatus || 'APPROVED',
+        timestamp: new Date().toISOString(),
       });
       this.notificationGateway.server.emit('marketing.tender.management_update', {
         type: 'CONTRACT_APPROVED',
-        contractId: payload.contractId,
-        timestamp: new Date().toISOString()
+        contractId,
+        timestamp: new Date().toISOString(),
       });
       this.logger.log(`Broadcast Socket.io 'legal.queue.updated' & 'marketing.tender.management_update' sent.`);
+    }
+  }
+
+  @OnEvent('legal.contract.revision_requested')
+  handleContractRevisionRequestedEvent(event: any) {
+    const payload = event?.payload || event;
+    const contractId = payload.contractId || event?.aggregateId;
+    this.logger.log(`Event diterima: Legal Contract Revision Requested - Contract ID ${contractId}`);
+
+    if (this.notificationGateway?.server && contractId) {
+      this.notificationGateway.server.emit('legal.queue.updated', {
+        type: 'REVISION_REQUESTED',
+        contractId,
+        legalStatus: payload.legalStatus || 'REVISION_REQUESTED',
+        timestamp: new Date().toISOString(),
+      });
+      this.logger.log(`Broadcast Socket.io 'legal.queue.updated' sent for revision request.`);
     }
   }
 

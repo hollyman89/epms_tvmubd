@@ -58,6 +58,7 @@ import {
 } from '../hooks/useDashboardQuery';
 import { apiClient } from '@/lib/axios';
 import { queryClient, updateAllTenderCaches, appendTenderToCache } from '../lib/queryClient';
+import { peekPendingSalesDrawerRequest } from '@/lib/salesNavigation';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -131,6 +132,8 @@ export const SalesPipelinePage = () => {
 
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
+  const tenderIdParam = searchParams.get('tenderId');
+  const actionParam = searchParams.get('action');
   const [activeTab, setActiveTab] = useState('1');
 
   useEffect(() => {
@@ -165,6 +168,23 @@ export const SalesPipelinePage = () => {
   const [viewMode, setViewMode] = useState('kanban');
   const [periodFilter, setPeriodFilter] = useState('all');
   const [analyticsPeriodFilter, setAnalyticsPeriodFilter] = useState('YEAR_TO_DATE');
+
+  useEffect(() => {
+    if (tenderIdParam || peekPendingSalesDrawerRequest()) {
+      setActiveTab('1');
+      setViewMode('kanban');
+    }
+
+    if (typeof window === 'undefined') return;
+    const handleDrawerEvent = () => {
+      setActiveTab('1');
+      setViewMode('kanban');
+    };
+    window.addEventListener('epms:open_sales_drawer', handleDrawerEvent);
+    return () => {
+      window.removeEventListener('epms:open_sales_drawer', handleDrawerEvent);
+    };
+  }, [tenderIdParam]);
 
   // Modals state
   const [isTenderModalVisible, setIsTenderModalVisible] = useState(false);
@@ -919,6 +939,8 @@ export const SalesPipelinePage = () => {
               {viewMode === 'kanban' ? (
                 <KanbanBoard 
                   tenders={activeTendersData} 
+                  targetTenderId={tenderIdParam ? Number(tenderIdParam) : null}
+                  targetAction={actionParam}
                   onStageChange={async (id, newStage) => {
                     try {
                       await apiClient.patch(`/marketing/tenders/${id}/status`, { stage: newStage });

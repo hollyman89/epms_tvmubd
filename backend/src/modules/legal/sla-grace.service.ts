@@ -1,7 +1,10 @@
 import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { Contract } from '../../entities/contract.entity';
+import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { BusinessEvent } from '../../shared/contracts/business-event.contract';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
 
 @Injectable()
@@ -16,9 +19,11 @@ export class SlaGraceService {
   /**
    * 2. Event Listener: Acknowledges 72h SLA grace period initialized when contract status becomes REVISION_REQUESTED
    */
+  @OnEvent('legal.contract.revision_requested')
   @OnEvent('contract.revision_requested')
-  async handleRevisionRequested(payload: { contractId: number; userId: number; reason?: string }) {
-    this.logger.log(`[Revision SLA] Contract #${payload.contractId} marked REVISION_REQUESTED. 72h SLA grace period active.`);
+  async handleRevisionRequested(payload: any) {
+    const contractId = payload?.payload?.contractId || payload?.contractId;
+    this.logger.log(`[Revision SLA] Contract #${contractId} marked REVISION_REQUESTED. 72h SLA grace period active.`);
   }
 
   /**
@@ -41,27 +46,63 @@ export class SlaGraceService {
     const currentDeadline = contract.grace_deadline ? new Date(contract.grace_deadline) : now;
     const newDeadline = new Date(currentDeadline.getTime() + daysToAdd * 24 * 60 * 60 * 1000);
 
-    contract.grace_deadline = newDeadline;
-    contract.grace_extended_by = userId;
-    contract.grace_extended_at = now;
-    contract.grace_extension_count = currentCount + 1;
+    await this.contractRepo.manager.transaction(async (manager) => {
+      contract.grace_deadline = newDeadline;
+      contract.grace_extended_by = userId;
+      contract.grace_extended_at = now;
+      contract.grace_extension_count = currentCount + 1;
 
-    await this.contractRepo.save(contract);
+      await manager.save(Contract, contract);
 
-    // Audit Log & Notification
+      // Phase N8: Transactional Outbox Canonical Event (replaces legacy notification.send)
+      const canonicalEvent: BusinessEvent = {
+        eventId: randomUUID(),
+        eventName: 'system.sla.grace_extended',
+        eventVersion: 1,
+        occurredAt: now.toISOString(),
+        aggregateType: 'Contract',
+        aggregateId: contract.id,
+        actor: { userId },
+        routing: { userIds: [userId] },
+        payload: {
+          contractId: contract.id,
+          contractNumber: contract.contract_number,
+          daysAdded: daysToAdd,
+          extensionCount: contract.grace_extension_count,
+          newDeadline: newDeadline.toISOString(),
+          formattedDeadline: newDeadline.toLocaleDateString('id-ID'),
+          extendedBy: userId,
+        },
+      };
+
+      const outbox = manager.create(OutboxEvent, {
+        event_id: canonicalEvent.eventId,
+        event_name: canonicalEvent.eventName,
+        event_version: String(canonicalEvent.eventVersion),
+        aggregate_type: canonicalEvent.aggregateType,
+        aggregate_id: Number(canonicalEvent.aggregateId),
+        correlation_id: canonicalEvent.correlationId || null,
+        payload: {
+          occurredAt: canonicalEvent.occurredAt,
+          projectId: canonicalEvent.projectId,
+          actor: canonicalEvent.actor,
+          routing: canonicalEvent.routing,
+          notificationPolicy: canonicalEvent.notificationPolicy,
+          businessPayload: canonicalEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await manager.save(OutboxEvent, outbox);
+    });
+
+    // Audit Log
     this.eventEmitter.emit('audit.log', {
       action: 'SLA_GRACE_EXTENDED',
       entityId: contractId,
       entityName: 'contracts',
       reason: `Grace deadline extended +${daysToAdd} days (Attempt ${contract.grace_extension_count}/3). Reason: ${reason || 'N/A'}`,
       userId,
-    });
-
-    this.eventEmitter.emit('notification.send', {
-      recipientId: userId,
-      title: 'Grace SLA Deadline Diperpanjang',
-      message: `Batas waktu SLA Kontrak diperpanjang +${daysToAdd} hari hingga ${newDeadline.toLocaleDateString('id-ID')}. (Perpanjangan ke-${contract.grace_extension_count}/3).`,
-      type: 'INFO',
     });
 
     return {

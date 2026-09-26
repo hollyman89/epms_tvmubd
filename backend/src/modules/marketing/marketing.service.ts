@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Optional, ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Optional, ForbiddenException, UnauthorizedException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
+import { Repository, DataSource, Like } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Customer } from '../../entities/customer.entity';
 import { Tender, TenderStatus, GoNoGoStatus, TenderStage, RevisionStatus } from '../../entities/tender.entity';
@@ -14,13 +14,22 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CreateTenderDto, UpdateTenderStatusDto } from './dto/create-tender.dto';
 import { TenderDetailResponseDto } from './dto/tender-detail-response.dto';
 import { CreateTenderActivityDto } from './dto/tender-activity.dto';
+import { SubmitGoNoGoReviewDto } from './dto/submit-go-no-go-review.dto';
 import { TenderPriceHistory } from '../../entities/tender-price-history.entity';
 import { emitLegalQueueUpdated } from '../../shared/helpers/legal-event.helper';
+import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
+import { WorkflowInstance, WorkflowInstanceStatus } from '../../entities/workflow-instance.entity';
+import { WorkflowTaskStatus } from '../../entities/workflow-task.entity';
+import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { BusinessEvent } from '../../shared/contracts/business-event.contract';
+import { randomUUID } from 'crypto';
 import * as path from 'path';
 import * as fs from 'fs';
 
 @Injectable()
 export class MarketingService {
+  private readonly logger = new Logger(MarketingService.name);
+
   constructor(
     @InjectRepository(Customer) private customerRepo: Repository<Customer>,
     @InjectRepository(Tender) private tenderRepo: Repository<Tender>,
@@ -30,6 +39,7 @@ export class MarketingService {
     @InjectRepository(TenderPriceHistory) private priceHistoryRepo: Repository<TenderPriceHistory>,
     private dataSource: DataSource,
     private eventEmitter: EventEmitter2,
+    @Optional() private readonly workflowEngineService?: WorkflowEngineService,
   ) { }
 
   private calculateProbabilityPercentage(stage: string, status: string): number {
@@ -83,6 +93,11 @@ export class MarketingService {
 
     const target = targetStageInput.toUpperCase();
     const current = (tender.stage || '').toUpperCase();
+
+    // 0. WORKFLOW-CONTROLLED STAGE GUARD: WAITING_GO_NO_GO
+    if (current === TenderStage.WAITING_GO_NO_GO && target !== TenderStage.WAITING_GO_NO_GO) {
+      throw new BadRequestException('Tender sedang dalam proses review GO/NO-GO oleh Direksi dan tidak dapat diubah secara manual.');
+    }
 
     // 1. HARD GATE: GO/NO_GO Status Verification
     if (target !== TenderStage.LEAD && target !== TenderStage.WAITING_GO_NO_GO && target !== TenderStage.LOST && tender.go_nogo_status !== GoNoGoStatus.GO) {
@@ -417,6 +432,62 @@ export class MarketingService {
         }
       }
 
+      let rawSubmissions: any[] = [];
+      try {
+        if (typeof this.tenderRepo.query === 'function') {
+          rawSubmissions = await this.tenderRepo.query(`
+            SELECT ta.tender_id, ta.user_id, ta.created_at, u.full_name AS submitter_name
+            FROM tender_activities ta
+            LEFT JOIN users u ON u.id = ta.user_id
+            WHERE ta.content LIKE '%submitted tender for GO / NO GO review%'
+            ORDER BY ta.id ASC
+          `);
+        }
+      } catch {
+        // graceful fallback if table not queryable
+      }
+
+      const submissionMapByTenderId = new Map<number, { submitterName: string; submittedAt: string }>();
+      for (const s of rawSubmissions) {
+        if (s.tender_id) {
+          submissionMapByTenderId.set(Number(s.tender_id), {
+            submitterName: s.submitter_name || (s.user_id ? userMap.get(Number(s.user_id)) : null) || 'Marketing',
+            submittedAt: s.created_at ? new Date(s.created_at).toISOString() : null,
+          });
+        }
+      }
+
+      let rawWorkflowInstances: any[] = [];
+      try {
+        if (typeof this.tenderRepo.query === 'function') {
+          rawWorkflowInstances = await this.tenderRepo.query(`
+            SELECT id, entity_id, context, status
+            FROM workflow_instances
+            WHERE entity_type = 'TENDER'
+            ORDER BY id DESC
+          `);
+        }
+      } catch {
+        // graceful fallback if table not queryable
+      }
+
+      const workflowContextMapByTenderId = new Map<number, any>();
+      for (const wi of rawWorkflowInstances) {
+        if (wi.entity_id && !workflowContextMapByTenderId.has(Number(wi.entity_id))) {
+          let parsedContext = wi.context;
+          if (typeof parsedContext === 'string') {
+            try {
+              parsedContext = JSON.parse(parsedContext);
+            } catch {
+              parsedContext = null;
+            }
+          }
+          if (parsedContext) {
+            workflowContextMapByTenderId.set(Number(wi.entity_id), parsedContext);
+          }
+        }
+      }
+
       return tenders.map((t: any) => {
         const matchedContract = contractMapByTenderId.get(Number(t.id));
         const rawStatus = matchedContract ? matchedContract.legal_status : 'UNVERIFIED';
@@ -430,10 +501,27 @@ export class MarketingService {
 
         const resolvedPicName = t.marketing_pic_id ? (userMap.get(Number(t.marketing_pic_id)) || 'Lukas Kurniawan (MARKETING)') : (t.created_by ? (userMap.get(Number(t.created_by)) || 'Lukas Kurniawan (MARKETING)') : 'Lukas Kurniawan (MARKETING)');
 
+        const matchedSubmission = submissionMapByTenderId.get(Number(t.id));
+        const resolvedSubmitterName = matchedSubmission?.submitterName || (t.updated_by ? userMap.get(Number(t.updated_by)) : null) || null;
+        const resolvedSubmittedAt = matchedSubmission?.submittedAt || (t.updated_at ? new Date(t.updated_at).toISOString() : null);
+
+        const matchedWfContext = workflowContextMapByTenderId.get(Number(t.id));
+        const matchedDecisionPack = matchedWfContext?.decisionPack || matchedWfContext?.goNoGoReview || null;
+
         return {
           ...t,
           marketing_pic_name: resolvedPicName,
           marketingPicName: resolvedPicName,
+          go_nogo_submitted_by_name: resolvedSubmitterName,
+          go_nogo_submitted_at: resolvedSubmittedAt,
+          submitted_by_name: resolvedSubmitterName,
+          submitted_at: resolvedSubmittedAt,
+          submittedByName: resolvedSubmitterName,
+          submittedAt: resolvedSubmittedAt,
+          decisionPack: matchedDecisionPack,
+          decision_pack: matchedDecisionPack,
+          goNoGoReview: matchedDecisionPack,
+          go_nogo_review: matchedDecisionPack,
           legal_status: formattedStatus,
           spk_verification_status: formattedStatus,
           contract_id: matchedContract?.id,
@@ -489,6 +577,62 @@ export class MarketingService {
         order: { id: 'DESC' }
       });
 
+      let resolvedMarketingPicName = '-';
+      if (entity.marketing_pic_id && this.dataSource) {
+        try {
+          const picUser = await this.dataSource.getRepository(User).findOne({ where: { id: Number(entity.marketing_pic_id) } });
+          if (picUser?.fullName) {
+            resolvedMarketingPicName = picUser.fullName;
+          }
+        } catch {
+          // fallback
+        }
+      }
+
+      let submittedByName: string | null = null;
+      let submittedAt: Date | null = null;
+      if (this.dataSource) {
+        try {
+          const lastActivity = await this.dataSource.getRepository(TenderActivity).findOne({
+            where: {
+              tender_id: entity.id,
+              content: Like('%submitted tender for GO / NO GO review%'),
+            },
+            relations: ['user'],
+            order: { id: 'DESC' },
+          });
+          if (lastActivity) {
+            submittedByName = lastActivity.user?.fullName || null;
+            submittedAt = lastActivity.created_at || null;
+          }
+        } catch {
+          // fallback
+        }
+      }
+
+      let decisionPack: any = null;
+      if (this.dataSource) {
+        try {
+          const wfInstance = await this.dataSource.getRepository(WorkflowInstance).findOne({
+            where: { entityType: 'TENDER', entityId: entity.id },
+            order: { id: 'DESC' },
+          });
+          if (wfInstance?.context) {
+            let ctx = wfInstance.context;
+            if (typeof ctx === 'string') {
+              try {
+                ctx = JSON.parse(ctx);
+              } catch {
+                ctx = null;
+              }
+            }
+            decisionPack = ctx?.decisionPack || ctx?.goNoGoReview || null;
+          }
+        } catch {
+          // fallback
+        }
+      }
+
       return {
         id: entity.id,
         title: entity.title,
@@ -504,14 +648,20 @@ export class MarketingService {
         expectedClosingDate: entity.expected_closing_date,
         bidSubmissionDeadline: entity.bid_submission_deadline || entity.submission_deadline,
         marketingPicId: entity.marketing_pic_id,
-        marketingPicName: '-',
+        marketingPicName: resolvedMarketingPicName,
         picCustomerName: entity.pic_customer_name,
         picCustomerPhone: entity.pic_customer_phone,
         projectLocation: entity.project_location,
         notes: entity.notes,
         status: entity.status,
         legalStatus: contract?.legal_status || null,
-        legalNotes: contract?.legal_notes || null
+        legalNotes: contract?.legal_notes || null,
+        submittedByName,
+        submittedAt,
+        decisionPack,
+        decision_pack: decisionPack,
+        goNoGoReview: decisionPack,
+        go_nogo_review: decisionPack,
       };
     } catch (e: any) {
       if (e instanceof NotFoundException) throw e;
@@ -724,18 +874,61 @@ export class MarketingService {
         // AUTO CONTRACT CREATION ON WON STAGE TRANSITION
         await this.ensureContractForWonTender(tender, userId, undefined, queryRunner);
 
-        await queryRunner.commitTransaction();
-
-        try {
-          this.eventEmitter.emit('marketing.tender.won', {
+        // Transactional Outbox: Canonical BusinessEvent for marketing.tender.won
+        const wonMarketingPicId = tender.marketing_pic_id ? Number(tender.marketing_pic_id) : undefined;
+        const wonBusinessEvent: BusinessEvent<{
+          tenderId: number;
+          title: string;
+          customerId: number;
+          customerName: string;
+          stage: string;
+          status: string;
+          estimatedBudget: number;
+          negotiatedPrice: number;
+          marketingPicId?: number;
+        }> = {
+          eventId: randomUUID(),
+          eventName: 'marketing.tender.won',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Tender',
+          aggregateId: tender.id,
+          actor: userId ? { userId: Number(userId) } : undefined,
+          routing: wonMarketingPicId ? { userIds: [wonMarketingPicId] } : undefined,
+          payload: {
             tenderId: tender.id,
-            customerId: tender.customer_id,
             title: tender.title,
-            estimatedBudget: tender.estimated_budget
-          });
-        } catch (eventErr) {
-          console.error(`[Event Error] Failed to emit marketing.tender.won for tender ${tender.id}:`, eventErr);
-        }
+            customerId: tender.customer_id,
+            customerName: tender.customer?.name || 'Unknown',
+            stage: tender.stage,
+            status: tender.status,
+            estimatedBudget: Number(tender.estimated_budget),
+            negotiatedPrice: Number(tender.negotiated_price),
+            marketingPicId: wonMarketingPicId,
+          },
+        };
+
+        const wonOutbox = queryRunner.manager.create(OutboxEvent, {
+          event_id: wonBusinessEvent.eventId,
+          event_name: wonBusinessEvent.eventName,
+          event_version: String(wonBusinessEvent.eventVersion),
+          aggregate_type: wonBusinessEvent.aggregateType,
+          aggregate_id: Number(wonBusinessEvent.aggregateId),
+          correlation_id: wonBusinessEvent.correlationId || null,
+          payload: {
+            occurredAt: wonBusinessEvent.occurredAt,
+            projectId: wonBusinessEvent.projectId,
+            actor: wonBusinessEvent.actor,
+            routing: wonBusinessEvent.routing,
+            notificationPolicy: wonBusinessEvent.notificationPolicy,
+            businessPayload: wonBusinessEvent.payload,
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await queryRunner.manager.save(OutboxEvent, wonOutbox);
+
+        await queryRunner.commitTransaction();
 
         this.eventEmitter.emit('marketing.tender.management_update', {
           tenderId: tender.id,
@@ -782,6 +975,60 @@ export class MarketingService {
           created_by: userId,
         });
         await queryRunner.manager.save(AuditLog, auditLog);
+
+        // Transactional Outbox: Canonical BusinessEvent for marketing.tender.lost
+        const lostMarketingPicId = tender.marketing_pic_id ? Number(tender.marketing_pic_id) : undefined;
+        const lostBusinessEvent: BusinessEvent<{
+          tenderId: number;
+          title: string;
+          customerId: number;
+          customerName: string;
+          stage: string;
+          status: string;
+          estimatedBudget: number;
+          negotiatedPrice: number;
+          marketingPicId?: number;
+        }> = {
+          eventId: randomUUID(),
+          eventName: 'marketing.tender.lost',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Tender',
+          aggregateId: tender.id,
+          actor: userId ? { userId: Number(userId) } : undefined,
+          routing: lostMarketingPicId ? { userIds: [lostMarketingPicId] } : undefined,
+          payload: {
+            tenderId: tender.id,
+            title: tender.title,
+            customerId: tender.customer_id,
+            customerName: tender.customer?.name || 'Unknown',
+            stage: tender.stage,
+            status: tender.status,
+            estimatedBudget: Number(tender.estimated_budget),
+            negotiatedPrice: Number(tender.negotiated_price),
+            marketingPicId: lostMarketingPicId,
+          },
+        };
+
+        const lostOutbox = queryRunner.manager.create(OutboxEvent, {
+          event_id: lostBusinessEvent.eventId,
+          event_name: lostBusinessEvent.eventName,
+          event_version: String(lostBusinessEvent.eventVersion),
+          aggregate_type: lostBusinessEvent.aggregateType,
+          aggregate_id: Number(lostBusinessEvent.aggregateId),
+          correlation_id: lostBusinessEvent.correlationId || null,
+          payload: {
+            occurredAt: lostBusinessEvent.occurredAt,
+            projectId: lostBusinessEvent.projectId,
+            actor: lostBusinessEvent.actor,
+            routing: lostBusinessEvent.routing,
+            notificationPolicy: lostBusinessEvent.notificationPolicy,
+            businessPayload: lostBusinessEvent.payload,
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await queryRunner.manager.save(OutboxEvent, lostOutbox);
 
         await queryRunner.commitTransaction();
 
@@ -917,7 +1164,290 @@ export class MarketingService {
     return saved;
   }
 
-  async submitGoNoGoReview(id: number, userId: number) {
+  private async reconcileTenderGoNoGoWorkflow(
+    tender: Tender,
+    userId: number,
+    userRoles: string[] = [],
+    requestedDecision?: 'GO' | 'NO_GO',
+    notes?: string,
+    decisionPack?: any,
+  ): Promise<void> {
+    if (!this.workflowEngineService) {
+      this.logger.warn(`WorkflowEngineService not injected; skipping workflow coordination for Tender #${tender.id}`);
+      return;
+    }
+
+    const stage = (tender.stage || '').toUpperCase();
+    const goNoGoStatus = tender.go_nogo_status;
+    const revisionStatus = tender.revision_status;
+
+    // 1. Initial Submit or Resubmit (WAITING_GO_NO_GO + PENDING)
+    if (stage === TenderStage.WAITING_GO_NO_GO && goNoGoStatus === GoNoGoStatus.PENDING) {
+      let instance = await this.workflowEngineService.getInstanceByEntity('TENDER', tender.id);
+
+      if (!instance || instance.status !== WorkflowInstanceStatus.IN_PROGRESS) {
+        // No active workflow instance: Initial submission or recovered initial submission
+        try {
+          await this.workflowEngineService.startInstance(
+            {
+              workflowKey: 'TENDER_GO_NOGO_WORKFLOW',
+              entityType: 'TENDER',
+              entityId: Number(tender.id),
+              context: {
+                marketing_pic_id: tender.marketing_pic_id ? Number(tender.marketing_pic_id) : null,
+                created_by: tender.created_by ? Number(tender.created_by) : null,
+                tenderId: Number(tender.id),
+                ...(decisionPack ? { decisionPack, goNoGoReview: decisionPack } : {}),
+              },
+            },
+            userId,
+          );
+        } catch (err: any) {
+          if (err instanceof ConflictException) {
+            instance = await this.workflowEngineService.getInstanceByEntity('TENDER', tender.id);
+            const hasApproval = instance?.tasks?.some(
+              (t) => t.taskKey === 'GO_NOGO_APPROVAL' && t.status === WorkflowTaskStatus.PENDING,
+            );
+            if (hasApproval) {
+              if (decisionPack && instance) {
+                try {
+                  instance.context = {
+                    ...(instance.context || {}),
+                    decisionPack,
+                    goNoGoReview: decisionPack,
+                  };
+                  if (this.dataSource) {
+                    await this.dataSource.getRepository(WorkflowInstance).save(instance);
+                  }
+                } catch {
+                  // graceful
+                }
+              }
+              return; // ALREADY_SYNCHRONIZED
+            }
+          }
+          throw err;
+        }
+        return;
+      }
+
+      // Active instance exists: Check tasks
+      const pendingApprovalTask = instance.tasks?.find(
+        (t) => t.taskKey === 'GO_NOGO_APPROVAL' && t.status === WorkflowTaskStatus.PENDING,
+      );
+      if (pendingApprovalTask) {
+        if (decisionPack && instance) {
+          try {
+            instance.context = {
+              ...(instance.context || {}),
+              decisionPack,
+              goNoGoReview: decisionPack,
+            };
+            if (this.dataSource) {
+              await this.dataSource.getRepository(WorkflowInstance).save(instance);
+            }
+          } catch {
+            // graceful
+          }
+        }
+        return; // ALREADY_SYNCHRONIZED
+      }
+
+      const pendingRevisionTask = instance.tasks?.find(
+        (t) => t.taskKey === 'GO_NOGO_REVISION' && t.status === WorkflowTaskStatus.PENDING,
+      );
+      if (pendingRevisionTask) {
+        try {
+          await this.workflowEngineService.completeTask(
+            pendingRevisionTask.id,
+            {
+              action: 'RESUBMIT',
+              reason: notes || 'Marketing resubmitted tender for GO / NO GO review',
+              contextUpdate: decisionPack
+                ? {
+                    decisionPack,
+                    goNoGoReview: decisionPack,
+                  }
+                : undefined,
+            },
+            userId,
+            userRoles,
+          );
+        } catch (err: any) {
+          if (err instanceof ConflictException) {
+            instance = await this.workflowEngineService.getInstanceByEntity('TENDER', tender.id);
+            const hasApproval = instance?.tasks?.some(
+              (t) => t.taskKey === 'GO_NOGO_APPROVAL' && t.status === WorkflowTaskStatus.PENDING,
+            );
+            if (hasApproval) {
+              return; // ALREADY_SYNCHRONIZED
+            }
+          }
+          throw err;
+        }
+        return;
+      }
+
+      throw new ConflictException(
+        `Workflow state conflicts with authoritative Tender state for Tender #${tender.id} (node: ${instance.currentNodeId}, status: ${instance.status})`,
+      );
+    }
+
+    // 2. Director / GM Decision: GO (QUALIFICATION + GO)
+    if (stage === TenderStage.QUALIFICATION && goNoGoStatus === GoNoGoStatus.GO) {
+      let instance = await this.workflowEngineService.getInstanceByEntity('TENDER', tender.id);
+      if (!instance) {
+        throw new ConflictException(`Active workflow instance not found for Tender #${tender.id} in QUALIFICATION stage.`);
+      }
+
+      if (instance.status === WorkflowInstanceStatus.COMPLETED) {
+        return; // ALREADY_SYNCHRONIZED
+      }
+
+      if (instance.status !== WorkflowInstanceStatus.IN_PROGRESS) {
+        throw new ConflictException(
+          `Workflow instance #${instance.id} is in incompatible status '${instance.status}'.`,
+        );
+      }
+
+      const pendingApprovalTask = instance.tasks?.find(
+        (t) => t.taskKey === 'GO_NOGO_APPROVAL' && t.status === WorkflowTaskStatus.PENDING,
+      );
+      if (!pendingApprovalTask) {
+        throw new ConflictException(
+          `Workflow state conflicts with authoritative Tender GO state (no pending GO_NOGO_APPROVAL task on instance #${instance.id}).`,
+        );
+      }
+
+      try {
+        await this.workflowEngineService.completeTask(
+          pendingApprovalTask.id,
+          {
+            action: 'APPROVE',
+            reason: notes || 'Director approved GO',
+          },
+          userId,
+          userRoles,
+        );
+      } catch (err: any) {
+        if (err instanceof ConflictException) {
+          instance = await this.workflowEngineService.getInstanceByEntity('TENDER', tender.id);
+          if (instance?.status === WorkflowInstanceStatus.COMPLETED) {
+            return; // ALREADY_SYNCHRONIZED
+          }
+        }
+        throw err;
+      }
+      return;
+    }
+
+    // 3. Director / GM Decision: NO_GO (LEAD + NO_GO + REQUIRED)
+    if (
+      stage === TenderStage.LEAD &&
+      goNoGoStatus === GoNoGoStatus.NO_GO &&
+      revisionStatus === RevisionStatus.REQUIRED
+    ) {
+      let instance = await this.workflowEngineService.getInstanceByEntity('TENDER', tender.id);
+      if (!instance || instance.status !== WorkflowInstanceStatus.IN_PROGRESS) {
+        throw new ConflictException(`Active workflow instance not found for Tender #${tender.id} in NO_GO state.`);
+      }
+
+      const pendingRevisionTask = instance.tasks?.find(
+        (t) => t.taskKey === 'GO_NOGO_REVISION' && t.status === WorkflowTaskStatus.PENDING,
+      );
+      if (pendingRevisionTask) {
+        return; // ALREADY_SYNCHRONIZED
+      }
+
+      const pendingApprovalTask = instance.tasks?.find(
+        (t) => t.taskKey === 'GO_NOGO_APPROVAL' && t.status === WorkflowTaskStatus.PENDING,
+      );
+      if (!pendingApprovalTask) {
+        throw new ConflictException(
+          `Workflow state conflicts with authoritative Tender NO_GO state (no pending GO_NOGO_APPROVAL task on instance #${instance.id}).`,
+        );
+      }
+
+      try {
+        await this.workflowEngineService.completeTask(
+          pendingApprovalTask.id,
+          {
+            action: 'RETURN',
+            reason: notes || 'Director rejected (NO GO). Tender returned to Lead.',
+          },
+          userId,
+          userRoles,
+        );
+      } catch (err: any) {
+        if (err instanceof ConflictException) {
+          instance = await this.workflowEngineService.getInstanceByEntity('TENDER', tender.id);
+          const hasRevision = instance?.tasks?.some(
+            (t) => t.taskKey === 'GO_NOGO_REVISION' && t.status === WorkflowTaskStatus.PENDING,
+          );
+          if (hasRevision) {
+            return; // ALREADY_SYNCHRONIZED
+          }
+        }
+        throw err;
+      }
+      return;
+    }
+  }
+
+  async submitGoNoGoReview(
+    id: number,
+    dtoOrUserId: SubmitGoNoGoReviewDto | number,
+    userIdOrRoles?: number | string[],
+    maybeUserRoles?: string[],
+    optionalDto?: SubmitGoNoGoReviewDto,
+  ) {
+    let dto: SubmitGoNoGoReviewDto | undefined;
+    let userId: number;
+    let userRoles: string[] = [];
+
+    if (typeof dtoOrUserId === 'object' && dtoOrUserId !== null) {
+      dto = dtoOrUserId;
+      userId = Number(userIdOrRoles);
+      userRoles = Array.isArray(maybeUserRoles) ? maybeUserRoles : [];
+    } else {
+      userId = Number(dtoOrUserId);
+      userRoles = Array.isArray(userIdOrRoles) ? userIdOrRoles : [];
+      dto = optionalDto;
+    }
+
+    // Backend validation for Decision Pack when dto is provided
+    if (dto) {
+      if (!dto.executiveSummary || !dto.executiveSummary.trim()) {
+        throw new BadRequestException('Ringkasan eksekutif wajib diisi');
+      }
+      if (
+        !dto.readiness ||
+        !dto.readiness.customerRequirement ||
+        !dto.readiness.commercialInformation ||
+        !dto.readiness.timeline
+      ) {
+        throw new BadRequestException('Kesiapan (Readiness) wajib diisi lengkap');
+      }
+      if (!['CLEAR', 'PARTIAL', 'UNCLEAR'].includes(dto.readiness.customerRequirement)) {
+        throw new BadRequestException('Customer requirement readiness harus CLEAR, PARTIAL, atau UNCLEAR');
+      }
+      if (!['READY', 'PARTIAL', 'NOT_READY'].includes(dto.readiness.commercialInformation)) {
+        throw new BadRequestException('Commercial information readiness harus READY, PARTIAL, atau NOT_READY');
+      }
+      if (!['FEASIBLE', 'AT_RISK'].includes(dto.readiness.timeline)) {
+        throw new BadRequestException('Timeline readiness harus FEASIBLE atau AT_RISK');
+      }
+      if (!dto.marketingRecommendation || !['GO', 'REVIEW'].includes(dto.marketingRecommendation)) {
+        throw new BadRequestException('Rekomendasi marketing harus berupa GO atau REVIEW');
+      }
+      if (!dto.marketingRecommendationReason || !dto.marketingRecommendationReason.trim()) {
+        throw new BadRequestException('Alasan rekomendasi marketing wajib diisi');
+      }
+      if (dto.keyConcerns && dto.keyConcerns.length > 3) {
+        throw new BadRequestException('Concern utama maksimal 3 item');
+      }
+    }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -928,6 +1458,64 @@ export class MarketingService {
         throw new NotFoundException(`Tender #${id} tidak ditemukan`);
       }
       await this.validateTenderOwnership(tender, userId);
+
+      let submitterName = 'Marketing';
+      try {
+        const submitterUser = await queryRunner.manager.findOne(User, { where: { id: userId } });
+        if (submitterUser?.fullName) {
+          submitterName = submitterUser.fullName;
+        }
+      } catch {
+        // fallback
+      }
+
+      let decisionPack: any = null;
+      if (dto && dto.executiveSummary) {
+        let cleanedConcerns: string[] = [];
+        if (Array.isArray(dto.keyConcerns) && dto.keyConcerns.length > 0) {
+          cleanedConcerns = dto.keyConcerns
+            .map((c) => (c ? String(c).trim() : ''))
+            .filter(Boolean)
+            .slice(0, 3);
+        }
+        if (cleanedConcerns.length === 0) {
+          cleanedConcerns = ['Tidak ada concern material'];
+        }
+
+        decisionPack = {
+          executiveSummary: dto.executiveSummary.trim(),
+          keyConcerns: cleanedConcerns,
+          readiness: {
+            customerRequirement: dto.readiness.customerRequirement,
+            commercialInformation: dto.readiness.commercialInformation,
+            timeline: dto.readiness.timeline,
+          },
+          marketingRecommendation: dto.marketingRecommendation,
+          marketingRecommendationReason: dto.marketingRecommendationReason.trim(),
+          recommendation: dto.marketingRecommendation,
+          recommendationReason: dto.marketingRecommendationReason.trim(),
+          submittedBy: submitterName,
+          submittedAt: new Date().toISOString(),
+        };
+      }
+
+      // State-aware retry recovery BEFORE returning stage error
+      // Recovery is allowed ONLY when authoritative domain state proves that the SAME business action was already committed:
+      // stage = WAITING_GO_NO_GO AND go_nogo_status = PENDING
+      if (
+        (tender.stage || '').toUpperCase() === TenderStage.WAITING_GO_NO_GO &&
+        tender.go_nogo_status === GoNoGoStatus.PENDING
+      ) {
+        await queryRunner.rollbackTransaction();
+
+        await this.reconcileTenderGoNoGoWorkflow(tender, userId, userRoles, undefined, undefined, decisionPack);
+
+        return {
+          status: 'success',
+          message: 'Tender berhasil diajukan untuk GO / NO GO review',
+          tender,
+        };
+      }
 
       // 1. Hanya boleh dari stage LEAD
       if ((tender.stage || '').toUpperCase() !== TenderStage.LEAD) {
@@ -970,7 +1558,59 @@ export class MarketingService {
       });
       await queryRunner.manager.save(TenderActivity, activity);
 
+      // Phase N8.1: Transactional Outbox Canonical Event for marketing.gonogo.submitted
+      const goNoGoSubmittedEvent: BusinessEvent = {
+        eventId: randomUUID(),
+        eventName: 'marketing.gonogo.submitted',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: tender.id,
+        actor: { userId: Number(userId), roles: userRoles },
+        routing: {
+          userIds: [userId],
+        },
+        payload: {
+          tenderId: tender.id,
+          tenderTitle: tender.title,
+          customerName: tender.customer?.name || 'Unknown',
+          estimatedBudget: Number(tender.estimated_budget),
+          isResubmission,
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      const submittedOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: goNoGoSubmittedEvent.eventId,
+        event_name: goNoGoSubmittedEvent.eventName,
+        event_version: String(goNoGoSubmittedEvent.eventVersion),
+        aggregate_type: goNoGoSubmittedEvent.aggregateType,
+        aggregate_id: Number(goNoGoSubmittedEvent.aggregateId),
+        correlation_id: goNoGoSubmittedEvent.correlationId || null,
+        payload: {
+          occurredAt: goNoGoSubmittedEvent.occurredAt,
+          projectId: goNoGoSubmittedEvent.projectId,
+          actor: goNoGoSubmittedEvent.actor,
+          routing: goNoGoSubmittedEvent.routing,
+          notificationPolicy: goNoGoSubmittedEvent.notificationPolicy,
+          businessPayload: goNoGoSubmittedEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await queryRunner.manager.save(OutboxEvent, submittedOutbox);
+
       await queryRunner.commitTransaction();
+
+      // Post-commit workflow reconciliation
+      try {
+        await this.reconcileTenderGoNoGoWorkflow(tender, userId, userRoles, undefined, undefined, decisionPack);
+      } catch (wfErr: any) {
+        this.logger.error(
+          `Workflow coordination failed for Tender #${tender.id} post-commit submitGoNoGoReview: ${wfErr.message}`,
+          wfErr.stack,
+        );
+      }
 
       const user = await this.dataSource.getRepository(User).findOne({ where: { id: userId }, relations: ['roles'] });
       const userStr = user ? `${user.fullName} (${user.roles[0]?.name || 'Marketing'})` : 'Marketing';
@@ -989,23 +1629,7 @@ export class MarketingService {
         timestamp: new Date().toISOString(),
       });
 
-      // Notification A: Kirim ke Director
-      this.eventEmitter.emit('notification.send', {
-        title: 'Menunggu APPROVE Director',
-        message: `Tender "${tender.title}" menunggu APPROVE Director untuk keputusan GO / NO GO.`,
-        type: 'INFO',
-        audience: 'DIRECTOR',
-        tenderId: tender.id,
-      });
-
-      // Notification B: Kirim notifikasi tracking personal ke Marketing (userId)
-      this.eventEmitter.emit('notification.send', {
-        title: 'GO/NO GO Berhasil Diajukan',
-        message: `Tender "${tender.title}" sedang menunggu APPROVE Director.`,
-        type: 'INFO',
-        recipientId: userId,
-        tenderId: tender.id,
-      });
+      // Notification B: Submitter tracking notification migrated to Outbox marketing.gonogo.submitted in Phase N8.1
 
       // Normalized Audit Log
       this.eventEmitter.emit('audit.log', {
@@ -1022,16 +1646,22 @@ export class MarketingService {
         tender,
       };
     } catch (err) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       throw err;
     } finally {
       await queryRunner.release();
     }
   }
 
-  async submitGoNoGo(id: number, dto: { decision: 'GO' | 'NO_GO'; notes?: string }, userId: number) {
+  async submitGoNoGo(id: number, dto: { decision: 'GO' | 'NO_GO'; notes?: string }, userId: number, userRoles: string[] = []) {
     if (dto.decision !== 'GO' && dto.decision !== 'NO_GO') {
       throw new BadRequestException('Decision harus berupa GO atau NO_GO');
+    }
+
+    if (dto.decision === 'NO_GO' && (!dto.notes || !dto.notes.trim())) {
+      throw new BadRequestException('Alasan NO_GO wajib diisi agar Marketing mengetahui hal yang perlu direvisi.');
     }
 
     const queryRunner = this.dataSource.createQueryRunner();
@@ -1042,6 +1672,30 @@ export class MarketingService {
       const tender = await queryRunner.manager.findOne(Tender, { where: { id: Number(id) }, relations: ['customer'] });
       if (!tender) {
         throw new NotFoundException(`Tender #${id} tidak ditemukan`);
+      }
+
+      // State-aware retry recovery BEFORE stage / status check
+      const isGoRetry =
+        dto.decision === 'GO' &&
+        (tender.stage || '').toUpperCase() === TenderStage.QUALIFICATION &&
+        tender.go_nogo_status === GoNoGoStatus.GO;
+
+      const isNoGoRetry =
+        dto.decision === 'NO_GO' &&
+        (tender.stage || '').toUpperCase() === TenderStage.LEAD &&
+        tender.go_nogo_status === GoNoGoStatus.NO_GO &&
+        tender.revision_status === RevisionStatus.REQUIRED;
+
+      if (isGoRetry || isNoGoRetry) {
+        await queryRunner.rollbackTransaction();
+
+        await this.reconcileTenderGoNoGoWorkflow(tender, userId, userRoles, dto.decision, dto.notes);
+
+        return {
+          status: 'success',
+          message: `Keputusan GO / NO GO berhasil disimpan (${dto.decision})`,
+          tender,
+        };
       }
 
       // Rule 1: Hanya boleh dilakukan jika stage == WAITING_GO_NO_GO
@@ -1087,7 +1741,65 @@ export class MarketingService {
       });
       await queryRunner.manager.save(TenderActivity, activity);
 
+      // Phase N8.1: Transactional Outbox Canonical Event for marketing.gonogo.approved
+      const picId = tender.marketing_pic_id || tender.created_by;
+      if (picId && dto.decision === 'GO') {
+        const goApprovedEvent: BusinessEvent = {
+          eventId: randomUUID(),
+          eventName: 'marketing.gonogo.approved',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Tender',
+          aggregateId: tender.id,
+          actor: { userId: Number(userId), roles: userRoles },
+          routing: {
+            userIds: [picId],
+          },
+          payload: {
+            tenderId: tender.id,
+            tenderTitle: tender.title,
+            customerName: tender.customer?.name || 'Unknown',
+            estimatedBudget: Number(tender.estimated_budget),
+            stage: tender.stage,
+            goNoGoStatus: tender.go_nogo_status,
+            decision: dto.decision,
+            notes: dto.notes,
+            timestamp: new Date().toISOString(),
+          },
+        };
+
+        const approvedOutbox = queryRunner.manager.create(OutboxEvent, {
+          event_id: goApprovedEvent.eventId,
+          event_name: goApprovedEvent.eventName,
+          event_version: String(goApprovedEvent.eventVersion),
+          aggregate_type: goApprovedEvent.aggregateType,
+          aggregate_id: Number(goApprovedEvent.aggregateId),
+          correlation_id: goApprovedEvent.correlationId || null,
+          payload: {
+            occurredAt: goApprovedEvent.occurredAt,
+            projectId: goApprovedEvent.projectId,
+            actor: goApprovedEvent.actor,
+            routing: goApprovedEvent.routing,
+            notificationPolicy: goApprovedEvent.notificationPolicy,
+            businessPayload: goApprovedEvent.payload,
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await queryRunner.manager.save(OutboxEvent, approvedOutbox);
+      }
+
       await queryRunner.commitTransaction();
+
+      // Post-commit workflow reconciliation
+      try {
+        await this.reconcileTenderGoNoGoWorkflow(tender, userId, userRoles, dto.decision, dto.notes);
+      } catch (wfErr: any) {
+        this.logger.error(
+          `Workflow coordination failed for Tender #${tender.id} post-commit submitGoNoGo: ${wfErr.message}`,
+          wfErr.stack,
+        );
+      }
 
       const user = await this.dataSource.getRepository(User).findOne({ where: { id: userId }, relations: ['roles'] });
       const userStr = user ? `${user.fullName} (${user.roles[0]?.name || 'Director'})` : 'Management';
@@ -1106,27 +1818,8 @@ export class MarketingService {
         timestamp: new Date().toISOString(),
       });
 
-      // Notification B & C: Kirim ke Marketing PIC
-      const picId = tender.marketing_pic_id || tender.created_by;
-      if (picId) {
-        if (dto.decision === 'GO') {
-          this.eventEmitter.emit('notification.send', {
-            title: 'Tender Disetujui (GO)',
-            message: `Tender "${tender.title}" telah disetujui. Status berubah menjadi Qualification.`,
-            type: 'SUCCESS',
-            recipientId: picId,
-            tenderId: tender.id,
-          });
-        } else {
-          this.eventEmitter.emit('notification.send', {
-            title: 'Tender Ditolak (NO GO)',
-            message: `Tender "${tender.title}" ditolak. Silakan lakukan revisi sebelum submit kembali.`,
-            type: 'WARNING',
-            recipientId: picId,
-            tenderId: tender.id,
-          });
-        }
-      }
+      // Notification B: Informational milestone migrated to Outbox marketing.gonogo.approved in Phase N8.1
+      // Pada NO_GO, aksi revisi adalah MUST ACT yang dikelola secara eksklusif oleh WorkflowTask (GO_NOGO_REVISION) di To-Do.
 
       // Normalized Audit Log
       this.eventEmitter.emit('audit.log', {
@@ -1143,7 +1836,9 @@ export class MarketingService {
         tender,
       };
     } catch (err) {
-      await queryRunner.rollbackTransaction();
+      if (queryRunner.isTransactionActive) {
+        await queryRunner.rollbackTransaction();
+      }
       throw err;
     } finally {
       await queryRunner.release();
@@ -1254,13 +1949,6 @@ export class MarketingService {
     const isOverDiscount = discountPercentage > maxDiscount;
     if (isOverDiscount) {
       tender.status = TenderStatus.PENDING_APPROVAL as any;
-      // Trigger Approval Workflow (Auto-Escalate mechanism handled by Scheduler)
-      this.eventEmitter.emit('notification.send', {
-        title: 'Peringatan Diskon Kritis',
-        message: `Tender ${tender.title} mengajukan diskon ${discountPercentage.toFixed(2)}% (Batas: ${maxDiscount}%). Menunggu persetujuan Direktur.`,
-        type: 'WARNING',
-        audience: 'ALL', // Director
-      });
     } else {
       tender.status = TenderStatus.NEGOTIATION;
     }
@@ -1280,6 +1968,52 @@ export class MarketingService {
         reason: dto.reason || (isOverDiscount ? 'Diskon melebihi batas - Menunggu approval' : 'Negosiasi Harga'),
       });
       await manager.save(TenderPriceHistory, history);
+
+      if (isOverDiscount) {
+        // Phase N8.1: Transactional Outbox Canonical Event for marketing.discount.critical_warning
+        const criticalWarningEvent: BusinessEvent = {
+          eventId: randomUUID(),
+          eventName: 'marketing.discount.critical_warning',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Tender',
+          aggregateId: tender.id,
+          actor: { userId: Number(userId) },
+          routing: {
+            roles: ['DIRECTOR', 'GENERAL_MANAGER'],
+          },
+          payload: {
+            tenderId: tender.id,
+            tenderTitle: tender.title,
+            discountPercentage: Number(discountPercentage.toFixed(2)),
+            maxDiscount,
+            newPrice,
+            oldPrice,
+            budget,
+            timestamp: new Date().toISOString(),
+          },
+        };
+
+        const outbox = manager.create(OutboxEvent, {
+          event_id: criticalWarningEvent.eventId,
+          event_name: criticalWarningEvent.eventName,
+          event_version: String(criticalWarningEvent.eventVersion),
+          aggregate_type: criticalWarningEvent.aggregateType,
+          aggregate_id: Number(criticalWarningEvent.aggregateId),
+          correlation_id: criticalWarningEvent.correlationId || null,
+          payload: {
+            occurredAt: criticalWarningEvent.occurredAt,
+            projectId: criticalWarningEvent.projectId,
+            actor: criticalWarningEvent.actor,
+            routing: criticalWarningEvent.routing,
+            notificationPolicy: criticalWarningEvent.notificationPolicy,
+            businessPayload: criticalWarningEvent.payload,
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await manager.save(OutboxEvent, outbox);
+      }
     });
 
     return {
@@ -1315,28 +2049,110 @@ export class MarketingService {
 
     tender.status = TenderStatus.NEGOTIATION;
     const oldPrice = tender.negotiated_price;
+    const targetPicId = tender.marketing_pic_id || tender.created_by;
+    const recipientUserIds = targetPicId ? [Number(targetPicId)] : undefined;
+
+    await this.dataSource.transaction(async (manager) => {
+      if (!dto.is_approved) {
+        tender.negotiated_price = tender.estimated_budget;
+        await manager.save(Tender, tender);
+
+        const history = manager.create(TenderPriceHistory, {
+          tender_id: tender.id,
+          old_price: oldPrice,
+          new_price: tender.estimated_budget,
+          changed_by: userId,
+          reason: 'Diskon DITOLAK oleh Direktur. Harga dikembalikan ke estimasi.',
+        });
+        await manager.save(TenderPriceHistory, history);
+
+        // Phase N8.1: Transactional Outbox Canonical Event for marketing.discount.rejected
+        const discountRejectedEvent: BusinessEvent = {
+          eventId: randomUUID(),
+          eventName: 'marketing.discount.rejected',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Tender',
+          aggregateId: tender.id,
+          actor: { userId: Number(userId) },
+          routing: {
+            userIds: recipientUserIds,
+            roles: recipientUserIds ? undefined : ['MARKETING'],
+          },
+          payload: {
+            tenderId: tender.id,
+            tenderTitle: tender.title,
+            notes: dto.notes || '-',
+            timestamp: new Date().toISOString(),
+          },
+        };
+
+        const outbox = manager.create(OutboxEvent, {
+          event_id: discountRejectedEvent.eventId,
+          event_name: discountRejectedEvent.eventName,
+          event_version: String(discountRejectedEvent.eventVersion),
+          aggregate_type: discountRejectedEvent.aggregateType,
+          aggregate_id: Number(discountRejectedEvent.aggregateId),
+          correlation_id: discountRejectedEvent.correlationId || null,
+          payload: {
+            occurredAt: discountRejectedEvent.occurredAt,
+            projectId: discountRejectedEvent.projectId,
+            actor: discountRejectedEvent.actor,
+            routing: discountRejectedEvent.routing,
+            notificationPolicy: discountRejectedEvent.notificationPolicy,
+            businessPayload: discountRejectedEvent.payload,
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await manager.save(OutboxEvent, outbox);
+      } else {
+        await manager.save(Tender, tender);
+
+        // Phase N8.1: Transactional Outbox Canonical Event for marketing.discount.approved
+        const discountApprovedEvent: BusinessEvent = {
+          eventId: randomUUID(),
+          eventName: 'marketing.discount.approved',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Tender',
+          aggregateId: tender.id,
+          actor: { userId: Number(userId) },
+          routing: {
+            userIds: recipientUserIds,
+            roles: recipientUserIds ? undefined : ['MARKETING'],
+          },
+          payload: {
+            tenderId: tender.id,
+            tenderTitle: tender.title,
+            notes: dto.notes || '-',
+            timestamp: new Date().toISOString(),
+          },
+        };
+
+        const outbox = manager.create(OutboxEvent, {
+          event_id: discountApprovedEvent.eventId,
+          event_name: discountApprovedEvent.eventName,
+          event_version: String(discountApprovedEvent.eventVersion),
+          aggregate_type: discountApprovedEvent.aggregateType,
+          aggregate_id: Number(discountApprovedEvent.aggregateId),
+          correlation_id: discountApprovedEvent.correlationId || null,
+          payload: {
+            occurredAt: discountApprovedEvent.occurredAt,
+            projectId: discountApprovedEvent.projectId,
+            actor: discountApprovedEvent.actor,
+            routing: discountApprovedEvent.routing,
+            notificationPolicy: discountApprovedEvent.notificationPolicy,
+            businessPayload: discountApprovedEvent.payload,
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await manager.save(OutboxEvent, outbox);
+      }
+    });
 
     if (!dto.is_approved) {
-      // Revert price back to estimated_budget
-      tender.negotiated_price = tender.estimated_budget;
-
-      const history = this.priceHistoryRepo.create({
-        tender_id: tender.id,
-        old_price: oldPrice,
-        new_price: tender.estimated_budget,
-        changed_by: userId,
-        reason: 'Diskon DITOLAK oleh Direktur. Harga dikembalikan ke estimasi.',
-      });
-      await this.priceHistoryRepo.save(history);
-
-      this.eventEmitter.emit('notification.send', {
-        title: 'Diskon Ditolak',
-        message: `Pengajuan diskon untuk tender ${tender.title} DITOLAK. Harga dikembalikan ke awal. Notes: ${dto.notes || '-'}`,
-        type: 'ERROR',
-        recipientId: tender.marketing_pic_id || 'C-LEVEL',
-        tenderId: tender.id
-      });
-
       this.eventEmitter.emit('audit.log', {
         action: 'DISCOUNT_REJECTED',
         entityId: tender.id,
@@ -1345,15 +2161,6 @@ export class MarketingService {
         userId: userId
       });
     } else {
-      // Approved
-      this.eventEmitter.emit('notification.send', {
-        title: 'Diskon Disetujui',
-        message: `Pengajuan diskon untuk tender ${tender.title} DISETUJUI oleh Direktur. Notes: ${dto.notes || '-'}`,
-        type: 'SUCCESS',
-        recipientId: tender.marketing_pic_id || 'C-LEVEL',
-        tenderId: tender.id
-      });
-
       this.eventEmitter.emit('audit.log', {
         action: 'DISCOUNT_APPROVED',
         entityId: tender.id,
@@ -1362,8 +2169,6 @@ export class MarketingService {
         userId: userId
       });
     }
-
-    await this.tenderRepo.save(tender);
 
     return {
       status: 'success',
@@ -1786,6 +2591,51 @@ export class MarketingService {
         });
         await manager.save(AuditLog, auditLog);
 
+        // 4. Transactional Outbox Pattern: Record marketing.spk.uploaded canonical event in same transaction
+        if (contract?.id) {
+          const spkEventId = randomUUID();
+          const spkBusinessEvent: BusinessEvent = {
+            eventId: spkEventId,
+            eventName: 'marketing.spk.uploaded',
+            eventVersion: 1,
+            occurredAt: new Date().toISOString(),
+            aggregateType: 'Contract',
+            aggregateId: contract.id,
+            actor: { userId: Number(userId) },
+            routing: { roles: ['LEGAL'] },
+            payload: {
+              tenderId,
+              contractId: contract.id,
+              contractNumber: contract.contract_number,
+              title: updatedTender?.title || `Tender ID: ${tenderId}`,
+              estimatedBudget: updatedTender?.estimated_budget,
+              isRevision: isRevisionUpload,
+              fileName,
+              spkFileUrl: publicUrl,
+            },
+          };
+
+          const spkOutbox = manager.create(OutboxEvent, {
+            event_id: spkBusinessEvent.eventId,
+            event_name: spkBusinessEvent.eventName,
+            event_version: String(spkBusinessEvent.eventVersion),
+            aggregate_type: spkBusinessEvent.aggregateType,
+            aggregate_id: Number(spkBusinessEvent.aggregateId),
+            correlation_id: spkBusinessEvent.correlationId || null,
+            payload: {
+              occurredAt: spkBusinessEvent.occurredAt,
+              projectId: spkBusinessEvent.projectId,
+              actor: spkBusinessEvent.actor,
+              routing: spkBusinessEvent.routing,
+              notificationPolicy: spkBusinessEvent.notificationPolicy,
+              businessPayload: spkBusinessEvent.payload,
+            },
+            status: OutboxStatus.PENDING,
+            retry_count: 0,
+          });
+          await manager.save(OutboxEvent, spkOutbox);
+        }
+
         return {
           contract,
           updatedTender,
@@ -1803,35 +2653,6 @@ export class MarketingService {
       const userStr = user ? `${user.fullName} (${user.roles[0]?.name || 'Marketing'})` : 'System';
 
       try {
-        if (isRevisionUpload) {
-          // Dedicated notification for revised SPK upload
-          const tenderTitle = updatedTender?.title || `Tender ID: ${tenderId}`;
-          this.eventEmitter.emit('notification.send', {
-            title: 'Dokumen Revisi SPK Diunggah',
-            message: `Dokumen revisi SPK untuk tender "${tenderTitle}" telah diunggah dan siap direview kembali oleh tim Legal.`,
-            type: 'TASK',
-            audience: 'LEGAL',
-            tenderId: tenderId,
-            metaData: {
-              category: 'LEGAL',
-              priority: 'HIGH',
-              reference_type: 'CONTRACT',
-              reference_id: contract?.id,
-              contractId: contract?.id,
-              tender_id: tenderId,
-              action_type: 'REVISED_SPK_UPLOADED',
-              action_buttons: ['REVIEW_REVISION'],
-              actionLink: '/legal/review?tab=REVISION'
-            }
-          });
-        } else {
-          this.eventEmitter.emit('marketing.tender.won', {
-            tenderId: tenderId,
-            contractId: contract?.id,
-            title: updatedTender?.title || `Tender ID: ${tenderId}`,
-            estimatedBudget: updatedTender?.estimated_budget,
-          });
-        }
 
         this.eventEmitter.emit('marketing.tender.management_update', {
           tenderId: updatedTender?.id || tenderId,

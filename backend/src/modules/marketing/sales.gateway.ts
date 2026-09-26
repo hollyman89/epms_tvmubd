@@ -85,15 +85,17 @@ export class SalesGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.emit('sales:pipeline_updated', payload);
   }
 
+  @OnEvent('legal.contract.revision_requested')
   @OnEvent('contract.revision_requested')
-  handleContractRevisionRequested(payload: any) {
+  handleContractRevisionRequested(eventOrPayload: any) {
+    const payload = eventOrPayload?.payload || eventOrPayload;
     if (!this.server || !payload?.tenderId) return;
     this.logger.log(`Broadcasting sales:pipeline_updated for contract.revision_requested on Tender ID ${payload.tenderId}`);
     this.broadcastTenderDelta(payload.tenderId, 'sales:pipeline_updated', {
       action: 'LEGAL_REVISION_REQUESTED',
       status: 'REVISION_NEEDED',
       legalStatus: payload.legalStatus || 'REVISION_REQUESTED',
-      updaterId: payload.userId,
+      updaterId: payload.reviewerId || payload.userId,
     });
   }
 

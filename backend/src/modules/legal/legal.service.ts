@@ -8,8 +8,10 @@ import { Tender, TenderStatus } from '../../entities/tender.entity';
 import { Project } from '../../entities/project.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { randomUUID } from 'crypto';
 import { LegalReviewDto } from './dto/legal-review.dto';
 import { emitLegalQueueUpdated } from '../../shared/helpers/legal-event.helper';
+import { BusinessEvent, RoutingMetadata } from '../../shared/contracts/business-event.contract';
 
 @Injectable()
 export class LegalService {
@@ -271,26 +273,77 @@ export class LegalService {
       });
       await queryRunner.manager.save(AuditLog, auditLog);
 
-      // 4. Transactional Outbox Pattern: Record OutboxEvent in the SAME atomic DB transaction
+      // 4. Transactional Outbox Pattern: Record canonical OutboxEvent in the SAME atomic DB transaction
       const correlationId = `corr-legal-${contract.id}-${Date.now()}`;
-      const outboxEvent = queryRunner.manager.create(OutboxEvent, {
-        event_id: `evt-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
-        event_name: dto.legalStatus === LegalStatus.APPROVED
-          ? 'ContractApprovedEvent'
-          : (dto.legalStatus === LegalStatus.REJECTED ? 'ContractRejectedEvent' : 'ContractRevisionRequestedEvent'),
-        event_version: '1.0',
-        aggregate_type: 'Contract',
-        aggregate_id: contract.id,
-        correlation_id: correlationId,
-        transaction_id: `tx-${Date.now()}`,
+      const resolvedTenderId = contract.tender_id || contract.proposal?.tender_id || targetTender?.id;
+      const tenderTitle = targetTender?.title || `Tender #${resolvedTenderId || contract.id}`;
+      const marketingPicId = targetTender?.marketing_pic_id
+        ? Number(targetTender.marketing_pic_id)
+        : (targetTender?.created_by ? Number(targetTender.created_by) : undefined);
+
+      let canonicalEventName: string;
+      let routing: RoutingMetadata = {};
+
+      if (dto.legalStatus === LegalStatus.APPROVED) {
+        canonicalEventName = 'legal.contract.approved';
+        routing = {
+          userIds: marketingPicId ? [marketingPicId] : undefined,
+          roles: ['PMO'],
+        };
+      } else if (dto.legalStatus === LegalStatus.REVISION_REQUESTED) {
+        canonicalEventName = 'legal.contract.revision_requested';
+        routing = {
+          userIds: marketingPicId ? [marketingPicId] : undefined,
+        };
+      } else {
+        canonicalEventName = 'legal.contract.rejected';
+        routing = {
+          userIds: marketingPicId ? [marketingPicId] : undefined,
+        };
+      }
+
+      const canonicalBusinessEvent: BusinessEvent = {
+        eventId: randomUUID(),
+        eventName: canonicalEventName,
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Contract',
+        aggregateId: contract.id,
+        actor: { userId: Number(userId) },
+        correlationId,
+        routing,
         payload: {
           contractId: contract.id,
           contractNumber: contract.contract_number,
+          tenderId: resolvedTenderId,
+          tenderTitle,
+          marketingPicId,
           legalStatus: dto.legalStatus,
+          status: contract.status,
           reviewerId: userId,
+          reason: dto.legalNotes,
           timestamp: new Date().toISOString(),
         },
+      };
+
+      const outboxEvent = queryRunner.manager.create(OutboxEvent, {
+        event_id: canonicalBusinessEvent.eventId,
+        event_name: canonicalBusinessEvent.eventName,
+        event_version: String(canonicalBusinessEvent.eventVersion),
+        aggregate_type: canonicalBusinessEvent.aggregateType,
+        aggregate_id: Number(canonicalBusinessEvent.aggregateId),
+        correlation_id: canonicalBusinessEvent.correlationId || null,
+        transaction_id: `tx-${Date.now()}`,
+        payload: {
+          occurredAt: canonicalBusinessEvent.occurredAt,
+          projectId: canonicalBusinessEvent.projectId,
+          actor: canonicalBusinessEvent.actor,
+          routing: canonicalBusinessEvent.routing,
+          notificationPolicy: canonicalBusinessEvent.notificationPolicy,
+          businessPayload: canonicalBusinessEvent.payload,
+        },
         status: OutboxStatus.PENDING,
+        retry_count: 0,
       });
       await queryRunner.manager.save(OutboxEvent, outboxEvent);
 
@@ -298,29 +351,10 @@ export class LegalService {
       await queryRunner.commitTransaction();
 
       try {
-        if (dto.legalStatus === LegalStatus.APPROVED || savedContract.legal_status === LegalStatus.APPROVED) {
-          this.eventEmitter.emit('legal.contract.approved', {
-            contractId: savedContract.id,
-            contractNumber: savedContract.contract_number,
-            legalStatus: savedContract.legal_status,
-            status: savedContract.status,
-            reviewerId: userId,
-            timestamp: new Date().toISOString()
-          });
-        } else {
-          const tenderId = savedContract.tender_id || savedContract.proposal?.tender_id || savedContract.proposal?.tender?.id;
-          this.eventEmitter.emit('contract.revision_requested', {
-            contractId: savedContract.id,
-            tenderId: tenderId,
-            userId: userId,
-            reason: dto.legalNotes || 'Revisi Dokumen dari Legal',
-            legalStatus: savedContract.legal_status,
-            timestamp: new Date().toISOString()
-          });
-        }
+        // Immediate data sync for frontend review tables (WebSocket only, zero Bell persistence)
         emitLegalQueueUpdated(this.eventEmitter, {
           contractId: savedContract.id,
-          action: 'REVIEWED'
+          action: 'REVIEWED',
         });
       } catch (evtErr) {
         console.error('EventEmitter error on legal review:', evtErr);
@@ -468,20 +502,54 @@ export class LegalService {
         await queryRunner.manager.save(AuditLog, auditLog);
       }
 
-      await queryRunner.commitTransaction();
-
-      try {
-        this.eventEmitter.emit('project.started', {
+      // Phase N8.1: Transactional Outbox Canonical Event for project.started
+      const projectStartedBusinessEvent: BusinessEvent = {
+        eventId: randomUUID(),
+        eventName: 'project.started',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Project',
+        aggregateId: project ? project.id : contract.id,
+        actor: { userId: Number(userId) },
+        routing: {
+          roles: ['PMO'],
+        },
+        payload: {
           projectId: project ? project.id : null,
           contractId: contract.id,
+          contractNumber: contract.contract_number,
           tenderId: tender.id,
-          title: tender.title,
-          userId,
+          tenderTitle: tender.title,
+          projectCode,
           timestamp: new Date().toISOString(),
-        });
-      } catch (evtErr) {
-        console.error('EventEmitter error on startProject:', evtErr);
-      }
+        },
+      };
+
+      const outboxEvent = queryRunner.manager.create(OutboxEvent, {
+        event_id: projectStartedBusinessEvent.eventId,
+        event_name: projectStartedBusinessEvent.eventName,
+        event_version: String(projectStartedBusinessEvent.eventVersion),
+        aggregate_type: projectStartedBusinessEvent.aggregateType,
+        aggregate_id: Number(projectStartedBusinessEvent.aggregateId),
+        correlation_id: projectStartedBusinessEvent.correlationId || null,
+        transaction_id: `tx-${Date.now()}`,
+        payload: {
+          occurredAt: projectStartedBusinessEvent.occurredAt,
+          projectId: projectStartedBusinessEvent.projectId,
+          actor: projectStartedBusinessEvent.actor,
+          routing: projectStartedBusinessEvent.routing,
+          notificationPolicy: projectStartedBusinessEvent.notificationPolicy,
+          businessPayload: projectStartedBusinessEvent.payload,
+        },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
+      });
+      await queryRunner.manager.save(OutboxEvent, outboxEvent);
+
+      await queryRunner.commitTransaction();
+
+      // Phase N8.1.1: Canonical event project.started originates exclusively from Transactional Outbox.
+      // Direct EventEmitter emission eliminated to resolve Canonical Event Origin Collision.
 
       return {
         message: 'Kontrak berhasil dirilis ke Antrean Kick-off Charter PMO!',

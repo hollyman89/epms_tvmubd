@@ -19,6 +19,11 @@ export interface TodoItem {
   dueAt?: string;
   createdAt: string;
   updatedAt?: string;
+  projectName?: string;
+  customerName?: string;
+  submittedByName?: string;
+  returnedByName?: string;
+  returnReason?: string;
 }
 
 export interface InboxSummary {
@@ -32,8 +37,8 @@ export class InboxService {
    */
   static async getTodos(): Promise<TodoItem[]> {
     const res = await apiClient.get('/inbox/todos');
-    const data = res.data?.data;
-    return Array.isArray(data) ? data : [];
+    const rawData = res.data?.data?.data || res.data?.data || [];
+    return Array.isArray(rawData) ? rawData : [];
   }
 
   /**
