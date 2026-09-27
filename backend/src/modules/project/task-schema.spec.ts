@@ -1,4 +1,4 @@
-import { DataSource } from 'typeorm';
+import { DataSource, QueryRunner, TableForeignKey } from 'typeorm';
 import * as dotenv from 'dotenv';
 import { EvolveTasksTableForGanttPlanning1788100000000 } from '../../migrations/1788100000000-EvolveTasksTableForGanttPlanning';
 import { EnforceTaskActiveWbsCardinality1789400000000 } from '../../migrations/1789400000000-EnforceTaskActiveWbsCardinality';
@@ -9,20 +9,111 @@ import { User } from '../../entities/user.entity';
 
 dotenv.config();
 
+const ISOLATED_TABLE = 'test_tasks_schema_isolated';
+
+function createIsolatedQueryRunner(qr: QueryRunner, tableName: string): QueryRunner {
+  return new Proxy(qr, {
+    get(target, prop, receiver) {
+      if (prop === 'query') {
+        return async (q: string, params?: any[]) => {
+          const rewritten = q
+            .replace(/TABLE_NAME = 'tasks'/g, `TABLE_NAME = '${tableName}'`)
+            .replace(/RC\.TABLE_NAME = 'tasks'/g, `RC.TABLE_NAME = '${tableName}'`)
+            .replace(/SHOW INDEX FROM tasks/gi, `SHOW INDEX FROM \`${tableName}\``)
+            .replace(/ALTER TABLE `tasks`/gi, `ALTER TABLE \`${tableName}\``)
+            .replace(/ALTER TABLE tasks/gi, `ALTER TABLE \`${tableName}\``)
+            .replace(/FROM tasks/gi, `FROM \`${tableName}\``)
+            .replace(/INTO tasks/gi, `INTO \`${tableName}\``)
+            .replace(/UPDATE tasks/gi, `UPDATE \`${tableName}\``);
+          const res = await target.query(rewritten, params);
+          if (Array.isArray(res)) {
+            for (const row of res) {
+              if (row && typeof row === 'object') {
+                if (row.TABLE_NAME === tableName) row.TABLE_NAME = 'tasks';
+                if (row.REFERENCED_TABLE_NAME === tableName) row.REFERENCED_TABLE_NAME = 'tasks';
+                if (row.CONSTRAINT_NAME && typeof row.CONSTRAINT_NAME === 'string' && row.CONSTRAINT_NAME.endsWith('_iso')) {
+                  row.CONSTRAINT_NAME = row.CONSTRAINT_NAME.replace(/_iso$/, '');
+                }
+              }
+            }
+          }
+          return res;
+        };
+      }
+      if (prop === 'getTable') {
+        return async (name: string) => {
+          const targetName = name === 'tasks' ? tableName : name;
+          const table = await target.getTable(targetName);
+          if (table && targetName === tableName) {
+            for (const fk of table.foreignKeys) {
+              if (fk.name && fk.name.endsWith('_iso')) {
+                fk.name = fk.name.replace(/_iso$/, '');
+              }
+            }
+          }
+          return table;
+        };
+      }
+      if (prop === 'addColumn' || prop === 'changeColumn' || prop === 'dropColumn') {
+        return async (name: any, ...args: any[]) => {
+          const targetName = name === 'tasks' ? tableName : name;
+          return (target as any)[prop](targetName, ...args);
+        };
+      }
+      if (prop === 'createForeignKey') {
+        return async (name: any, fk: TableForeignKey) => {
+          const targetName = name === 'tasks' ? tableName : name;
+          const clonedFk = new TableForeignKey({
+            name: fk.name ? `${fk.name}_iso` : undefined,
+            columnNames: fk.columnNames,
+            referencedTableName: fk.referencedTableName === 'tasks' ? tableName : fk.referencedTableName,
+            referencedColumnNames: fk.referencedColumnNames,
+            onDelete: fk.onDelete,
+            onUpdate: fk.onUpdate,
+          });
+          return target.createForeignKey(targetName, clonedFk);
+        };
+      }
+      if (prop === 'dropForeignKey') {
+        return async (name: any, fk: any) => {
+          const targetName = name === 'tasks' ? tableName : name;
+          const rawTable = await target.getTable(targetName);
+          const fkName = typeof fk === 'string' ? fk : fk.name;
+          const realFk = rawTable?.foreignKeys.find(
+            (k) => k.name === fkName || k.name === `${fkName}_iso`
+          );
+          if (realFk) {
+            return target.dropForeignKey(targetName, realFk);
+          }
+        };
+      }
+      if (prop === 'createIndex' || prop === 'dropIndex') {
+        return async (name: any, ...args: any[]) => {
+          const targetName = name === 'tasks' ? tableName : name;
+          return (target as any)[prop](targetName, ...args);
+        };
+      }
+      if (prop === 'hasColumn') {
+        return async (name: any, col: string) => {
+          const targetName = name === 'tasks' ? tableName : name;
+          return target.hasColumn(targetName, col);
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
+}
+
 /**
- * ARCHITECTURAL NOTICE (P6.4-IMPLEMENTATION-SLICE-1-C5):
- * This is controlled sequential execution against the development test database;
- * dedicated test DB isolation remains the preferred future CI architecture.
- *
- * This suite mutates DDL in CASE 22 using a controlled reverse-order migration step-down:
- *   M3 (1789400000000).down() -> M_Tasks (1788100000000).down() -> M_Tasks.up() -> M3.up()
- * Because it performs DDL operations on the shared `tasks` table, this suite MUST NOT
- * be run concurrently with domain regression suites that access `tasks`.
- * Run standalone with: `jest src/modules/project/task-schema.spec.ts --runInBand`
+ * ARCHITECTURAL NOTICE (Phase R6 — Test Suite Cleanup):
+ * Isolated execution harness: creates and tears down a dedicated test table (`test_tasks_schema_isolated`)
+ * so that DDL and migration lifecycle tests are 100% isolated, deterministic, and non-destructive
+ * to the shared developer database (`tasks` table).
  */
 describe('R11.1.4-B — Schedule / Task Database Schema & Entity Hardening Spec', () => {
   let dataSource: DataSource;
   let migration: EvolveTasksTableForGanttPlanning1788100000000;
+  let rawQueryRunner: QueryRunner;
 
   beforeAll(async () => {
     dataSource = new DataSource({
@@ -39,11 +130,19 @@ describe('R11.1.4-B — Schedule / Task Database Schema & Entity Hardening Spec'
     await dataSource.initialize();
     migration = new EvolveTasksTableForGanttPlanning1788100000000();
 
-    const queryRunner = dataSource.createQueryRunner();
-    await queryRunner.connect();
+    rawQueryRunner = dataSource.createQueryRunner();
+    await rawQueryRunner.connect();
 
-    // Transient typeorm_metadata table for TypeORM getTable() support when virtual generated columns exist
-    await queryRunner.query(`
+    // Bind createQueryRunner so all describe/it blocks get isolated QueryRunner
+    const originalCreateQueryRunner = dataSource.createQueryRunner.bind(dataSource);
+    dataSource.createQueryRunner = () => {
+      const qr = originalCreateQueryRunner();
+      return createIsolatedQueryRunner(qr, ISOLATED_TABLE);
+    };
+
+    // Clean start for isolated table and transient typeorm_metadata
+    await rawQueryRunner.query(`DROP TABLE IF EXISTS \`${ISOLATED_TABLE}\``);
+    await rawQueryRunner.query(`
       CREATE TABLE IF NOT EXISTS \`typeorm_metadata\` (
         \`type\` varchar(255) NOT NULL,
         \`database\` varchar(255) DEFAULT NULL,
@@ -54,13 +153,42 @@ describe('R11.1.4-B — Schedule / Task Database Schema & Entity Hardening Spec'
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
 
-    // Verify 0 rows before migration
+    // Create initial tasks table structure before migration 1788100000000
+    await rawQueryRunner.query(`
+      CREATE TABLE \`${ISOLATED_TABLE}\` (
+        \`id\` bigint unsigned NOT NULL AUTO_INCREMENT,
+        \`wbs_id\` bigint unsigned NOT NULL,
+        \`assignee_id\` bigint unsigned DEFAULT NULL,
+        \`name\` varchar(255) NOT NULL,
+        \`status\` varchar(50) NOT NULL DEFAULT 'TODO',
+        \`start_date\` date DEFAULT NULL,
+        \`due_date\` date DEFAULT NULL,
+        \`created_by\` bigint unsigned DEFAULT NULL,
+        \`updated_by\` bigint unsigned DEFAULT NULL,
+        \`deleted_by\` bigint unsigned DEFAULT NULL,
+        \`created_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+        \`updated_at\` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+        \`deleted_at\` datetime(6) DEFAULT NULL,
+        PRIMARY KEY (\`id\`),
+        KEY \`idx_tasks_deleted_at\` (\`deleted_at\`),
+        KEY \`fk_tasks_wbs\` (\`wbs_id\`),
+        CONSTRAINT \`fk_tasks_wbs_iso\` FOREIGN KEY (\`wbs_id\`) REFERENCES \`work_breakdown_structures\` (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    `);
+
+    const queryRunner = dataSource.createQueryRunner();
+
+    // Verify 0 rows before migration on isolated table
     const countRes = await queryRunner.query('SELECT COUNT(*) as cnt FROM tasks');
     const rowCount = Number(countRes[0]?.cnt || 0);
     expect(rowCount).toBe(0);
 
     // Apply migration
     await migration.up(queryRunner);
+
+    // Apply BD-06 cardinality migration to complete Slice 1 schema (active_wbs_id)
+    const cardinalityMigration = new EnforceTaskActiveWbsCardinality1789400000000();
+    await cardinalityMigration.up(queryRunner);
 
     // Update migrations ledger if not already recorded
     const ledgerCheck = await queryRunner.query(
@@ -76,11 +204,12 @@ describe('R11.1.4-B — Schedule / Task Database Schema & Entity Hardening Spec'
   });
 
   afterAll(async () => {
+    if (rawQueryRunner) {
+      await rawQueryRunner.query(`DROP TABLE IF EXISTS \`${ISOLATED_TABLE}\``);
+      await rawQueryRunner.query('DROP TABLE IF EXISTS `typeorm_metadata`');
+      await rawQueryRunner.release();
+    }
     if (dataSource && dataSource.isInitialized) {
-      const queryRunner = dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.query('DROP TABLE IF EXISTS `typeorm_metadata`');
-      await queryRunner.release();
       await dataSource.destroy();
     }
   });
