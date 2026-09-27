@@ -5,7 +5,7 @@ import { diskStorage } from 'multer';
 import * as path from 'path';
 import * as fs from 'fs';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiConsumes, ApiBody } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { MarketingService } from './marketing.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { CreateTenderDto, UpdateTenderStatusDto, UpdateTenderDto } from './dto/create-tender.dto';

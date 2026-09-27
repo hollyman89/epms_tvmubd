@@ -20,7 +20,7 @@ import { AuthService } from './auth.service';
 import { UserSessionService } from './user-session.service';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { JwtAuthGuard } from './jwt-auth.guard';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @ApiTags('Auth & Cookie Security')
 @Controller('auth')

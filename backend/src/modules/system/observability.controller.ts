@@ -1,6 +1,7 @@
-import { Controller, Get } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Controller, Get, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { ObservabilityService } from './observability.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @ApiTags('Enterprise Observability & Health Checks')
 @Controller()
@@ -16,12 +17,16 @@ export class ObservabilityController {
   }
 
   @Get('observability/dashboard')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Fetch Enterprise Observability Dashboard (SLI/SLO, Error Budget, Capacity, Security, Outbox)' })
   async getObservabilityDashboard() {
     return this.observabilityService.getOperationalDashboard();
   }
 
   @Get('observability/readiness-report')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Fetch Production Readiness Report & Metrics Catalog' })
   async getReadinessReport() {
     const dashboard = await this.observabilityService.getOperationalDashboard();

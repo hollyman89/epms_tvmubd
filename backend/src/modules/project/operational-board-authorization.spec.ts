@@ -21,7 +21,7 @@ import { ScheduleValidator } from './schedule.validator';
 import { InitialConditionValidator } from './initial-condition.validator';
 import { ManagementReviewValidator } from './management-review.validator';
 import { OperationalReadinessValidator } from './operational-readiness.validator';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 
 describe('GAP-PRJ-03: Operational Board Server-Side Role and Ownership Scoping', () => {
