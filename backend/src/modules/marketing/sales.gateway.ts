@@ -8,9 +8,10 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger } from '@nestjs/common';
+import { Logger, Optional } from '@nestjs/common';
 import * as jwt from 'jsonwebtoken';
 import { OnEvent } from '@nestjs/event-emitter';
+import { MarketingService } from './marketing.service';
 
 @WebSocketGateway({
   cors: {
@@ -23,6 +24,10 @@ export class SalesGateway implements OnGatewayConnection, OnGatewayDisconnect {
   server: Server;
 
   private readonly logger = new Logger(SalesGateway.name);
+
+  constructor(
+    @Optional() private readonly marketingService?: MarketingService,
+  ) {}
 
   handleConnection(client: Socket) {
     try {
@@ -40,6 +45,10 @@ export class SalesGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
       client.data.userId = decoded.sub;
+      const roles: string[] = Array.isArray(decoded.roles)
+        ? decoded.roles
+        : (decoded.role ? [decoded.role] : []);
+      client.data.roles = roles;
       this.logger.log(`Sales Client Connected: ${client.id} (User ${decoded.sub})`);
     } catch (err) {
       this.logger.error(`Sales Gateway Connection error: ${err.message}`);
@@ -53,25 +62,49 @@ export class SalesGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('join-sales-room')
   handleJoinSalesRoom(@ConnectedSocket() client: Socket) {
+    if (!client.data?.userId) {
+      return { status: 'error', message: 'Unauthorized' };
+    }
     client.join('room:sales');
     this.logger.log(`Client ${client.id} joined room:sales`);
     return { status: 'joined', room: 'room:sales' };
   }
 
   @SubscribeMessage('join_tender_room')
-  handleJoinTenderRoom(@MessageBody() data: { tenderId: number }, @ConnectedSocket() client: Socket) {
-    if (data?.tenderId) {
-      const roomName = `room:tender:${data.tenderId}`;
-      client.join(roomName);
-      this.logger.log(`Client ${client.id} joined Tender Room: ${roomName}`);
-      return { status: 'joined', room: roomName };
+  async handleJoinTenderRoom(@MessageBody() data: { tenderId: number }, @ConnectedSocket() client: Socket) {
+    const userId = client.data?.userId;
+    const roles: string[] = client.data?.roles || [];
+
+    if (!userId) {
+      this.logger.warn(`Unauthenticated client ${client.id} attempted to join Tender Room`);
+      return { status: 'error', message: 'Unauthorized' };
     }
+
+    if (!data?.tenderId || isNaN(Number(data.tenderId))) {
+      return { status: 'error', message: 'Invalid tenderId' };
+    }
+
+    const tenderId = Number(data.tenderId);
+
+    if (this.marketingService) {
+      try {
+        await this.marketingService.getTenderById(tenderId, userId, roles);
+      } catch (err: any) {
+        this.logger.warn(`Client ${client.id} (User ${userId}) denied access to Tender Room ${tenderId}: ${err?.message}`);
+        return { status: 'error', message: 'Access denied to tender room' };
+      }
+    }
+
+    const roomName = `room:tender:${tenderId}`;
+    client.join(roomName);
+    this.logger.log(`Client ${client.id} joined Tender Room: ${roomName}`);
+    return { status: 'joined', room: roomName };
   }
 
   @SubscribeMessage('leave_tender_room')
   handleLeaveTenderRoom(@MessageBody() data: { tenderId: number }, @ConnectedSocket() client: Socket) {
-    if (data?.tenderId) {
-      const roomName = `room:tender:${data.tenderId}`;
+    if (data?.tenderId && !isNaN(Number(data.tenderId))) {
+      const roomName = `room:tender:${Number(data.tenderId)}`;
       client.leave(roomName);
       this.logger.log(`Client ${client.id} left Tender Room: ${roomName}`);
       return { status: 'left', room: roomName };
