@@ -7,7 +7,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, EntityManager } from 'typeorm';
+import { Repository, DataSource, EntityManager, In } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as crypto from 'crypto';
 
@@ -257,7 +257,7 @@ export class WorkflowEngineService {
   ): Promise<{ task: WorkflowTask; instance: WorkflowInstance }> {
     const { action, reason, contextUpdate } = dto;
 
-    return this.dataSource.transaction(async (manager) => {
+    const result = await this.dataSource.transaction(async (manager) => {
       // 1. Load Task with Pessimistic Write Lock for strict Concurrency Protection
       const task = await manager
         .createQueryBuilder(WorkflowTask, 'task')
@@ -429,20 +429,22 @@ export class WorkflowEngineService {
         },
       });
 
-      // 13. Emit real-time domain event for zero-refresh UI synchronization
-      this.eventEmitter.emit('internal.workflow.task.completed', {
-        taskId: task.id,
-        instanceId: instance.id,
-        action,
-        decidedBy: actorId,
-        fromNode: currentNode.id,
-        toNode: nextNode.id,
-        entityType: instance.entityType,
-        entityId: instance.entityId,
-      });
-
-      return { task, instance };
+      return { task, instance, fromNodeId: currentNode.id, toNodeId: nextNode.id };
     });
+
+    // 13. Emit real-time domain event for zero-refresh UI synchronization AFTER COMMIT
+    this.eventEmitter.emit('internal.workflow.task.completed', {
+      taskId: result.task.id,
+      instanceId: result.instance.id,
+      action,
+      decidedBy: actorId,
+      fromNode: result.fromNodeId,
+      toNode: result.toNodeId,
+      entityType: result.instance.entityType,
+      entityId: result.instance.entityId,
+    });
+
+    return { task: result.task, instance: result.instance };
   }
 
   // 3. NODE PROGRESSION & CONDITION EVALUATION
@@ -1226,4 +1228,54 @@ export class WorkflowEngineService {
       order: { id: 'DESC' },
     });
   }
+
+  async getInstancesByEntities(
+    entityType: string,
+    entityIds: (string | number)[],
+  ): Promise<Map<number, WorkflowInstance>> {
+    const result = new Map<number, WorkflowInstance>();
+    const numericIds = entityIds.map(Number).filter((id) => !isNaN(id) && id > 0);
+    if (numericIds.length === 0) return result;
+
+    const allowedEntityTypes = ['PURCHASE_REQUEST', 'PROJECT', 'TENDER', 'CONTRACT'];
+    if (!allowedEntityTypes.includes(entityType)) {
+      throw new BadRequestException(
+        `Unsupported entityType: '${entityType}'. Supported types are 'PURCHASE_REQUEST', 'PROJECT', 'TENDER', and 'CONTRACT'.`,
+      );
+    }
+
+    const relations = [
+      'tasks',
+      'tasks.assigneeRole',
+      'transitions',
+      'transitions.actor',
+      'workflowDefinition',
+      'workflowVersion',
+    ];
+
+    const instances = await this.instanceRepo.find({
+      where: {
+        entityType,
+        entityId: In(numericIds),
+      },
+      relations,
+      order: { id: 'DESC' },
+    });
+
+    for (const inst of instances) {
+      const eid = Number(inst.entityId);
+      const existing = result.get(eid);
+      if (!existing) {
+        result.set(eid, inst);
+      } else if (
+        existing.status !== WorkflowInstanceStatus.IN_PROGRESS &&
+        inst.status === WorkflowInstanceStatus.IN_PROGRESS
+      ) {
+        result.set(eid, inst);
+      }
+    }
+
+    return result;
+  }
 }
+

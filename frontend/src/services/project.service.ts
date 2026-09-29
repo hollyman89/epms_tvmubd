@@ -20,7 +20,9 @@ export interface ProjectCharterItem {
   address?: string | null;
   postalCode?: string | null;
   latitude?: number | null;
-  longitude?: number | null;
+  operationalPlanStatus?: string;
+  handoverStatus?: string;
+  readiness?: any;
   [key: string]: any;
 }
 

@@ -48,6 +48,7 @@ backend/*.tsbuildinfo
 frontend/*.tsbuildinfo
 backend/logs/
 frontend/test-results/
+scratch_trace/
 frontend/analyze/
 
 # Security: Audit scripts containing hardcoded credentials (never commit)

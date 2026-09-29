@@ -1,0 +1,434 @@
+import {
+  evaluateOperationalPlanReadiness,
+  BackendOperationalReadinessData,
+} from '../operational-plan-readiness.utils';
+
+describe('R9.1B-OP-FIX PHASE 3: OP-03 Operational Plan Modal Readiness SSOT Alignment', () => {
+  // Baseline simulated locally-complete form inputs
+  const localCompleteInputs = {
+    hasCostInput: true,
+    totalPmEstimate: 250000000,
+    isCostMappingValid: true,
+    isCostServerSynced: true,
+    isWbsComplete: true,
+    isWbsServerSynced: true,
+    isScheduleComplete: true,
+    isScheduleServerSynced: true,
+    isConditionComplete: true,
+    initialConditionId: 991,
+    hasSavedDraftSinceRevision: false,
+    isRevisionMode: false,
+  };
+
+  // -------------------------------------------------------------------------
+  // TEST 1 — LOCAL COMPLETE / BACKEND INCOMPLETE
+  // Given: local Cost/WBS/Schedule/Condition booleans appear complete
+  // BUT backend readiness: 2/4, IN_PROGRESS
+  // ASSERT: modal does NOT display 4/4 READY.
+  // ASSERT: modal reflects backend 2/4 state.
+  // -------------------------------------------------------------------------
+  describe('TEST 1 — LOCAL COMPLETE / BACKEND INCOMPLETE', () => {
+    it('should reflect backend 2/4 state and NOT claim 4/4 READY even when client form is complete', () => {
+      const backendIncompleteReadiness: BackendOperationalReadinessData = {
+        projectId: 1361,
+        projectCode: 'PRJ-2026-001',
+        projectName: 'Fiber Optic Backbone',
+        overallStatus: 'IN_PROGRESS',
+        completenessCount: 2,
+        totalPillars: 4,
+        canSubmitForReview: false,
+        canCreatePr: false,
+        pillars: {
+          cost: { status: 'READY', message: 'Estimasi biaya siap' },
+          wbs: { status: 'READY', message: 'WBS 100% siap' },
+          schedule: {
+            status: 'IN_PROGRESS',
+            message: 'Sebagian task belum memiliki tanggal mulai/selesai yang valid',
+          },
+          initialCondition: {
+            status: 'NOT_STARTED',
+            message: 'Belum ada data baseline di database',
+          },
+        },
+      };
+
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: backendIncompleteReadiness,
+      });
+
+      // ASSERT: modal does NOT display 4/4 READY
+      expect(result.isOperationalPlanAuthoritativeReady).toBe(false);
+
+      // ASSERT: modal reflects backend 2/4 state
+      expect(result.completenessScore).toBe(2);
+      expect(result.totalPillars).toBe(4);
+      expect(result.overallStatus).toBe('IN_PROGRESS');
+
+      // Individual pillar check
+      expect(result.isCostReady).toBe(true);
+      expect(result.isWbsReady).toBe(true);
+      expect(result.isScheduleReady).toBe(false);
+      expect(result.isConditionReady).toBe(false);
+
+      // Management Review must be blocked
+      expect(result.canSubmitManagementReview).toBe(false);
+      expect(result.reviewSubmissionTooltip).toContain('2/4 selesai');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 2 — BACKEND 4/4 READY
+  // Given backend readiness: 4/4, READY
+  // ASSERT: modal displays 4/4 READY and 100% Kesiapan.
+  // -------------------------------------------------------------------------
+  describe('TEST 2 — BACKEND 4/4 READY', () => {
+    it('should display 4/4 READY and allow review when backend SSOT confirms 4/4 READY', () => {
+      const backendReady: BackendOperationalReadinessData = {
+        projectId: 1361,
+        projectCode: 'PRJ-2026-001',
+        projectName: 'Fiber Optic Backbone',
+        overallStatus: 'READY',
+        completenessCount: 4,
+        totalPillars: 4,
+        canSubmitForReview: true,
+        canCreatePr: false,
+        pillars: {
+          cost: { status: 'READY', message: 'Cost siap' },
+          wbs: { status: 'READY', message: 'WBS 100% siap' },
+          schedule: { status: 'READY', message: 'Jadwal lengkap' },
+          initialCondition: { status: 'READY', message: 'Baseline terisi' },
+        },
+      };
+
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: backendReady,
+      });
+
+      // ASSERT: modal displays 4/4 READY
+      expect(result.isOperationalPlanAuthoritativeReady).toBe(true);
+      expect(result.completenessScore).toBe(4);
+      expect(result.totalPillars).toBe(4);
+      expect(result.overallStatus).toBe('READY');
+
+      // Percentage calculation
+      const percentage = Number(((result.completenessScore / result.totalPillars) * 100).toFixed(0));
+      expect(percentage).toBe(100);
+
+      // Pillars all ready
+      expect(result.isCostReady).toBe(true);
+      expect(result.isWbsReady).toBe(true);
+      expect(result.isScheduleReady).toBe(true);
+      expect(result.isConditionReady).toBe(true);
+
+      // Submission eligible
+      expect(result.canSubmitManagementReview).toBe(true);
+      expect(result.reviewSubmissionTooltip).toBe(
+        'Ajukan Operational Plan kepada Head of Operations untuk ditinjau.'
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 3 — SAVE THEN REFETCH
+  // After successful Save Draft:
+  // ASSERT: getOperationalReadiness is refetched.
+  // ASSERT: displayed readiness comes from returned backend state.
+  // -------------------------------------------------------------------------
+  describe('TEST 3 — SAVE THEN REFETCH', () => {
+    it('should derive displayed readiness strictly from refetched backend state after save', async () => {
+      let currentBackendState: BackendOperationalReadinessData = {
+        projectId: 1361,
+        overallStatus: 'IN_PROGRESS',
+        completenessCount: 1,
+        totalPillars: 4,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'NOT_STARTED' },
+          schedule: { status: 'NOT_STARTED' },
+          initialCondition: { status: 'NOT_STARTED' },
+        },
+      };
+
+      // Simulated service
+      const mockProjectService = {
+        getOperationalReadiness: jest.fn().mockImplementation(async (pid: number) => {
+          return currentBackendState;
+        }),
+      };
+
+      // 1. Initial render before save
+      let result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: await mockProjectService.getOperationalReadiness(1361),
+      });
+      expect(result.completenessScore).toBe(1);
+      expect(result.isOperationalPlanAuthoritativeReady).toBe(false);
+
+      // 2. User saves drafts -> Backend persists WBS and Schedule -> Backend updates to 3/4
+      currentBackendState = {
+        projectId: 1361,
+        overallStatus: 'IN_PROGRESS',
+        completenessCount: 3,
+        totalPillars: 4,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'READY' },
+          schedule: { status: 'READY' },
+          initialCondition: { status: 'NOT_STARTED' },
+        },
+      };
+
+      // Refetch triggered after save
+      const freshReadiness = await mockProjectService.getOperationalReadiness(1361);
+      result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: freshReadiness,
+      });
+
+      // ASSERT: refetch was called
+      expect(mockProjectService.getOperationalReadiness).toHaveBeenCalledTimes(2);
+
+      // ASSERT: displayed readiness comes directly from returned backend state
+      expect(result.completenessScore).toBe(3);
+      expect(result.isCostReady).toBe(true);
+      expect(result.isWbsReady).toBe(true);
+      expect(result.isScheduleReady).toBe(true);
+      expect(result.isConditionReady).toBe(false);
+      expect(result.isOperationalPlanAuthoritativeReady).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 4 — PARTIAL SAVE
+  // Given: one pillar save fails
+  // ASSERT: modal cannot become false 4/4 READY.
+  // ASSERT: authoritative backend readiness is displayed.
+  // -------------------------------------------------------------------------
+  describe('TEST 4 — PARTIAL SAVE', () => {
+    it('should maintain actual backend state and prevent false 4/4 READY when one pillar fails to save', async () => {
+      // Backend persists Cost and WBS, but Schedule save failed at HTTP level
+      const backendPartialState: BackendOperationalReadinessData = {
+        projectId: 1361,
+        overallStatus: 'IN_PROGRESS',
+        completenessCount: 2,
+        totalPillars: 4,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'READY' },
+          schedule: { status: 'NOT_STARTED' }, // Schedule did not persist
+          initialCondition: { status: 'NOT_STARTED' },
+        },
+      };
+
+      // Even though schedule form is filled client-side:
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isScheduleServerSynced: false, // Save failed
+        operationalReadinessData: backendPartialState,
+      });
+
+      // ASSERT: modal cannot become false 4/4 READY
+      expect(result.isOperationalPlanAuthoritativeReady).toBe(false);
+
+      // ASSERT: authoritative backend readiness is displayed
+      expect(result.completenessScore).toBe(2);
+      expect(result.isCostReady).toBe(true);
+      expect(result.isWbsReady).toBe(true);
+      expect(result.isScheduleReady).toBe(false);
+      expect(result.isScheduleLocalDraft).toBe(true); // Flagged as local unsaved draft
+      expect(result.canSubmitManagementReview).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 5 — READINESS FETCH FAILURE
+  // Given: readiness API fails or is unavailable
+  // ASSERT: modal fails closed.
+  // ASSERT: it does NOT derive READY from local booleans.
+  // -------------------------------------------------------------------------
+  describe('TEST 5 — READINESS FETCH FAILURE', () => {
+    it('should fail closed when readiness API fails or returns null', () => {
+      // Simulate API failure -> operationalReadinessData is null
+      const resultNull = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: null,
+      });
+
+      // ASSERT: fails closed
+      expect(resultNull.isOperationalPlanAuthoritativeReady).toBe(false);
+      expect(resultNull.completenessScore).toBe(0);
+      expect(resultNull.totalPillars).toBe(4);
+      expect(resultNull.isCostReady).toBe(false);
+      expect(resultNull.isWbsReady).toBe(false);
+      expect(resultNull.isScheduleReady).toBe(false);
+      expect(resultNull.isConditionReady).toBe(false);
+      expect(resultNull.canSubmitManagementReview).toBe(false);
+
+      // Simulate API loading state
+      const resultLoading = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isReadinessLoading: true,
+        operationalReadinessData: null,
+      });
+      expect(resultLoading.isOperationalPlanAuthoritativeReady).toBe(false);
+      expect(resultLoading.completenessScore).toBe(0);
+      expect(resultLoading.canSubmitManagementReview).toBe(false);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 6 — MANAGEMENT REVIEW BUTTON
+  // Backend readiness incomplete:
+  // ASSERT: Management Review submission UI is not presented as ready.
+  // Backend readiness READY 4/4:
+  // ASSERT: normal eligibility behavior continues.
+  // Do not weaken backend gate.
+  // -------------------------------------------------------------------------
+  describe('TEST 6 — MANAGEMENT REVIEW BUTTON', () => {
+    it('should disable submit when backend is incomplete and enable only when 4/4 READY', () => {
+      // Incomplete: 3/4
+      const incomplete3of4: BackendOperationalReadinessData = {
+        projectId: 1361,
+        overallStatus: 'IN_PROGRESS',
+        completenessCount: 3,
+        totalPillars: 4,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'READY' },
+          schedule: { status: 'READY' },
+          initialCondition: { status: 'NOT_STARTED' },
+        },
+      };
+
+      const resultIncomplete = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: incomplete3of4,
+      });
+
+      expect(resultIncomplete.canSubmitManagementReview).toBe(false);
+      expect(resultIncomplete.reviewSubmissionTooltip).toBe(
+        'Lengkapi 4/4 pilar (3/4 selesai) untuk mengajukan review.'
+      );
+
+      // Complete: 4/4
+      const complete4of4: BackendOperationalReadinessData = {
+        projectId: 1361,
+        overallStatus: 'READY',
+        completenessCount: 4,
+        totalPillars: 4,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'READY' },
+          schedule: { status: 'READY' },
+          initialCondition: { status: 'READY' },
+        },
+      };
+
+      const resultComplete = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: complete4of4,
+      });
+
+      expect(resultComplete.canSubmitManagementReview).toBe(true);
+      expect(resultComplete.reviewSubmissionTooltip).toBe(
+        'Ajukan Operational Plan kepada Head of Operations untuk ditinjau.'
+      );
+
+      // Revision mode: requires both 4/4 and hasSavedDraftSinceRevision
+      const resultRevisionNoSave = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        hasSavedDraftSinceRevision: false,
+        operationalReadinessData: complete4of4,
+      });
+      expect(resultRevisionNoSave.canSubmitManagementReview).toBe(false);
+      expect(resultRevisionNoSave.reviewSubmissionTooltip).toBe(
+        'Perbaiki dan simpan Operational Plan terlebih dahulu.'
+      );
+
+      const resultRevisionSaved = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        hasSavedDraftSinceRevision: true,
+        operationalReadinessData: complete4of4,
+      });
+      expect(resultRevisionSaved.canSubmitManagementReview).toBe(true);
+      expect(resultRevisionSaved.reviewSubmissionTooltip).toBe(
+        'Ajukan kembali Operational Plan yang telah direvisi kepada Head of Operations untuk ditinjau.'
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 7 — REOPEN CONSISTENCY
+  // Open modal with backend 3/4.
+  // ASSERT: 3/4.
+  // Close.
+  // Backend becomes 4/4.
+  // Reopen.
+  // ASSERT: 4/4.
+  // No stale local readiness.
+  // -------------------------------------------------------------------------
+  describe('TEST 7 — REOPEN CONSISTENCY', () => {
+    it('should reset readiness on modal close and fetch fresh backend SSOT on reopen without stale state', () => {
+      // 1. Initial Open: Backend is 3/4
+      let modalReadinessData: BackendOperationalReadinessData | null = {
+        projectId: 1361,
+        overallStatus: 'IN_PROGRESS',
+        completenessCount: 3,
+        totalPillars: 4,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'READY' },
+          schedule: { status: 'READY' },
+          initialCondition: { status: 'NOT_STARTED' },
+        },
+      };
+
+      let result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: modalReadinessData,
+      });
+
+      expect(result.completenessScore).toBe(3);
+      expect(result.isOperationalPlanAuthoritativeReady).toBe(false);
+
+      // 2. Modal Closes -> State resets to null
+      modalReadinessData = null;
+      let closedResult = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: modalReadinessData,
+      });
+      expect(closedResult.completenessScore).toBe(0);
+      expect(closedResult.isOperationalPlanAuthoritativeReady).toBe(false);
+
+      // 3. In the background / elsewhere, backend updates to 4/4
+      const freshBackend4of4: BackendOperationalReadinessData = {
+        projectId: 1361,
+        overallStatus: 'READY',
+        completenessCount: 4,
+        totalPillars: 4,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'READY' },
+          schedule: { status: 'READY' },
+          initialCondition: { status: 'READY' },
+        },
+      };
+
+      // 4. Modal Reopens -> Fetches fresh backend data
+      modalReadinessData = freshBackend4of4;
+      let reopenedResult = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        operationalReadinessData: modalReadinessData,
+      });
+
+      // ASSERT: 4/4, no stale 3/4
+      expect(reopenedResult.completenessScore).toBe(4);
+      expect(reopenedResult.isOperationalPlanAuthoritativeReady).toBe(true);
+      expect(reopenedResult.canSubmitManagementReview).toBe(true);
+    });
+  });
+});

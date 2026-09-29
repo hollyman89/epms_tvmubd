@@ -82,6 +82,9 @@ export interface ProjectCharter {
   postalCode?: string;
   latitude?: number;
   longitude?: number;
+  operationalPlanStatus?: string;
+  handoverStatus?: string;
+  readiness?: any;
 }
 
 export interface ProjectOperationTabProps {
@@ -194,51 +197,10 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     }
 
     const pid = Number(charter.projectId);
-    const entry = readinessMap[pid];
-
-    // 1. Loading: Show only while request is in-flight and no entry exists yet
-    if (readinessLoading && !entry) {
-      return (
-        <Tag color="default" style={{ fontWeight: 500, borderRadius: 6 }}>
-          ○ MEMUAT STATUS...
-        </Tag>
-      );
-    }
-
-    // 2. Error / Unavailable: Request failed (404, 500, network error) or invalid payload
-    if (!entry) {
-      return (
-        <Tooltip title="Status Operational Plan belum tersedia.">
-          <Tag color="error" style={{ fontWeight: 600, borderRadius: 6 }}>
-            STATUS TIDAK TERSEDIA
-          </Tag>
-        </Tooltip>
-      );
-    }
-
-    if (entry.status === 'ERROR') {
-      const errorMsg = entry.message || 'Gagal memuat status Operational Plan.';
-      return (
-        <Tooltip title={`${errorMsg} Silakan coba muat ulang atau hubungi administrator.`}>
-          <Tag color="error" style={{ fontWeight: 600, borderRadius: 6 }}>
-            STATUS TIDAK TERSEDIA
-          </Tag>
-        </Tooltip>
-      );
-    }
-
-    // 3. Success: Authoritative Business State from Database SSOT API
-    const readiness = entry.data;
-    const gate = readiness?.gate;
-    const gateStatus = gate?.status;
-    const currentStage = gate?.currentStage || readiness?.workflow?.currentStage;
-    const currentNodeId = gate?.currentNodeId || readiness?.workflow?.currentNodeId;
-    const count = readiness?.completenessCount ?? 0;
     const downstreamPr = projectPrMap[pid];
     const isProjectActive =
       charter.status === 'IN_PROGRESS' ||
-      charter.projectStatus === 'IN_PROGRESS' ||
-      currentStage === 'ACTIVE';
+      charter.projectStatus === 'IN_PROGRESS';
 
     if (isProjectActive) {
       const prNum = downstreamPr?.prNumber || (downstreamPr?.id ? `PR-${downstreamPr.id}` : null);
@@ -300,7 +262,39 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       );
     }
 
-    if (currentStage === 'UNKNOWN_WORKFLOW_STATE' || gateStatus === 'UNKNOWN_WORKFLOW_STATE') {
+    const entry = readinessMap[pid];
+    const readiness = entry?.status === 'SUCCESS' ? entry.data : (charter.readiness || null);
+    const opStatus = charter.operationalPlanStatus;
+
+    // 1. Loading: Show only while request is in-flight and no entry or projection exists yet
+    if (readinessLoading && !entry && !charter.readiness && !opStatus) {
+      return (
+        <Tag color="default" style={{ fontWeight: 500, borderRadius: 6 }}>
+          ○ MEMUAT STATUS...
+        </Tag>
+      );
+    }
+
+    // 2. Error: only if explicitly marked as error with no fallback
+    if (entry?.status === 'ERROR' && !charter.readiness && !opStatus) {
+      const errorMsg = entry.message || 'Gagal memuat status Operational Plan.';
+      return (
+        <Tooltip title={`${errorMsg} Silakan coba muat ulang atau hubungi administrator.`}>
+          <Tag color="error" style={{ fontWeight: 600, borderRadius: 6 }}>
+            STATUS TIDAK TERSEDIA
+          </Tag>
+        </Tooltip>
+      );
+    }
+
+    // 3. Authoritative Business State from Database SSOT Projection or Map
+    const gate = readiness?.gate;
+    const gateStatus = gate?.status;
+    const currentStage = gate?.currentStage || readiness?.workflow?.currentStage;
+    const currentNodeId = gate?.currentNodeId || readiness?.workflow?.currentNodeId;
+    const count = readiness?.completenessCount ?? 0;
+
+    if (currentStage === 'UNKNOWN_WORKFLOW_STATE' || gateStatus === 'UNKNOWN_WORKFLOW_STATE' || opStatus === 'UNKNOWN') {
       return (
         <Tooltip title="Status workflow tidak dikenali. Periksa alur kerja di Workflow Engine.">
           <Tag color="error" style={{ fontWeight: 700, borderRadius: 6 }}>
@@ -310,7 +304,12 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       );
     }
 
-    if (currentStage === 'READY_FOR_KICKOFF' || gateStatus === 'READY_FOR_KICKOFF' || currentNodeId === 'node_end') {
+    if (
+      currentStage === 'READY_FOR_KICKOFF' ||
+      gateStatus === 'READY_FOR_KICKOFF' ||
+      currentNodeId === 'node_end' ||
+      opStatus === 'APPROVED_READY_FOR_KICKOFF'
+    ) {
       return (
         <Tooltip title="Project Plan Review Workflow telah disetujui penuh oleh Director. Siap untuk Formal Kickoff oleh PM.">
           <Tag
@@ -334,7 +333,12 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       );
     }
 
-    if (currentStage === 'NEEDS_REVISION' || gateStatus === 'NEEDS_REVISION' || currentNodeId?.startsWith('node_pm_revision')) {
+    if (
+      currentStage === 'NEEDS_REVISION' ||
+      gateStatus === 'NEEDS_REVISION' ||
+      currentNodeId?.startsWith('node_pm_revision') ||
+      opStatus === 'NEEDS_REVISION'
+    ) {
       return (
         <Tooltip title={gate?.revisionNotes ? `Permintaan Revisi Manajemen: ${gate.revisionNotes}` : "Permintaan Revisi Manajemen (Database SSOT)"}>
           <Tag color="error" style={{ fontWeight: 700, borderRadius: 6 }}>
@@ -345,7 +349,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     }
 
     // Canonical Review Stages
-    if (currentStage === 'REVIEW_HOPS' || currentNodeId === 'node_hops_review') {
+    if (currentStage === 'REVIEW_HOPS' || currentNodeId === 'node_hops_review' || opStatus === 'REVIEW_HOPS') {
       return (
         <Tooltip title="Operational Plan diajukan oleh PM dan sedang menunggu review Head of Operations (Tahap 1 Governance)">
           <Tag color="processing" style={{ fontWeight: 700, borderRadius: 6 }}>
@@ -355,7 +359,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       );
     }
 
-    if (currentStage === 'REVIEW_PROCUREMENT' || currentNodeId === 'node_procurement_review') {
+    if (currentStage === 'REVIEW_PROCUREMENT' || currentNodeId === 'node_procurement_review' || opStatus === 'REVIEW_PROCUREMENT') {
       return (
         <Tooltip title="Operational Plan telah disetujui HOPS dan sedang direview oleh Procurement (Tahap 2 Governance)">
           <Tag color="processing" style={{ fontWeight: 700, borderRadius: 6 }}>
@@ -365,7 +369,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       );
     }
 
-    if (currentStage === 'REVIEW_FINANCE' || currentNodeId === 'node_finance_review') {
+    if (currentStage === 'REVIEW_FINANCE' || currentNodeId === 'node_finance_review' || opStatus === 'REVIEW_FINANCE') {
       return (
         <Tooltip title="Operational Plan telah disetujui Procurement dan sedang dievaluasi oleh Finance (Tahap 3 Governance)">
           <Tag color="processing" style={{ fontWeight: 700, borderRadius: 6 }}>
@@ -375,7 +379,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       );
     }
 
-    if (currentStage === 'REVIEW_DIRECTOR' || currentNodeId === 'node_director_approval') {
+    if (currentStage === 'REVIEW_DIRECTOR' || currentNodeId === 'node_director_approval' || opStatus === 'REVIEW_DIRECTOR') {
       return (
         <Tooltip title="Operational Plan telah disetujui Finance dan sedang menunggu persetujuan final Director (Tahap 4 Governance)">
           <Tag
@@ -395,7 +399,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     }
 
     // General REVIEW_PENDING fallback
-    if (gateStatus === 'REVIEW_PENDING') {
+    if (gateStatus === 'REVIEW_PENDING' || opStatus === 'REVIEW_PENDING') {
       return (
         <Tooltip title="Operational Plan diajukan oleh PM dan sedang dalam peninjauan tata kelola manajemen">
           <Tag color="processing" style={{ fontWeight: 700, borderRadius: 6 }}>
@@ -406,7 +410,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     }
 
     // Legacy READY_FOR_PROCUREMENT fallback
-    if (gateStatus === 'READY_FOR_PROCUREMENT') {
+    if (gateStatus === 'READY_FOR_PROCUREMENT' || opStatus === 'MANAGEMENT_REVIEW_APPROVED') {
       return (
         <Tooltip title="Milestone Management Review Operational Plan telah disetujui">
           <Tag
@@ -426,7 +430,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     }
 
     // Drafting Stages (Before Submit)
-    if (count === 4 || currentStage === 'READY_TO_SUBMIT') {
+    if (count === 4 || currentStage === 'READY_TO_SUBMIT' || opStatus === 'COMPLETE_READINESS') {
       return (
         <Tooltip title="Cost Estimate, WBS (100% Bobot), Schedule Terjadwal Penuh, Kondisi Awal Proyek — Operational Plan Lengkap (4/4 Siap Review)">
           <Tag color="success" style={{ fontWeight: 700, borderRadius: 6 }}>
@@ -434,11 +438,11 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
           </Tag>
         </Tooltip>
       );
-    } else if (count > 0 || currentStage === 'INCOMPLETE') {
+    } else if (count > 0 || currentStage === 'INCOMPLETE' || opStatus === 'INCOMPLETE') {
       return (
         <Tooltip title={`Operational Plan Belum Lengkap (${count}/4 Pilar). Dihitung dari Database SSOT.`}>
           <Tag color="warning" style={{ fontWeight: 700, borderRadius: 6 }}>
-            {count}/4 INCOMPLETE
+            {count > 0 ? `${count}/4 INCOMPLETE` : 'INCOMPLETE'}
           </Tag>
         </Tooltip>
       );
@@ -455,7 +459,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
 
   // Helper to derive Handover & Kickoff Readiness from Database SSOT
   const getHandoverStatusTag = (charter: ProjectCharter) => {
-    if (!charter.projectId || Number(charter.projectId) <= 0) {
+    if (!charter.projectId || Number(charter.projectId) <= 0 || charter.handoverStatus === 'ANTREAN_KICKOFF') {
       return (
         <Tag color="default" style={{ fontWeight: 500, borderRadius: 6 }}>
           ANTREAN KICKOFF
@@ -463,28 +467,10 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       );
     }
 
-    const pid = Number(charter.projectId);
-    const entry = readinessMap[pid];
-    const downstreamPr = projectPrMap[pid];
-
-    if (readinessLoading && !entry) {
-      return (
-        <Tag color="default" style={{ fontWeight: 500, borderRadius: 6 }}>
-          ○ MEMUAT...
-        </Tag>
-      );
-    }
-
-    const readiness = entry?.status === 'SUCCESS' ? entry.data : null;
-    const gate = readiness?.gate;
-    const gateStatus = gate?.status;
-    const currentStage = gate?.currentStage || readiness?.workflow?.currentStage;
-    const currentNodeId = gate?.currentNodeId || readiness?.workflow?.currentNodeId;
-    const count = readiness?.completenessCount ?? 0;
     const isProjectActive =
       charter.status === 'IN_PROGRESS' ||
       charter.projectStatus === 'IN_PROGRESS' ||
-      currentStage === 'ACTIVE';
+      charter.handoverStatus === 'PROYEK_BERJALAN';
 
     // 1. ACTIVE: Proyek Berjalan
     if (isProjectActive) {
@@ -495,7 +481,28 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       );
     }
 
-    if (currentStage === 'UNKNOWN_WORKFLOW_STATE' || gateStatus === 'UNKNOWN_WORKFLOW_STATE') {
+    const pid = Number(charter.projectId);
+    const entry = readinessMap[pid];
+    const downstreamPr = projectPrMap[pid];
+
+    const readiness = entry?.status === 'SUCCESS' ? entry.data : (charter.readiness || null);
+    const hoStatus = charter.handoverStatus;
+
+    if (readinessLoading && !entry && !charter.readiness && !hoStatus) {
+      return (
+        <Tag color="default" style={{ fontWeight: 500, borderRadius: 6 }}>
+          ○ MEMUAT...
+        </Tag>
+      );
+    }
+
+    const gate = readiness?.gate;
+    const gateStatus = gate?.status;
+    const currentStage = gate?.currentStage || readiness?.workflow?.currentStage;
+    const currentNodeId = gate?.currentNodeId || readiness?.workflow?.currentNodeId;
+    const count = readiness?.completenessCount ?? 0;
+
+    if (currentStage === 'UNKNOWN_WORKFLOW_STATE' || gateStatus === 'UNKNOWN_WORKFLOW_STATE' || hoStatus === 'UNKNOWN') {
       return (
         <Tooltip title="Status workflow tidak dikenali. Periksa alur kerja di Workflow Engine.">
           <Tag color="error" style={{ fontWeight: 700, borderRadius: 6 }}>
@@ -506,7 +513,12 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     }
 
     // 2. READY_FOR_KICKOFF: Menunggu Kickoff PM
-    if (currentStage === 'READY_FOR_KICKOFF' || gateStatus === 'READY_FOR_KICKOFF' || currentNodeId === 'node_end') {
+    if (
+      currentStage === 'READY_FOR_KICKOFF' ||
+      gateStatus === 'READY_FOR_KICKOFF' ||
+      currentNodeId === 'node_end' ||
+      hoStatus === 'MENUNGGU_KICKOFF_PM'
+    ) {
       return (
         <Tooltip title="Seluruh persetujuan governance (PM → HOPS → Procurement → Finance → Director) telah selesai disetujui. Proyek siap untuk Kickoff Resmi oleh Project Manager.">
           <Tag
@@ -526,7 +538,12 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     }
 
     // 3. NEEDS_REVISION: Perlu Revisi PM
-    if (currentStage === 'NEEDS_REVISION' || gateStatus === 'NEEDS_REVISION' || currentNodeId?.startsWith('node_pm_revision')) {
+    if (
+      currentStage === 'NEEDS_REVISION' ||
+      gateStatus === 'NEEDS_REVISION' ||
+      currentNodeId?.startsWith('node_pm_revision') ||
+      hoStatus === 'PERLU_REVISI_PM'
+    ) {
       return (
         <Tooltip title={gate?.revisionNotes ? `Manajemen meminta revisi operasional: ${gate.revisionNotes}` : "Manajemen meminta revisi operasional kepada PM."}>
           <Tag color="error" style={{ fontWeight: 600, borderRadius: 6 }}>
@@ -586,8 +603,8 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       );
     }
 
-    // General REVIEW_PENDING fallback
-    if (gateStatus === 'REVIEW_PENDING') {
+    // General REVIEW_PENDING or PENINJAUAN_MANAJEMEN
+    if (gateStatus === 'REVIEW_PENDING' || hoStatus === 'PENINJAUAN_MANAJEMEN') {
       return (
         <Tooltip title="Handover tertunda: Menunggu keputusan review tata kelola manajemen.">
           <Tag color="processing" style={{ fontWeight: 600, borderRadius: 6 }}>
@@ -609,7 +626,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     }
 
     // 5. Drafting Stage (Before Submit)
-    if (count === 4 || currentStage === 'READY_TO_SUBMIT') {
+    if (count === 4 || currentStage === 'READY_TO_SUBMIT' || hoStatus === 'SIAP_PENGAJUAN') {
       return (
         <Tooltip title="Operational Plan sudah lengkap (4/4 Pilar Siap), menunggu pengajuan PM ke manajemen.">
           <Tag color="blue" style={{ fontWeight: 600, borderRadius: 6 }}>
@@ -679,37 +696,17 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       const active: ProjectCharter[] = boardData.activeProjects || [];
       setPendingKickoff(pending);
       setActiveProjects(active);
+      setLoading(false);
 
-      // Async fetch live operational readiness for all canonical projects (Project.id SSOT).
-      const allPids = Array.from(
-        new Set(
-          [...active, ...pending]
-            .map((p) => (p.projectId ? Number(p.projectId) : 0))
-            .filter((pid) => pid > 0)
-        )
-      );
-
-      const readinessPromises = allPids.map(async (pid) => {
-        try {
-          const r = await ProjectService.getOperationalReadiness(pid);
-          if (r && typeof r === 'object' && 'totalPillars' in r) {
-            return { id: pid, entry: { status: 'SUCCESS' as const, data: r } };
-          }
-          return {
-            id: pid,
-            entry: { status: 'ERROR' as const, message: 'Format data kesiapan operasional tidak valid.' },
-          };
-        } catch (e: any) {
-          const msg = e?.response?.data?.message || e?.message || 'Gagal memuat status Operational Plan.';
-          return { id: pid, entry: { status: 'ERROR' as const, error: e, message: msg } };
+      // Populate readinessMap directly from board projection — ZERO N+1 per-project requests!
+      const initialMap: Record<number, ProjectReadinessEntry> = {};
+      for (const p of [...pending, ...active]) {
+        const pid = p.projectId ? Number(p.projectId) : 0;
+        if (pid > 0 && p.readiness) {
+          initialMap[pid] = { status: 'SUCCESS', data: p.readiness };
         }
-      });
-      const results = await Promise.all(readinessPromises);
-      const newMap: Record<number, ProjectReadinessEntry> = {};
-      for (const res of results) {
-        newMap[res.id] = res.entry;
       }
-      setReadinessMap(newMap);
+      setReadinessMap(initialMap);
 
       // Async fetch downstream Purchase Requests to project PR & workflow status alongside readiness
       try {
@@ -880,13 +877,13 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
         });
         message.success(`Project Manager berhasil ditugaskan ke Proyek #${selectedCharter.project_code}!`);
       }
+      setIsClaimModalVisible(false);
+      setSubmittingClaim(false);
+      void fetchBoardData();
     } catch (err: any) {
       const errMsg = err?.response?.data?.message || err?.message || (isFormalKickoffMode ? 'Gagal melakukan Formal Kickoff' : 'Gagal menugaskan Project Manager');
       message.error(errMsg);
-    } finally {
-      await fetchBoardData();
       setSubmittingClaim(false);
-      setIsClaimModalVisible(false);
     }
   };
 

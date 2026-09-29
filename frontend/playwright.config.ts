@@ -17,7 +17,9 @@ export default defineConfig({
   reporter: 'list',
   use: {
     baseURL: 'http://localhost:3000',
-    trace: 'on-first-retry',
+    trace: 'on',
+    video: 'on',
+    screenshot: 'on',
   },
   projects: [
     // Mode A — AUTOMATED (Headless regression / CI)
@@ -25,6 +27,7 @@ export default defineConfig({
       name: 'chromium',
       use: {
         ...devices['Desktop Chrome'],
+        viewport: { width: 1920, height: 1080 },
         headless: true,
       },
     },

@@ -173,7 +173,290 @@ export function reconcileScheduleWithWbs(
       return syncScheduleMetadata(fromSaved, leaf, taskIdToWbsCodeMap);
     }
 
+    // Priority 3.5: Current frontend schedule even if not yet populated (preserves user task structure)
+    if (fromCurrent) {
+      return syncScheduleMetadata(fromCurrent, leaf, taskIdToWbsCodeMap);
+    }
+
     // Priority 4: Create empty template (genuinely new WBS leaf)
     return createEmptyScheduleItem(leaf);
   });
 }
+
+export interface BuildSchedulePayloadResult {
+  valid: boolean;
+  error?: string;
+  payload?: {
+    tasks: {
+      id?: number;
+      wbsId: number;
+      name: string;
+      isMilestone: boolean;
+      startDate?: string;
+      endDate?: string;
+      predecessorTaskId?: number | null;
+      predecessorWbsCode?: string;
+      dependencyType: 'FS';
+      progress: number;
+      status: string;
+    }[];
+    pmNotes?: string;
+  };
+  reconciledTasks: ScheduleTaskItem[];
+}
+
+/**
+ * Validates and transforms schedule items into an atomic, fail-closed backend save payload.
+ * Maps temporary client WBS IDs to permanent database WBS IDs.
+ * Never silently drops tasks; if any task cannot be reconciled to a valid WBS leaf, returns valid=false.
+ */
+export function buildSaveProjectSchedulePayload(
+  scheduleData: ScheduleTaskItem[],
+  wbsLeaves: { id: string; code: string; name: string }[],
+  pmNotes?: string,
+  preSaveWbsNodes?: { id: string; code: string }[]
+): BuildSchedulePayloadResult {
+  // If scheduleData is completely empty, payload legitimately has 0 tasks
+  if (!scheduleData || scheduleData.length === 0) {
+    return {
+      valid: true,
+      payload: {
+        tasks: [],
+        pmNotes: pmNotes ? pmNotes.trim() : undefined,
+      },
+      reconciledTasks: [],
+    };
+  }
+
+  // Build fallback map for pre-save temporary WBS IDs -> WBS code
+  const tempIdToCodeMap = new Map<string, string>();
+  if (preSaveWbsNodes) {
+    for (const node of preSaveWbsNodes) {
+      if (node.id && node.code) {
+        tempIdToCodeMap.set(String(node.id), normalizeWbsCode(node.code));
+      }
+    }
+  }
+
+  // Build lookups for active WBS leaves
+  const leafByCode = new Map<string, { id: string; code: string; name: string }>();
+  const leafById = new Map<string, { id: string; code: string; name: string }>();
+  for (const leaf of wbsLeaves) {
+    if (leaf.code) {
+      leafByCode.set(normalizeWbsCode(leaf.code), leaf);
+    }
+    if (leaf.id) {
+      leafById.set(String(leaf.id), leaf);
+    }
+  }
+
+  // Pre-validate that EVERY task currently in scheduleData can be mapped to an active WBS leaf
+  const unresolvableTasks: string[] = [];
+  for (const item of scheduleData) {
+    let matchedLeaf: { id: string; code: string; name: string } | undefined;
+
+    const itemCode = item.wbsCode ? normalizeWbsCode(item.wbsCode) : undefined;
+    if (itemCode && leafByCode.has(itemCode)) {
+      matchedLeaf = leafByCode.get(itemCode);
+    } else if (item.wbsNodeId && tempIdToCodeMap.has(String(item.wbsNodeId))) {
+      const codeFromTemp = tempIdToCodeMap.get(String(item.wbsNodeId))!;
+      if (leafByCode.has(codeFromTemp)) {
+        matchedLeaf = leafByCode.get(codeFromTemp);
+      }
+    } else if (item.wbsNodeId && leafById.has(String(item.wbsNodeId))) {
+      matchedLeaf = leafById.get(String(item.wbsNodeId));
+    }
+
+    if (!matchedLeaf) {
+      unresolvableTasks.push(item.name || item.wbsCode || String(item.wbsNodeId) || 'Task tanpa nama');
+      continue;
+    }
+
+    const leafDbId = Number(matchedLeaf.id);
+    if (!matchedLeaf.id || isNaN(leafDbId) || leafDbId <= 0) {
+      unresolvableTasks.push(item.name || item.wbsCode || String(item.wbsNodeId) || 'Task tanpa nama');
+    }
+  }
+
+  // Fail-Closed Validation 1: Any unresolvable tasks blocks save
+  if (unresolvableTasks.length > 0) {
+    return {
+      valid: false,
+      error: `Terdapat ${unresolvableTasks.length} task jadwal yang tidak dapat dipetakan ke ID WBS database yang valid: ${unresolvableTasks.join(', ')}. Penyimpanan jadwal dibatalkan untuk mencegah kehilangan data.`,
+      reconciledTasks: [],
+    };
+  }
+
+  // Reconcile and translate schedule items to permanent WBS database IDs
+  const reconciledTasks: ScheduleTaskItem[] = scheduleData.map((item) => {
+    let matchedLeaf: { id: string; code: string; name: string } | undefined;
+    const itemCode = item.wbsCode ? normalizeWbsCode(item.wbsCode) : undefined;
+    if (itemCode && leafByCode.has(itemCode)) {
+      matchedLeaf = leafByCode.get(itemCode);
+    } else if (item.wbsNodeId && tempIdToCodeMap.has(String(item.wbsNodeId))) {
+      const mappedCode = tempIdToCodeMap.get(String(item.wbsNodeId))!;
+      matchedLeaf = leafByCode.get(mappedCode);
+    } else if (item.wbsNodeId && leafById.has(String(item.wbsNodeId))) {
+      matchedLeaf = leafById.get(String(item.wbsNodeId));
+    }
+
+    return {
+      ...item,
+      wbsNodeId: matchedLeaf ? String(matchedLeaf.id) : item.wbsNodeId,
+      wbsCode: matchedLeaf ? matchedLeaf.code : item.wbsCode,
+      name: matchedLeaf ? matchedLeaf.name : item.name,
+    };
+  });
+
+  // Build code -> task map for predecessor task ID resolution
+  const wbsCodeToTaskMap = new Map<string, ScheduleTaskItem>();
+  for (const item of reconciledTasks) {
+    if (item.wbsCode) {
+      wbsCodeToTaskMap.set(normalizeWbsCode(item.wbsCode), item);
+    }
+  }
+
+  const tasksPayload: {
+    id?: number;
+    wbsId: number;
+    name: string;
+    isMilestone: boolean;
+    startDate?: string;
+    endDate?: string;
+    predecessorTaskId?: number | null;
+    predecessorWbsCode?: string;
+    dependencyType: 'FS';
+    progress: number;
+    status: string;
+  }[] = [];
+
+  for (const item of reconciledTasks) {
+    const rawWbsId = item.wbsNodeId;
+    const resolvedWbsId = Number(rawWbsId);
+
+    let predTaskId: number | null = item.predecessorTaskId ? Number(item.predecessorTaskId) : null;
+    if (!predTaskId && item.predecessorWbsCode) {
+      const target = wbsCodeToTaskMap.get(normalizeWbsCode(item.predecessorWbsCode));
+      if (target && target.id) {
+        predTaskId = Number(target.id);
+      }
+    }
+
+    const isMilestone = item.type === 'MILESTONE' || Boolean(item.isMilestone);
+
+    tasksPayload.push({
+      id: item.id && !isNaN(Number(item.id)) && Number(item.id) > 0 ? Number(item.id) : undefined,
+      wbsId: resolvedWbsId,
+      name: item.name,
+      isMilestone,
+      startDate: item.startDate || undefined,
+      endDate: isMilestone ? undefined : (item.endDate || undefined),
+      predecessorTaskId: predTaskId,
+      predecessorWbsCode: item.predecessorWbsCode ? normalizeWbsCode(item.predecessorWbsCode) : undefined,
+      dependencyType: 'FS',
+      progress: Number(item.progress || 0),
+      status: item.status || 'PLANNED',
+    });
+  }
+
+  // Fail-Closed Validation 2: Never send 0 tasks if user had tasks in UI
+  if (scheduleData.length > 0 && tasksPayload.length === 0) {
+    return {
+      valid: false,
+      error: `Validasi gagal: Jumlah task jadwal yang akan disimpan adalah 0 padahal terdapat ${scheduleData.length} task di UI. Penyimpanan jadwal dibatalkan.`,
+      reconciledTasks,
+    };
+  }
+
+  // Fail-Closed Validation 3: Ensure all intended tasks are accounted for
+  if (tasksPayload.length !== scheduleData.length) {
+    return {
+      valid: false,
+      error: `Inkonsistensi jumlah task jadwal: ${scheduleData.length} task di UI, tetapi ${tasksPayload.length} task dalam payload simpan. Penyimpanan jadwal dibatalkan.`,
+      reconciledTasks,
+    };
+  }
+
+  return {
+    valid: true,
+    payload: {
+      tasks: tasksPayload,
+      pmNotes: pmNotes ? pmNotes.trim() : undefined,
+    },
+    reconciledTasks,
+  };
+}
+
+/**
+ * Phase C & Phase D: Extracts the persisted WBS array from various backend response envelopes.
+ *
+ * Supported envelope patterns:
+ * 1. Direct array: [ ...nodes ]
+ * 2. Axios wrapper over NestJS service envelope:
+ *    { data: { statusCode: 200, message: "...", data: [ ...nodes ] } }
+ * 3. NestJS service envelope (unwrapped by service or direct):
+ *    { statusCode: 200, message: "...", data: [ ...nodes ] }
+ * 4. Generic data envelope:
+ *    { data: [ ...nodes ] }
+ * 5. Generic nodes envelope:
+ *    { nodes: [ ...nodes ] } or { data: { nodes: [ ...nodes ] } }
+ *
+ * Returns null if the extracted value is not a valid array, ensuring fail-closed behavior.
+ */
+export function extractPersistedWbsArray(response: any): any[] | null {
+  if (!response || typeof response !== 'object') return null;
+
+  // Case 1: Direct array
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  // Case 2: Double-nested: { data: { data: [...] } } or { data: { statusCode: 200, data: [...] } }
+  if (response.data && typeof response.data === 'object') {
+    if (Array.isArray(response.data.data)) {
+      return response.data.data;
+    }
+    if (Array.isArray(response.data)) {
+      return response.data;
+    }
+    if (Array.isArray(response.data.nodes)) {
+      return response.data.nodes;
+    }
+  }
+
+  // Case 3: Single-level nested: { data: [...] }
+  if (Array.isArray(response.data)) {
+    return response.data;
+  }
+
+  // Case 4: Single-level nested: { nodes: [...] }
+  if (Array.isArray(response.nodes)) {
+    return response.nodes;
+  }
+
+  return null;
+}
+
+/**
+ * Asserts that all nodes in a WBS tree (including recursive children)
+ * have valid, positive numeric permanent database IDs.
+ */
+export function assertPersistedWbsNodesHaveDbIds(nodes: any[]): boolean {
+  if (!nodes || !Array.isArray(nodes) || nodes.length === 0) return false;
+
+  const validateNode = (node: any): boolean => {
+    if (!node || typeof node !== 'object') return false;
+    const rawId = node.dbId ?? node.id;
+    if (rawId === undefined || rawId === null) return false;
+    const numId = Number(rawId);
+    if (isNaN(numId) || numId <= 0) return false;
+
+    if (node.children && Array.isArray(node.children) && node.children.length > 0) {
+      return node.children.every(validateNode);
+    }
+    return true;
+  };
+
+  return nodes.every(validateNode);
+}
+

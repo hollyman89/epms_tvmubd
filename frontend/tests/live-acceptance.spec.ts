@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
+import { loginViaUi as loginViaUiHelper } from './canonical-lifecycle-helpers';
 
 const BASE_URL = 'http://localhost:3000';
 const ARTIFACT_DIR = path.resolve(__dirname, '../../test-results');
@@ -17,46 +18,10 @@ test.describe('EPMS LIVE VISIBLE E2E ACCEPTANCE TEST', () => {
     console.log('==================================================\n');
 
     // -------------------------------------------------------------------------
-    // Helper: UI Login
+    // Helper: UI Login (Canonical-aligned)
     // -------------------------------------------------------------------------
     const loginViaUi = async (email: string, pass = '123456') => {
-      console.log(`[UI] Navigating to login for ${email}...`);
-      await page.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(500);
-
-      // If already logged in as this exact user, return
-      const currentEmail = page.locator('header').locator(`text=${email}`).first();
-      if (await currentEmail.isVisible({ timeout: 1000 }).catch(() => false)) {
-        console.log(`[UI] Already logged in as ${email}. Current URL: ${page.url()}`);
-        return;
-      }
-
-      // If redirected away because of another active session, force logout first
-      const emailInput = page.locator('input[placeholder*="email"], input[placeholder*="username"], #login_form_email').first();
-      if (!(await emailInput.isVisible({ timeout: 3000 }).catch(() => false))) {
-        console.log('[UI] Session still active; clearing session to render login form...');
-        await page.evaluate(() => {
-          localStorage.clear();
-          sessionStorage.clear();
-        }).catch(() => {});
-        await page.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded' });
-        await page.waitForTimeout(800);
-      }
-
-      await expect(emailInput).toBeVisible({ timeout: 15000 });
-      await emailInput.fill(email);
-
-      const passInput = page.locator('input[type="password"], #login_form_password').first();
-      await expect(passInput).toBeVisible({ timeout: 10000 });
-      await passInput.fill(pass);
-
-      const submitBtn = page.locator('button[type="submit"]').first();
-      await submitBtn.click();
-
-      await expect(page).not.toHaveURL(/.*\/login/, { timeout: 15000 });
-      await page.waitForLoadState('domcontentloaded');
-      await page.waitForTimeout(1000);
-      console.log(`[UI] Logged in successfully as ${email}. Current URL: ${page.url()}`);
+      await loginViaUiHelper(page, BASE_URL, email, pass);
     };
 
     // -------------------------------------------------------------------------
@@ -86,7 +51,8 @@ test.describe('EPMS LIVE VISIBLE E2E ACCEPTANCE TEST', () => {
         }
       }
 
-      // Ensure storage tokens cleared so Next.js does not auto-redirect
+      // Ensure cookies and storage tokens are thoroughly cleared during actor handover
+      await page.context().clearCookies();
       await page.evaluate(() => {
         localStorage.clear();
         sessionStorage.clear();
@@ -101,7 +67,12 @@ test.describe('EPMS LIVE VISIBLE E2E ACCEPTANCE TEST', () => {
     // STEP 0 — OPEN APPLICATION & 01-login-page.png
     // =========================================================================
     console.log('\n>>> STEP 0: Open Application');
+    await page.context().clearCookies();
     await page.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+    }).catch(() => {});
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(ARTIFACT_DIR, '01-login-page.png') });
     console.log('Saved: 01-login-page.png');

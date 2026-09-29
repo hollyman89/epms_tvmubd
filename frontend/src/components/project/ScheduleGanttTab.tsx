@@ -49,6 +49,9 @@ import {
   createEmptyScheduleItem,
   syncScheduleMetadata,
   reconcileScheduleWithWbs,
+  buildSaveProjectSchedulePayload,
+  extractPersistedWbsArray,
+  assertPersistedWbsNodesHaveDbIds,
 } from './schedule-reconciliation.utils';
 
 dayjs.extend(isSameOrAfter);
@@ -147,7 +150,11 @@ export {
   createEmptyScheduleItem,
   syncScheduleMetadata,
   reconcileScheduleWithWbs,
+  buildSaveProjectSchedulePayload,
+  extractPersistedWbsArray,
+  assertPersistedWbsNodesHaveDbIds,
 };
+export type { BuildSchedulePayloadResult } from './schedule-reconciliation.utils';
 
 export const ScheduleGanttTab: React.FC<ScheduleGanttTabProps> = ({
   charter,

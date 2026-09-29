@@ -134,10 +134,18 @@ export class ManagementReviewSyncService {
 
     // Resolve authoritative canonical projection from CURRENT Workflow Engine runtime (Phase 2B.1 SSOT)
     const projection = this.getProjectionService().buildProjection(instance, existingReview);
-    const targetStatus: string = projection.businessStatus;
+    let targetStatus: string = projection.businessStatus;
 
+    // Terminal Event Semantics:
+    // If advancing to node_end on APPROVE, target status is strictly READY_FOR_KICKOFF.
+    if (toNode === 'node_end' && action === 'APPROVE') {
+      targetStatus = 'READY_FOR_KICKOFF';
+    }
 
     let reviewerRole: string | null = projection.lastApprovedRole || projection.current.ownerRole || null;
+    if (toNode === 'node_end' && action === 'APPROVE' && !reviewerRole) {
+      reviewerRole = 'DIRECTOR';
+    }
 
     // Resolve actual actor role if possible from User entity
     if (actorId) {
@@ -167,6 +175,26 @@ export class ManagementReviewSyncService {
       });
 
       const oldStatus = review ? review.status : 'NOT_SUBMITTED';
+
+      // Terminal Non-Regression Guard:
+      // READY_FOR_KICKOFF is the approved terminal governance state.
+      // An APPROVE task event or intermediate projection must NEVER regress READY_FOR_KICKOFF to an earlier review state.
+      if (
+        review &&
+        review.status === 'READY_FOR_KICKOFF' &&
+        action === 'APPROVE' &&
+        targetStatus !== 'READY_FOR_KICKOFF'
+      ) {
+        this.logger.warn(
+          `[NonRegressionGuard] Project #${projectId} review is already READY_FOR_KICKOFF. Ignoring stale regression attempt to '${targetStatus}'.`,
+        );
+        return {
+          synchronized: true,
+          reviewId: review.id,
+          status: review.status,
+          alreadySynced: true,
+        };
+      }
 
       // Idempotency Check:
       // If review is already at targetStatus and has decidedBy and decidedAt,

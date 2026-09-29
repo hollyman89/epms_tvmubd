@@ -490,6 +490,105 @@ describe('Phase 2B — Backend Authority Direction & Conflict Tests', () => {
     });
   });
 
+  // R9.1B-MR-FIX REGRESSION SUITE (FIRST-SUBMIT FALSE CONFLICT & DUPLICATE PROTECTION)
+  describe('R9.1B-MR-FIX — First-Submit False Conflict & Duplicate Protection', () => {
+    it('TEST 1 — FIRST VALID SUBMIT: fresh project with 4/4 READY starts workflow exactly once, creates review REVIEW_PENDING, no ConflictException', async () => {
+      inMemoryWorkflowInstance = null;
+      inMemoryReview.status = 'NOT_SUBMITTED';
+      mockWorkflowEngineService.startInstance = jest.fn().mockResolvedValue({
+        id: 101,
+        workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW',
+        entityType: 'PROJECT',
+        entityId: validProjectId,
+        status: 'IN_PROGRESS',
+        currentNodeId: 'node_hops_review',
+      });
+
+      const res = await service.submitManagementReview(validProjectId, validUserId, ['PROJECT_MANAGER']);
+      expect(res).toBeDefined();
+      expect(res.status).toBe('REVIEW_PENDING');
+      expect(mockWorkflowEngineService.startInstance).toHaveBeenCalledTimes(1);
+      expect(mockWorkflowEngineService.startInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW',
+          entityType: 'PROJECT',
+          entityId: validProjectId,
+        }),
+        validUserId,
+      );
+    });
+
+    it('TEST 2 — STARTINSTANCE CREATED REVIEW: when startInstance creates REVIEW_PENDING review, does NOT trigger stale legacy guard', async () => {
+      inMemoryWorkflowInstance = null;
+      inMemoryReview.status = 'NOT_SUBMITTED';
+      // Simulate real workflow engine side effect: startInstance updates review to REVIEW_PENDING
+      mockWorkflowEngineService.startInstance = jest.fn().mockImplementation(async () => {
+        inMemoryReview.status = 'REVIEW_PENDING';
+        return {
+          id: 102,
+          workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW',
+          entityType: 'PROJECT',
+          entityId: validProjectId,
+          status: 'IN_PROGRESS',
+          currentNodeId: 'node_hops_review',
+        };
+      });
+
+      const res = await service.submitManagementReview(validProjectId, validUserId, ['PROJECT_MANAGER']);
+      expect(res).toBeDefined();
+      expect(res.status).toBe('REVIEW_PENDING');
+      expect(mockWorkflowEngineService.startInstance).toHaveBeenCalledTimes(1);
+    });
+
+    it('TEST 3 — DUPLICATE SUBMIT: active workflow already in progress -> blocks submit, creates no duplicate workflow', async () => {
+      inMemoryWorkflowInstance = {
+        id: 101,
+        currentNodeId: 'node_hops_review',
+        status: 'IN_PROGRESS',
+        tasks: [{ id: 55, nodeId: 'node_hops_review', status: 'PENDING' }],
+      };
+      inMemoryReview.status = 'REVIEW_PENDING';
+      mockWorkflowEngineService.startInstance = jest.fn();
+
+      await expect(
+        service.submitManagementReview(validProjectId, validUserId, ['PROJECT_MANAGER']),
+      ).rejects.toThrow(ConflictException);
+
+      expect(mockWorkflowEngineService.startInstance).not.toHaveBeenCalled();
+    });
+
+    it('TEST 4 — OP READINESS GATE: readiness < 4/4 blocks submission and does not start workflow', async () => {
+      inMemoryWorkflowInstance = null;
+      inMemoryReview.status = 'NOT_SUBMITTED';
+      mockWorkflowEngineService.startInstance = jest.fn();
+
+      jest.spyOn(service, 'getOperationalReadiness').mockResolvedValueOnce({
+        overallStatus: 'NOT_READY',
+        completenessCount: 3,
+        canSubmitForReview: false,
+      } as any);
+
+      await expect(
+        service.submitManagementReview(validProjectId, validUserId, ['PROJECT_MANAGER']),
+      ).rejects.toThrow(BadRequestException);
+
+      expect(mockWorkflowEngineService.startInstance).not.toHaveBeenCalled();
+    });
+
+    it('TEST 5 — ACTOR / OWNERSHIP: unassigned PM is blocked and does not start workflow', async () => {
+      inMemoryWorkflowInstance = null;
+      inMemoryReview.status = 'NOT_SUBMITTED';
+      mockWorkflowEngineService.startInstance = jest.fn();
+
+      const unassignedPmId = 999;
+      await expect(
+        service.submitManagementReview(validProjectId, unassignedPmId, ['PROJECT_MANAGER']),
+      ).rejects.toThrow();
+
+      expect(mockWorkflowEngineService.startInstance).not.toHaveBeenCalled();
+    });
+  });
+
   // UNKNOWN NODE FAIL-SAFE TESTS (PHASE 2B.14)
   describe('PHASE 2B.14 — Unknown Node Fail-Safe', () => {
     it('blocks baseline mutation fail-safe when currentNodeId is unknown', async () => {

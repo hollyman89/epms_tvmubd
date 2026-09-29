@@ -572,5 +572,121 @@ describe('ManagementReviewSyncService & ProjectService Integration Tests', () =>
       expect(updated.status).toBe('REVIEW_FINANCE');
     });
   });
+
+  describe('6. R9.1B-MR-SYNC-FIX — Terminal State Consistency & Non-Regression Tests', () => {
+    it('TEST 1 & 4: Terminal event semantics ensures READY_FOR_KICKOFF even if instance query returns stale node_director_approval', async () => {
+      inMemoryReviews.set(6, {
+        id: 2,
+        projectId: 6,
+        status: 'READY_FOR_KICKOFF',
+      });
+
+      // Simulate the exact historical race condition where instanceRepo read pre-commit snapshot
+      mockInstanceRepo.findOne.mockResolvedValueOnce({
+        id: 2,
+        entityType: 'PROJECT',
+        entityId: 6,
+        currentNodeId: 'node_director_approval', // Stale pre-commit snapshot!
+        status: 'IN_PROGRESS',
+        tasks: [{ id: 119, nodeId: 'node_director_approval', status: 'COMPLETED' }],
+        transitions: [],
+      });
+
+      const payload = {
+        workflowInstanceId: 2,
+        taskId: 119,
+        projectId: 6,
+        entityType: 'PROJECT',
+        fromNode: 'node_director_approval',
+        toNode: 'node_end',
+        action: 'APPROVE',
+        decidedBy: 4,
+        decidedAt: new Date(),
+      };
+
+      const result = await syncService.syncManagementReviewFromWorkflow(payload);
+      expect(result.synchronized).toBe(true);
+      expect(result.status).toBe('READY_FOR_KICKOFF');
+
+      const updated = inMemoryReviews.get(6);
+      expect(updated.status).toBe('READY_FOR_KICKOFF');
+      expect(updated.status).not.toBe('REVIEW_DIRECTOR');
+    });
+
+    it('TEST 2: Non-regression guard prevents READY_FOR_KICKOFF from being downgraded by older review projection', async () => {
+      inMemoryReviews.set(6, {
+        id: 2,
+        projectId: 6,
+        status: 'READY_FOR_KICKOFF',
+      });
+
+      // Simulate a stale event where targetStatus would evaluate to REVIEW_DIRECTOR
+      mockInstanceRepo.findOne.mockResolvedValueOnce({
+        id: 2,
+        entityType: 'PROJECT',
+        entityId: 6,
+        currentNodeId: 'node_director_approval',
+        status: 'IN_PROGRESS',
+        tasks: [],
+        transitions: [],
+      });
+
+      const payload = {
+        workflowInstanceId: 2,
+        taskId: 118,
+        projectId: 6,
+        entityType: 'PROJECT',
+        fromNode: 'node_finance_review',
+        toNode: 'node_director_approval',
+        action: 'APPROVE',
+        decidedBy: 3,
+        decidedAt: new Date(),
+      };
+
+      const result = await syncService.syncManagementReviewFromWorkflow(payload);
+      expect(result.synchronized).toBe(true);
+      expect(result.status).toBe('READY_FOR_KICKOFF');
+
+      const updated = inMemoryReviews.get(6);
+      expect(updated.status).toBe('READY_FOR_KICKOFF');
+    });
+
+    it('TEST 3: Non-terminal forward transitions still synchronize normally (Finance -> Director)', async () => {
+      inMemoryReviews.set(6, {
+        id: 2,
+        projectId: 6,
+        status: 'REVIEW_FINANCE',
+      });
+
+      mockInstanceRepo.findOne.mockResolvedValueOnce({
+        id: 2,
+        entityType: 'PROJECT',
+        entityId: 6,
+        currentNodeId: 'node_director_approval',
+        status: 'IN_PROGRESS',
+        tasks: [{ id: 118, nodeId: 'node_director_approval', status: 'PENDING' }],
+        transitions: [],
+      });
+
+      const payload = {
+        workflowInstanceId: 2,
+        taskId: 118,
+        projectId: 6,
+        entityType: 'PROJECT',
+        fromNode: 'node_finance_review',
+        toNode: 'node_director_approval',
+        action: 'APPROVE',
+        decidedBy: 3,
+        decidedAt: new Date(),
+      };
+
+      const result = await syncService.syncManagementReviewFromWorkflow(payload);
+      expect(result.synchronized).toBe(true);
+      expect(result.status).toBe('REVIEW_DIRECTOR');
+
+      const updated = inMemoryReviews.get(6);
+      expect(updated.status).toBe('REVIEW_DIRECTOR');
+    });
+  });
 });
 

@@ -71,7 +71,14 @@ import {
   getWbsStructureMetrics,
 } from './WbsTreeTableModal';
 import { PmOperationalPlanReviewModal } from './PmOperationalPlanReviewModal';
-import { ScheduleGanttTab, ScheduleTaskItem } from './ScheduleGanttTab';
+import {
+  ScheduleGanttTab,
+  ScheduleTaskItem,
+  extractLeafWbsNodes,
+  buildSaveProjectSchedulePayload,
+  extractPersistedWbsArray,
+  assertPersistedWbsNodesHaveDbIds,
+} from './ScheduleGanttTab';
 import { ReviewTrackingTimeline, PrApprovalStateLike } from './ReviewTrackingTimeline';
 import {
   ProjectInitialConditionModal,
@@ -80,6 +87,7 @@ import {
   isInitialConditionComplete,
 } from './ProjectInitialConditionModal';
 import { isPmEditableWorkflowState, getCanonicalStatusColor } from './workflowUiHelpers';
+import { evaluateOperationalPlanReadiness } from './operational-plan-readiness.utils';
 import { ProjectService, ProcurementService } from '@/services';
 import WorkflowEngineService from '@/services/workflowEngine.service';
 import { useAuth } from '@/context/AuthContext';
@@ -266,7 +274,36 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
   } | null>(null);
 
   const [operationalReadinessData, setOperationalReadinessData] = useState<any>(null);
+  const [isReadinessLoading, setIsReadinessLoading] = useState<boolean>(false);
   const [prApprovalState, setPrApprovalState] = useState<PrApprovalStateLike | null>(null);
+
+  // Fetch authoritative operational readiness SSOT from backend (Phase B / OP-03)
+  const fetchOperationalReadiness = useCallback(async (projectId: number) => {
+    if (!projectId || projectId <= 0) {
+      setOperationalReadinessData(null);
+      return null;
+    }
+    setIsReadinessLoading(true);
+    try {
+      const readiness = await ProjectService.getOperationalReadiness(projectId);
+      setOperationalReadinessData(readiness);
+      return readiness;
+    } catch (err) {
+      console.error('Failed to load operational readiness in PM modal:', err);
+      setOperationalReadinessData(null);
+      return null;
+    } finally {
+      setIsReadinessLoading(false);
+    }
+  }, []);
+
+  // Reset readiness data when modal closes to prevent stale state on reopen
+  useEffect(() => {
+    if (!open) {
+      setOperationalReadinessData(null);
+      setIsReadinessLoading(false);
+    }
+  }, [open]);
 
   // Canonical Planning Project ID (strictly uses backend projectId, never contract id)
   const canonicalProjectId = useMemo(() => {
@@ -537,14 +574,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
             setInitialCondition(localCond);
           });
 
-        // 6. Load 4-Pillar Operational Readiness from Backend SSOT
-        ProjectService.getOperationalReadiness(canonicalProjectId)
-          .then((readiness) => {
-            setOperationalReadinessData(readiness);
-          })
-          .catch((err) => {
-            console.error('Failed to load operational readiness in PM modal:', err);
-          });
+        // 6. Load 4-Pillar Operational Readiness from Backend SSOT (Phase B / OP-03)
+        fetchOperationalReadiness(canonicalProjectId);
 
         // 7. Load downstream PR & Workflow status if project is in or past READY_FOR_PROCUREMENT
         ProcurementService.getPurchaseRequests()
@@ -690,31 +721,60 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     };
   }, [scheduleData]);
 
-  // --- COMPLETENESS & SYNCHRONIZED READINESS STATUS ---
+  // --- COMPLETENESS & SYNCHRONIZED READINESS STATUS (R9.1B-OP-FIX Phase 3: OP-03) ---
   const isCostComplete = hasCostInput && totalPmEstimate > 0 && isCostMappingValid;
   const isConditionComplete = isInitialConditionComplete(initialCondition);
 
-  // Synchronized Readiness: Requires both local completeness AND authoritative server persistence
-  const isCostReady = isCostComplete && isCostServerSynced;
-  const isCostLocalDraft = isCostComplete && !isCostServerSynced;
+  const isRevisionWorkflow = gateRecord?.workflow
+    ? gateRecord.workflow.current?.nodeKey === 'PM_REVISION'
+    : gateRecord?.status === 'NEEDS_REVISION';
 
-  const isWbsReady = isWbsComplete && isWbsServerSynced;
-  const isWbsLocalDraft = isWbsComplete && !isWbsServerSynced;
+  const readinessEvaluation = useMemo(() => {
+    return evaluateOperationalPlanReadiness({
+      operationalReadinessData,
+      isReadinessLoading,
+      hasCostInput,
+      totalPmEstimate,
+      isCostMappingValid,
+      isCostServerSynced,
+      isWbsComplete,
+      isWbsServerSynced,
+      isScheduleComplete,
+      isScheduleServerSynced,
+      isConditionComplete,
+      initialConditionId: initialCondition?.id,
+      hasSavedDraftSinceRevision,
+      isRevisionMode: isRevisionWorkflow,
+    });
+  }, [
+    operationalReadinessData,
+    isReadinessLoading,
+    hasCostInput,
+    totalPmEstimate,
+    isCostMappingValid,
+    isCostServerSynced,
+    isWbsComplete,
+    isWbsServerSynced,
+    isScheduleComplete,
+    isScheduleServerSynced,
+    isConditionComplete,
+    initialCondition?.id,
+    hasSavedDraftSinceRevision,
+    isRevisionWorkflow,
+  ]);
 
-  const isScheduleReady = isScheduleComplete && isScheduleServerSynced;
-  const isScheduleLocalDraft = isScheduleComplete && !isScheduleServerSynced;
-
-  const isConditionReady = isConditionComplete && Boolean(initialCondition?.id);
-  const isConditionLocalDraft = isConditionComplete && !initialCondition?.id;
-
-  const completenessScore = useMemo(() => {
-    let score = 0;
-    if (isCostReady) score += 1;
-    if (isWbsReady) score += 1;
-    if (isScheduleReady) score += 1;
-    if (isConditionReady) score += 1;
-    return score;
-  }, [isCostReady, isWbsReady, isScheduleReady, isConditionReady]);
+  const {
+    isCostReady,
+    isWbsReady,
+    isScheduleReady,
+    isConditionReady,
+    isCostLocalDraft,
+    isWbsLocalDraft,
+    isScheduleLocalDraft,
+    isConditionLocalDraft,
+    completenessScore,
+    isOperationalPlanAuthoritativeReady,
+  } = readinessEvaluation;
 
   // Save All Drafts
   const handleSaveAllDrafts = useCallback(
@@ -744,8 +804,9 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
 
       // 1. Save Cost via Canonical API SSOT
       if (costAttempted) {
-        // PRE-SAVE GUARD: Block save if any WBS item lacks active leaf WBS mapping
-        const costValidation = validateCostEstimateItems(costCategories, activeLeafWbsIds);
+        // PRE-SAVE GUARD: Block save if any WBS item lacks active leaf WBS mapping (avoid 400 BadRequest)
+        // Draft persistence of UNASSIGNED items is allowed, but readiness remains false.
+        const costValidation = validateCostEstimateItems(costCategories, activeLeafWbsIds, { allowUnassigned: true });
         if (!costValidation.valid) {
           costSaveError = true;
           setIsCostServerSynced(false);
@@ -788,21 +849,31 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
             nodes: convertUiNodesToSavePayload(wbsData),
           };
           const res = await ProjectService.saveWbsTree(canonicalProjectId, wbsTreePayload);
-          const serverTree = convertBackendTreeToUiNodes(res?.data || []);
-          if (serverTree && serverTree.length > 0) {
-            // Buffer — deferred to Coordinated State Commit
-            pendingWbsTree = serverTree;
-            pendingExpandedKeys = getAllNodeIds(serverTree);
-          }
-          if (wbsStorageKey && typeof window !== 'undefined') {
-            localStorage.removeItem(wbsStorageKey);
-          }
-          setIsWbsServerSynced(true);
-          setIsLegacyWbsDraftDetected(false);
-          if (canonicalProjectId > 0) {
-            ProjectService.getOperationalReadiness(canonicalProjectId)
-              .then((r) => setOperationalReadinessData(r))
-              .catch(() => {});
+
+          // Phase C & Phase D: Robust envelope extraction and permanent ID assertion
+          const rawNodes = extractPersistedWbsArray(res);
+          if (!rawNodes || !Array.isArray(rawNodes) || rawNodes.length === 0) {
+            wbsSaveError = true;
+            setIsWbsServerSynced(false);
+            console.error('[WBS Save] Failed to extract persisted WBS array from response:', res);
+            message.error('WBS: Gagal mengekstrak struktur WBS tersimpan dari server. Format respons server tidak valid.');
+          } else {
+            const serverTree = convertBackendTreeToUiNodes(rawNodes);
+            if (!serverTree || serverTree.length === 0 || !assertPersistedWbsNodesHaveDbIds(serverTree)) {
+              wbsSaveError = true;
+              setIsWbsServerSynced(false);
+              console.error('[WBS Save] Persisted WBS nodes lack valid permanent database IDs:', serverTree);
+              message.error('WBS: Node WBS tersimpan tidak memiliki ID database permanen yang valid.');
+            } else {
+              // Buffer — deferred to Coordinated State Commit
+              pendingWbsTree = serverTree;
+              pendingExpandedKeys = getAllNodeIds(serverTree);
+              if (wbsStorageKey && typeof window !== 'undefined') {
+                localStorage.removeItem(wbsStorageKey);
+              }
+              setIsWbsServerSynced(true);
+              setIsLegacyWbsDraftDetected(false);
+            }
           }
         } catch (err: any) {
           wbsSaveError = true;
@@ -818,73 +889,88 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
       // 3. Save Schedule via Canonical API SSOT
       if (scheduleAttempted) {
         setIsScheduleSaving(true);
-        const wbsCodeToTaskMap = new Map<string, ScheduleTaskItem>();
-        for (const item of scheduleData) {
-          if (item.wbsCode) wbsCodeToTaskMap.set(item.wbsCode, item);
-        }
 
-        const tasksPayload = scheduleData
-          .filter((item) => item.wbsNodeId && !isNaN(Number(item.wbsNodeId)))
-          .map((item) => {
-            let predTaskId: number | null = item.predecessorTaskId ? Number(item.predecessorTaskId) : null;
-            if (!predTaskId && item.predecessorWbsCode) {
-              const target = wbsCodeToTaskMap.get(item.predecessorWbsCode);
-              if (target && target.id) {
-                predTaskId = Number(target.id);
+        // FAIL-FAST: If WBS save was attempted in this session but failed, abort Schedule save immediately
+        if (wbsAttempted && (wbsSaveError || !pendingWbsTree)) {
+          scheduleSaveError = true;
+          setIsScheduleSaving(false);
+          setIsScheduleServerSynced(false);
+          message.error('Jadwal: Penyimpanan jadwal dibatalkan karena penyimpanan Struktur WBS gagal.');
+        } else {
+          // Authoritative WBS Tree for Schedule:
+          // If WBS was just saved in this cycle, use pendingWbsTree (permanent DB IDs).
+          // Otherwise use wbsData.
+          const activeWbsTreeForSchedule = (wbsAttempted && pendingWbsTree) ? pendingWbsTree : wbsData;
+          const activeLeaves = extractLeafWbsNodes(activeWbsTreeForSchedule);
+
+          // Flatten pre-save WBS nodes to provide fallback mapping from temporary client IDs to WBS codes
+          const preSaveFlattened: { id: string; code: string }[] = [];
+          const traversePreSave = (list: WbsNodeItem[]) => {
+            for (const item of list) {
+              preSaveFlattened.push({ id: String(item.id), code: item.code });
+              if (item.children && item.children.length > 0) {
+                traversePreSave(item.children);
               }
             }
+          };
+          traversePreSave(wbsData);
 
-            return {
-              id: item.id ? Number(item.id) : undefined,
-              wbsId: Number(item.wbsNodeId),
-              name: item.name,
-              isMilestone: item.type === 'MILESTONE' || Boolean(item.isMilestone),
-              startDate: item.startDate || undefined,
-              endDate: item.isMilestone || item.type === 'MILESTONE' ? undefined : (item.endDate || undefined),
-              predecessorTaskId: predTaskId,
-              predecessorWbsCode: item.predecessorWbsCode || undefined,
-              dependencyType: 'FS',
-              progress: Number(item.progress || 0),
-              status: item.status || 'PLANNED',
-            };
-          });
-
-        try {
-          const res = await ProjectService.saveProjectSchedule(canonicalProjectId, {
-            tasks: tasksPayload,
+          const schedulePayloadResult = buildSaveProjectSchedulePayload(
+            scheduleData,
+            activeLeaves,
             pmNotes,
-          });
-          if (res && Array.isArray(res.tasks)) {
-            const mappedTasks: ScheduleTaskItem[] = res.tasks.map((t: any) => ({
-              id: Number(t.id),
-              wbsNodeId: String(t.wbsId),
-              wbsCode: t.wbsCode || '',
-              name: t.name,
-              type: t.isMilestone ? 'MILESTONE' : 'TASK',
-              isMilestone: Boolean(t.isMilestone),
-              startDate: t.startDate || undefined,
-              endDate: t.endDate || undefined,
-              duration: Number(t.duration ?? 0),
-              predecessorTaskId: t.predecessorTaskId ? Number(t.predecessorTaskId) : null,
-              dependencyType: 'FS',
-              progress: Number(t.progress || 0),
-              status: t.status || 'PLANNED',
-              assigneeId: t.assigneeId ? Number(t.assigneeId) : null,
-            }));
-            // Buffer — deferred to Coordinated State Commit
-            pendingScheduleData = mappedTasks;
+            preSaveFlattened
+          );
+
+          if (!schedulePayloadResult.valid || !schedulePayloadResult.payload) {
+            scheduleSaveError = true;
+            setIsScheduleSaving(false);
+            setIsScheduleServerSynced(false);
+            const errText = schedulePayloadResult.error || 'Validasi rekonsiliasi WBS -> Jadwal gagal.';
+            console.error('[Schedule Save Aborted]', errText);
+            message.error(`Jadwal: ${errText}`);
+          } else {
+            try {
+              const res = await ProjectService.saveProjectSchedule(
+                canonicalProjectId,
+                schedulePayloadResult.payload
+              );
+              if (res && Array.isArray(res.tasks)) {
+                const mappedTasks: ScheduleTaskItem[] = res.tasks.map((t: any) => ({
+                  id: Number(t.id),
+                  wbsNodeId: String(t.wbsId),
+                  wbsCode: t.wbsCode || '',
+                  name: t.name,
+                  type: t.isMilestone ? 'MILESTONE' : 'TASK',
+                  isMilestone: Boolean(t.isMilestone),
+                  startDate: t.startDate || undefined,
+                  endDate: t.endDate || undefined,
+                  duration: Number(t.duration ?? 0),
+                  predecessorTaskId: t.predecessorTaskId ? Number(t.predecessorTaskId) : null,
+                  dependencyType: 'FS',
+                  progress: Number(t.progress || 0),
+                  status: t.status || 'PLANNED',
+                  assigneeId: t.assigneeId ? Number(t.assigneeId) : null,
+                }));
+                // Buffer — deferred to Coordinated State Commit
+                pendingScheduleData = mappedTasks;
+              } else {
+                // Fallback: commit reconciled tasks so in-memory state holds permanent DB IDs
+                pendingScheduleData = schedulePayloadResult.reconciledTasks;
+              }
+              if (scheduleStorageKey && typeof window !== 'undefined') {
+                localStorage.removeItem(scheduleStorageKey);
+              }
+            } catch (err: any) {
+              scheduleSaveError = true;
+              setIsScheduleServerSynced(false);
+              console.error('Failed to save project schedule to server:', err);
+              const errMsg = err.response?.data?.message || err.message || 'Gagal menyimpan Jadwal Proyek';
+              message.error(`Jadwal: ${errMsg}`);
+            } finally {
+              setIsScheduleSaving(false);
+            }
           }
-          if (scheduleStorageKey && typeof window !== 'undefined') {
-            localStorage.removeItem(scheduleStorageKey);
-          }
-        } catch (err: any) {
-          scheduleSaveError = true;
-          setIsScheduleServerSynced(false);
-          console.error('Failed to save project schedule to server:', err);
-          const errMsg = err.response?.data?.message || err.message || 'Gagal menyimpan Jadwal Proyek';
-          message.error(`Jadwal: ${errMsg}`);
-        } finally {
-          setIsScheduleSaving(false);
         }
       }
 
@@ -922,6 +1008,11 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         }
       } catch (e) {
         console.warn('Failed to update gate on draft save:', e);
+      }
+
+      // Refetch authoritative backend operational readiness SSOT after all pillar saves resolve
+      if (canonicalProjectId > 0) {
+        await fetchOperationalReadiness(canonicalProjectId);
       }
 
       setLastSavedTime(nowStr);
@@ -980,6 +1071,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
       isWbsSaving,
       isScheduleSaving,
       onRefreshParent,
+      fetchOperationalReadiness,
     ]
   );
 
@@ -991,8 +1083,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
       return;
     }
     const pid = canonicalProjectId;
-    if (completenessScore < 4) {
-      message.error('Semua 4 pilar operasional (Cost, WBS 100%, Schedule, Initial Condition) harus lengkap sebelum mengajukan review!');
+    if (!isOperationalPlanAuthoritativeReady || completenessScore < 4) {
+      message.error('Semua 4 pilar operasional (Cost, WBS 100%, Schedule, Initial Condition) harus berstatus READY menurut evaluasi backend sebelum mengajukan review!');
       return;
     }
     const isResubmission = gateRecord?.workflow
@@ -1013,9 +1105,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
       }
 
       // Refresh live readiness from server
-      ProjectService.getOperationalReadiness(pid)
-        .then((r) => setOperationalReadinessData(r))
-        .catch(() => {});
+      await fetchOperationalReadiness(pid);
 
       if (isResubmission) {
         message.success('Operational Plan hasil revisi berhasil diajukan kembali kepada Head of Operations untuk Management Review!');
@@ -1844,10 +1934,10 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                           </Tag>
                           {curr.nodeKey === 'PM_PLANNING' && (
                             <Tag
-                              color={completenessScore === 4 ? 'success' : completenessScore >= 2 ? 'processing' : 'warning'}
+                              color={isOperationalPlanAuthoritativeReady ? 'success' : completenessScore >= 2 ? 'processing' : 'warning'}
                               style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}
                             >
-                              {completenessScore === 4 ? '4/4 READY' : `${completenessScore}/4 INCOMPLETE`}
+                              {isOperationalPlanAuthoritativeReady ? '4/4 READY' : `${completenessScore}/4 INCOMPLETE`}
                             </Tag>
                           )}
                         </Space>
@@ -1879,7 +1969,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                       <Tag color="error" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}>
                         NEEDS REVISION
                       </Tag>
-                    ) : completenessScore === 4 ? (
+                    ) : isOperationalPlanAuthoritativeReady ? (
                       <Tag color="success" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}>
                         4/4 READY — SIAP DIAJUKAN
                       </Tag>
@@ -1926,9 +2016,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                 icon={<EyeOutlined />}
                 onClick={() => {
                   if (canonicalProjectId > 0) {
-                    ProjectService.getOperationalReadiness(canonicalProjectId)
-                      .then((r) => setOperationalReadinessData(r))
-                      .catch(() => {});
+                    fetchOperationalReadiness(canonicalProjectId);
                   }
                   setIsSummaryModalOpen(true);
                 }}
@@ -2012,23 +2100,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                   }
                   if (curr.nodeKey === 'PM_REVISION') {
                     return (
-                      <Tooltip
-                        title={
-                          !hasSavedDraftSinceRevision
-                            ? 'Perbaiki dan simpan Operational Plan terlebih dahulu.'
-                            : completenessScore < 4
-                            ? `Lengkapi 4/4 pilar (${completenessScore}/4 selesai) untuk mengajukan review.`
-                            : 'Ajukan kembali Operational Plan yang telah direvisi kepada Head of Operations untuk ditinjau.'
-                        }
-                      >
+                      <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
                         <Button
                           type="primary"
                           icon={<RocketOutlined />}
-                          disabled={!hasSavedDraftSinceRevision || completenessScore < 4}
+                          disabled={!readinessEvaluation.canSubmitManagementReview}
                           onClick={() => setIsSubmitModalOpen(true)}
                           style={{
-                            backgroundColor: hasSavedDraftSinceRevision && completenessScore === 4 ? '#d97706' : undefined,
-                            borderColor: hasSavedDraftSinceRevision && completenessScore === 4 ? '#d97706' : undefined,
+                            backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
+                            borderColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
                             borderRadius: 6,
                             fontWeight: 600,
                           }}
@@ -2040,21 +2120,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                   }
                   if (curr.nodeKey === 'PM_PLANNING') {
                     return (
-                      <Tooltip
-                        title={
-                          completenessScore === 4
-                            ? 'Ajukan Operational Plan kepada Head of Operations untuk ditinjau.'
-                            : `Lengkapi 4/4 pilar (${completenessScore}/4 selesai) untuk mengajukan review.`
-                        }
-                      >
+                      <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
                         <Button
                           type="primary"
                           icon={<RocketOutlined />}
-                          disabled={completenessScore < 4}
+                          disabled={!readinessEvaluation.canSubmitManagementReview}
                           onClick={() => setIsSubmitModalOpen(true)}
                           style={{
-                            backgroundColor: completenessScore === 4 ? '#059669' : undefined,
-                            borderColor: completenessScore === 4 ? '#059669' : undefined,
+                            backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#059669' : undefined,
+                            borderColor: readinessEvaluation.canSubmitManagementReview ? '#059669' : undefined,
                             borderRadius: 6,
                             fontWeight: 600,
                           }}
@@ -2101,23 +2175,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                 }
                 if (gateRecord?.status === 'NEEDS_REVISION') {
                   return (
-                    <Tooltip
-                      title={
-                        !hasSavedDraftSinceRevision
-                          ? 'Perbaiki dan simpan Operational Plan terlebih dahulu.'
-                          : completenessScore < 4
-                          ? `Lengkapi 4/4 pilar (${completenessScore}/4 selesai) untuk mengajukan review.`
-                          : 'Ajukan kembali Operational Plan yang telah direvisi kepada Head of Operations untuk ditinjau.'
-                      }
-                    >
+                    <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
                       <Button
                         type="primary"
                         icon={<RocketOutlined />}
-                        disabled={!hasSavedDraftSinceRevision || completenessScore < 4}
+                        disabled={!readinessEvaluation.canSubmitManagementReview}
                         onClick={() => setIsSubmitModalOpen(true)}
                         style={{
-                          backgroundColor: hasSavedDraftSinceRevision && completenessScore === 4 ? '#d97706' : undefined,
-                          borderColor: hasSavedDraftSinceRevision && completenessScore === 4 ? '#d97706' : undefined,
+                          backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
+                          borderColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
                           borderRadius: 6,
                           fontWeight: 600,
                         }}
@@ -2128,21 +2194,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                   );
                 }
                 return (
-                  <Tooltip
-                    title={
-                      completenessScore === 4
-                        ? 'Ajukan Operational Plan kepada Head of Operations untuk ditinjau.'
-                        : `Lengkapi 4/4 pilar (${completenessScore}/4 selesai) untuk mengajukan review.`
-                    }
-                  >
+                  <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
                     <Button
                       type="primary"
                       icon={<RocketOutlined />}
-                      disabled={completenessScore < 4}
+                      disabled={!readinessEvaluation.canSubmitManagementReview}
                       onClick={() => setIsSubmitModalOpen(true)}
                       style={{
-                        backgroundColor: completenessScore === 4 ? '#059669' : undefined,
-                        borderColor: completenessScore === 4 ? '#059669' : undefined,
+                        backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#059669' : undefined,
+                        borderColor: readinessEvaluation.canSubmitManagementReview ? '#059669' : undefined,
                         borderRadius: 6,
                         fontWeight: 600,
                       }}
@@ -2392,7 +2452,9 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
               </Space>
               <Tag
                 color={
-                  completenessScore === 4
+                  isReadinessLoading && !operationalReadinessData
+                    ? 'default'
+                    : isOperationalPlanAuthoritativeReady
                     ? 'success'
                     : completenessScore > 0
                     ? 'warning'
@@ -2400,7 +2462,9 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                 }
                 style={{ fontWeight: 700, margin: 0, fontSize: 10 }}
               >
-                {completenessScore === 4
+                {isReadinessLoading && !operationalReadinessData
+                  ? 'MEMUAT...'
+                  : isOperationalPlanAuthoritativeReady
                   ? '4/4 READY'
                   : completenessScore > 0
                   ? `${completenessScore}/4 INCOMPLETE`
@@ -2600,15 +2664,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, marginBottom: 4 }}>
                 <Text type="secondary">Kesiapan:</Text>
-                <Text strong style={{ color: completenessScore === 4 ? '#15803d' : '#1d4ed8' }}>
+                <Text strong style={{ color: isOperationalPlanAuthoritativeReady ? '#15803d' : '#1d4ed8' }}>
                   {((completenessScore / 4) * 100).toFixed(0)}%
                 </Text>
               </div>
               <Progress
                 percent={Number(((completenessScore / 4) * 100).toFixed(0))}
                 size="small"
-                status={completenessScore === 4 ? 'success' : 'active'}
-                strokeColor={completenessScore === 4 ? '#10b981' : '#3b82f6'}
+                status={isOperationalPlanAuthoritativeReady ? 'success' : 'active'}
+                strokeColor={isOperationalPlanAuthoritativeReady ? '#10b981' : '#3b82f6'}
               />
             </div>
           </div>
@@ -4313,9 +4377,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
           onSaveSuccess={(saved) => {
             setInitialCondition(saved);
             if (canonicalProjectId > 0) {
-              ProjectService.getOperationalReadiness(canonicalProjectId)
-                .then((r) => setOperationalReadinessData(r))
-                .catch(() => {});
+              fetchOperationalReadiness(canonicalProjectId);
             }
             if (onRefreshParent) onRefreshParent();
           }}
@@ -4337,9 +4399,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
           onGateDecisionChange={(newRecord) => {
             setGateRecord(newRecord);
             if (canonicalProjectId > 0) {
-              ProjectService.getOperationalReadiness(canonicalProjectId)
-                .then((r) => setOperationalReadinessData(r))
-                .catch(() => {});
+              fetchOperationalReadiness(canonicalProjectId);
             }
             if (onRefreshParent) onRefreshParent();
           }}

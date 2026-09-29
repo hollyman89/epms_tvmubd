@@ -449,15 +449,21 @@ export function normalizeCostCategories(rawCategories?: any[]): CostCategoryEsti
 export interface CostItemValidationError {
   itemName: string;
   categoryKey: string;
-  reason: 'MISSING_WBS' | 'INVALID_OR_DELETED_WBS';
+  reason: 'MISSING_WBS' | 'INVALID_OR_DELETED_WBS' | 'UNASSIGNED_SCOPE';
   message: string;
+}
+
+export interface ValidateCostEstimateOptions {
+  allowUnassigned?: boolean;
 }
 
 export function validateCostEstimateItems(
   categories: CostCategoryEstimation[],
-  activeLeafWbsIds?: Set<string | number> | null
-): { valid: boolean; error?: string; errors: CostItemValidationError[] } {
+  activeLeafWbsIds?: Set<string | number> | null,
+  options?: ValidateCostEstimateOptions
+): { valid: boolean; error?: string; errors: CostItemValidationError[]; unassignedCount: number } {
   const errors: CostItemValidationError[] = [];
+  let unassignedCount = 0;
 
   for (const cat of categories) {
     if (cat.mode !== 'ITEMIZED' || !cat.items) continue;
@@ -474,9 +480,19 @@ export function validateCostEstimateItems(
       const effectiveScope: CostAssignmentScope =
         item.assignmentScope || (hasValidNumericWbs ? 'WBS' : 'UNASSIGNED');
 
-      if (effectiveScope === 'WBS') {
-        const itemLabel = item.itemName && item.itemName.trim() !== '' ? item.itemName.trim() : 'Item';
+      const itemLabel = item.itemName && item.itemName.trim() !== '' ? item.itemName.trim() : 'Item';
 
+      if (effectiveScope === 'UNASSIGNED') {
+        unassignedCount++;
+        if (!options?.allowUnassigned) {
+          errors.push({
+            itemName: itemLabel,
+            categoryKey: cat.categoryKey,
+            reason: 'UNASSIGNED_SCOPE',
+            message: `${itemLabel}: belum memiliki alokasi scope/WBS yang valid (UNASSIGNED).`,
+          });
+        }
+      } else if (effectiveScope === 'WBS') {
         if (!hasValidNumericWbs) {
           errors.push({
             itemName: itemLabel,
@@ -500,6 +516,7 @@ export function validateCostEstimateItems(
           }
         }
       }
+      // effectiveScope === 'PROJECT' is valid project-level allocation per backend SSOT
     }
   }
 
@@ -507,6 +524,7 @@ export function validateCostEstimateItems(
     valid: errors.length === 0,
     error: errors.length > 0 ? errors[0].message : undefined,
     errors,
+    unassignedCount,
   };
 }
 
@@ -721,7 +739,12 @@ export const PmCostEstimationModal: React.FC<PmCostEstimationModalProps> = ({
     return validateCostEstimateItems(categories, activeLeafWbsIds);
   }, [categories, activeLeafWbsIds]);
 
+  const costSaveValidationResult = useMemo(() => {
+    return validateCostEstimateItems(categories, activeLeafWbsIds, { allowUnassigned: true });
+  }, [categories, activeLeafWbsIds]);
+
   const isCostMappingValid = costValidationResult.valid;
+  const isCostSaveable = costSaveValidationResult.valid;
 
   const wbsSelectOptions = useMemo(() => buildWbsHierarchyOptions(internalWbsData), [internalWbsData]);
 
@@ -885,8 +908,9 @@ export const PmCostEstimationModal: React.FC<PmCostEstimationModalProps> = ({
       return;
     }
 
-    // PRE-SAVE GUARD: Block save if any WBS item lacks active leaf WBS mapping
-    const validation = validateCostEstimateItems(categories, activeLeafWbsIds);
+    // PRE-SAVE GUARD: Block save if any WBS item lacks active leaf WBS mapping (avoid 400 BadRequest)
+    // Draft persistence of UNASSIGNED items is allowed, but readiness remains false.
+    const validation = validateCostEstimateItems(categories, activeLeafWbsIds, { allowUnassigned: true });
     if (!validation.valid) {
       const errText = validation.error || 'Terdapat item WBS yang belum dipetakan ke WBS Deliverable aktif.';
       message.error(errText);
@@ -958,7 +982,7 @@ export const PmCostEstimationModal: React.FC<PmCostEstimationModalProps> = ({
       const normalized = normalizeCostCategories(parsed.categories);
 
       // PRE-SAVE GUARD: Block sync if any WBS item in legacy draft lacks active leaf WBS mapping
-      const validation = validateCostEstimateItems(normalized, activeLeafWbsIds);
+      const validation = validateCostEstimateItems(normalized, activeLeafWbsIds, { allowUnassigned: true });
       if (!validation.valid) {
         const errText = `Sinkronisasi dibatalkan: ${validation.error || 'Terdapat item WBS tanpa mapping valid.'}`;
         message.error(errText);
@@ -1089,16 +1113,16 @@ export const PmCostEstimationModal: React.FC<PmCostEstimationModalProps> = ({
               </Popconfirm>
             )}
             {!isApproved && (
-              <Tooltip title={!isCostMappingValid ? (costValidationResult.error || 'Terdapat item WBS yang belum dipetakan ke WBS Deliverable aktif') : undefined}>
+              <Tooltip title={!isCostSaveable ? (costSaveValidationResult.error || 'Terdapat item WBS yang belum dipetakan ke WBS Deliverable aktif') : undefined}>
                 <span>
                   <Button
                     size="small"
                     type="primary"
                     icon={saving ? <LoadingOutlined /> : <SaveOutlined />}
                     loading={saving}
-                    disabled={saving || loading || !isCostMappingValid}
+                    disabled={saving || loading || !isCostSaveable}
                     onClick={() => handleSaveEstimate(false)}
-                    style={{ backgroundColor: !isCostMappingValid ? '#94a3b8' : '#1d4ed8', borderColor: !isCostMappingValid ? '#94a3b8' : '#1d4ed8', fontWeight: 600 }}
+                    style={{ backgroundColor: !isCostSaveable ? '#94a3b8' : '#1d4ed8', borderColor: !isCostSaveable ? '#94a3b8' : '#1d4ed8', fontWeight: 600 }}
                   >
                     Simpan Draft RAB
                   </Button>
@@ -1118,14 +1142,14 @@ export const PmCostEstimationModal: React.FC<PmCostEstimationModalProps> = ({
           <Space>
             <Button onClick={onClose}>Tutup</Button>
             {!isApproved && (
-              <Tooltip title={!isCostMappingValid ? (costValidationResult.error || 'Terdapat item WBS yang belum dipetakan ke WBS Deliverable aktif') : undefined}>
+              <Tooltip title={!isCostSaveable ? (costSaveValidationResult.error || 'Terdapat item WBS yang belum dipetakan ke WBS Deliverable aktif') : undefined}>
                 <span>
                   <Button
                     type="primary"
                     loading={saving}
-                    disabled={saving || loading || !isCostMappingValid}
+                    disabled={saving || loading || !isCostSaveable}
                     onClick={() => handleSaveEstimate(true)}
-                    style={{ backgroundColor: !isCostMappingValid ? '#94a3b8' : '#1d4ed8', borderColor: !isCostMappingValid ? '#94a3b8' : '#1d4ed8', fontWeight: 600 }}
+                    style={{ backgroundColor: !isCostSaveable ? '#94a3b8' : '#1d4ed8', borderColor: !isCostSaveable ? '#94a3b8' : '#1d4ed8', fontWeight: 600 }}
                   >
                     Simpan & Selesai
                   </Button>
@@ -1165,9 +1189,9 @@ export const PmCostEstimationModal: React.FC<PmCostEstimationModalProps> = ({
 
         {!isCostMappingValid && costValidationResult.error && (
           <Alert
-            type="error"
+            type={isCostSaveable ? 'warning' : 'error'}
             showIcon
-            message="Pemetaan WBS Belum Lengkap"
+            message={isCostSaveable ? 'Alokasi Scope / WBS Belum Lengkap' : 'Pemetaan WBS Belum Lengkap'}
             description={costValidationResult.error}
           />
         )}

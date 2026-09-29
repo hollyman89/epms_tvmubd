@@ -13,6 +13,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, IsNull } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
+import { WorkflowInstance } from '../../entities/workflow-instance.entity';
 import { WorkBreakdownStructure } from '../../entities/wbs.entity';
 import { Task } from '../../entities/task.entity';
 import { Project } from '../../entities/project.entity';
@@ -868,37 +869,67 @@ export class ProjectService {
       order: { id: 'DESC' },
     });
 
-    const pendingKickoff: any[] = [];
+    // Ensure assigned approved contracts have a canonical Project in PLANNING state
     for (const c of approvedContracts) {
       const projectCode = c.contract_number || `CONT-${c.id}`;
       let project = projectMapByCode.get(projectCode);
+      if (!project && c.project_manager_id) {
+        const projectName = c.proposal?.tender?.title || `Proyek ${projectCode}`;
+        const locationSiteName = c.proposal?.tender?.title ? `Site ${c.proposal.tender.title}` : `Site ${projectName}`;
+        const locationCity = c.proposal?.tender?.project_location || null;
 
-      // Lazily and idempotently ensure a canonical Project in status 'PLANNING'
-      if (!project) {
-        if (c.project_manager_id) {
-          const projectName = c.proposal?.tender?.title || `Proyek ${projectCode}`;
-          const locationSiteName = c.proposal?.tender?.title ? `Site ${c.proposal.tender.title}` : `Site ${projectName}`;
-          const locationCity = c.proposal?.tender?.project_location || null;
-
-          const newProject = this.projectRepo.create({
-            code: projectCode,
-            name: projectName,
-            status: 'PLANNING',
-            managerId: Number(c.project_manager_id),
-            siteName: locationSiteName,
-            city: locationCity,
-          });
-          project = await this.projectRepo.save(newProject);
-          projectMapByCode.set(projectCode, project);
-        }
+        const newProject = this.projectRepo.create({
+          code: projectCode,
+          name: projectName,
+          status: 'PLANNING',
+          managerId: Number(c.project_manager_id),
+          siteName: locationSiteName,
+          city: locationCity,
+        });
+        project = await this.projectRepo.save(newProject);
+        projectMapByCode.set(projectCode, project);
       }
+    }
 
-      // Contracts where project is in PLANNING state are pending kickoff
+    // Batch calculate readiness for all pending projects in status PLANNING
+    const pendingProjects = Array.from(projectMapByCode.values()).filter(
+      (p) => p.status === 'PLANNING',
+    );
+    const readinessBatchMap = await this.getOperationalReadinessBatch(pendingProjects);
+
+    const pendingKickoff: any[] = [];
+    for (const c of approvedContracts) {
+      const projectCode = c.contract_number || `CONT-${c.id}`;
+      const project = projectMapByCode.get(projectCode);
+
+      // Contracts where project is in PLANNING state (or not yet created/unassigned) are pending kickoff
       if (!project || project.status === 'PLANNING') {
+        const hasPm = Boolean(project?.managerId || c.project_manager_id);
+        const pid = project ? Number(project.id) : null;
+        const r = pid ? (readinessBatchMap.get(pid) || null) : null;
+
+        const opStatus = this.deriveOperationalPlanStatus(
+          project ? project.status : 'PLANNING',
+          r?.gate?.currentStage,
+          r?.gate?.status,
+          r?.gate?.currentNodeId,
+          r?.completenessCount ?? 0,
+          hasPm,
+        );
+
+        const hoStatus = this.deriveHandoverStatus(
+          pid,
+          project ? project.status : 'PLANNING',
+          r?.gate?.currentStage,
+          r?.gate?.status,
+          r?.gate?.currentNodeId,
+          r?.completenessCount ?? 0,
+        );
+
         pendingKickoff.push({
           id: c.id,
           contractId: Number(c.id),
-          projectId: project ? Number(project.id) : null,
+          projectId: pid,
           tender_id: c.proposal?.tender_id || c.proposal_id || null,
           project_code: projectCode,
           project_name: c.proposal?.tender?.title || project?.name || `Proyek ${projectCode}`,
@@ -930,6 +961,9 @@ export class ProjectService {
           postalCode: project?.postalCode || null,
           latitude: project?.latitude !== null && project?.latitude !== undefined ? Number(project.latitude) : null,
           longitude: project?.longitude !== null && project?.longitude !== undefined ? Number(project.longitude) : null,
+          operationalPlanStatus: opStatus,
+          handoverStatus: hoStatus,
+          readiness: r,
         });
       }
     }
@@ -1066,6 +1100,33 @@ export class ProjectService {
         postalCode: p.postalCode || null,
         latitude: p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : null,
         longitude: p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : null,
+        operationalPlanStatus: 'APPROVED',
+        handoverStatus: 'PROYEK_BERJALAN',
+        readiness: {
+          projectId: Number(p.id),
+          projectCode: p.code,
+          projectName: p.name,
+          overallStatus: 'READY',
+          completenessCount: 4,
+          totalPillars: 4,
+          canSubmitForReview: false,
+          canCreatePr: true,
+          pillars: {
+            wbs: { status: 'READY', message: 'WBS Approved' },
+            cost: { status: 'READY', message: 'Cost Approved' },
+            schedule: { status: 'READY', message: 'Schedule Approved' },
+            initialCondition: { status: 'READY', message: 'Initial Condition Approved' },
+          },
+          gate: {
+            status: 'ACTIVE',
+            currentStage: 'ACTIVE',
+            currentNodeId: 'node_end',
+          },
+          workflow: {
+            currentStage: 'ACTIVE',
+            currentNodeId: 'node_end',
+          },
+        },
       };
     });
 
@@ -3271,6 +3332,300 @@ export class ProjectService {
     };
   }
 
+  public deriveOperationalPlanStatus(
+    projectStatus: string,
+    currentStage?: string | null,
+    gateStatus?: string | null,
+    currentNodeId?: string | null,
+    count: number = 0,
+    hasAssignedPm: boolean = true,
+  ): string {
+    if (!hasAssignedPm) return 'BELUM_DITUGASKAN';
+    if (projectStatus === 'IN_PROGRESS' || currentStage === 'ACTIVE') return 'APPROVED';
+    if (currentStage === 'UNKNOWN_WORKFLOW_STATE' || gateStatus === 'UNKNOWN_WORKFLOW_STATE') return 'UNKNOWN_WORKFLOW_STATE';
+    if (currentStage === 'READY_FOR_KICKOFF' || gateStatus === 'READY_FOR_KICKOFF' || currentNodeId === 'node_end') return 'READY_FOR_KICKOFF';
+    if (currentStage === 'NEEDS_REVISION' || gateStatus === 'NEEDS_REVISION' || currentNodeId?.startsWith('node_pm_revision')) return 'NEEDS_REVISION';
+    if (currentStage === 'REVIEW_HOPS' || currentNodeId === 'node_hops_review') return 'REVIEW_HOPS';
+    if (currentStage === 'REVIEW_PROCUREMENT' || currentNodeId === 'node_procurement_review') return 'REVIEW_PROCUREMENT';
+    if (currentStage === 'REVIEW_FINANCE' || currentNodeId === 'node_finance_review') return 'REVIEW_FINANCE';
+    if (currentStage === 'REVIEW_DIRECTOR' || currentNodeId === 'node_director_approval') return 'REVIEW_DIRECTOR';
+    if (gateStatus === 'REVIEW_PENDING') return 'REVIEW_PENDING';
+    if (gateStatus === 'READY_FOR_PROCUREMENT') return 'READY_FOR_PROCUREMENT';
+    if (count === 4 || currentStage === 'READY_TO_SUBMIT') return 'READY_TO_SUBMIT';
+    if (count > 0 || currentStage === 'INCOMPLETE') return 'INCOMPLETE';
+    return 'NOT_STARTED';
+  }
+
+  public deriveHandoverStatus(
+    projectId: number | null,
+    projectStatus: string,
+    currentStage?: string | null,
+    gateStatus?: string | null,
+    currentNodeId?: string | null,
+    count: number = 0,
+  ): string {
+    if (!projectId || projectId <= 0) return 'ANTREAN_KICKOFF';
+    if (projectStatus === 'IN_PROGRESS' || currentStage === 'ACTIVE') return 'PROYEK_BERJALAN';
+    if (currentStage === 'UNKNOWN_WORKFLOW_STATE' || gateStatus === 'UNKNOWN_WORKFLOW_STATE') return 'UNKNOWN_WORKFLOW_STATE';
+    if (currentStage === 'READY_FOR_KICKOFF' || gateStatus === 'READY_FOR_KICKOFF' || currentNodeId === 'node_end') return 'READY_FOR_KICKOFF';
+    if (currentStage === 'NEEDS_REVISION' || gateStatus === 'NEEDS_REVISION' || currentNodeId?.startsWith('node_pm_revision')) return 'NEEDS_REVISION';
+    if (currentStage === 'REVIEW_HOPS' || currentNodeId === 'node_hops_review') return 'REVIEW_HOPS';
+    if (currentStage === 'REVIEW_PROCUREMENT' || currentNodeId === 'node_procurement_review') return 'REVIEW_PROCUREMENT';
+    if (currentStage === 'REVIEW_FINANCE' || currentNodeId === 'node_finance_review') return 'REVIEW_FINANCE';
+    if (currentStage === 'REVIEW_DIRECTOR' || currentNodeId === 'node_director_approval') return 'REVIEW_DIRECTOR';
+    if (gateStatus === 'REVIEW_PENDING') return 'REVIEW_PENDING';
+    if (gateStatus === 'READY_FOR_PROCUREMENT') return 'READY_FOR_PROCUREMENT';
+    if (count === 4 || currentStage === 'READY_TO_SUBMIT') return 'READY_TO_SUBMIT';
+    return 'PENYUSUNAN_PLAN';
+  }
+
+  /**
+   * Batch calculates Operational Plan Readiness for a list of projects in a single round-trip.
+   * Eliminates N+1 queries from dashboard/board endpoints.
+   */
+  async getOperationalReadinessBatch(
+    projects: Project[],
+  ): Promise<Map<number, OperationalReadinessData>> {
+    const resultMap = new Map<number, OperationalReadinessData>();
+    if (!projects || projects.length === 0) return resultMap;
+
+    const validProjects = projects.filter((p) => p && p.id && Number(p.id) > 0);
+    if (validProjects.length === 0) return resultMap;
+
+    const projectIds = validProjects.map((p) => Number(p.id));
+    const isSingle = projectIds.length === 1;
+    const singlePid = projectIds[0];
+
+    // 1. Batch load WBS nodes
+    const wbsMap = new Map<number, WorkBreakdownStructure[]>();
+    if (this.wbsRepo && typeof this.wbsRepo.find === 'function') {
+      try {
+        const allWbs = await this.wbsRepo.find({
+          where: isSingle ? { projectId: singlePid } : { projectId: In(projectIds) },
+        });
+        for (const w of allWbs || []) {
+          const pid = Number(w.projectId);
+          if (!wbsMap.has(pid)) wbsMap.set(pid, []);
+          wbsMap.get(pid)!.push(w);
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to batch load WBS: ${err}`);
+      }
+    }
+
+    // 2. Batch load Cost Estimates & Cost Items
+    const estimateMap = new Map<number, ProjectCostEstimate>();
+    const costItemMap = new Map<number, CostItem[]>();
+    if (this.costEstimateRepo) {
+      try {
+        if (isSingle && typeof this.costEstimateRepo.findOne === 'function') {
+          const est = await this.costEstimateRepo.findOne({
+            where: { projectId: singlePid },
+            order: { version: 'DESC' },
+          });
+          if (est) {
+            estimateMap.set(singlePid, est);
+            if (this.costItemRepo && typeof this.costItemRepo.find === 'function') {
+              const items = await this.costItemRepo.find({
+                where: { estimateId: est.id },
+              });
+              costItemMap.set(Number(est.id), items || []);
+            }
+          }
+        } else if (typeof this.costEstimateRepo.find === 'function') {
+          const allEstimates = await this.costEstimateRepo.find({
+            where: { projectId: In(projectIds) },
+            order: { version: 'DESC' },
+          });
+          for (const est of allEstimates || []) {
+            const pid = Number(est.projectId);
+            if (!estimateMap.has(pid)) {
+              estimateMap.set(pid, est);
+            }
+          }
+          const estimateIds = Array.from(estimateMap.values()).map((e) => Number(e.id));
+          if (estimateIds.length > 0 && this.costItemRepo && typeof this.costItemRepo.find === 'function') {
+            const allItems = await this.costItemRepo.find({
+              where: { estimateId: In(estimateIds) },
+            });
+            for (const item of allItems || []) {
+              const eid = Number(item.estimateId);
+              if (!costItemMap.has(eid)) costItemMap.set(eid, []);
+              costItemMap.get(eid)!.push(item);
+            }
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to batch load Cost Estimates: ${err}`);
+      }
+    }
+
+    // 3. Batch load Tasks
+    const taskMap = new Map<number, Task[]>();
+    if (this.taskRepo && typeof this.taskRepo.find === 'function') {
+      try {
+        const allTasks = await this.taskRepo.find({
+          where: isSingle ? { projectId: singlePid } : { projectId: In(projectIds) },
+        });
+        for (const t of allTasks || []) {
+          const pid = Number(t.projectId);
+          if (!taskMap.has(pid)) taskMap.set(pid, []);
+          taskMap.get(pid)!.push(t);
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to batch load Tasks: ${err}`);
+      }
+    }
+
+    // 4. Batch load Initial Conditions
+    const initialConditionMap = new Map<number, ProjectInitialCondition>();
+    if (this.initialConditionRepo) {
+      try {
+        if (isSingle && typeof this.initialConditionRepo.findOne === 'function') {
+          const ic = await this.initialConditionRepo.findOne({
+            where: { projectId: singlePid },
+          });
+          if (ic) initialConditionMap.set(singlePid, ic);
+        } else if (typeof this.initialConditionRepo.find === 'function') {
+          const allIc = await this.initialConditionRepo.find({
+            where: { projectId: In(projectIds) },
+          });
+          for (const ic of allIc || []) {
+            initialConditionMap.set(Number(ic.projectId), ic);
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to batch load Initial Conditions: ${err}`);
+      }
+    }
+
+    // 5. Batch load Management Reviews
+    const reviewMap = new Map<number, ProjectManagementReview>();
+    if (this.managementReviewRepo) {
+      try {
+        if (isSingle && typeof this.managementReviewRepo.findOne === 'function') {
+          const rev = await this.managementReviewRepo.findOne({
+            where: { projectId: singlePid },
+            relations: ['submitter', 'decider'],
+          });
+          if (rev) reviewMap.set(singlePid, rev);
+        } else if (typeof this.managementReviewRepo.find === 'function') {
+          const allReviews = await this.managementReviewRepo.find({
+            where: { projectId: In(projectIds) },
+            relations: ['submitter', 'decider'],
+          });
+          for (const rev of allReviews || []) {
+            reviewMap.set(Number(rev.projectId), rev);
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to batch load Management Reviews: ${err}`);
+      }
+    }
+
+    // 6. Batch load Workflow Instances
+    let workflowMap = new Map<number, WorkflowInstance>();
+    const wfService = this.getWorkflowEngineService();
+    if (wfService) {
+      try {
+        if (typeof (wfService as any).getInstancesByEntities === 'function') {
+          workflowMap = await (wfService as any).getInstancesByEntities('PROJECT', projectIds);
+        } else {
+          for (const pid of projectIds) {
+            try {
+              const inst = await wfService.getInstanceByEntity('PROJECT', pid);
+              if (inst) workflowMap.set(pid, inst);
+            } catch {}
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to batch load Workflow Instances: ${err}`);
+      }
+    }
+
+    // 7. Evaluate each project deterministically in memory
+    const validator = this.readinessValidator || new OperationalReadinessValidator();
+    const projectionService = this.getProjectWorkflowProjectionService();
+
+    for (const project of validProjects) {
+      const pid = Number(project.id);
+      const activeWbs = (wbsMap.get(pid) || []).filter((n) => !n.deletedAt);
+      const estimate = estimateMap.get(pid) || null;
+      const costItems = estimate ? (costItemMap.get(Number(estimate.id)) || []) : [];
+      const activeTasks = (taskMap.get(pid) || []).filter((t) => !t.deletedAt);
+      const initialCondition = initialConditionMap.get(pid) || null;
+      const managementReview = reviewMap.get(pid) || null;
+      const activeInstance = workflowMap.get(pid) || null;
+
+      const wbsResult = validator.evaluateWbsReadiness(activeWbs);
+      const costResult = validator.evaluateCostReadiness(estimate, costItems, activeWbs);
+      const scheduleResult = validator.evaluateScheduleReadiness(activeTasks, activeWbs);
+      const initialConditionResult = validator.evaluateInitialConditionReadiness(initialCondition);
+      const gateResult = validator.evaluateManagementReview(managementReview);
+
+      const aggregated = validator.aggregateReadiness(
+        pid,
+        project.code || `PRJ-${project.id}`,
+        project.name || 'Proyek Tanpa Nama',
+        wbsResult,
+        costResult,
+        scheduleResult,
+        initialConditionResult,
+        gateResult,
+      );
+
+      let workflowInfo: OperationalWorkflowInfo | null = null;
+      if (activeInstance) {
+        const projection = projectionService.buildProjection(activeInstance, managementReview);
+        const stage = projectionService.toOperationalPlanStage(projection);
+        const pendingTask = (activeInstance.tasks || []).find((t: any) => t.status === 'PENDING');
+
+        workflowInfo = {
+          instanceId: projection.workflowInstanceId,
+          status: projection.runtimeStatus,
+          currentNodeId: projection.currentNodeId || activeInstance.currentNodeId || null,
+          activeRole: projection.current.ownerRole || pendingTask?.assigneeRole?.name || null,
+          activeTaskName: pendingTask?.taskKey || projection.current.nodeKey,
+          currentStage: stage,
+        };
+
+        aggregated.gate.status = projection.businessStatus;
+      }
+
+      let resolvedStage: OperationalPlanStage = 'NOT_STARTED';
+      if (project.status === 'IN_PROGRESS') {
+        resolvedStage = 'ACTIVE';
+      } else if (workflowInfo?.currentStage) {
+        resolvedStage = workflowInfo.currentStage as OperationalPlanStage;
+      } else if (managementReview?.status === 'READY_FOR_KICKOFF') {
+        resolvedStage = 'READY_FOR_KICKOFF';
+      } else if (managementReview?.status === 'NEEDS_REVISION') {
+        resolvedStage = 'NEEDS_REVISION';
+      } else if (managementReview?.status === 'REVIEW_PENDING') {
+        resolvedStage = 'REVIEW_HOPS';
+      } else if (aggregated.completenessCount === 4) {
+        resolvedStage = 'READY_TO_SUBMIT';
+      } else if (aggregated.completenessCount > 0) {
+        resolvedStage = 'INCOMPLETE';
+      } else {
+        resolvedStage = 'NOT_STARTED';
+      }
+
+      aggregated.gate.currentNodeId =
+        workflowInfo?.currentNodeId ||
+        (managementReview?.status === 'READY_FOR_KICKOFF' ? 'node_end' : null);
+      aggregated.gate.activeRole =
+        workflowInfo?.activeRole || managementReview?.reviewerRole || null;
+      aggregated.gate.activeTaskName = workflowInfo?.activeTaskName || null;
+      aggregated.gate.currentStage = resolvedStage;
+      aggregated.workflow = workflowInfo;
+
+      resultMap.set(pid, aggregated);
+    }
+
+    return resultMap;
+  }
+
   /**
    * Evaluates canonical Operational Plan Readiness for a project (WBS, Cost, Schedule, Initial Condition SSOT)
    */
@@ -3292,53 +3647,11 @@ export class ProjectService {
       await this.validateProjectReadAccess(project, userId, userRoles);
     }
 
-    // 1. Load active WBS nodes for this project
-    const allWbs = await this.wbsRepo.find({ where: { projectId: Number(projectId) } });
-    const activeWbs = allWbs.filter((n) => !n.deletedAt);
-
-    // 2. Load latest Cost Estimate & items for this project
-    let estimate: ProjectCostEstimate | null = null;
-    let costItems: CostItem[] = [];
-    if (this.costEstimateRepo) {
-      estimate = await this.costEstimateRepo.findOne({
-        where: { projectId: Number(projectId) },
-        order: { version: 'DESC' },
-      });
-      if (estimate && this.costItemRepo) {
-        costItems = await this.costItemRepo.find({
-          where: { estimateId: estimate.id },
-        });
-      }
+    const batch = await this.getOperationalReadinessBatch([project]);
+    const aggregated = batch.get(Number(projectId));
+    if (!aggregated) {
+      throw new NotFoundException(`Gagal memuat kesiapan operasional untuk proyek #${projectId}`);
     }
-
-    // 3. Load active Tasks for this project
-    const allTasks = await this.taskRepo.find({ where: { projectId: Number(projectId) } });
-    const activeTasks = allTasks.filter((t) => !t.deletedAt);
-
-    // 4. Load Initial Condition baseline from database
-    let initialCondition: ProjectInitialCondition | null = null;
-    if (this.initialConditionRepo) {
-      initialCondition = await this.initialConditionRepo.findOne({
-        where: { projectId: Number(projectId) },
-      });
-    }
-
-    // 5. Load Management Review / Procurement Gate from database
-    let managementReview: ProjectManagementReview | null = null;
-    if (this.managementReviewRepo) {
-      managementReview = await this.managementReviewRepo.findOne({
-        where: { projectId: Number(projectId) },
-        relations: ['submitter', 'decider'],
-      });
-    }
-
-    // 6. Evaluate all technical pillars deterministically via validator
-    const validator = this.readinessValidator || new OperationalReadinessValidator();
-    const wbsResult = validator.evaluateWbsReadiness(activeWbs);
-    const costResult = validator.evaluateCostReadiness(estimate, costItems, activeWbs);
-    const scheduleResult = validator.evaluateScheduleReadiness(activeTasks, activeWbs);
-    const initialConditionResult = validator.evaluateInitialConditionReadiness(initialCondition);
-    const gateResult = validator.evaluateManagementReview(managementReview);
 
     // 7. Load Canonical Contract from database SSOT if associated with project
     let contractData: any = null;
@@ -3362,79 +3675,6 @@ export class ProjectService {
         this.logger.warn(`Failed to load contract for project #${projectId}: ${err}`);
       }
     }
-
-    // 8. Aggregate overall readiness
-    const aggregated = validator.aggregateReadiness(
-      Number(projectId),
-      project.code || `PRJ-${project.id}`,
-      project.name || 'Proyek Tanpa Nama',
-      wbsResult,
-      costResult,
-      scheduleResult,
-      initialConditionResult,
-      gateResult,
-    );
-
-    // 8b. Resolve active canonical workflow instance from Workflow Engine SSOT
-    let workflowInfo: OperationalWorkflowInfo | null = null;
-    const wfService = this.getWorkflowEngineService();
-    if (wfService) {
-      const activeInstance = await wfService.getInstanceByEntity('PROJECT', projectId);
-      if (activeInstance) {
-        const projectionService = this.getProjectWorkflowProjectionService();
-        const projection = projectionService.buildProjection(
-          activeInstance,
-          managementReview,
-        );
-
-        const stage = projectionService.toOperationalPlanStage(projection);
-
-        const pendingTask = (activeInstance.tasks || []).find(
-          (t: any) => t.status === 'PENDING',
-        );
-
-        workflowInfo = {
-          instanceId: projection.workflowInstanceId,
-          status: projection.runtimeStatus,
-          currentNodeId: projection.currentNodeId || activeInstance.currentNodeId || null,
-          activeRole: projection.current.ownerRole || pendingTask?.assigneeRole?.name || null,
-          activeTaskName: pendingTask?.taskKey || projection.current.nodeKey,
-          currentStage: stage,
-        };
-
-        // Authoritative business status from canonical projection
-        aggregated.gate.status = projection.businessStatus;
-      }
-    }
-
-    // Determine derived currentStage for canonical sequence (Workflow Runtime has priority)
-    let resolvedStage: OperationalPlanStage = 'NOT_STARTED';
-    if (project.status === 'IN_PROGRESS') {
-      resolvedStage = 'ACTIVE';
-    } else if (workflowInfo?.currentStage) {
-      resolvedStage = workflowInfo.currentStage as OperationalPlanStage;
-    } else if (managementReview?.status === 'READY_FOR_KICKOFF') {
-      resolvedStage = 'READY_FOR_KICKOFF';
-    } else if (managementReview?.status === 'NEEDS_REVISION') {
-      resolvedStage = 'NEEDS_REVISION';
-    } else if (managementReview?.status === 'REVIEW_PENDING') {
-      resolvedStage = 'REVIEW_HOPS';
-    } else if (aggregated.completenessCount === 4) {
-      resolvedStage = 'READY_TO_SUBMIT';
-    } else if (aggregated.completenessCount > 0) {
-      resolvedStage = 'INCOMPLETE';
-    } else {
-      resolvedStage = 'NOT_STARTED';
-    }
-
-
-    aggregated.gate.currentNodeId =
-      workflowInfo?.currentNodeId ||
-      (managementReview?.status === 'READY_FOR_KICKOFF' ? 'node_end' : null);
-    aggregated.gate.activeRole =
-      workflowInfo?.activeRole || managementReview?.reviewerRole || null;
-    aggregated.gate.activeTaskName = workflowInfo?.activeTaskName || null;
-    aggregated.gate.currentStage = resolvedStage;
 
     let actualKickoffDate: string | null = null;
     if (project.status === 'IN_PROGRESS' || project.status === 'COMPLETED') {
@@ -3478,7 +3718,6 @@ export class ProjectService {
       ...aggregated,
       actualKickoffDate,
       contract: contractData,
-      workflow: workflowInfo,
     };
   }
 
@@ -3826,7 +4065,7 @@ export class ProjectService {
       }
 
       if (wfService) {
-        await wfService.startInstance(
+        activeInstance = await wfService.startInstance(
           {
             workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW',
             entityType: 'PROJECT',
@@ -3835,6 +4074,9 @@ export class ProjectService {
           },
           userId,
         );
+        if (!activeInstance) {
+          activeInstance = await wfService.getInstanceByEntity('PROJECT', projectId);
+        }
       }
     }
 
