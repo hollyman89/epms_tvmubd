@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { 
   Table, 
@@ -12,15 +12,14 @@ import {
   Descriptions, 
   message, 
   Popconfirm, 
-  Card, 
-  Row, 
-  Col, 
   Typography, 
   Tooltip, 
   Empty, 
   Avatar, 
   Tabs, 
-  Timeline 
+  Timeline,
+  Pagination,
+  Spin
 } from 'antd';
 import { 
   EditOutlined, 
@@ -38,13 +37,15 @@ import {
   TrophyOutlined,
   AppstoreOutlined,
   CopyOutlined,
-  UserOutlined
+  UserOutlined,
+  ReloadOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { apiClient } from '@/lib/axios';
 import { useUsersQuery } from '@/hooks/useMasterDataQuery';
 import EditCustomerModal from './EditCustomerModal';
-import CustomerForm, { CustomerFormPayload } from './CustomerForm';
+import CustomerForm, { CustomerFormPayload, BUSINESS_SECTORS } from './CustomerForm';
+import styles from './customers/CustomersPage.module.css';
 
 const { Option } = Select;
 const { Title, Text } = Typography;
@@ -54,14 +55,6 @@ const getInitials = (name?: string) => {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
-};
-
-const getStatusColor = (status?: string) => {
-  const s = status ? status.toUpperCase() : '';
-  if (s === 'ACTIVE') return 'success';
-  if (s === 'PROSPECT') return 'processing';
-  if (s === 'INACTIVE') return 'default';
-  return 'default';
 };
 
 export interface Customer {
@@ -94,6 +87,7 @@ export const CustomersPage: React.FC = () => {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 10 });
   const [searchText, setSearchText] = useState<string>('');
   const [sectorFilter, setSectorFilter] = useState<string | undefined>(undefined);
+  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined);
 
   // Modals & Drawers
   const [isModalVisible, setIsModalVisible] = useState<boolean>(false);
@@ -102,19 +96,21 @@ export const CustomersPage: React.FC = () => {
   const [userRole, setUserRole] = useState<string | null>(null);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
 
   const roleStr = userRole ? userRole.toUpperCase() : '';
   const isSuperAdmin = roleStr === 'SUPER_ADMIN' || roleStr === 'ADMIN';
-  const isCanEdit = isSuperAdmin || roleStr === 'MANAGER' || roleStr === 'GENERAL_MANAGER';
+  const isCanEdit = isSuperAdmin || roleStr === 'MANAGER' || roleStr === 'GENERAL_MANAGER' || roleStr === 'MARKETING';
+  const isCanCreate = isSuperAdmin || roleStr === 'MARKETING';
 
-  const { data: queryData, isLoading: loading } = useQuery({
-    queryKey: ['customers', pagination.current, pagination.pageSize, searchText, sectorFilter],
+  const { data: queryData, isLoading: loading, isError, error, refetch } = useQuery({
+    queryKey: ['customers', pagination.current, pagination.pageSize, searchText, sectorFilter, statusFilter],
     queryFn: async () => {
       try {
         const params: any = { page: pagination.current, limit: pagination.pageSize };
         if (searchText) params.search = searchText;
         if (sectorFilter) params.sector = sectorFilter;
+        if (statusFilter) params.status = statusFilter;
 
         const res = await apiClient.get('/customers', { params });
         const responseBody = res.data?.data || res.data;
@@ -122,9 +118,9 @@ export const CustomersPage: React.FC = () => {
         const totalCount = Array.isArray(responseBody) ? responseBody.length : (responseBody?.total || customerArray.length);
 
         return { customers: customerArray, total: totalCount };
-      } catch (error: any) {
-        message.error(error.response?.data?.message || 'Failed to fetch customers');
-        throw error;
+      } catch (err: any) {
+        message.error(err.response?.data?.message || 'Gagal memuat data customer');
+        throw err;
       }
     },
     staleTime: 5 * 60 * 1000,
@@ -132,6 +128,15 @@ export const CustomersPage: React.FC = () => {
 
   const customers = queryData?.customers || [];
   const totalCustomers = queryData?.total || 0;
+
+  // Build sector options dynamically combining BUSINESS_SECTORS + existing live sectors
+  const sectorOptions = useMemo(() => {
+    const set = new Set<string>(BUSINESS_SECTORS);
+    customers.forEach((c: Customer) => {
+      if (c.business_sector) set.add(c.business_sector);
+    });
+    return Array.from(set);
+  }, [customers]);
 
   useEffect(() => {
     try {
@@ -152,12 +157,17 @@ export const CustomersPage: React.FC = () => {
   };
 
   const handleSearch = (value: string) => {
-    setSearchText(value);
+    setSearchText(value.trim());
     setPagination((prev) => ({ ...prev, current: 1 }));
   };
 
-  const handleSectorFilter = (value: string) => {
+  const handleSectorFilter = (value: string | undefined) => {
     setSectorFilter(value);
+    setPagination((prev) => ({ ...prev, current: 1 }));
+  };
+
+  const handleStatusFilter = (value: string | undefined) => {
+    setStatusFilter(value);
     setPagination((prev) => ({ ...prev, current: 1 }));
   };
 
@@ -174,12 +184,12 @@ export const CustomersPage: React.FC = () => {
     try {
       setIsSubmitting(true);
       await apiClient.post('/customers', payload);
-      message.success('Customer added successfully');
+      message.success('Customer berhasil ditambahkan');
       setIsModalVisible(false);
       queryClient.invalidateQueries({ queryKey: ['customers'] });
-    } catch (error: any) {
-      if (error.response) {
-        message.error(error.response?.data?.message || 'Failed to save customer');
+    } catch (err: any) {
+      if (err.response) {
+        message.error(err.response?.data?.message || 'Gagal menyimpan data customer');
       }
     } finally {
       setIsSubmitting(false);
@@ -189,79 +199,99 @@ export const CustomersPage: React.FC = () => {
   const handleDelete = async (id: number) => {
     try {
       await apiClient.delete(`/customers/${id}`);
-      message.success('Customer deleted successfully');
+      message.success('Customer berhasil dihapus');
       queryClient.invalidateQueries({ queryKey: ['customers'] });
-    } catch (error: any) {
-      message.error(error.response?.data?.message || 'Failed to delete customer');
+    } catch (err: any) {
+      message.error(err.response?.data?.message || 'Gagal menghapus customer');
     }
   };
 
   const openDetailDrawer = async (record: any) => {
     try {
       const res = await apiClient.get(`/customers/${record.id}`);
-      setDetailCustomer(res.data.data || res.data);
+      setDetailCustomer(res.data?.data || res.data);
       setIsDrawerVisible(true);
-    } catch (error: any) {
-      message.error('Failed to fetch customer details');
+    } catch (err: any) {
+      message.error('Gagal mengambil detail customer');
     }
+  };
+
+  const renderStatusBadge = (status: string) => {
+    const s = (status || '').toUpperCase();
+    if (s === 'ACTIVE') {
+      return <span className={styles.statusBadgeActive}>ACTIVE</span>;
+    }
+    if (s === 'PROSPECT') {
+      return <span className={styles.statusBadgeProspect}>PROSPECT</span>;
+    }
+    return <span className={styles.statusBadgeInactive}>{s || 'INACTIVE'}</span>;
   };
 
   const columns = [
     { 
-      title: 'Code', 
+      title: 'Kode', 
       dataIndex: 'code', 
       key: 'code', 
-      width: 110,
-      render: (text: string) => <Text code style={{ fontWeight: 600, color: '#334155', fontSize: 12 }}>{text || '-'}</Text>
+      width: 105,
+      render: (text: string) => <span className={styles.codeTag}>{text || '-'}</span>
     },
     { 
-      title: 'Name', 
+      title: 'Nama Customer', 
       dataIndex: 'name', 
       key: 'name', 
-      width: 200,
+      width: 190,
       render: (text: string) => <Text strong style={{ color: '#0f172a', fontSize: 13 }}>{text}</Text>
     },
     { 
-      title: 'Company', 
+      title: 'Perusahaan (Legal)', 
       dataIndex: 'company', 
       key: 'company', 
       width: 200,
       render: (text: string) => <Text style={{ color: '#475569', fontSize: 13 }}>{text || '-'}</Text>
     },
     { 
-      title: 'Contact Person', 
+      title: 'Kontak Utama', 
       dataIndex: 'contact_person', 
       key: 'contact_person', 
-      width: 160,
+      width: 150,
       render: (text: string) => <Text style={{ color: '#334155', fontSize: 12 }}>{text || '-'}</Text>
     },
     { 
-      title: 'Phone', 
+      title: 'Telepon', 
       dataIndex: 'phone', 
       key: 'phone', 
       width: 140,
-      render: (text: string) => <Text style={{ color: '#64748b', fontSize: 12 }}>{text || '-'}</Text>
+      render: (text: string) => <span className={styles.phoneCell}>{text || '-'}</span>
     },
     { 
       title: 'Email', 
       dataIndex: 'email', 
       key: 'email', 
       width: 190,
-      render: (text: string) => <Text style={{ color: '#64748b', fontSize: 12, wordBreak: 'break-all' }}>{text || '-'}</Text>
+      render: (text: string) => {
+        if (!text) return <Text type="secondary">-</Text>;
+        return (
+          <Tooltip title={text}>
+            <a href={`mailto:${text}`} className={styles.emailLink}>
+              {text}
+            </a>
+          </Tooltip>
+        );
+      }
     },
     { 
-      title: 'Sector', 
+      title: 'Sektor', 
       dataIndex: 'business_sector', 
       key: 'business_sector', 
-      width: 150,
-      render: (text: string) => text ? <Tag color="blue" style={{ borderRadius: 6, margin: 0 }}>{text}</Tag> : <Text type="secondary">-</Text>
+      width: 160,
+      render: (text: string) => text ? <Tag className={styles.sectorTag}>{text}</Tag> : <Text type="secondary">-</Text>
     },
     { 
-      title: 'City', 
+      title: 'Kota', 
       dataIndex: 'city', 
       key: 'city', 
-      width: 130,
-      render: (text: string) => <Text style={{ color: '#64748b', fontSize: 12 }}>{text || '-'}</Text>
+      width: 120,
+      render: (text: string) => <Text style={{ color: '#475569', fontSize: 12 }}>{text || '-'}</Text>
     },
     { 
       title: 'Marketing PIC', 
@@ -269,10 +299,10 @@ export const CustomersPage: React.FC = () => {
       key: 'marketing_pic', 
       width: 160,
       render: (pic: any) => {
-        if (!pic) return <Text type="secondary">-</Text>;
+        if (!pic) return <Text type="secondary" style={{ fontStyle: 'italic', fontSize: 12 }}>Belum ditugaskan</Text>;
         return (
           <Space size={6}>
-            
+            <Avatar size={20} icon={<UserOutlined />} style={{ background: '#e0e7ff', color: '#4338ca', fontSize: 10 }} />
             <Text style={{ fontSize: 12, fontWeight: 500, color: '#334155' }}>
               {pic.fullName || pic.email}
             </Text>
@@ -285,28 +315,23 @@ export const CustomersPage: React.FC = () => {
       dataIndex: 'status', 
       key: 'status', 
       width: 110,
-      render: (status: string) => {
-        const s = status ? status.toUpperCase() : 'UNKNOWN';
-        if (s === 'ACTIVE') return <Tag color="success" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>ACTIVE</Tag>;
-        if (s === 'PROSPECT') return <Tag color="processing" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>PROSPECT</Tag>;
-        return <Tag color="default" style={{ fontWeight: 500, borderRadius: 10, padding: '2px 8px' }}>{s}</Tag>;
-      }
+      render: (status: string) => renderStatusBadge(status)
     },
     { 
-      title: 'Action', 
+      title: 'Aksi', 
       key: 'action', 
-      width: 120,
+      width: 110,
       align: 'center' as const,
       render: (_: any, record: any) => {
         return (
           <Space size={6}>
-            <Tooltip title="View Detail">
+            <Tooltip title="Lihat Detail">
               <Button 
                 type="text" 
                 size="small"
-                icon={<EyeOutlined style={{ color: '#2563eb' }} />} 
+                icon={<EyeOutlined />} 
                 onClick={() => openDetailDrawer(record)} 
-                style={{ backgroundColor: '#eff6ff', borderRadius: 6 }}
+                className={styles.viewActionBtn}
               />
             </Tooltip>
             
@@ -315,9 +340,9 @@ export const CustomersPage: React.FC = () => {
                 <Button 
                   type="text" 
                   size="small"
-                  icon={<EditOutlined style={{ color: '#d97706' }} />} 
+                  icon={<EditOutlined />} 
                   onClick={() => openEditModal(record)} 
-                  style={{ backgroundColor: '#fef3c7', borderRadius: 6 }}
+                  className={styles.editActionBtn}
                 />
               </Tooltip>
             )}
@@ -329,14 +354,15 @@ export const CustomersPage: React.FC = () => {
                 onConfirm={() => handleDelete(record.id)}
                 okText="Hapus"
                 cancelText="Batal"
+                okButtonProps={{ danger: true }}
               >
-                <Tooltip title="Delete Customer">
+                <Tooltip title="Hapus Customer">
                   <Button 
                     type="text" 
                     danger 
                     size="small"
-                    icon={<DeleteOutlined style={{ color: '#dc2626' }} />} 
-                    style={{ backgroundColor: '#fef2f2', borderRadius: 6 }}
+                    icon={<DeleteOutlined />} 
+                    className={styles.deleteActionBtn}
                   />
                 </Tooltip>
               </Popconfirm>
@@ -348,137 +374,279 @@ export const CustomersPage: React.FC = () => {
   ];
 
   return (
-    <div style={{ 
-      background: '#ffffff', 
-      borderRadius: '16px', 
-      padding: '24px', 
-      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02)',
-      border: '1px solid #f1f5f9',
-      minHeight: '80vh' 
-    }}>
-      <Row justify="space-between" align="middle" style={{ marginBottom: 20 }}>
-        <Col>
-          <Space direction="vertical" size={2}>
-            <Space align="center" size={8}>
-              <TeamOutlined style={{ fontSize: 22, color: '#0f172a' }} />
-              <Title level={4} style={{ margin: 0, color: '#0f172a', fontWeight: 700 }}>
-                Master Data Customer
-              </Title>
-            </Space>
-            <Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>
-              Kelola direktori pelanggan, profil perusahaan, dan penanggung jawab (PIC)
-            </Text>
-          </Space>
-        </Col>
-        <Col>
-          <Space size={12} wrap>
-            <Input 
-              placeholder="Search Name / Company" 
-              prefix={<SearchOutlined style={{ color: '#94a3b8' }} />} 
-              onChange={(e) => handleSearch(e.target.value)}
-              style={{ width: 250, borderRadius: 8 }}
-              allowClear
-            />
-            <Select 
-              placeholder="Filter Sector" 
-              style={{ width: 160 }} 
-              onChange={handleSectorFilter}
-              allowClear
-              dropdownStyle={{ borderRadius: 8 }}
-            >
-              <Option value="Technology">Technology</Option>
-              <Option value="Finance">Finance</Option>
-              <Option value="Healthcare">Healthcare</Option>
-              <Option value="Government">Government</Option>
-              <Option value="Retail">Retail</Option>
-            </Select>
+    <div className={styles.pageContainer}>
+      {/* 1. PAGE HEADER */}
+      <div className={styles.pageHeader}>
+        <div className={styles.headerTextGroup}>
+          <div className={styles.titleRow}>
+            <TeamOutlined className={styles.headerIcon} />
+            <Title level={3} className={styles.pageTitle}>
+              Customer Master
+            </Title>
+          </div>
+          <Text className={styles.pageSubtitle}>
+            Direktori customer, profil perusahaan, dan kontak utama.
+          </Text>
+        </div>
+
+        {/* 2. SEARCH & FILTER TOOLBAR */}
+        <div className={styles.toolbarContainer}>
+          <Input 
+            placeholder="Cari Nama / Perusahaan..." 
+            prefix={<SearchOutlined style={{ color: '#94a3b8' }} />} 
+            onChange={(e) => handleSearch(e.target.value)}
+            style={{ width: 240, height: 38, borderRadius: 8 }}
+            allowClear
+          />
+
+          <Select 
+            placeholder="Filter Sektor" 
+            style={{ width: 180, height: 38 }} 
+            onChange={handleSectorFilter}
+            allowClear
+            dropdownStyle={{ borderRadius: 8 }}
+          >
+            {sectorOptions.map((sector) => (
+              <Option key={sector} value={sector}>{sector}</Option>
+            ))}
+          </Select>
+
+          <Select 
+            placeholder="Filter Status" 
+            style={{ width: 140, height: 38 }} 
+            onChange={handleStatusFilter}
+            allowClear
+            dropdownStyle={{ borderRadius: 8 }}
+          >
+            <Option value="PROSPECT">PROSPECT</Option>
+            <Option value="Active">ACTIVE</Option>
+            <Option value="Inactive">INACTIVE</Option>
+          </Select>
+
+          {isCanCreate && (
             <Button 
               type="primary" 
               icon={<PlusOutlined />}
               onClick={openAddModal}
-              style={{
-                backgroundColor: '#1677ff',
-                borderColor: '#1677ff',
-                borderRadius: 8,
-                fontWeight: 600,
-                boxShadow: '0 2px 6px rgba(22, 119, 255, 0.2)'
-              }}
+              className={styles.primaryCtaBtn}
             >
               Input Customer
             </Button>
-          </Space>
-        </Col>
-      </Row>
+          )}
+        </div>
+      </div>
 
-      <Table 
-        columns={columns} 
-        dataSource={customers} 
-        rowKey="id" 
-        loading={loading}
-        pagination={{
-          current: pagination.current,
-          pageSize: pagination.pageSize,
-          total: totalCustomers,
-          showSizeChanger: true,
-          showTotal: (total, range) => `Menampilkan ${range[0]}-${range[1]} dari ${total} customer`,
-        }}
-        onChange={handleTableChange}
-        scroll={{ x: 1200 }}
-        rowClassName={() => 'customer-table-row'}
-        locale={{
-          emptyText: (
-            <Empty 
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description={
-                <Space direction="vertical" size={4}>
-                  <Text strong style={{ color: '#475569' }}>Tidak ada data customer</Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>Gunakan tombol "Add Customer" di atas untuk menambahkan data baru.</Text>
-                </Space>
-              }
-              style={{ margin: '32px 0' }}
-            />
-          )
-        }}
-      />
+      {/* 3. ERROR STATE */}
+      {isError && (
+        <div style={{ 
+          padding: '24px', 
+          background: '#fef2f2', 
+          border: '1px solid #fecaca', 
+          borderRadius: '10px', 
+          textAlign: 'center', 
+          marginBottom: 16 
+        }}>
+          <Text strong style={{ color: '#b91c1c', display: 'block', fontSize: 14 }}>
+            Terjadi kesalahan saat memuat data customer.
+          </Text>
+          <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 4 }}>
+            {(error as any)?.message || 'Koneksi ke backend bermasalah.'}
+          </Text>
+          <Button 
+            type="primary" 
+            danger 
+            icon={<ReloadOutlined />} 
+            onClick={() => refetch()} 
+            style={{ marginTop: 12, borderRadius: 6 }}
+          >
+            Muat Ulang
+          </Button>
+        </div>
+      )}
 
-      <style>{`
-        .customer-table-row:hover > td {
-          background-color: #f8fafc !important;
-          cursor: pointer;
-        }
-        .customer-table-row > td {
-          border-bottom: 1px solid #f1f5f9;
-          padding: 12px 16px !important;
-          vertical-align: middle !important;
-        }
-        .ant-table-thead > tr > th {
-          background-color: #102A43 !important;
-          color: #ffffff !important;
-          font-weight: 600 !important;
-          text-transform: uppercase;
-          font-size: 11px;
-          letter-spacing: 0.5px;
-          border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-          padding: 12px 16px !important;
-          vertical-align: middle !important;
-        }
-        .ant-table-thead > tr > th::before {
-          display: none !important;
-        }
-        .ant-table {
-          border-radius: 12px;
-          overflow: hidden;
-          border: 1px solid #e2e8f0;
-        }
-      `}</style>
+      {/* 4. DESKTOP / TABLET ENTERPRISE TABLE */}
+      <div className={styles.desktopOnly}>
+        <div className={styles.tableContainer}>
+          <Table 
+            columns={columns} 
+            dataSource={customers} 
+            rowKey="id" 
+            loading={loading}
+            className={styles.customerTable}
+            pagination={{
+              current: pagination.current,
+              pageSize: pagination.pageSize,
+              total: totalCustomers,
+              showSizeChanger: true,
+              showTotal: (total, range) => `Menampilkan ${range[0]}-${range[1]} dari ${total} customer`,
+              style: { padding: '12px 16px', margin: 0 }
+            }}
+            onChange={handleTableChange}
+            scroll={{ x: 1150 }}
+            locale={{
+              emptyText: (
+                <Empty 
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={
+                    <Space direction="vertical" size={4}>
+                      <Text strong style={{ color: '#475569' }}>
+                        Tidak ada customer yang sesuai dengan pencarian atau filter.
+                      </Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        Coba periksa kata kunci pencarian atau reset filter.
+                      </Text>
+                    </Space>
+                  }
+                  style={{ margin: '36px 0' }}
+                />
+              )
+            }}
+          />
+        </div>
+      </div>
 
+      {/* 5. MOBILE RESPONSIVE CARDS VIEW (<= 768px) */}
+      <div className={styles.mobileOnly}>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '40px 0' }}>
+            <Spin tip="Memuat data customer..." />
+          </div>
+        ) : customers.length === 0 ? (
+          <Empty 
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={
+              <Space direction="vertical" size={4}>
+                <Text strong style={{ color: '#475569' }}>
+                  Tidak ada customer yang sesuai dengan pencarian atau filter.
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Coba periksa kata kunci pencarian atau reset filter.
+                </Text>
+              </Space>
+            }
+            style={{ margin: '36px 0' }}
+          />
+        ) : (
+          <>
+            {customers.map((c: Customer) => (
+              <div key={c.id} className={styles.mobileCard}>
+                <div className={styles.mobileCardTop}>
+                  <span className={styles.codeTag}>{c.code}</span>
+                  {renderStatusBadge(c.status)}
+                </div>
+
+                <div>
+                  <div className={styles.mobileCardCustomerName}>{c.name}</div>
+                  <div className={styles.mobileCardCompany}>{c.company || 'Perusahaan Belum Terdaftar'}</div>
+                </div>
+
+                <div className={styles.mobileCardGrid}>
+                  <div>
+                    <div className={styles.mobileCardFieldLabel}>Kontak Utama</div>
+                    <div className={styles.mobileCardFieldValue}>{c.contact_person || '-'}</div>
+                  </div>
+                  <div>
+                    <div className={styles.mobileCardFieldLabel}>Telepon</div>
+                    <div className={styles.mobileCardFieldValue}>
+                      {c.phone ? (
+                        <a href={`tel:${c.phone}`} style={{ color: '#2563eb', fontWeight: 600 }}>{c.phone}</a>
+                      ) : '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className={styles.mobileCardFieldLabel}>Email</div>
+                    <div className={styles.mobileCardFieldValue}>
+                      {c.email ? (
+                        <a href={`mailto:${c.email}`} style={{ color: '#2563eb' }}>{c.email}</a>
+                      ) : '-'}
+                    </div>
+                  </div>
+                  <div>
+                    <div className={styles.mobileCardFieldLabel}>Sektor / Kota</div>
+                    <div className={styles.mobileCardFieldValue}>
+                      {c.business_sector ? <Tag className={styles.sectorTag} style={{ marginBottom: 2 }}>{c.business_sector}</Tag> : null}
+                      <span style={{ color: '#64748b', fontSize: 11 }}>{c.city ? `(${c.city})` : ''}</span>
+                    </div>
+                  </div>
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <div className={styles.mobileCardFieldLabel}>Marketing PIC</div>
+                    <div className={styles.mobileCardFieldValue}>
+                      {c.marketing_pic?.fullName || (
+                        <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Belum ditugaskan</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className={styles.mobileCardFooter}>
+                  <Button 
+                    size="small" 
+                    icon={<EyeOutlined />} 
+                    onClick={() => openDetailDrawer(c)}
+                    className={styles.mobileActionBtn}
+                    style={{ background: '#eff6ff', borderColor: '#dbeafe', color: '#2563eb' }}
+                  >
+                    Lihat
+                  </Button>
+
+                  {isCanEdit && (
+                    <Button 
+                      size="small" 
+                      icon={<EditOutlined />} 
+                      onClick={() => openEditModal(c)}
+                      className={styles.mobileActionBtn}
+                      style={{ background: '#fef3c7', borderColor: '#fde68a', color: '#d97706' }}
+                    >
+                      Edit
+                    </Button>
+                  )}
+
+                  {isSuperAdmin && (
+                    <Popconfirm 
+                      title="Hapus Customer?"
+                      description="Customer dengan Tender aktif tidak dapat dihapus."
+                      onConfirm={() => handleDelete(c.id)}
+                      okText="Hapus"
+                      cancelText="Batal"
+                      okButtonProps={{ danger: true }}
+                    >
+                      <Button 
+                        size="small" 
+                        danger 
+                        icon={<DeleteOutlined />}
+                        className={styles.mobileActionBtn}
+                        style={{ background: '#fef2f2', borderColor: '#fecaca' }}
+                      >
+                        Hapus
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 12 }}>
+              <Pagination 
+                size="small"
+                current={pagination.current}
+                pageSize={pagination.pageSize}
+                total={totalCustomers}
+                onChange={(page, pageSize) => setPagination({ current: page, pageSize })}
+                showTotal={(total) => `Total ${total} customer`}
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* CREATE MODAL */}
       {isModalVisible && (
         <Modal 
           title={
             <Space align="center" size={8}>
-              <UserAddOutlined style={{ color: '#1677ff', fontSize: 18 }} />
+              <UserAddOutlined style={{ color: '#2563eb', fontSize: 18 }} />
               <Text strong style={{ fontSize: 16, color: '#0f172a' }}>
-                Create New Customer
+                Input Customer Baru
               </Text>
             </Space>
           } 
@@ -499,13 +667,13 @@ export const CustomersPage: React.FC = () => {
         </Modal>
       )}
 
-      {/* Redesigned Customer Detail Drawer */}
+      {/* CUSTOMER DETAIL DRAWER */}
       {isDrawerVisible && (
         <Drawer 
           title={
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <TeamOutlined style={{ color: '#2563eb', fontSize: 16 }} />
-              <span style={{ fontWeight: 700, fontSize: 16, color: '#0f172a' }}>Customer Details</span>
+              <span style={{ fontWeight: 700, fontSize: 16, color: '#0f172a' }}>Detail Customer</span>
             </div>
           } 
           placement="right" 
@@ -548,7 +716,7 @@ export const CustomersPage: React.FC = () => {
                 icon={<CopyOutlined />}
                 style={{ borderRadius: 8 }}
               >
-                Copy Info
+                Salin Info
               </Button>
 
               {isCanEdit && (
@@ -569,7 +737,7 @@ export const CustomersPage: React.FC = () => {
         >
           {detailCustomer && (
             <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-              {/* 1. CUSTOMER IDENTITY HEADER */}
+              {/* Profile Card Header */}
               <div style={{ 
                 background: '#ffffff', 
                 borderRadius: 14, 
@@ -596,12 +764,7 @@ export const CustomersPage: React.FC = () => {
                       <Typography.Title level={4} style={{ margin: 0, color: '#0f172a', fontWeight: 700, fontSize: 18, lineHeight: 1.3 }}>
                         {detailCustomer.name}
                       </Typography.Title>
-                      <Tag 
-                        color={getStatusColor(detailCustomer.status)} 
-                        style={{ borderRadius: 6, fontWeight: 700, fontSize: 11, padding: '2px 8px', margin: 0 }}
-                      >
-                        {detailCustomer.status?.toUpperCase() || 'UNKNOWN'}
-                      </Tag>
+                      {renderStatusBadge(detailCustomer.status)}
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, color: '#475569', fontSize: 13, fontWeight: 500 }}>
@@ -610,11 +773,11 @@ export const CustomersPage: React.FC = () => {
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-                      <Text code style={{ fontSize: 11, background: '#f1f5f9', color: '#334155', fontWeight: 600, padding: '2px 6px', borderRadius: 4 }}>
+                      <span className={styles.codeTag}>
                         {detailCustomer.code}
-                      </Text>
+                      </span>
                       {detailCustomer.business_sector && (
-                        <Tag color="blue" style={{ borderRadius: 4, fontSize: 11, margin: 0, border: 'none', background: '#eff6ff', color: '#1d4ed8' }}>
+                        <Tag className={styles.sectorTag}>
                           {detailCustomer.business_sector}
                         </Tag>
                       )}
@@ -623,14 +786,13 @@ export const CustomersPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* 2. TABS SECTION */}
+              {/* Tabs Section */}
               <Tabs 
                 defaultActiveKey="overview"
-                className="customer-detail-tabs"
                 items={[
                   {
                     key: 'overview',
-                    label: <span style={{ fontWeight: 600 }}><AppstoreOutlined /> Overview</span>,
+                    label: <span style={{ fontWeight: 600 }}><AppstoreOutlined /> Ringkasan</span>,
                     children: (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                         {/* Company Info */}
@@ -647,7 +809,7 @@ export const CustomersPage: React.FC = () => {
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 16px' }}>
                             <div>
                               <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Kode Customer</Text>
-                              <Text strong style={{ fontSize: 13, color: '#0f172a' }}>{detailCustomer.code || '-'}</Text>
+                              <Text strong style={{ fontSize: 13, color: '#0f172a', fontFamily: 'var(--font-mono, monospace)' }}>{detailCustomer.code || '-'}</Text>
                             </div>
                             <div>
                               <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Kota / Lokasi</Text>
@@ -694,7 +856,7 @@ export const CustomersPage: React.FC = () => {
                               <div>
                                 <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Nomor Telepon</Text>
                                 {detailCustomer.phone ? (
-                                  <a href={`tel:${detailCustomer.phone}`} style={{ fontSize: 13, color: '#2563eb', fontWeight: 600 }}>
+                                  <a href={`tel:${detailCustomer.phone}`} style={{ fontSize: 13, color: '#2563eb', fontWeight: 600, fontFamily: 'var(--font-mono, monospace)' }}>
                                     {detailCustomer.phone}
                                   </a>
                                 ) : (
@@ -719,7 +881,7 @@ export const CustomersPage: React.FC = () => {
                           </div>
                         </div>
 
-                        {/* Tender Activity Summary KPI */}
+                        {/* Tender Summary */}
                         <div style={{ 
                           background: '#ffffff', 
                           borderRadius: 12, 
@@ -761,7 +923,7 @@ export const CustomersPage: React.FC = () => {
                   },
                   {
                     key: 'contacts',
-                    label: <span style={{ fontWeight: 600 }}><PhoneOutlined /> Contacts</span>,
+                    label: <span style={{ fontWeight: 600 }}><PhoneOutlined /> Kontak</span>,
                     children: (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
                         <div style={{ 
@@ -783,7 +945,7 @@ export const CustomersPage: React.FC = () => {
                               <Text type="secondary" style={{ fontSize: 11 }}>Telepon:</Text>
                               <div style={{ marginTop: 2 }}>
                                 {detailCustomer.phone ? (
-                                  <a href={`tel:${detailCustomer.phone}`} style={{ fontSize: 13, fontWeight: 600, color: '#2563eb' }}>{detailCustomer.phone}</a>
+                                  <a href={`tel:${detailCustomer.phone}`} style={{ fontSize: 13, fontWeight: 600, color: '#2563eb', fontFamily: 'var(--font-mono, monospace)' }}>{detailCustomer.phone}</a>
                                 ) : (
                                   <Text type="secondary">-</Text>
                                 )}
@@ -832,7 +994,7 @@ export const CustomersPage: React.FC = () => {
                   },
                   {
                     key: 'activity',
-                    label: <span style={{ fontWeight: 600 }}><TrophyOutlined /> Activity</span>,
+                    label: <span style={{ fontWeight: 600 }}><TrophyOutlined /> Aktivitas</span>,
                     children: (
                       <div style={{ background: '#ffffff', borderRadius: 12, padding: '16px', border: '1px solid #e2e8f0' }}>
                         {detailCustomer.tenders && detailCustomer.tenders.length > 0 ? (
@@ -850,7 +1012,7 @@ export const CustomersPage: React.FC = () => {
                                     </Tag>
                                   </div>
                                   {tender.estimated_budget && (
-                                    <div style={{ fontSize: 12, color: '#059669', fontWeight: 600, marginTop: 2 }}>
+                                    <div style={{ fontSize: 12, color: '#059669', fontWeight: 600, marginTop: 2, fontFamily: 'var(--font-mono, monospace)' }}>
                                       Rp {Number(tender.estimated_budget).toLocaleString('id-ID')}
                                     </div>
                                   )}
@@ -875,7 +1037,7 @@ export const CustomersPage: React.FC = () => {
                   },
                   {
                     key: 'notes',
-                    label: <span style={{ fontWeight: 600 }}><FileTextOutlined /> Notes</span>,
+                    label: <span style={{ fontWeight: 600 }}><FileTextOutlined /> Catatan</span>,
                     children: (
                       <div style={{ background: '#ffffff', borderRadius: 12, padding: '16px', border: '1px solid #e2e8f0' }}>
                         <Empty 
@@ -893,6 +1055,7 @@ export const CustomersPage: React.FC = () => {
         </Drawer>
       )}
 
+      {/* EDIT MODAL */}
       {isEditModalOpen && (
         <EditCustomerModal 
           visible={isEditModalOpen} 

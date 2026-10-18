@@ -35,6 +35,13 @@ import {
 import dayjs, { Dayjs } from 'dayjs';
 import { ProcurementService, PurchaseOrder } from '@/services/procurement.service';
 import type { PurchaseOrderPrototypeRecord } from './PurchaseOrderModal';
+import UserIdentityDisplay from '@/components/common/UserIdentityDisplay';
+import {
+  formatDate,
+  formatQuantity,
+  formatQuantityWithUom,
+} from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
 
 const { Text, Title } = Typography;
 
@@ -50,6 +57,7 @@ export interface GoodsReceiptItemRecord {
   poItemId: string | number;
   categoryName: string;
   itemName: string;
+  specification?: string;
   orderedQty: number;
   previouslyReceivedQty: number;
   receivedQuantity: number;
@@ -95,6 +103,39 @@ export interface GoodsReceiptModalProps {
   canReceiveGoods?: boolean;
 }
 
+/**
+ * Deterministic normalizer for View Mode GR items
+ */
+export const normalizeGoodsReceiptViewItems = (items: any[]): GoodsReceiptItemRecord[] => {
+  return (items || []).map((it: any, idx: number) => {
+    const poi = it.purchaseOrderItem || it.purchase_order_item || {};
+    const pri = poi.purchaseRequestItem || poi.purchase_request_item || {};
+    const ci = poi.costItem || poi.cost_item || {};
+    const orderedQty = poi.quantity !== undefined
+      ? Number(poi.quantity)
+      : Number(it.orderedQty ?? it.ordered_qty ?? it.quantity ?? 0);
+    const previouslyReceivedQty = Number(poi.receivedQuantity ?? poi.received_quantity ?? it.previouslyReceivedQty ?? 0);
+    const receivedQuantity = Number(it.receivedQuantity ?? it.received_quantity ?? 0);
+
+    return {
+      key: String(it.id || it.key || idx),
+      poItemId: it.poItemId || it.po_item_id || poi.id || idx + 1,
+      categoryName: ci.categoryKey || ci.category_key || it.categoryName || it.category_name || 'Material',
+      itemName: poi.itemName || poi.item_name || pri.itemName || pri.item_name || ci.itemName || ci.item_name || it.itemName || it.item_name || 'Item Pengadaan',
+      specification: ci.description || pri.description || it.specification || '',
+      orderedQty,
+      previouslyReceivedQty,
+      receivedQuantity,
+      remainingQty: Math.max(0, orderedQty - previouslyReceivedQty),
+      remainingAfterThisGr: 0,
+      uom: pri.uom || ci.uom || poi.uom || it.uom || 'Unit',
+      unitPrice: it.unitPrice ?? it.unit_price ?? poi.unitPrice ?? poi.unit_price,
+      remarks: it.remarks || '',
+      wbsNodeId: it.wbsNodeId || it.wbs_node_id || pri.wbsId || pri.wbs_id || ci.wbsId || ci.wbs_id,
+    };
+  });
+};
+
 export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
   open,
   onClose,
@@ -120,12 +161,12 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
   // Compute item rows for Create Mode or View Mode
   const tableRows: GoodsReceiptItemRecord[] = useMemo(() => {
     if (isViewMode && existingGr?.items) {
-      return existingGr.items;
+      return normalizeGoodsReceiptViewItems(existingGr.items);
     }
 
     if (!targetPo?.items) return [];
 
-    return targetPo.items.map((it, idx) => {
+    return targetPo.items.map((it: any, idx: number) => {
       const itemKey = getPoItemKey(it, idx);
       const orderedQty = Number(it.quantity || 0);
       const previouslyReceivedQty = Number(it.receivedQuantity || 0);
@@ -136,17 +177,18 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
       return {
         key: itemKey,
         poItemId: it.id || it.poItemId || it.key || idx + 1,
-        categoryName: it.categoryName || 'Material',
+        categoryName: it.costItem?.categoryKey || it.categoryName || 'Material',
         itemName: it.itemName || 'Item Pengadaan',
+        specification: it.costItem?.description || it.purchaseRequestItem?.description || it.specification || '',
         orderedQty,
         previouslyReceivedQty,
         receivedQuantity: currentInputQty,
         remainingQty,
         remainingAfterThisGr: Math.max(0, remainingQty - currentInputQty),
-        uom: it.uom || 'Unit',
+        uom: it.purchaseRequestItem?.uom || it.costItem?.uom || it.uom || 'Unit',
         unitPrice: it.unitPrice,
         remarks: currentInputRemarks,
-        wbsNodeId: it.wbsNodeId,
+        wbsNodeId: it.wbsNodeId || it.purchaseRequestItem?.wbsId || it.costItem?.wbsId,
       };
     });
   }, [isViewMode, existingGr, targetPo, itemInputMap]);
@@ -456,7 +498,12 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
             <Text style={{ fontSize: 12 }}>
               {isViewMode ? (
                 <span>
-                  Nomor GR: <strong>{existingGr?.grNumber}</strong> — Penerima: <strong>{existingGr?.createdBy}</strong>
+                  Nomor GR: <strong>{existingGr?.grNumber}</strong> — Penerima:{' '}
+                  <UserIdentityDisplay
+                    user={(existingGr as any)?.receiver || (existingGr as any)?.creator}
+                    userId={existingGr?.createdBy}
+                    fallbackRole="Petugas Gudang"
+                  />
                 </span>
               ) : (
                 <span>
@@ -530,18 +577,12 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
               <div style={{ fontWeight: 700, fontSize: 12.5, color: '#1d4ed8', fontFamily: 'monospace' }}>
                 {poNumber}
               </div>
-              <Tag
-                color={
-                  targetPo?.status === 'COMPLETED'
-                    ? 'green'
-                    : targetPo?.status === 'PARTIALLY_FULFILLED'
-                    ? 'gold'
-                    : 'blue'
-                }
-                style={{ fontSize: 9.5, margin: 0, marginTop: 2, fontWeight: 700 }}
-              >
-                ● {targetPo?.status || 'ISSUED'}
-              </Tag>
+              <StatusBadge
+                domain="po"
+                status={targetPo?.status || 'ISSUED'}
+                showDot
+                style={{ fontSize: 9.5, margin: 0, marginTop: 2 }}
+              />
             </Col>
             <Col xs={24} sm={6}>
               <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>VENDOR PENYEDIA:</Text>
@@ -555,18 +596,20 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
               <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>STATUS PEMENUHAN BARANG:</Text>
               <div style={{ fontWeight: 700, fontSize: 12.5, color: '#334155' }}>
                 {isViewMode ? (
-                  <Tag color="teal" style={{ fontWeight: 700, margin: 0 }}>
-                    {existingGr?.status === 'COMPLETED' ? 'FULLY RECEIVED' : 'PARTIAL RECEIPT'}
-                  </Tag>
+                  <StatusBadge
+                    domain="gr"
+                    status={existingGr?.status === 'COMPLETED' ? 'FULLY_RECEIVED' : 'PARTIALLY_RECEIVED'}
+                    style={{ fontWeight: 700, margin: 0 }}
+                  />
                 ) : (
                   <span>
-                    Sisa: <strong>{totalRemainingOutstanding}</strong> dari <strong>{totalOrderedQty}</strong> unit
+                    Sisa: <strong>{formatQuantity(totalRemainingOutstanding)}</strong> dari <strong>{formatQuantity(totalOrderedQty)}</strong> unit
                   </span>
                 )}
               </div>
               {!isViewMode && (
                 <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
-                  Sudah diterima sebelumnya: {totalPreviouslyReceived} unit
+                  Sudah diterima sebelumnya: {formatQuantity(totalPreviouslyReceived)} unit
                 </div>
               )}
             </Col>
@@ -582,13 +625,18 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
             style={{ borderRadius: 6, overflow: 'hidden' }}
           >
             <Descriptions.Item label="Tanggal Penerimaan">
-              {dayjs(existingGr.receiptDate).format('DD MMMM YYYY')}
+              {formatDate(existingGr.receiptDate)}
             </Descriptions.Item>
             <Descriptions.Item label="Nomor Surat Jalan / DO">
               {existingGr.deliveryNoteNumber || '—'}
             </Descriptions.Item>
             <Descriptions.Item label="Petugas Penerima">
-              {existingGr.createdBy || 'Petugas Gudang'}
+              <UserIdentityDisplay
+                user={(existingGr as any).receiver || (existingGr as any).creator}
+                userId={existingGr.createdBy}
+                fallbackRole="Petugas Gudang"
+                showEmail
+              />
             </Descriptions.Item>
             {existingGr.remarks && (
               <Descriptions.Item label="Catatan Surat Jalan / Logistik" span={3}>
@@ -660,7 +708,7 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
               <span style={{ fontWeight: 700, fontSize: 12.5, color: '#0f766e' }}>
                 {isViewMode
                   ? `Daftar Item yang Diterima pada GR ini (${tableRows.length} Item)`
-                  : `Daftar 24 Item PO — Input Kuantitas Diterima`}
+                  : `Daftar ${tableRows.length} Item PO — Input Kuantitas Diterima`}
               </span>
               {!isViewMode && (
                 <Tag color="teal" style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
@@ -710,9 +758,17 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
                 key: 'itemName',
                 render: (name: string, it: GoodsReceiptItemRecord) => (
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>{name}</div>
+                    <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>{name || it.itemName}</div>
+                    {it.specification && (
+                      <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 1 }}>
+                        {it.specification}
+                      </div>
+                    )}
                     <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                      <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                      <Tag
+                        color={it.categoryName === 'EQUIPMENT' ? 'purple' : 'blue'}
+                        style={{ fontSize: 9, margin: 0, padding: '0 4px' }}
+                      >
                         {it.categoryName || 'Material'}
                       </Tag>
                       {it.wbsNodeId && (
@@ -731,7 +787,7 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
                 width: 85,
                 align: 'center' as const,
                 render: (qty: number) => (
-                  <span style={{ fontWeight: 600, color: '#334155' }}>{qty}</span>
+                  <span style={{ fontWeight: 600, color: '#334155' }}>{formatQuantity(qty)}</span>
                 ),
               },
               ...(!isViewMode
@@ -744,7 +800,7 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
                       align: 'center' as const,
                       render: (prev: number) => (
                         <span style={{ color: prev > 0 ? '#059669' : '#64748b', fontWeight: 600 }}>
-                          {prev}
+                          {formatQuantity(prev)}
                         </span>
                       ),
                     },
@@ -756,7 +812,7 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
                       align: 'center' as const,
                       render: (rem: number) => (
                         <Tag color={rem > 0 ? 'orange' : 'green'} style={{ fontWeight: 700, margin: 0 }}>
-                          {rem}
+                          {formatQuantity(rem)}
                         </Tag>
                       ),
                     },
@@ -780,7 +836,7 @@ export const GoodsReceiptModal: React.FC<GoodsReceiptModalProps> = ({
                   if (isViewMode) {
                     return (
                       <span style={{ fontWeight: 700, color: '#0f766e', fontSize: 12.5 }}>
-                        {val} {it.uom}
+                        {formatQuantityWithUom(val, it.uom)}
                       </span>
                     );
                   }

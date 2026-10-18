@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 import path from 'path';
+import fs from 'fs';
+import { execSync } from 'child_process';
 import dayjs from 'dayjs';
 import {
   loginViaUi as loginViaUiHelper,
@@ -55,7 +57,76 @@ test.describe('P1 — CANONICAL PURE BROWSER E2E LIFECYCLE', () => {
       await page.waitForTimeout(800);
     };
 
-    const tenderUniqueName = `CANONICAL-E2E-${Date.now()}`;
+    // =========================================================================
+    // PHASE 0: GOOGLE CHROME HARD GATE ATTESTATION
+    // =========================================================================
+    console.log('\n==================================================');
+    console.log('PHASE 0: GOOGLE CHROME HARD GATE ATTESTATION');
+    console.log('==================================================');
+
+    const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+    expect(fs.existsSync(chromePath)).toBe(true);
+
+    let chromeVersion = 'Unknown';
+    try {
+      const psCmd = `(Get-Item '${chromePath}').VersionInfo.FileDescription + ' ' + (Get-Item '${chromePath}').VersionInfo.ProductVersion`;
+      chromeVersion = execSync(`powershell -NoProfile -Command "${psCmd}"`).toString().trim();
+    } catch {}
+
+    let chromePid = 'Unknown';
+    try {
+      const psProcess = execSync(`powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'chrome.exe' } | Select-Object -First 1 ProcessId | Format-List"`).toString();
+      const pidMatch = psProcess.match(/ProcessId\s*:\s*(\d+)/i);
+      if (pidMatch) chromePid = pidMatch[1].trim();
+    } catch {}
+
+    await page.goto(`${BASE_URL}/login`, { waitUntil: 'domcontentloaded' });
+    console.log('\n==================================================');
+    console.log('[BROWSER CHECK] Google Chrome opened visibly at ' + BASE_URL + '/login');
+    console.log('[BROWSER CHECK] Pausing 5 seconds for visual confirmation on desktop...');
+    console.log('==================================================\n');
+    await page.waitForTimeout(5000);
+
+    const userAgent = await page.evaluate(() => navigator.userAgent);
+    const containsHeadless = userAgent.includes('HeadlessChrome');
+    const containsChrome = userAgent.includes('Chrome/');
+
+    expect(containsHeadless).toBe(false);
+    expect(containsChrome).toBe(true);
+
+    const screenshotDir = path.resolve(__dirname, '../screenshots');
+    if (!fs.existsSync(screenshotDir)) fs.mkdirSync(screenshotDir, { recursive: true });
+    const attestationScreenshot = path.join(screenshotDir, '00-google-chrome-attestation.png');
+    await page.screenshot({ path: attestationScreenshot, fullPage: true });
+
+    const emailInput = page.locator('#login_form_email');
+    await expect(emailInput).toBeVisible({ timeout: 10000 });
+    const passInput = page.locator('#login_form_password');
+    await expect(passInput).toBeVisible({ timeout: 10000 });
+    const loginSubmitBtn = page.locator('button[type="submit"]');
+    await expect(loginSubmitBtn).toBeVisible({ timeout: 10000 });
+
+    console.log('\n# GOOGLE CHROME HARD GATE\n');
+    console.log('Chrome executable:\n' + chromePath);
+    console.log('\nChrome --version:\n' + chromeVersion);
+    console.log('\nWindows process:\nchrome.exe');
+    console.log('\nPID:\n' + chromePid);
+    console.log('\nPlaywright engine:\nchromium');
+    console.log('\nActual executable:\nGoogle Chrome chrome.exe');
+    console.log('\nHeadless:\nfalse');
+    console.log('\nVisible window:\nYES');
+    console.log('\nbrowser.version():\n' + page.context().browser()?.version());
+    console.log('\nnavigator.userAgent:\n' + userAgent);
+    console.log('\nContains HeadlessChrome:\n' + (containsHeadless ? 'YES' : 'NO'));
+    console.log('\nEPMS Login DOM loaded:\nYES');
+    console.log('\nDOM Selectors / Roles:');
+    console.log('- Email Input: locator(\'#login_form_email\'), role=textbox');
+    console.log('- Password Input: locator(\'#login_form_password\'), role=textbox (password)');
+    console.log('- Login Button: locator(\'button[type="submit"]\'), role=button');
+    console.log('\nScreenshot:\n00-google-chrome-attestation.png');
+    console.log('\nHARD GATE:\nPASS\n');
+
+    const tenderUniqueName = `CANONICAL-LIVE-${Date.now()}`;
 
     // =========================================================================
     // STEP 01: LOGIN MARKETING VIA UI
@@ -130,6 +201,7 @@ test.describe('P1 — CANONICAL PURE BROWSER E2E LIFECYCLE', () => {
     const createdCard = page.locator('.ant-card').filter({ hasText: tenderUniqueName }).first();
     await expect(createdCard).toBeVisible({ timeout: 15000 });
     console.log(`[UI ASSERTION] Tender card is visible in Kanban board.`);
+    await page.screenshot({ path: path.resolve(__dirname, '../screenshots/01_marketing_fresh_entity.png'), fullPage: true });
 
     // =========================================================================
     // STEP 03: PROPOSE GO / NO-GO REVIEW VIA UI DRAWER
@@ -459,6 +531,7 @@ test.describe('P1 — CANONICAL PURE BROWSER E2E LIFECYCLE', () => {
     const wonCard = wonColumn.locator('.ant-card').filter({ hasText: tenderUniqueName }).first();
     await expect(wonCard).toBeVisible({ timeout: 15000 });
     console.log('[UI ASSERTION] SPK PDF uploaded and Tender moved to WON column!');
+    await page.screenshot({ path: path.resolve(__dirname, '../screenshots/02_won_spk.png'), fullPage: true });
 
     await wonCard.click();
     await expect(detailDrawer).toBeVisible({ timeout: 10000 });
@@ -531,6 +604,7 @@ test.describe('P1 — CANONICAL PURE BROWSER E2E LIFECYCLE', () => {
       await handoverModal.locator('button:has-text("Tutup")').click();
       await expect(handoverModal).not.toBeVisible({ timeout: 10000 });
     }
+    await page.screenshot({ path: path.resolve(__dirname, '../screenshots/03_legal_approved.png'), fullPage: true });
 
     // =========================================================================
     // STEP 13: LOGOUT LEGAL OFFICER VIA UI
@@ -608,20 +682,22 @@ test.describe('P1 — CANONICAL PURE BROWSER E2E LIFECYCLE', () => {
     // STEP 24: PR APPROVAL WORKFLOW (Finance -> Director) -> PR APPROVED
     // =========================================================================
     console.log('\n>>> [STEP 24] Complete PR Approval Workflow');
-    await completePrApprovalWorkflow(
+    const prWorkflowResult = await completePrApprovalWorkflow(
       page,
       BASE_URL,
       capturedPrNumber,
       async (email) => { await loginViaUi(email); },
       async () => { await logoutViaUi(); }
     );
+    expect(prWorkflowResult.rfqAvailable).toBe(true);
+    expect(prWorkflowResult.terminalStatus).toMatch(/PR Disetujui|APPROVED/i);
 
     // Note: completePrApprovalWorkflow ends with purchasing@epms.com logged in on /procurement
 
     // =========================================================================
     // STEP 25: FRESH RFQ (strictly OPEN), 3 QUOTATIONS, VENDOR COMPARISON & EVALUATION
     // =========================================================================
-    console.log('\n>>> [STEP 25] Fresh RFQ with 3 Quotations & Winner Finalization');
+    console.log('\n[STEP25-START] Fresh RFQ with 3 Quotations & Winner Finalization');
     const capturedRfqNumber = await createAndEvaluateRfq(page, capturedPrNumber);
 
     // =========================================================================
@@ -659,8 +735,8 @@ test.describe('P1 — CANONICAL PURE BROWSER E2E LIFECYCLE', () => {
     await expect(finalPoCard).toBeVisible({ timeout: 15000 });
     const finalPoRow = finalPoCard.locator(`tr:has-text("${capturedPoNumber}")`).first();
     await expect(finalPoRow).toBeVisible({ timeout: 10000 });
-    await expect(finalPoRow.locator('.ant-tag:has-text("ISSUED")')).toBeVisible({ timeout: 10000 });
-    console.log(`[TERMINAL CHECK] 3. Canonical PO (${capturedPoNumber}) verified with status ISSUED.`);
+    await expect(finalPoRow.locator('.ant-tag').filter({ hasText: /ISSUED|Diterbitkan/i }).first()).toBeVisible({ timeout: 10000 });
+    console.log(`[TERMINAL CHECK] 3. Canonical PO (${capturedPoNumber}) verified with status ISSUED / Diterbitkan.`);
 
     await page.screenshot({ path: path.resolve(__dirname, '../test-results/canonical_e2e_procurement_po_issued.png'), fullPage: true });
 

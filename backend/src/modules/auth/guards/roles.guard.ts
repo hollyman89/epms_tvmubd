@@ -1,6 +1,6 @@
 import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ROLES_KEY } from '../decorators/roles.decorator';
+import { ROLES_KEY, DENY_ROLES_KEY } from '../decorators/roles.decorator';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -11,14 +11,40 @@ export class RolesGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    if (!requiredRoles || requiredRoles.length === 0) {
+
+    const denyRoles = this.reflector.getAllAndOverride<string[]>(DENY_ROLES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+
+    const hasRequired = Boolean(requiredRoles && requiredRoles.length > 0);
+    const hasDeny = Boolean(denyRoles && denyRoles.length > 0);
+
+    if (!hasRequired && !hasDeny) {
       return true;
     }
+
     const { user } = context.switchToHttp().getRequest();
     if (!user || !user.roles || !Array.isArray(user.roles)) {
       return false;
     }
+
     const userRolesUpper = user.roles.map((r: string) => String(r).toUpperCase());
-    return requiredRoles.some((role) => userRolesUpper.includes(String(role).toUpperCase()));
+
+    // 1. Explicit Deny Check: If user has ANY denied role, immediately reject (403)
+    if (hasDeny) {
+      const denyRolesUpper = denyRoles.map((r: string) => String(r).toUpperCase());
+      const hasDeniedRole = userRolesUpper.some((role) => denyRolesUpper.includes(role));
+      if (hasDeniedRole) {
+        return false;
+      }
+    }
+
+    // 2. Required Roles Check: If required roles specified, user must match at least one
+    if (hasRequired) {
+      return requiredRoles.some((role) => userRolesUpper.includes(String(role).toUpperCase()));
+    }
+
+    return true;
   }
 }

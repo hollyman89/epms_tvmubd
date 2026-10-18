@@ -8,5 +8,6 @@ import { Tender } from '../../entities/tender.entity';
   imports: [TypeOrmModule.forFeature([Tender])],
   controllers: [AnalyticsController],
   providers: [AnalyticsService],
+  exports: [AnalyticsService],
 })
 export class AnalyticsModule {}

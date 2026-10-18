@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Table,
   Typography,
@@ -30,19 +31,46 @@ import {
   InboxOutlined,
   ClockCircleOutlined,
   ExclamationCircleOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { FinanceService, InvoiceDto } from '@/services/finance.service';
+import { formatNumber } from '@/lib/formatters';
+import { FinanceService, InvoiceDto, PaymentRequestDto } from '@/services/finance.service';
 import { ProcurementService, PurchaseOrder } from '@/services/procurement.service';
 import { useAuth } from '@/context/AuthContext';
+import dynamic from 'next/dynamic';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { CreateInvoiceModal } from '@/components/finance/CreateInvoiceModal';
-import { InvoiceDetailModal } from '@/components/finance/InvoiceDetailModal';
-import {
-  ProcessPaymentModal,
-} from '@/components/finance/ProcessPaymentModal';
-import { PaymentReceiptModal } from '@/components/finance/PaymentReceiptModal';
+
+const CreateInvoiceModal = dynamic(
+  () => import('@/components/finance/CreateInvoiceModal').then((m) => m.CreateInvoiceModal),
+  { ssr: false }
+);
+const InvoiceDetailModal = dynamic(
+  () => import('@/components/finance/InvoiceDetailModal').then((m) => m.InvoiceDetailModal),
+  { ssr: false }
+);
+const ProcessPaymentModal = dynamic(
+  () => import('@/components/finance/ProcessPaymentModal').then((m) => m.ProcessPaymentModal),
+  { ssr: false }
+);
+const PaymentReceiptModal = dynamic(
+  () => import('@/components/finance/PaymentReceiptModal').then((m) => m.PaymentReceiptModal),
+  { ssr: false }
+);
+const SubmitPaymentRequestModal = dynamic(
+  () => import('@/components/finance/SubmitPaymentRequestModal').then((m) => m.SubmitPaymentRequestModal),
+  { ssr: false }
+);
+const ResubmitPaymentRequestModal = dynamic(
+  () => import('@/components/finance/ResubmitPaymentRequestModal').then((m) => m.ResubmitPaymentRequestModal),
+  { ssr: false }
+);
 import { PaymentDto } from '@/services/finance.service';
+import { formatCurrency, formatDate } from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
+import { UserIdentityDisplay } from '@/components/common/UserIdentityDisplay';
+import { getPaymentRequestActionState } from '@/components/finance/paymentRequestActionability';
+import styles from './InvoicesPage.module.css';
 
 const { Title, Text } = Typography;
 
@@ -148,35 +176,39 @@ const getQueueTermEligibility = (
   const isDp = isDpTerm(term);
   const isRet = isRetentionTerm(term);
 
+  const isServicePo = po.orderType === 'SERVICE';
+
   if (isDp) {
     if (!['ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED'].includes(po.status)) {
       msPassed = false;
       msReason = `Status PO (${po.status}) belum siap untuk penagihan DP`;
     }
   } else if (isProg) {
-    const is100Percent =
-      /100%|fisik\s*100%|lengkap/i.test(term.triggerCondition || '') ||
-      Number(term.percentage) === 100;
+    if (!isServicePo) {
+      const is100Percent =
+        /100%|fisik\s*100%|lengkap/i.test(term.triggerCondition || '') ||
+        Number(term.percentage) === 100;
 
-    if (is100Percent) {
-      const isPoCompleted = po.status === 'COMPLETED';
-      const unfulfilled = (po.items || []).filter(
-        (it: any) => Number(it.receivedQuantity || 0) < Number(it.quantity || 0)
-      );
-      if (!isPoCompleted || unfulfilled.length > 0) {
-        msPassed = false;
-        const itemDetail = unfulfilled.map((i: any) => `${i.itemName}: ${i.receivedQuantity || 0}/${i.quantity}`).join(', ');
-        msReason = `Kemajuan Fisik 100% belum tercapai (status PO: ${po.status}). Item belum selesai: ${itemDetail || 'Belum lengkap'}`;
-      }
-    } else {
-      const matchPercent = (term.triggerCondition || '').match(/(\d+(?:\.\d+)?)\s*%/);
-      const targetPercent = matchPercent ? parseFloat(matchPercent[1]) : Number(term.percentage || 0);
-      const poTotal = Number(po.totalAmount || 0);
-      if (targetPercent > 0 && targetPercent < 100) {
-        const physicalProgress = poTotal > 0 ? (totalPhysicalDeliveryValueAcrossPo / poTotal) * 100 : 0;
-        if (Math.round(physicalProgress * 100) / 100 + 0.5 < targetPercent) {
+      if (is100Percent) {
+        const isPoCompleted = po.status === 'COMPLETED';
+        const unfulfilled = (po.items || []).filter(
+          (it: any) => Number(it.receivedQuantity || 0) < Number(it.quantity || 0)
+        );
+        if (!isPoCompleted || unfulfilled.length > 0) {
           msPassed = false;
-          msReason = `Kemajuan fisik baru mencapai ${physicalProgress.toFixed(1)}% (target: ${targetPercent}%)`;
+          const itemDetail = unfulfilled.map((i: any) => `${i.itemName}: ${i.receivedQuantity || 0}/${i.quantity}`).join(', ');
+          msReason = `Kemajuan Fisik 100% belum tercapai (status PO: ${po.status}). Item belum selesai: ${itemDetail || 'Belum lengkap'}`;
+        }
+      } else {
+        const matchPercent = (term.triggerCondition || '').match(/(\d+(?:\.\d+)?)\s*%/);
+        const targetPercent = matchPercent ? parseFloat(matchPercent[1]) : Number(term.percentage || 0);
+        const poTotal = Number(po.totalAmount || 0);
+        if (targetPercent > 0 && targetPercent < 100) {
+          const physicalProgress = poTotal > 0 ? (totalPhysicalDeliveryValueAcrossPo / poTotal) * 100 : 0;
+          if (Math.round(physicalProgress * 100) / 100 + 0.5 < targetPercent) {
+            msPassed = false;
+            msReason = `Kemajuan fisik baru mencapai ${physicalProgress.toFixed(1)}% (target: ${targetPercent}%)`;
+          }
         }
       }
     }
@@ -190,7 +222,7 @@ const getQueueTermEligibility = (
   // 4. Financial Capacity Gate (for Progress terms)
   let capPassed = true;
   let capReason = '';
-  if (isProg) {
+  if (isProg && !isServicePo) {
     if (poGrs.length === 0) {
       capPassed = false;
       capReason = 'Belum ada dokumen Goods Receipt (GR) aktif sebagai dasar fisik penagihan';
@@ -247,12 +279,9 @@ const getQueueTermEligibility = (
 };
 
 export default function InvoicesPage() {
-  const { user, isFinance, isSuperAdmin } = useAuth();
-  const canCreateInvoice = isFinance || isSuperAdmin;
-  const canProcessPayment = useMemo(() => {
-    const authorizedRoles = ['FINANCE', 'SUPER_ADMIN', 'ADMIN', 'DIRECTOR', 'GENERAL_MANAGER'];
-    return (user?.roles || []).some((r) => authorizedRoles.includes(r));
-  }, [user]);
+  const { user, isFinance } = useAuth();
+  const canCreateInvoice = isFinance;
+  const canProcessPayment = isFinance;
 
   // Active Tab
   const [activeTabKey, setActiveTabKey] = useState<string>('ready_pos');
@@ -268,58 +297,98 @@ export default function InvoicesPage() {
   const [isProcessPaymentModalOpen, setIsProcessPaymentModalOpen] = useState<boolean>(false);
   const [selectedPaymentForReceipt, setSelectedPaymentForReceipt] = useState<PaymentDto | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState<boolean>(false);
+  const [selectedInvoiceForPaymentRequest, setSelectedInvoiceForPaymentRequest] = useState<InvoiceDto | null>(null);
+  const [isPaymentRequestModalOpen, setIsPaymentRequestModalOpen] = useState<boolean>(false);
+  const [selectedRequestForResubmit, setSelectedRequestForResubmit] = useState<PaymentRequestDto | null>(null);
+  const [isResubmitModalOpen, setIsResubmitModalOpen] = useState<boolean>(false);
 
-  // Version counter for reactive updates
-  const [invoiceVersion, setInvoiceVersion] = useState<number>(0);
-  const [poVersion, setPoVersion] = useState<number>(0);
+  const queryClient = useQueryClient();
 
-  // 1. Fetch All POs from Canonical Backend SSOT API (ProcurementService)
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [loadingPos, setLoadingPos] = useState<boolean>(true);
+  // 1. Fetch All POs from Canonical Backend SSOT API via TanStack Query
+  const {
+    data: purchaseOrders = [],
+    isLoading: loadingPos,
+    refetch: fetchPurchaseOrders,
+  } = useQuery<PurchaseOrder[]>({
+    queryKey: ['finance', 'purchase-orders'],
+    queryFn: () => ProcurementService.getPurchaseOrders(),
+    staleTime: 60000,
+  });
 
-  const fetchPurchaseOrders = useCallback(async () => {
-    setLoadingPos(true);
-    try {
-      const data = await ProcurementService.getPurchaseOrders();
-      setPurchaseOrders(data || []);
-    } catch (err) {
-      console.error('Failed to fetch purchase orders from backend SSOT:', err);
-    } finally {
-      setLoadingPos(false);
+  // 2. Fetch Invoices from Authoritative Backend SSOT API via TanStack Query
+  const {
+    data: invoices = [],
+    isLoading: loadingInvoices,
+    refetch: refetchInvoices,
+  } = useQuery<InvoiceDto[]>({
+    queryKey: ['finance', 'invoices'],
+    queryFn: () => FinanceService.getInvoices(),
+    staleTime: 60000,
+  });
+
+  // 3. Fetch Payments via TanStack Query (shared with /finance/payments)
+  const {
+    data: allPayments = [],
+    refetch: refetchPayments,
+  } = useQuery<PaymentDto[]>({
+    queryKey: ['finance', 'payments'],
+    queryFn: () => FinanceService.getPayments(),
+    staleTime: 60000,
+  });
+
+  // 4. Fetch Goods Receipts via TanStack Query
+  const {
+    data: goodsReceipts = [],
+    refetch: refetchGoodsReceipts,
+  } = useQuery<any[]>({
+    queryKey: ['finance', 'goods-receipts'],
+    queryFn: () => ProcurementService.getGoodsReceipts(),
+    staleTime: 60000,
+  });
+
+  // 5. Fetch Payment Requests via TanStack Query
+  const {
+    data: paymentRequests = [],
+    refetch: refetchPaymentRequests,
+  } = useQuery<PaymentRequestDto[]>({
+    queryKey: ['finance', 'payment-requests'],
+    queryFn: () => FinanceService.getPaymentRequests(),
+    staleTime: 60000,
+  });
+
+  // Map of active payment requests by invoiceId
+  const activePaymentRequestsByInvoiceId = useMemo(() => {
+    const map = new Map<number, PaymentRequestDto>();
+    for (const pr of paymentRequests) {
+      if (!pr.invoiceId) continue;
+      const invId = Number(pr.invoiceId);
+      const existing = map.get(invId);
+      if (!existing) {
+        map.set(invId, pr);
+      } else {
+        const activeStatuses = ['PENDING_DIRECTOR_APPROVAL', 'NEEDS_REVISION', 'APPROVED_FOR_PAYMENT'];
+        const isPrActive = activeStatuses.includes(pr.status);
+        const isExActive = activeStatuses.includes(existing.status);
+        if (isPrActive && !isExActive) {
+          map.set(invId, pr);
+        } else if (Number(pr.id) > Number(existing.id)) {
+          map.set(invId, pr);
+        }
+      }
     }
-  }, []);
+    return map;
+  }, [paymentRequests]);
 
-  useEffect(() => {
-    fetchPurchaseOrders();
-  }, [fetchPurchaseOrders, poVersion]);
-
-  // 2. Fetch Invoices and Goods Receipts from Authoritative Backend SSOT API
-  const [invoices, setInvoices] = useState<InvoiceDto[]>([]);
-  const [allPayments, setAllPayments] = useState<PaymentDto[]>([]);
-  const [goodsReceipts, setGoodsReceipts] = useState<any[]>([]);
-  const [loadingInvoices, setLoadingInvoices] = useState<boolean>(true);
-
+  // Invalidate helper to refresh finance data when mutations occur
   const fetchInvoices = useCallback(async () => {
-    setLoadingInvoices(true);
-    try {
-      const [invoiceData, paymentData, grData] = await Promise.all([
-        FinanceService.getInvoices().catch(() => []),
-        FinanceService.getPayments().catch(() => []),
-        ProcurementService.getGoodsReceipts().catch(() => []),
-      ]);
-      setInvoices(invoiceData || []);
-      setAllPayments(paymentData || []);
-      setGoodsReceipts(grData || []);
-    } catch (err) {
-      console.error('Failed to fetch invoices/payments/GRs from backend:', err);
-    } finally {
-      setLoadingInvoices(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchInvoices();
-  }, [fetchInvoices, invoiceVersion]);
+    await Promise.allSettled([
+      queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] }),
+      queryClient.invalidateQueries({ queryKey: ['finance', 'payments'] }),
+      queryClient.invalidateQueries({ queryKey: ['finance', 'goods-receipts'] }),
+      queryClient.invalidateQueries({ queryKey: ['finance', 'payment-requests'] }),
+      queryClient.invalidateQueries({ queryKey: ['inbox', 'todos'] }),
+    ]);
+  }, [queryClient]);
 
   // Canonical Phase G Cross-User Synchronization & Reconnect Resync
   useEffect(() => {
@@ -328,19 +397,22 @@ export default function InvoicesPage() {
       if (!detail) return;
 
       if (detail.aggregateType === 'PurchaseOrder') {
-        fetchPurchaseOrders();
+        queryClient.invalidateQueries({ queryKey: ['finance', 'purchase-orders'] });
       } else if (
         detail.aggregateType === 'Invoice' ||
         detail.aggregateType === 'GoodsReceipt' ||
-        detail.aggregateType === 'Payment'
+        detail.aggregateType === 'Payment' ||
+        detail.aggregateType === 'PaymentRequest'
       ) {
-        fetchInvoices();
+        queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] });
+        queryClient.invalidateQueries({ queryKey: ['finance', 'payments'] });
+        queryClient.invalidateQueries({ queryKey: ['finance', 'goods-receipts'] });
+        queryClient.invalidateQueries({ queryKey: ['finance', 'payment-requests'] });
       }
     };
 
     const handleReconnect = () => {
-      fetchPurchaseOrders();
-      fetchInvoices();
+      queryClient.invalidateQueries({ queryKey: ['finance'] });
     };
 
     window.addEventListener('epms:business-sync', handleSync);
@@ -349,7 +421,7 @@ export default function InvoicesPage() {
       window.removeEventListener('epms:business-sync', handleSync);
       window.removeEventListener('epms:reconnect-resync', handleReconnect);
     };
-  }, [fetchPurchaseOrders, fetchInvoices]);
+  }, [queryClient]);
 
   // 3. Filter POs: POs eligible for billing (DP, Progress with GR, or Full Delivery COMPLETED)
   const readyCompletedPos = useMemo(() => {
@@ -435,43 +507,41 @@ export default function InvoicesPage() {
       {
         title: 'Nomor PO',
         key: 'poNumber',
-        render: (_: any, r: PurchaseOrder) => {
-          const statusColor =
-            r.status === 'COMPLETED'
-              ? 'green'
-              : r.status === 'PARTIALLY_FULFILLED'
-              ? 'cyan'
-              : r.status === 'ISSUED'
-              ? 'blue'
-              : 'default';
-
-          return (
-            <div>
-              <span style={{ fontWeight: 700, color: '#1d4ed8', fontFamily: 'monospace' }}>
-                {r.poNumber}
-              </span>
-              <div>
-                <Tag color={statusColor} style={{ fontSize: 9.5, fontWeight: 700, marginTop: 2, padding: '0 4px' }}>
-                  ● {r.status}
-                </Tag>
-              </div>
+        width: 170,
+        render: (_: any, r: PurchaseOrder) => (
+          <div>
+            <span style={{ fontWeight: 700, color: '#1D4ED8', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'nowrap' }}>
+              {r.poNumber}
+            </span>
+            <div style={{ marginTop: 2 }}>
+              <StatusBadge
+                domain="po"
+                status={r.status}
+                showDot
+                style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4 }}
+              />
             </div>
-          );
-        },
+          </div>
+        ),
       },
       {
         title: 'Proyek',
         key: 'project',
+        width: 240,
         render: (_: any, r: PurchaseOrder) => {
           const projectName = r.purchaseRequest?.project?.name || (r as any).projectName || 'Proyek Tanpa Nama';
           const projectId = r.purchaseRequest?.project?.id || (r as any).projectId;
           return (
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 12, color: '#0f172a' }}>{projectName}</div>
+            <div style={{ maxWidth: 260 }}>
+              <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0F172A', whiteSpace: 'normal', lineHeight: 1.35 }}>
+                {projectName}
+              </div>
               {projectId ? (
-                <Tag color="blue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', marginTop: 2 }}>
-                  Project ID #{projectId}
-                </Tag>
+                <div style={{ marginTop: 2 }}>
+                  <span style={{ fontSize: 10.5, color: '#64748B', fontFamily: 'monospace' }}>
+                    ID #{projectId}
+                  </span>
+                </div>
               ) : null}
             </div>
           );
@@ -480,19 +550,22 @@ export default function InvoicesPage() {
       {
         title: 'Vendor Penyedia',
         key: 'vendor',
+        width: 210,
         render: (_: any, r: PurchaseOrder) => {
           const vendorName = r.vendor?.name || (r as any).vendorName || 'Vendor Tidak Tercatat';
           const vendorCode = r.vendor?.code || (r as any).vendorCode || '';
           return (
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 12, color: '#0f766e' }}>
-                <ShopOutlined style={{ marginRight: 4 }} />
-                {vendorName}
+            <div style={{ maxWidth: 220 }}>
+              <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0F172A', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <ShopOutlined style={{ color: '#0D9488', fontSize: 13 }} />
+                <span>{vendorName}</span>
               </div>
               {vendorCode ? (
-                <Tag color="cyan" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', marginTop: 2 }}>
-                  {vendorCode}
-                </Tag>
+                <div style={{ marginTop: 2 }}>
+                  <span className={styles.subtleCodeTag} style={{ background: '#F0FDFA', color: '#0F766E', border: '1px solid #CCFBF1' }}>
+                    {vendorCode}
+                  </span>
+                </div>
               ) : null}
             </div>
           );
@@ -502,16 +575,18 @@ export default function InvoicesPage() {
         title: 'Total Kontrak PO',
         dataIndex: 'totalAmount',
         key: 'totalAmount',
+        width: 160,
         align: 'right' as const,
         render: (val: number) => (
-          <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 12.5, color: '#059669' }}>
-            Rp {Number(val || 0).toLocaleString('id-ID')}
+          <span className={styles.currencyText} style={{ color: '#059669' }}>
+            {formatCurrency(val)}
           </span>
         ),
       },
       {
         title: 'Status Realisasi Fisik',
         key: 'fulfillment',
+        width: 180,
         render: (_: any, r: PurchaseOrder) => {
           const totalOrdered = (r.items || []).reduce((sum, it) => sum + Number(it.quantity || 0), 0);
           const totalReceived = (r.items || []).reduce((sum, it) => sum + Number(it.receivedQuantity || 0), 0);
@@ -519,11 +594,14 @@ export default function InvoicesPage() {
 
           return (
             <div>
-              <Tag color={isFullyReceived ? 'green' : totalReceived > 0 ? 'processing' : 'orange'} style={{ fontWeight: 700, margin: 0 }}>
-                {isFullyReceived ? '100% DITERIMA' : totalReceived > 0 ? 'PARSIAL' : 'MENUNGGU PENGIRIMAN'}
+              <Tag
+                color={isFullyReceived ? 'success' : totalReceived > 0 ? 'processing' : 'warning'}
+                style={{ fontWeight: 600, fontSize: 11, borderRadius: 4, margin: 0, padding: '1px 8px' }}
+              >
+                {isFullyReceived ? '100% Diterima' : totalReceived > 0 ? 'Parsial' : 'Menunggu Pengiriman'}
               </Tag>
-              <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
-                {totalReceived}/{totalOrdered} Unit {totalReceived > 0 ? '• GR Tercatat' : '• Belum ada GR'}
+              <div style={{ fontSize: 11, color: '#64748B', marginTop: 3, whiteSpace: 'nowrap' }}>
+                {totalReceived}/{totalOrdered} unit · {totalReceived > 0 ? 'GR tercatat' : 'Belum ada GR'}
               </div>
             </div>
           );
@@ -532,7 +610,7 @@ export default function InvoicesPage() {
       {
         title: 'Status Penagihan',
         key: 'invoiceStatus',
-        width: 190,
+        width: 220,
         render: (_: any, r: PurchaseOrder) => {
           const poInvoices = invoices.filter(
             (i) =>
@@ -564,13 +642,21 @@ export default function InvoicesPage() {
                 <div>
                   <Tooltip title={elig.reason || undefined}>
                     <Tag
-                      color={elig.tagColor}
-                      style={{ fontWeight: 700, margin: 0, cursor: elig.reason ? 'help' : 'default' }}
+                      color={elig.isEligible ? 'success' : 'warning'}
+                      style={{
+                        fontWeight: 600,
+                        fontSize: 11,
+                        borderRadius: 4,
+                        margin: 0,
+                        padding: '1px 8px',
+                        cursor: elig.reason ? 'help' : 'default',
+                        whiteSpace: 'nowrap',
+                      }}
                     >
                       {elig.statusText}
                     </Tag>
                   </Tooltip>
-                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
+                  <div style={{ fontSize: 11, color: '#64748B', marginTop: 3, whiteSpace: 'nowrap' }}>
                     {invoicedCount}/{terms.length} Termin Terbit
                   </div>
                 </div>
@@ -579,10 +665,23 @@ export default function InvoicesPage() {
 
             return (
               <div>
-                <Tag color="purple" style={{ fontWeight: 700, margin: 0 }}>
+                <Tag
+                  color="default"
+                  style={{
+                    fontWeight: 600,
+                    fontSize: 11,
+                    borderRadius: 4,
+                    margin: 0,
+                    padding: '1px 8px',
+                    background: '#F1F5F9',
+                    color: '#475569',
+                    border: '1px solid #CBD5E1',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   ● SEMUA TERMIN TERBIT
                 </Tag>
-                <div style={{ fontSize: 10.5, color: '#6b21a8', fontWeight: 600, marginTop: 2, fontFamily: 'monospace' }}>
+                <div style={{ fontSize: 11, color: '#64748B', fontWeight: 500, marginTop: 3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                   {invoicedCount}/{terms.length} Invoice
                 </div>
               </div>
@@ -593,10 +692,23 @@ export default function InvoicesPage() {
           if (poInvoices.length > 0) {
             return (
               <div>
-                <Tag color="purple" style={{ fontWeight: 700, margin: 0 }}>
+                <Tag
+                  color="default"
+                  style={{
+                    fontWeight: 600,
+                    fontSize: 11,
+                    borderRadius: 4,
+                    margin: 0,
+                    padding: '1px 8px',
+                    background: '#F1F5F9',
+                    color: '#475569',
+                    border: '1px solid #CBD5E1',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   ● INVOICED
                 </Tag>
-                <div style={{ fontSize: 10.5, color: '#6b21a8', fontWeight: 600, marginTop: 2, fontFamily: 'monospace' }}>
+                <div style={{ fontSize: 11, color: '#64748B', fontWeight: 500, marginTop: 3, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
                   {poInvoices[0].invoiceNumber}
                 </div>
               </div>
@@ -604,7 +716,7 @@ export default function InvoicesPage() {
           }
 
           return (
-            <Tag color="gold" style={{ fontWeight: 600, margin: 0 }}>
+            <Tag color="warning" style={{ fontWeight: 600, fontSize: 11, borderRadius: 4, margin: 0, padding: '1px 8px', whiteSpace: 'nowrap' }}>
               Belum Ditagihkan
             </Tag>
           );
@@ -648,13 +760,13 @@ export default function InvoicesPage() {
             : undefined;
 
           return (
-            <Space size={6}>
+            <Space size={6} wrap={false}>
               {nextPendingTerm && (
                 <Tooltip title={!canSubmitAction ? buttonTitle : undefined}>
                   <span>
                     <Button
                       size="small"
-                      type="primary"
+                      type={canSubmitAction ? 'primary' : 'default'}
                       icon={<SendOutlined />}
                       disabled={!canSubmitAction}
                       onClick={() => {
@@ -662,13 +774,7 @@ export default function InvoicesPage() {
                         setSelectedPoForInvoice(r);
                         setIsCreateModalOpen(true);
                       }}
-                      style={{
-                        backgroundColor: canSubmitAction ? '#059669' : undefined,
-                        borderColor: canSubmitAction ? '#059669' : undefined,
-                        borderRadius: 6,
-                        fontWeight: 600,
-                        fontSize: 11,
-                      }}
+                      className={canSubmitAction ? styles.btnActionPrimary : styles.btnActionDisabled}
                     >
                       Terbitkan Termin
                     </Button>
@@ -684,14 +790,7 @@ export default function InvoicesPage() {
                     setSelectedInvoiceForDetail(poInvoices[poInvoices.length - 1]);
                     setIsDetailModalOpen(true);
                   }}
-                  style={{
-                    borderColor: '#9333ea',
-                    color: '#9333ea',
-                    background: '#faf5ff',
-                    borderRadius: 6,
-                    fontWeight: 600,
-                    fontSize: 11,
-                  }}
+                  className={styles.btnActionSecondary}
                 >
                   {terms.length > 0 && nextPendingTerm
                     ? `Invoice (${poInvoices.length})`
@@ -713,8 +812,9 @@ export default function InvoicesPage() {
         title: 'Nomor Invoice',
         dataIndex: 'invoiceNumber',
         key: 'invoiceNumber',
+        width: 170,
         render: (invNum: string) => (
-          <span style={{ fontWeight: 700, color: '#1d4ed8', fontFamily: 'monospace' }}>
+          <span style={{ fontWeight: 700, color: '#1D4ED8', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'nowrap' }}>
             {invNum}
           </span>
         ),
@@ -722,10 +822,11 @@ export default function InvoicesPage() {
       {
         title: 'Nomor PO Terkait',
         key: 'poNumber',
+        width: 170,
         render: (_: any, r: InvoiceDto) => {
           const poNum = r.purchaseOrder?.poNumber || (r.poId ? `PO #${r.poId}` : '—');
           return (
-            <span style={{ fontWeight: 600, color: '#0f766e', fontFamily: 'monospace' }}>
+            <span style={{ fontWeight: 600, color: '#0F766E', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
               {poNum}
             </span>
           );
@@ -734,16 +835,19 @@ export default function InvoicesPage() {
       {
         title: 'Vendor Penyedia',
         key: 'vendor',
+        width: 200,
         render: (_: any, r: InvoiceDto) => {
           const vName = r.purchaseOrder?.vendor?.name || (r as any).vendorName || '—';
           const vCode = r.purchaseOrder?.vendor?.code || (r as any).vendorCode;
           return (
-            <div>
-              <div style={{ fontWeight: 600, fontSize: 12, color: '#0f172a' }}>{vName}</div>
+            <div style={{ maxWidth: 200 }}>
+              <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0F172A' }}>{vName}</div>
               {vCode && (
-                <Tag color="cyan" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', marginTop: 2 }}>
-                  {vCode}
-                </Tag>
+                <div style={{ marginTop: 2 }}>
+                  <span className={styles.subtleCodeTag} style={{ background: '#F0FDFA', color: '#0F766E', border: '1px solid #CCFBF1' }}>
+                    {vCode}
+                  </span>
+                </div>
               )}
             </div>
           );
@@ -753,10 +857,11 @@ export default function InvoicesPage() {
         title: 'Total Tagihan',
         dataIndex: 'totalAmount',
         key: 'totalAmount',
+        width: 160,
         align: 'right' as const,
         render: (val: number) => (
-          <span style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: 12.5, color: '#059669' }}>
-            Rp {Number(val || 0).toLocaleString('id-ID')}
+          <span className={styles.currencyText} style={{ color: '#059669', fontSize: 13 }}>
+            {formatCurrency(val)}
           </span>
         ),
       },
@@ -764,46 +869,28 @@ export default function InvoicesPage() {
         title: 'Status Rekonsiliasi',
         dataIndex: 'matchStatus',
         key: 'matchStatus',
-        width: 155,
+        width: 170,
         align: 'center' as const,
         render: (status: string) => {
-          if (status === 'VERIFIED') {
+          const s = (status || '').toUpperCase();
+          if (s === 'VERIFIED') {
             return (
-              <Tag color="green" style={{ fontWeight: 700 }}>
-                <SafetyCertificateOutlined style={{ marginRight: 4 }} />
-                VERIFIED
-              </Tag>
+              <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontWeight: 600, fontSize: 11, background: '#ECFDF5', color: '#065F46', border: '1px solid #A7F3D0', whiteSpace: 'nowrap' }}>
+                Terverifikasi
+              </span>
             );
           }
-          if (status === 'MATCHED') {
+          if (s === 'MATCHED') {
             return (
-              <Tag color="cyan" style={{ fontWeight: 700 }}>
-                <CheckCircleOutlined style={{ marginRight: 4 }} />
-                MATCHED
-              </Tag>
-            );
-          }
-          if (status === 'MISMATCH' || status === 'MISMATCHED') {
-            return (
-              <Tag color="red" style={{ fontWeight: 700 }}>
-                <CloseCircleOutlined style={{ marginRight: 4 }} />
-                MISMATCH
-              </Tag>
-            );
-          }
-          if (status === 'REJECTED') {
-            return (
-              <Tag color="magenta" style={{ fontWeight: 700 }}>
-                <CloseOutlined style={{ marginRight: 4 }} />
-                REJECTED
-              </Tag>
+              <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontWeight: 600, fontSize: 11, background: '#EFF6FF', color: '#1E40AF', border: '1px solid #BFDBFE', whiteSpace: 'nowrap' }}>
+                Tercocokkan
+              </span>
             );
           }
           return (
-            <Tag color="gold" style={{ fontWeight: 700 }}>
-              <ClockCircleOutlined style={{ marginRight: 4 }} />
-              {status || 'PENDING'}
-            </Tag>
+            <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 4, fontWeight: 600, fontSize: 11, background: '#FFFBEB', color: '#92400E', border: '1px solid #FDE68A', whiteSpace: 'nowrap' }}>
+              Menunggu Rekonsiliasi
+            </span>
           );
         },
       },
@@ -811,27 +898,60 @@ export default function InvoicesPage() {
         title: 'Status Bayar',
         dataIndex: 'paymentStatus',
         key: 'paymentStatus',
-        width: 120,
+        width: 140,
         align: 'center' as const,
-        render: (status: string) => (
-          <Tag color={status === 'PAID' ? 'green' : status === 'PARTIALLY_PAID' ? 'blue' : 'orange'} style={{ fontWeight: 700 }}>
-            ● {status || 'UNPAID'}
-          </Tag>
-        ),
+        render: (status: string) => {
+          const isPaid = (status || '').toUpperCase() === 'PAID';
+          return (
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '2px 8px',
+              borderRadius: 4,
+              fontWeight: 600,
+              fontSize: 11,
+              background: isPaid ? '#ECFDF5' : '#FFFBEB',
+              color: isPaid ? '#065F46' : '#92400E',
+              border: isPaid ? '1px solid #A7F3D0' : '1px solid #FDE68A',
+              whiteSpace: 'nowrap'
+            }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: isPaid ? '#10B981' : '#F59E0B' }} />
+              {isPaid ? 'Lunas' : 'Belum Dibayar'}
+            </span>
+          );
+        },
       },
       {
         title: 'Tanggal Terbit',
         key: 'invoiceDate',
-        render: (_: any, r: InvoiceDto) => {
-          const date = r.invoiceDate || r.createdAt;
-          return date ? dayjs(date).format('DD MMM YYYY') : '—';
-        },
+        width: 130,
+        render: (_: any, r: InvoiceDto) => (
+          <span style={{ whiteSpace: 'nowrap', fontSize: 12, color: '#475569' }}>
+            {formatDate(r.invoiceDate || r.createdAt)}
+          </span>
+        ),
       },
       {
         title: 'Penerbit',
-        dataIndex: 'createdBy',
         key: 'createdBy',
-        render: (by: any) => <span style={{ fontSize: 11, color: '#64748b' }}>{by ? `User #${by}` : 'Finance Team'}</span>,
+        width: 180,
+        render: (_: any, r: InvoiceDto) => {
+          const name = r.creator?.fullName || (r.createdBy ? `User #${r.createdBy}` : 'Finance Team');
+          const email = r.creator?.email || '';
+          return (
+            <div style={{ maxWidth: 170 }}>
+              <div style={{ fontWeight: 600, fontSize: 12, color: '#0F172A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {name}
+              </div>
+              {email && (
+                <div style={{ fontSize: 11, color: '#64748B', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {email}
+                </div>
+              )}
+            </div>
+          );
+        },
       },
       {
         title: 'Aksi',
@@ -839,14 +959,16 @@ export default function InvoicesPage() {
         width: 220,
         align: 'center' as const,
         render: (_: any, r: InvoiceDto) => {
-          const isVerifiedOrMatched = r.matchStatus === 'VERIFIED' || r.matchStatus === 'MATCHED';
           const isPaid = r.paymentStatus === 'PAID';
           const paymentRecord = isPaid
             ? allPayments.find((p) => Number(p.invoiceId) === Number(r.id)) || null
             : null;
 
+          const activePrq = activePaymentRequestsByInvoiceId.get(Number(r.id)) || null;
+          const uiState = getPaymentRequestActionState(r, activePrq);
+
           return (
-            <Space size={6} wrap>
+            <Space size={6} wrap={false}>
               <Button
                 size="small"
                 icon={<EyeOutlined />}
@@ -854,38 +976,83 @@ export default function InvoicesPage() {
                   setSelectedInvoiceForDetail(r);
                   setIsDetailModalOpen(true);
                 }}
-                style={{
-                  borderColor: '#2563eb',
-                  color: '#2563eb',
-                  background: '#eff6ff',
-                  borderRadius: 6,
-                  fontWeight: 600,
-                  fontSize: 11,
-                }}
+                className={styles.btnActionSecondary}
               >
                 Lihat Invoice
               </Button>
 
-              {isVerifiedOrMatched && !isPaid && (
+              {!isPaid && uiState.actionType === 'PENDING_DIRECTOR_APPROVAL' && (
+                <Tag
+                  color="orange"
+                  icon={<ClockCircleOutlined />}
+                  id={`tag-pending-director-${r.id}`}
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: '4px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                  }}
+                >
+                  Menunggu Persetujuan Direktur
+                </Tag>
+              )}
+
+              {!isPaid && uiState.actionType === 'NEEDS_REVISION' && (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SyncOutlined />}
+                  id={`btn-resubmit-payment-request-${r.id}`}
+                  onClick={() => {
+                    setSelectedRequestForResubmit(uiState.activeRequest || activePrq);
+                    setIsResubmitModalOpen(true);
+                  }}
+                  style={{ background: '#D97706', borderColor: '#D97706' }}
+                >
+                  Revisi Pengajuan
+                </Button>
+              )}
+
+              {!isPaid && uiState.actionType === 'APPROVED_FOR_PAYMENT' && (
                 <Button
                   size="small"
                   type="primary"
                   icon={<DollarCircleOutlined />}
-                  disabled={!canCreateInvoice}
+                  id={`btn-pay-approved-invoice-${r.id}`}
                   onClick={() => {
                     setSelectedInvoiceForPay(r);
                     setIsProcessPaymentModalOpen(true);
                   }}
-                  style={{
-                    backgroundColor: canCreateInvoice ? '#059669' : undefined,
-                    borderColor: canCreateInvoice ? '#059669' : undefined,
-                    borderRadius: 6,
-                    fontWeight: 600,
-                    fontSize: 11,
-                  }}
+                  style={{ background: '#059669', borderColor: '#059669' }}
                 >
-                  Proses Bayar
+                  Bayar Sekarang
                 </Button>
+              )}
+
+              {!isPaid && (uiState.actionType === 'SUBMIT_NEW' || uiState.actionType === 'CANNOT_SUBMIT') && (
+                <Tooltip title={uiState.tooltipMessage}>
+                  <span>
+                    <Button
+                      size="small"
+                      type="primary"
+                      icon={<SendOutlined />}
+                      id={`btn-submit-payment-request-${r.id}`}
+                      disabled={!uiState.canSubmitNew}
+                      onClick={() => {
+                        if (uiState.canSubmitNew) {
+                          setSelectedInvoiceForPaymentRequest(r);
+                          setIsPaymentRequestModalOpen(true);
+                        }
+                      }}
+                      className={styles.btnActionSubmitApproval}
+                    >
+                      Ajukan Persetujuan
+                    </Button>
+                  </span>
+                </Tooltip>
               )}
 
               {isPaid && paymentRecord && (
@@ -896,14 +1063,7 @@ export default function InvoicesPage() {
                     setSelectedPaymentForReceipt(paymentRecord);
                     setIsReceiptModalOpen(true);
                   }}
-                  style={{
-                    borderColor: '#059669',
-                    color: '#059669',
-                    background: '#ecfdf5',
-                    borderRadius: 6,
-                    fontWeight: 600,
-                    fontSize: 11,
-                  }}
+                  className={styles.btnActionReceipt}
                 >
                   Bukti Bayar
                 </Button>
@@ -913,194 +1073,223 @@ export default function InvoicesPage() {
         },
       },
     ],
-    [canCreateInvoice, allPayments]
+    [canCreateInvoice, allPayments, activePaymentRequestsByInvoiceId]
   );
 
   return (
     <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'FINANCE', 'DIRECTOR', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'PROJECT_MANAGER', 'PROCUREMENT', 'PURCHASING']}>
-      <div style={{ padding: 24 }}>
-      {/* Header Section */}
-      <div style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+      <div className={styles.pageContainer}>
+        {/* Header Section */}
+        <div className={styles.pageHeader}>
           <div>
-            <Title level={3} style={{ margin: 0, color: '#0f172a' }}>
-              Finance Invoicing &amp; 3-Way Matching Workstation
+            <Title level={3} className={styles.headerTitle}>
+              Finance &amp; Invoices
             </Title>
-            <Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>
-              Verifikasi faktur tagihan vendor berbasis Purchase Order (DP, Progress GR, atau COMPLETED) dan rekonsiliasi fisik Goods Receipt (GR).
+            <Text className={styles.headerSubtitle}>
+              Verifikasi faktur tagihan vendor berbasis Purchase Order (DP, Progress GR, atau COMPLETED), rekonsiliasi fisik Goods Receipt (GR), dan kesiapan pembayaran.
             </Text>
           </div>
-
-          <Tag color="blue" style={{ fontSize: 11.5, padding: '4px 10px', borderRadius: 6, fontWeight: 600 }}>
-            Role Akses: {user?.roles?.join(', ') || 'FINANCE'}
-          </Tag>
         </div>
-      </div>
 
-      {/* Summary KPI Cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={12} md={6}>
-          <Card size="small" style={{ borderRadius: 8, border: '1px solid #e2e8f0' }}>
-            <Statistic
-              title={<span style={{ fontSize: 11.5, color: '#64748b' }}>Antrean PO Siap Ditagihkan</span>}
-              value={pendingInvoicePosCount}
-              prefix={<FileTextOutlined style={{ color: '#2563eb' }} />}
-              suffix={<span style={{ fontSize: 11, color: '#94a3b8' }}>PO</span>}
-              valueStyle={{ fontWeight: 700, color: '#1e293b' }}
-            />
-            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 4 }}>
-              {monitoredPosCount > 0
-                ? `${monitoredPosCount} PO Dalam Pemantauan Milestone`
-                : `${pendingInvoicePosCount} PO Siap Diterbitkan Faktur`}
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card size="small" style={{ borderRadius: 8, border: '1px solid #e2e8f0' }}>
-            <Statistic
-              title={<span style={{ fontSize: 11.5, color: '#64748b' }}>Invoice Diterbitkan</span>}
-              value={invoices.length}
-              prefix={<SendOutlined style={{ color: '#059669' }} />}
-              suffix={<span style={{ fontSize: 11, color: '#94a3b8' }}>Faktur</span>}
-              valueStyle={{ fontWeight: 700, color: '#059669' }}
-            />
-            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 4 }}>
-              {verifiedInvoicesCount} VERIFIED, {matchedInvoicesCount} MATCHED
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card size="small" style={{ borderRadius: 8, border: '1px solid #e2e8f0' }}>
-            <Statistic
-              title={<span style={{ fontSize: 11.5, color: '#64748b' }}>Total Nilai Penagihan (100% PO)</span>}
-              value={totalInvoicedValue}
-              precision={0}
-              prefix={<span style={{ fontSize: 13, marginRight: 2 }}>Rp</span>}
-              valueStyle={{ fontWeight: 700, color: '#059669', fontFamily: 'monospace' }}
-            />
-            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 4 }}>
-              Sesuai Snapshot Kontrak Pemenang
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} md={6}>
-          <Card size="small" style={{ borderRadius: 8, border: '1px solid #e2e8f0' }}>
-            <Statistic
-              title={<span style={{ fontSize: 11.5, color: '#64748b' }}>Status Pembayaran</span>}
-              value={`${paidInvoicesCount}/${invoices.length} LUNAS`}
-              prefix={<CheckCircleOutlined style={{ color: paidInvoicesCount > 0 ? '#059669' : '#d97706' }} />}
-              valueStyle={{
-                fontWeight: 700,
-                color: paidInvoicesCount > 0 ? '#059669' : '#d97706',
-                fontSize: 16,
-              }}
-            />
-            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 4 }}>
-              {paidInvoicesCount} Faktur Telah Dilunasi Kas/Bank
-            </div>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* Main Tabs Container */}
-      <Card
-        size="small"
-        style={{ borderRadius: 8, border: '1px solid #e2e8f0', background: '#ffffff' }}
-        bodyStyle={{ padding: '8px 16px 16px' }}
-      >
-        <Tabs
-          activeKey={activeTabKey}
-          onChange={setActiveTabKey}
-          items={[
-            {
-              key: 'ready_pos',
-              label: (
-                <Space size={6}>
+        {/* Summary KPI Cards */}
+        <Row gutter={[16, 16]} className={styles.metricsRow}>
+          <Col xs={24} sm={12} md={12} xl={6}>
+            <div className={styles.summaryCard}>
+              <div className={styles.cardHeader}>
+                <div className={styles.iconSurface} style={{ background: '#EFF6FF', color: '#2563EB' }}>
                   <FileTextOutlined />
-                  <span>PO Siap Ditagihkan</span>
-                  <Badge count={pendingInvoicePosCount} overflowCount={99} style={{ backgroundColor: '#059669' }} />
-                </Space>
-              ),
-              children: (
-                <div>
-                  <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      Daftar Purchase Order yang memenuhi syarat penagihan termin (DP, Progress GR, atau Full Delivery COMPLETED).
-                    </Text>
-                  </div>
-                  <Table
-                    columns={readyPoColumns}
-                    dataSource={readyCompletedPos}
-                    rowKey={(r) => r.id || r.poNumber}
-                    loading={loadingPos}
-                    pagination={{ pageSize: 5 }}
-                    locale={{
-                      emptyText: (
-                        <Empty
-                          image={Empty.PRESENTED_IMAGE_SIMPLE}
-                          description={
-                            <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                              <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
-                                Belum ada PO yang siap ditagihkan
-                              </div>
-                              <Text type="secondary" style={{ fontSize: 11.5 }}>
-                                Seluruh termin telah diterbitkan atau belum ada PO yang memenuhi syarat penagihan termin (DP/Progress GR).
-                              </Text>
-                            </div>
-                          }
-                        />
-                      ),
-                    }}
-                  />
                 </div>
-              ),
-            },
-            {
-              key: 'invoices_list',
-              label: (
-                <Space size={6}>
-                  <AuditOutlined />
-                  <span>Daftar Invoice Terbit</span>
-                  <Badge count={invoices.length} overflowCount={99} style={{ backgroundColor: '#2563eb' }} />
-                </Space>
-              ),
-              children: (
-                <div>
-                  <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      Daftar seluruh faktur tagihan yang telah diterbitkan beserta hasil rekonsiliasi 3-Way Matching dan status pelunasan kas/bank.
-                    </Text>
-                  </div>
-                  <Table
-                    loading={loadingInvoices}
-                    columns={invoiceColumns}
-                    dataSource={invoices}
-                    rowKey="id"
-                    pagination={{ pageSize: 10 }}
-                    locale={{
-                      emptyText: (
-                        <Empty
-                          image={Empty.PRESENTED_IMAGE_SIMPLE}
-                          description={
-                            <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                              <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
-                                Belum ada invoice yang tercatat di sistem
-                              </div>
-                              <Text type="secondary" style={{ fontSize: 11.5 }}>
-                                Data invoice penagihan akan termuat secara otomatis dari modul Finance backend.
-                              </Text>
-                            </div>
-                          }
-                        />
-                      ),
-                    }}
-                  />
+                <span className={styles.cardLabel}>Antrean PO Siap Ditagihkan</span>
+              </div>
+              <div>
+                <div className={styles.cardValueRow}>
+                  <span className={styles.cardValue}>{pendingInvoicePosCount}</span>
+                  <span className={styles.cardUnit}>PO</span>
                 </div>
-              ),
-            },
-          ]}
-        />
-      </Card>
+                <div className={styles.cardSubtext} title={monitoredPosCount > 0 ? `${monitoredPosCount} PO Dalam Pemantauan Milestone` : `${pendingInvoicePosCount} PO Siap Diterbitkan Faktur`}>
+                  {monitoredPosCount > 0
+                    ? `${monitoredPosCount} PO Dalam Pemantauan Milestone`
+                    : `${pendingInvoicePosCount} PO Siap Diterbitkan Faktur`}
+                </div>
+              </div>
+            </div>
+          </Col>
+
+          <Col xs={24} sm={12} md={12} xl={6}>
+            <div className={styles.summaryCard}>
+              <div className={styles.cardHeader}>
+                <div className={styles.iconSurface} style={{ background: '#ECFDF5', color: '#059669' }}>
+                  <SendOutlined />
+                </div>
+                <span className={styles.cardLabel}>Invoice Diterbitkan</span>
+              </div>
+              <div>
+                <div className={styles.cardValueRow}>
+                  <span className={styles.cardValue} style={{ color: '#059669' }}>{invoices.length}</span>
+                  <span className={styles.cardUnit}>Faktur</span>
+                </div>
+                <div className={styles.cardSubtext} title={`${verifiedInvoicesCount} VERIFIED, ${matchedInvoicesCount} MATCHED`}>
+                  {verifiedInvoicesCount} VERIFIED, {matchedInvoicesCount} MATCHED
+                </div>
+              </div>
+            </div>
+          </Col>
+
+          <Col xs={24} sm={12} md={12} xl={6}>
+            <div className={styles.summaryCard}>
+              <div className={styles.cardHeader}>
+                <div className={styles.iconSurface} style={{ background: '#EEF2FF', color: '#4F46E5' }}>
+                  <DollarCircleOutlined />
+                </div>
+                <span className={styles.cardLabel}>Total Nilai Penagihan</span>
+              </div>
+              <div>
+                <div className={styles.cardValueRow}>
+                  <span className={styles.cardCurrencyPrefix}>Rp</span>
+                  <span className={styles.cardValue}>{formatNumber(totalInvoicedValue)}</span>
+                </div>
+                <div className={styles.cardSubtext} title="Sesuai Snapshot Kontrak Pemenang">
+                  Sesuai Snapshot Kontrak Pemenang
+                </div>
+              </div>
+            </div>
+          </Col>
+
+          <Col xs={24} sm={12} md={12} xl={6}>
+            <div className={styles.summaryCard}>
+              <div className={styles.cardHeader}>
+                <div className={styles.iconSurface} style={{ background: paidInvoicesCount > 0 ? '#ECFDF5' : '#FFFBEB', color: paidInvoicesCount > 0 ? '#059669' : '#D97706' }}>
+                  <CheckCircleOutlined />
+                </div>
+                <span className={styles.cardLabel}>Status Pembayaran</span>
+              </div>
+              <div>
+                <div className={styles.cardValueRow}>
+                  <span className={styles.cardValue} style={{ color: paidInvoicesCount > 0 ? '#059669' : '#D97706' }}>
+                    {paidInvoicesCount}/{invoices.length}
+                  </span>
+                  <span className={styles.cardUnit} style={{ color: paidInvoicesCount > 0 ? '#059669' : '#D97706', fontWeight: 600 }}>
+                    LUNAS
+                  </span>
+                </div>
+                <div className={styles.cardSubtext} title={`${paidInvoicesCount} Faktur Telah Dilunasi Kas/Bank`}>
+                  {paidInvoicesCount} Faktur Telah Dilunasi Kas/Bank
+                </div>
+              </div>
+            </div>
+          </Col>
+        </Row>
+
+        {/* Main Tabs Container */}
+        <div className={styles.tabsCard}>
+          <Tabs
+            className={styles.financeTabs}
+            activeKey={activeTabKey}
+            onChange={setActiveTabKey}
+            items={[
+              {
+                key: 'ready_pos',
+                label: (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <FileTextOutlined style={{ fontSize: 13 }} />
+                    <span>PO Siap Ditagihkan</span>
+                    {pendingInvoicePosCount > 0 && (
+                      <span className={`${styles.tabBadge} ${activeTabKey === 'ready_pos' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+                        {pendingInvoicePosCount}
+                      </span>
+                    )}
+                  </span>
+                ),
+                children: (
+                  <div>
+                    <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                      <Text type="secondary" style={{ fontSize: 12.5, color: '#64748B' }}>
+                        Daftar Purchase Order yang memenuhi syarat penagihan termin (DP, Progress GR, atau Full Delivery COMPLETED).
+                      </Text>
+                    </div>
+                    <div className={styles.tableContainer}>
+                      <Table
+                        className={styles.financeTable}
+                        columns={readyPoColumns}
+                        dataSource={readyCompletedPos}
+                        rowKey={(r) => r.id || r.poNumber}
+                        loading={loadingPos}
+                        pagination={{ pageSize: 5 }}
+                        scroll={{ x: 1050 }}
+                        locale={{
+                          emptyText: (
+                            <Empty
+                              image={Empty.PRESENTED_IMAGE_SIMPLE}
+                              description={
+                                <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                                  <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+                                    Belum ada PO yang siap ditagihkan
+                                  </div>
+                                  <Text type="secondary" style={{ fontSize: 12, color: '#64748B' }}>
+                                    Seluruh termin telah diterbitkan atau belum ada PO yang memenuhi syarat penagihan termin (DP/Progress GR).
+                                  </Text>
+                                </div>
+                              }
+                            />
+                          ),
+                        }}
+                      />
+                    </div>
+                  </div>
+                ),
+              },
+              {
+                key: 'invoices_list',
+                label: (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <AuditOutlined style={{ fontSize: 13 }} />
+                    <span>Daftar Invoice Terbit</span>
+                    <span className={`${styles.tabBadge} ${activeTabKey === 'invoices_list' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+                      {invoices.length}
+                    </span>
+                  </span>
+                ),
+                children: (
+                  <div>
+                    <div style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                      <Text type="secondary" style={{ fontSize: 12.5, color: '#64748B' }}>
+                        Daftar seluruh faktur tagihan yang telah diterbitkan beserta hasil rekonsiliasi 3-Way Matching dan status pelunasan kas/bank.
+                      </Text>
+                    </div>
+                    <div className={styles.tableContainer}>
+                      <Table
+                        className={styles.financeTable}
+                        loading={loadingInvoices}
+                        columns={invoiceColumns}
+                        dataSource={invoices}
+                        rowKey="id"
+                        pagination={{ pageSize: 10 }}
+                        scroll={{ x: 1150 }}
+                        locale={{
+                          emptyText: (
+                            <Empty
+                              image={Empty.PRESENTED_IMAGE_SIMPLE}
+                              description={
+                                <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                                  <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+                                    Belum ada invoice yang tercatat di sistem
+                                  </div>
+                                  <Text type="secondary" style={{ fontSize: 12, color: '#64748B' }}>
+                                    Data invoice penagihan akan termuat secara otomatis dari modul Finance backend.
+                                  </Text>
+                                </div>
+                              }
+                            />
+                          ),
+                        }}
+                      />
+                    </div>
+                  </div>
+                ),
+              },
+            ]}
+          />
+        </div>
 
       {/* CREATE INVOICE MODAL */}
       {selectedPoForInvoice && (
@@ -1114,9 +1303,8 @@ export default function InvoicesPage() {
           canCreateInvoice={canCreateInvoice}
           currentUserName={user?.fullName || user?.email || 'Finance Team'}
           onInvoiceCreated={(newInv) => {
-            fetchInvoices();
-            fetchPurchaseOrders();
-            setPoVersion((v) => v + 1);
+            queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['finance', 'purchase-orders'] });
             setActiveTabKey('invoices_list');
           }}
           onViewExistingInvoice={(existingInv) => {
@@ -1136,7 +1324,8 @@ export default function InvoicesPage() {
           }}
           invoice={selectedInvoiceForDetail}
           onVerified={() => {
-            fetchInvoices();
+            queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['finance', 'payment-requests'] });
           }}
         />
       )}
@@ -1153,8 +1342,11 @@ export default function InvoicesPage() {
           canProcessPayment={canProcessPayment}
           currentUserName={user?.fullName || user?.email || 'Finance Team'}
           onPaymentCreated={(newPayment, updatedInvoice) => {
-            setInvoiceVersion((v) => v + 1);
-            fetchInvoices();
+            queryClient.invalidateQueries({ queryKey: ['finance', 'payments'] });
+            queryClient.invalidateQueries({ queryKey: ['finance', 'payment-requests'] });
+            queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['finance', 'purchase-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['inbox', 'todos'] });
           }}
           onViewReceipt={(payment) => {
             setSelectedPaymentForReceipt(payment);
@@ -1172,6 +1364,49 @@ export default function InvoicesPage() {
             setSelectedPaymentForReceipt(null);
           }}
           payment={selectedPaymentForReceipt}
+        />
+      )}
+
+      {/* SUBMIT PAYMENT REQUEST MODAL */}
+      {selectedInvoiceForPaymentRequest && (
+        <SubmitPaymentRequestModal
+          open={isPaymentRequestModalOpen}
+          onClose={() => {
+            setIsPaymentRequestModalOpen(false);
+            setSelectedInvoiceForPaymentRequest(null);
+          }}
+          invoice={selectedInvoiceForPaymentRequest}
+          activeRequest={activePaymentRequestsByInvoiceId.get(Number(selectedInvoiceForPaymentRequest.id))}
+          onSubmitted={(res) => {
+            queryClient.setQueryData(['finance', 'payment-requests'], (old: PaymentRequestDto[] = []) => [
+              res,
+              ...old.filter((x) => x.id !== res.id),
+            ]);
+            queryClient.invalidateQueries({ queryKey: ['finance', 'payment-requests'] });
+            queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['inbox', 'todos'] });
+          }}
+        />
+      )}
+
+      {/* RESUBMIT PAYMENT REQUEST MODAL */}
+      {selectedRequestForResubmit && (
+        <ResubmitPaymentRequestModal
+          open={isResubmitModalOpen}
+          onClose={() => {
+            setIsResubmitModalOpen(false);
+            setSelectedRequestForResubmit(null);
+          }}
+          paymentRequest={selectedRequestForResubmit}
+          onResubmitted={(updated) => {
+            queryClient.setQueryData(['finance', 'payment-requests'], (old: PaymentRequestDto[] = []) => [
+              updated,
+              ...old.filter((x) => x.id !== updated.id),
+            ]);
+            queryClient.invalidateQueries({ queryKey: ['finance', 'payment-requests'] });
+            queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['inbox', 'todos'] });
+          }}
         />
       )}
       </div>

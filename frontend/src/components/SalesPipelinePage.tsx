@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic';
 import { Tabs, Table, Typography, Button, Modal, Form, Input, InputNumber, DatePicker, Select, Tag, message, Row, Col, Card, Spin, Skeleton, Space, Tooltip, Radio, Steps, Avatar, Empty } from 'antd';
 import type { MenuProps } from 'antd';
-import { PlusOutlined, EyeOutlined, RocketOutlined, AuditOutlined, ExclamationCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, CalendarOutlined, FolderOpenOutlined, PieChartOutlined, ClockCircleOutlined, ArrowRightOutlined, InfoCircleOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import { PlusOutlined, EyeOutlined, RocketOutlined, AuditOutlined, ExclamationCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, CalendarOutlined, FolderOpenOutlined, PieChartOutlined, ClockCircleOutlined, ArrowRightOutlined, InfoCircleOutlined, PlayCircleOutlined, AppstoreOutlined, BarsOutlined } from '@ant-design/icons';
 import CountUp from 'react-countup';
 import { io } from 'socket.io-client';
 import dayjs from 'dayjs';
@@ -48,6 +48,14 @@ import { useTendersQuery } from '../hooks/useTendersQuery';
 import { useCustomersQuery, useUsersQuery } from '../hooks/useMasterDataQuery';
 import { SalesKpiSummaryCards } from './marketing/SalesKpiSummaryCards';
 import { MarketingActionItemsCard } from './marketing/MarketingActionItemsCard';
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatPercentage,
+  formatQuantity,
+} from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
 import { PipelineAnalyticsView } from './marketing/PipelineAnalyticsView';
 import { CreateTenderModal } from './marketing/CreateTenderModal';
 import { LegalReviewModal } from './marketing/LegalReviewModal';
@@ -59,6 +67,7 @@ import {
 import { apiClient } from '@/lib/axios';
 import { queryClient, updateAllTenderCaches, appendTenderToCache } from '../lib/queryClient';
 import { peekPendingSalesDrawerRequest } from '@/lib/salesNavigation';
+import { evaluateMarketingActionItem } from '@/lib/marketingActionItemPredicate';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -350,17 +359,43 @@ export const SalesPipelinePage = () => {
   const renderTrendBadge = (growth: number | null, isDelta = false) => {
     if (growth === null || growth === undefined || periodFilter === 'all') {
       return (
-        <span style={{ fontSize: 11, color: '#8f959e', backgroundColor: '#f2f3f5', padding: '2px 8px', borderRadius: 4, fontWeight: 500 }}>
-          — N/A
+        <span
+          style={{
+            fontSize: 11,
+            color: '#94A3B8',
+            backgroundColor: '#F8FAFC',
+            border: '1px solid #E2E8F0',
+            padding: '2px 8px',
+            borderRadius: 6,
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          N/A
         </span>
       );
     }
 
     const isPositive = growth >= 0;
     return (
-      <Tag color={isPositive ? 'success' : 'error'} style={{ margin: 0, borderRadius: '4px', fontSize: 10, fontWeight: 700 }}>
-        {isPositive ? <ArrowUpOutlined /> : <ArrowDownOutlined />} {Math.abs(growth).toFixed(1)}%{isDelta ? ' pts' : ''}
-      </Tag>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 3,
+          fontSize: 11,
+          fontWeight: 600,
+          borderRadius: 6,
+          padding: '2px 8px',
+          backgroundColor: isPositive ? '#F0FDF4' : '#FEF2F2',
+          color: isPositive ? '#16A34A' : '#DC2626',
+          border: `1px solid ${isPositive ? '#BBF7D0' : '#FECACA'}`,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {isPositive ? <ArrowUpOutlined style={{ fontSize: 10 }} /> : <ArrowDownOutlined style={{ fontSize: 10 }} />}
+        {Math.abs(growth).toFixed(1)}%{isDelta ? ' pts' : ''}
+      </span>
     );
   };
 
@@ -427,38 +462,8 @@ export const SalesPipelinePage = () => {
 
   const actionItemsData = useMemo(() => {
     const items = activeTendersData.filter((t: any) => {
-      const stage = t.stage?.toUpperCase();
-      if (t.status === 'WON' || t.status === 'LOST' || stage === 'WON' || stage === 'LOST') return false;
-
-      let isOverdue = false;
-      if (t.bid_submission_deadline) {
-        const deadline = new Date(t.bid_submission_deadline);
-        deadline.setHours(0, 0, 0, 0);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        if (deadline < today) isOverdue = true;
-      }
-
-      const isQualOrNeg = stage === 'QUALIFICATION' || stage === 'NEGOTIATION' || stage === 'PROPOSAL';
-      
-      let needsAttentionDeadline = false;
-      if (t.bid_submission_deadline) {
-        const deadline = new Date(t.bid_submission_deadline);
-        const diffTime = deadline.getTime() - new Date().getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        if (diffDays <= 14) needsAttentionDeadline = true;
-      }
-
-      let needsAttentionStuck = false;
-      if (t.probability_percentage === 0) {
-        const tDateStr = t.created_at || t.createdAt;
-        const created = tDateStr ? new Date(tDateStr) : new Date();
-        const diffTime = new Date().getTime() - created.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        if (diffDays > 7) needsAttentionStuck = true;
-      }
-
-      return isOverdue || (isQualOrNeg && needsAttentionDeadline) || needsAttentionStuck;
+      const evaluation = evaluateMarketingActionItem(t);
+      return evaluation.isActionItem;
     });
 
     return items.sort((a: any, b: any) => {
@@ -476,14 +481,37 @@ export const SalesPipelinePage = () => {
   }, [activeTendersData]);
 
   const actionItemsColumns = useMemo(() => [
-    { title: 'Project Name', dataIndex: 'title', key: 'title', render: (text: string) => <Text strong style={{ fontSize: 12, color: '#1f2329' }}>{text}</Text> },
-    { title: 'Customer', key: 'customer', render: (text: any, record: any) => <Text style={{ fontSize: 12, color: '#4b5563' }}>{record.customer?.name || `ID: ${record.customer_id}`}</Text> },
-    { title: 'Stage', dataIndex: 'stage', key: 'stage', render: (val: string) => <Tag color={getStageColor(val)} style={{ borderRadius: 10, fontSize: 10, fontWeight: 600 }}>{val}</Tag> },
+    {
+      title: 'Project Name',
+      dataIndex: 'title',
+      key: 'title',
+      render: (text: string, record: any) => (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <Text strong style={{ fontSize: 13, color: '#0F172A', lineHeight: 1.35 }}>{text}</Text>
+          <Text style={{ fontSize: 11, color: '#94A3B8' }}>TND-{String(record.id).padStart(4, '0')}</Text>
+        </div>
+      ),
+    },
+    {
+      title: 'Customer',
+      key: 'customer',
+      render: (text: any, record: any) => (
+        <Text style={{ fontSize: 12.5, color: '#475569', fontWeight: 500 }}>
+          {record.customer?.name || `ID: ${record.customer_id}`}
+        </Text>
+      ),
+    },
+    {
+      title: 'Stage',
+      dataIndex: 'stage',
+      key: 'stage',
+      render: (val: string) => renderStageBadge(val),
+    },
     { 
       title: 'Bid Submission Deadline', 
       key: 'deadline', 
       render: (_: any, record: any) => {
-        if (!record.bid_submission_deadline) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        if (!record.bid_submission_deadline) return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
         const deadlineDate = new Date(record.bid_submission_deadline);
         deadlineDate.setHours(0, 0, 0, 0);
         const today = new Date();
@@ -491,36 +519,63 @@ export const SalesPipelinePage = () => {
         const stage = record.stage?.toUpperCase();
         const isOverdue = deadlineDate < today && !['WON', 'LOST'].includes(stage);
         const daysOverdue = isOverdue ? Math.floor((today.getTime() - deadlineDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
-        const formattedDate = deadlineDate.toLocaleDateString('id-ID');
+        const formattedDate = deadlineDate.toLocaleDateString('id-ID', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        });
 
         return (
-          <Space size={6}>
-            <Text style={{ fontSize: 12, color: isOverdue ? '#f53f3f' : '#4b5563', fontWeight: isOverdue ? 700 : 400 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 140 }}>
+            <span style={{ fontSize: 12.5, color: '#334155', fontWeight: 500, whiteSpace: 'nowrap' }}>
               {formattedDate}
-            </Text>
+            </span>
             {isOverdue && (
-              <Tooltip title={`Tender ini telah melewati deadline selama ${daysOverdue} hari!`}>
-                <Tag style={{ borderRadius: 10, fontSize: 9, color: '#f53f3f', backgroundColor: '#ffece6', border: 'none', fontWeight: 700 }}>
-                  LEWAT JATUH TEMPO ({daysOverdue}d)
-                </Tag>
-              </Tooltip>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: '#DC2626',
+                  backgroundColor: '#FEF2F2',
+                  border: '1px solid #FECACA',
+                  borderRadius: 4,
+                  padding: '1px 6px',
+                  width: 'fit-content',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Lewat jatuh tempo ({daysOverdue} hari)
+              </span>
             )}
-          </Space>
+          </div>
         );
       } 
     },
     { 
       title: 'Action', 
       key: 'action', 
+      width: 120,
       render: (_: any, record: any) => (
         <Button 
           size="small" 
-          type="primary" 
-          style={{ backgroundColor: '#3370ff', borderRadius: 6, fontSize: 11, fontWeight: 600 }}
-          icon={<ArrowRightOutlined />}
           onClick={() => router.push(`/sales/tenders/${record.id}`)}
+          icon={<EyeOutlined style={{ color: '#2563EB', fontSize: 12 }} />}
+          style={{
+            borderRadius: 6,
+            fontSize: 12,
+            fontWeight: 500,
+            color: '#1E293B',
+            borderColor: '#CBD5E1',
+            backgroundColor: '#FFFFFF',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+          }}
         >
-          Buka Detail
+          Lihat Detail
         </Button>
       ) 
     }
@@ -542,18 +597,48 @@ export const SalesPipelinePage = () => {
     } catch (err: any) {
       message.error(err.response?.data?.message || 'Error updating tender');
     }
-  };
+  };  // Standardized semantic pastel badge for tender stages
+  const renderStageBadge = (stage: string) => {
+    const s = (stage || '').toUpperCase();
+    let bg = '#F1F5F9';
+    let color = '#475569';
+    let border = '#E2E8F0';
+    let label = stage || 'LEAD';
 
-  // Helper for stage color
-  const getStageColor = (stage: string) => {
-    if (!stage) return 'default';
-    const s = stage.toUpperCase();
-    if (s === 'QUALIFICATION') return 'blue';
-    if (s === 'NEGOTIATION') return 'magenta';
-    if (s === 'PROPOSAL_SUBMITTED' || s === 'PROPOSAL SUBMITTED') return 'purple';
-    if (s === 'WON') return 'green';
-    if (s === 'LOST') return 'red';
-    return 'default'; // LEAD
+    if (s === 'LEAD') {
+      bg = '#EFF6FF'; color = '#1D4ED8'; border = '#BFDBFE'; label = 'LEAD';
+    } else if (s === 'WAITING_GO_NO_GO') {
+      bg = '#FFFBEB'; color = '#B45309'; border = '#FDE68A'; label = 'WAITING GO/NO-GO';
+    } else if (s === 'QUALIFICATION') {
+      bg = '#ECFEFF'; color = '#0E7490'; border = '#A5F3FC'; label = 'QUALIFICATION';
+    } else if (s === 'PROPOSAL' || s === 'PROPOSAL_SUBMITTED' || s === 'PROPOSAL SUBMITTED') {
+      bg = '#F5F3FF'; color = '#6D28D9'; border = '#DDD6FE'; label = 'PROPOSAL';
+    } else if (s === 'NEGOTIATION') {
+      bg = '#FFF7ED'; color = '#C2410C'; border = '#FFEDD5'; label = 'NEGOTIATION';
+    } else if (s === 'WON') {
+      bg = '#F0FDF4'; color = '#15803D'; border = '#BBF7D0'; label = 'WON';
+    } else if (s === 'LOST') {
+      bg = '#FEF2F2'; color = '#B91C1C'; border = '#FECACA'; label = 'LOST';
+    }
+
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '2px 8px',
+          borderRadius: 6,
+          fontSize: 11,
+          fontWeight: 600,
+          backgroundColor: bg,
+          color: color,
+          border: `1px solid ${border}`,
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {label}
+      </span>
+    );
   };
 
   const tenderColumns = [
@@ -593,10 +678,10 @@ export const SalesPipelinePage = () => {
       title: 'Budget Awal', 
       key: 'estimated_budget', 
       render: (_: any, record: any) => {
-        const val = Number(record.estimated_budget != null && !isNaN(Number(record.estimated_budget)) ? record.estimated_budget : 0);
+        const val = record.estimated_budget != null && !isNaN(Number(record.estimated_budget)) ? Number(record.estimated_budget) : null;
         return (
           <Text style={{ fontWeight: 600, color: '#475569', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
-            Rp {val.toLocaleString('id-ID')}
+            {formatCurrency(val)}
           </Text>
         );
       }
@@ -608,26 +693,18 @@ export const SalesPipelinePage = () => {
         if (record.negotiated_price != null && !isNaN(Number(record.negotiated_price))) {
           return (
             <Text style={{ fontWeight: 700, color: '#10b981', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
-              Rp {Number(record.negotiated_price).toLocaleString('id-ID')}
+              {formatCurrency(record.negotiated_price)}
             </Text>
           );
         }
-        return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
       }
     },
     { 
       title: 'Tahap (Stage)', 
       dataIndex: 'stage', 
       key: 'stage', 
-      render: (stage: string) => {
-        const s = (stage || 'LEAD').toUpperCase();
-        if (s === 'WON') return <Tag color="success" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>WON</Tag>;
-        if (s === 'LOST') return <Tag color="error" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>LOST</Tag>;
-        if (s === 'NEGOTIATION') return <Tag color="warning" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>NEGOTIATION</Tag>;
-        if (s === 'PROPOSAL') return <Tag color="purple" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>PROPOSAL</Tag>;
-        if (s === 'QUALIFICATION') return <Tag color="processing" style={{ fontWeight: 600, borderRadius: 10, padding: '2px 8px' }}>QUALIFICATION</Tag>;
-        return <Tag color="default" style={{ fontWeight: 500, borderRadius: 10, padding: '2px 8px' }}>{s}</Tag>;
-      }
+      render: (stage: string) => renderStageBadge(stage)
     },
     { 
       title: 'PIC', 
@@ -651,7 +728,7 @@ export const SalesPipelinePage = () => {
         if (!date) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
         const dateObj = new Date(date);
         const isOverdue = dateObj < new Date();
-        const formattedDate = dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+        const formattedDate = formatDate(date);
         
         return (
           <Space size={4} style={{ color: isOverdue ? '#ef4444' : '#64748b' }}>
@@ -664,16 +741,16 @@ export const SalesPipelinePage = () => {
     { 
       title: 'Action', 
       key: 'action', 
-      width: 90,
+      width: 80,
       align: 'center' as const,
       render: (_: any, record: any) => (
         <Tooltip title="Lihat Detail Proyek">
           <Button 
-            type="text" 
+            type="default" 
             size="small"
-            icon={<EyeOutlined style={{ color: '#2563eb' }} />} 
+            icon={<EyeOutlined style={{ color: '#2563EB', fontSize: 12 }} />} 
             onClick={() => router.push(`/sales/tenders/${record.id}`)}
-            style={{ backgroundColor: '#eff6ff', borderRadius: 6 }}
+            style={{ borderRadius: 6, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' }}
           />
         </Tooltip>
       )
@@ -690,7 +767,7 @@ export const SalesPipelinePage = () => {
         if (record.negotiated_price != null && !isNaN(Number(record.negotiated_price))) {
           return (
             <Text style={{ fontWeight: 700, color: '#10b981', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
-              Rp {Number(record.negotiated_price).toLocaleString('id-ID')}
+              {formatCurrency(record.negotiated_price)}
             </Text>
           );
         }
@@ -702,16 +779,10 @@ export const SalesPipelinePage = () => {
       key: 'legal_status', 
       render: (_: any, record: any) => {
         if (record.contract_status === 'PM_RETURNED' || record.contractStatus === 'PM_RETURNED') {
-          return <Tag color="warning" style={{ fontWeight: 700, borderRadius: 10, backgroundColor: '#fffbe6', color: '#d97706', borderColor: '#ffe58f' }}>DIKEMBALIKAN PM</Tag>;
+          return <StatusBadge domain="legal" status="PM_RETURNED" />;
         }
         const val = record.legal_status || record.spk_verification_status || 'UNVERIFIED';
-        if (val === 'VERIFIED') return <Tag color="success" style={{ fontWeight: 700, borderRadius: 10 }}>VERIFIED</Tag>;
-        if (val === 'PENDING_REVIEW' || val === 'MENUNGGU_REVIEW') return <Tag color="warning" style={{ fontWeight: 600, borderRadius: 10 }}>MENUNGGU REVIEW</Tag>;
-        if (val === 'REVISION_NEEDED') return <Tag color="error" style={{ fontWeight: 700, borderRadius: 10 }}>REVISI KONTRAK</Tag>;
-        if (val === 'REJECTED') return <Tag color="error" style={{ fontWeight: 700, borderRadius: 10 }}>SPK Ditolak</Tag>;
-        if (val === 'SPK_REQUIRED') return <Tag color="warning" style={{ fontWeight: 700, borderRadius: 10, backgroundColor: '#fff7ed', color: '#c2410c', borderColor: '#ffbb96' }}>Upload SPK Diperlukan</Tag>;
-        if (val === 'PROJECT_STARTED') return <Tag color="processing" style={{ fontWeight: 700, borderRadius: 10 }}>PROYEK AKTIF</Tag>;
-        return <Tag color="default" style={{ fontWeight: 500, borderRadius: 10 }}>{val}</Tag>;
+        return <StatusBadge domain="legal" status={val} />;
       }
     },
     {
@@ -730,7 +801,7 @@ export const SalesPipelinePage = () => {
         if (!deadline) return <Text type="secondary" style={{ fontSize: 11 }}>-</Text>;
         const dObj = new Date(deadline);
         const isBreached = dObj < new Date() && (record.legal_status === 'MENUNGGU_REVIEW' || record.spk_verification_status === 'PENDING_REVIEW');
-        const formattedDate = dObj.toLocaleDateString('id-ID');
+        const formattedDate = formatDate(deadline);
 
         return (
           <Space size={4}>
@@ -793,23 +864,9 @@ export const SalesPipelinePage = () => {
                 type="primary" 
                 style={{ background: '#10b981', borderColor: '#10b981', borderRadius: 6, fontWeight: 600, fontSize: 11 }}
                 icon={<PlayCircleOutlined />}
-                onClick={() => {
-                  Modal.confirm({
-                    title: 'Inisiasi Proyek (PMO Governance)',
-                    content: `Apakah Anda yakin ingin mengonversi SPK "${record.title || record.project_name}" menjadi Proyek Operasional?`,
-                    okText: 'Inisiasi Proyek',
-                    onOk: async () => {
-                      try {
-                        await apiClient.post('/legal/start-project', { tenderId: record.id });
-                        message.success('Proyek operasional berhasil diinisiasi!');
-                      } catch (err: any) {
-                        message.error(err.response?.data?.message || 'Gagal menginisiasi proyek');
-                      }
-                    }
-                  });
-                }}
+                onClick={() => router.push('/projects')}
               >
-                Inisiasi Proyek (PMO)
+                Buka Board PMO
               </Button>
             );
           }
@@ -855,60 +912,68 @@ export const SalesPipelinePage = () => {
   }
 
   return (
-    <div style={{ 
-      background: '#ffffff', 
-      borderRadius: '16px', 
-      padding: '24px', 
-      boxShadow: '0 4px 20px rgba(0, 0, 0, 0.03), 0 1px 3px rgba(0, 0, 0, 0.02)',
-      border: '1px solid #f1f5f9',
-      minHeight: '80vh' 
-    }}>
-      <Row justify="space-between" align="middle" style={{ marginBottom: 20 }}>
-        <Col>
-          <Space direction="vertical" size={2}>
-            <Space align="center" size={8}>
-              <RocketOutlined style={{ fontSize: 22, color: '#0f172a' }} />
-              <Title level={4} style={{ margin: 0, color: '#0f172a', fontWeight: 700 }}>
+    <div className={styles.salesContainer}>
+      <div className={styles.pageHeader}>
+        <div className={styles.headerTitleGroup}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 10,
+                backgroundColor: '#EFF6FF',
+                color: '#2563EB',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 18,
+                border: '1px solid #BFDBFE',
+                flexShrink: 0,
+              }}
+            >
+              <RocketOutlined />
+            </div>
+            <div>
+              <h1 style={{ margin: 0, color: '#0F172A', fontSize: 22, fontWeight: 700, lineHeight: 1.3 }}>
                 {canAccessLegalTracking ? 'Sales & Legal Pipeline' : 'Sales Pipeline'}
-              </Title>
-            </Space>
-            <Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>
-              {canAccessLegalTracking
-                ? 'Kelola direktori pipeline tender, status kualifikasi, analitik prospek, dan integrasi legal'
-                : 'Kelola direktori pipeline tender, status kualifikasi, dan analitik prospek'}
-            </Text>
-          </Space>
-        </Col>
-        <Col>
-          {activeTab === '1' && (
-            <Space size={12} wrap align="center">
-              <Radio.Group value={periodFilter} onChange={(e) => setPeriodFilter(e.target.value)} optionType="button" buttonStyle="solid">
-                <Radio.Button value="all">Semua Waktu</Radio.Button>
-                <Radio.Button value="month">Bulan Ini</Radio.Button>
-                <Radio.Button value="quarter">Kuartal Ini</Radio.Button>
-                <Radio.Button value="year">Tahun Ini</Radio.Button>
-              </Radio.Group>
-              <Button 
-                type="primary" 
-                icon={<PlusOutlined />}
-                onClick={() => setIsTenderModalVisible(true)}
-                style={{
-                  backgroundColor: '#1677ff',
-                  borderColor: '#1677ff',
-                  borderRadius: 8,
-                  fontWeight: 600,
-                  boxShadow: '0 2px 6px rgba(22, 119, 255, 0.2)'
-                }}
-              >
-                Input Tender
-              </Button>
-            </Space>
-          )}
-        </Col>
-      </Row>
+              </h1>
+              <p style={{ margin: '2px 0 0 0', fontSize: 13, color: '#64748B' }}>
+                {canAccessLegalTracking
+                  ? 'Kelola direktori pipeline tender, status kualifikasi, analitik prospek, dan integrasi legal'
+                  : 'Kelola direktori pipeline tender, status kualifikasi, dan analitik prospek'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {activeTab === '1' && (
+          <div className={styles.headerControls}>
+            <Radio.Group 
+              value={periodFilter} 
+              onChange={(e) => setPeriodFilter(e.target.value)} 
+              optionType="button" 
+              buttonStyle="solid"
+              className={styles.periodSegmented}
+            >
+              <Radio.Button value="all">Semua Waktu</Radio.Button>
+              <Radio.Button value="month">Bulan Ini</Radio.Button>
+              <Radio.Button value="quarter">Kuartal Ini</Radio.Button>
+              <Radio.Button value="year">Tahun Ini</Radio.Button>
+            </Radio.Group>
+            <Button 
+              type="primary" 
+              icon={<PlusOutlined />}
+              onClick={() => setIsTenderModalVisible(true)}
+              className={styles.inputTenderBtn}
+            >
+              Input Tender
+            </Button>
+          </div>
+        )}
+      </div>
 
       {activeTab === '1' && (
-        <div style={{ marginBottom: '24px' }}>
+        <div style={{ marginBottom: 20 }}>
           {isLoadingQuery ? (
             <Skeleton active paragraph={{ rows: 2 }} />
           ) : (
@@ -930,12 +995,40 @@ export const SalesPipelinePage = () => {
           label: <span><RocketOutlined /> Active Opportunities</span>,
           children: (
             <div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-                <Radio.Group value={viewMode} onChange={e => setViewMode(e.target.value)} optionType="button" buttonStyle="solid">
-                  <Radio.Button value="table">Table View</Radio.Button>
-                  <Radio.Button value="kanban">Kanban View</Radio.Button>
+              <div className={styles.opportunitiesControlBar}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13.5, color: '#0F172A' }}>
+                    Daftar Peluang Aktif ({activeTendersData.length})
+                  </div>
+                  <div style={{ fontSize: 12, color: '#64748B' }}>
+                    {viewMode === 'kanban' 
+                      ? 'Visualisasi alur kartu berdasarkan tahapan pipeline tender' 
+                      : 'Tabel ringkasan data tender, anggaran, dan tanggal target'}
+                  </div>
+                </div>
+
+                <Radio.Group 
+                  value={viewMode} 
+                  onChange={e => setViewMode(e.target.value)} 
+                  optionType="button" 
+                  buttonStyle="solid"
+                  className={styles.viewModeGroup}
+                >
+                  <Radio.Button value="kanban">
+                    <Space size={4}>
+                      <AppstoreOutlined />
+                      <span>Kanban View</span>
+                    </Space>
+                  </Radio.Button>
+                  <Radio.Button value="table">
+                    <Space size={4}>
+                      <BarsOutlined />
+                      <span>Table View</span>
+                    </Space>
+                  </Radio.Button>
                 </Radio.Group>
               </div>
+
               {viewMode === 'kanban' ? (
                 <KanbanBoard 
                   tenders={activeTendersData} 
@@ -956,15 +1049,16 @@ export const SalesPipelinePage = () => {
               ) : (
                 <div style={{ 
                   background: '#ffffff', 
-                  borderRadius: '16px', 
-                  padding: '16px 24px', 
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.03), 0 1px 3px rgba(0,0,0,0.02)',
-                  border: '1px solid #f1f5f9' 
+                  borderRadius: '12px', 
+                  padding: '16px 20px', 
+                  boxShadow: '0 1px 3px rgba(15, 23, 42, 0.03)',
+                  border: '1px solid #E2E8F0' 
                 }}>
                   <Table 
                     dataSource={activeTendersData} 
                     columns={tenderColumns} 
                     rowKey="id" 
+                    scroll={{ x: 1050 }}
                     pagination={{ 
                       pageSize: 10, 
                       position: ['bottomRight'],
@@ -973,7 +1067,6 @@ export const SalesPipelinePage = () => {
                     }} 
                     loading={isLoadingQuery} 
                     rowClassName={() => 'modern-table-row'}
-                    style={{ overflowX: 'auto' }}
                     locale={{
                       emptyText: (
                         <Empty 
@@ -991,30 +1084,31 @@ export const SalesPipelinePage = () => {
                   />
                   <style>{`
                     .modern-table-row:hover > td {
-                      background-color: #f8fafc !important;
+                      background-color: #F8FAFC !important;
                       cursor: pointer;
                     }
                     .modern-table-row > td {
-                      border-bottom: 1px solid #f1f5f9;
-                      padding: 14px 16px !important;
+                      border-bottom: 1px solid #F1F5F9;
+                      padding: 12px 16px !important;
+                      font-size: 12.5px;
                     }
                     .ant-table-thead > tr > th {
-                      background-color: #102A43 !important;
-                      color: #ffffff !important;
+                      background-color: #F8FAFC !important;
+                      color: #475569 !important;
                       font-weight: 600 !important;
-                      text-transform: uppercase;
-                      font-size: 11px;
+                      font-size: 11.5px;
                       letter-spacing: 0.5px;
-                      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
-                      padding: 14px 16px !important;
+                      border-bottom: 1px solid #E2E8F0 !important;
+                      padding: 12px 16px !important;
+                      white-space: nowrap;
                     }
                     .ant-table-thead > tr > th::before {
                       display: none !important;
                     }
                     .ant-table {
-                      border-radius: 12px;
+                      border-radius: 10px;
                       overflow: hidden;
-                      border: 1px solid #e2e8f0;
+                      border: 1px solid #E2E8F0;
                     }
                   `}</style>
                 </div>
@@ -1032,6 +1126,7 @@ export const SalesPipelinePage = () => {
                 dataSource={activeTendersData.filter((t: any) => t.status === 'WON' || t.spk_verification_status)} 
                 columns={contractColumns} 
                 rowKey="id" 
+                scroll={{ x: 950 }}
                 pagination={{ pageSize: 10 }} 
               />
             </div>

@@ -1,50 +1,49 @@
 "use client";
 
-import React, { useEffect } from 'react';
-import { DashboardPage as DashboardComponent } from '@/components/DashboardPage';
-import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation';
+import { useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Spin } from 'antd';
+import { useAuth } from '@/context/AuthContext';
+import { getCanonicalRoleLandingRoute } from '@/constants/menuConfig';
 
-export default function DashboardPage() {
-  const { user, isLoading } = useAuth();
+function RootRedirectContent() {
   const router = useRouter();
-
-  const userRolesUpper = (user?.roles || []).map((r) => String(r).toUpperCase());
-  const isMarketingOnly =
-    userRolesUpper.includes('MARKETING') &&
-    !userRolesUpper.some((r) =>
-      ['SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'DIRECTOR'].includes(r)
-    );
-  const isLegalOnly =
-    userRolesUpper.includes('LEGAL') &&
-    !userRolesUpper.some((r) =>
-      ['SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'DIRECTOR'].includes(r)
-    );
-  const isPmUser =
-    userRolesUpper.includes('PROJECT_MANAGER') &&
-    !userRolesUpper.some((r) =>
-      ['SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'DIRECTOR'].includes(r)
-    );
-
-  const shouldRedirect = isMarketingOnly || isLegalOnly || isPmUser;
+  const searchParams = useSearchParams();
+  const { user, isLoading, isAuthenticated } = useAuth();
 
   useEffect(() => {
-    if (!isLoading && user) {
-      if (isMarketingOnly) {
-        router.replace('/sales');
-      } else if (isLegalOnly) {
-        router.replace('/legal/review');
-      } else if (isPmUser) {
-        router.replace('/project-delivery');
-      }
+    if (isLoading) return;
+
+    if (!isAuthenticated || !user) {
+      const qs = searchParams ? searchParams.toString() : '';
+      const dest = qs ? `/login?${qs}` : '/login';
+      router.replace(dest);
+      return;
     }
-  }, [user, isLoading, router, isMarketingOnly, isLegalOnly, isPmUser]);
 
-  if (isLoading || (user && shouldRedirect)) {
-    return <Spin size="large" style={{ display: 'block', margin: 'auto', marginTop: '20vh' }} />;
-  }
+    const landing = getCanonicalRoleLandingRoute(user.roles || []);
+    const qs = searchParams ? searchParams.toString() : '';
+    const destination = qs ? `${landing}?${qs}` : landing;
+    router.replace(destination);
+  }, [router, searchParams, user, isLoading, isAuthenticated]);
 
-  return <DashboardComponent />;
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+      <Spin size="large" />
+    </div>
+  );
 }
 
+export default function RootRedirectPage() {
+  return (
+    <Suspense
+      fallback={
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
+          <Spin size="large" />
+        </div>
+      }
+    >
+      <RootRedirectContent />
+    </Suspense>
+  );
+}

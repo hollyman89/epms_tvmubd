@@ -34,7 +34,9 @@ export function shouldRefreshTodos(
     name === 'procurement.po.issued' ||
     name.startsWith('project.') ||
     name.startsWith('legal.') ||
-    name.startsWith('marketing.tender.')
+    name.startsWith('marketing.tender.') ||
+    name === 'marketing.spk.uploaded' ||
+    name.startsWith('finance.payment')
   );
 }
 

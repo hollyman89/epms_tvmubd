@@ -250,8 +250,7 @@ describe('Phase 4 — Procurement Intake Frontend Operational Flow Tests', () =>
         upper.includes('PROCUREMENT') ||
         upper.includes('PURCHASING') ||
         upper.includes('SUPER_ADMIN') ||
-        upper.includes('SUPERADMIN') ||
-        upper.includes('ADMIN')
+        upper.includes('SUPERADMIN')
       );
     };
 
@@ -268,11 +267,11 @@ describe('Phase 4 — Procurement Intake Frontend Operational Flow Tests', () =>
       expect(canReadReconciliation(['DIRECTOR'])).toBe(false);
     });
 
-    it('should permit PROCUREMENT, PURCHASING, SUPER_ADMIN, and ADMIN to perform reconciliation mutations', () => {
+    it('should permit PROCUREMENT, PURCHASING, and SUPER_ADMIN to perform reconciliation mutations, but DENY ADMIN', () => {
       expect(canMutateReconciliation(['PROCUREMENT'])).toBe(true);
       expect(canMutateReconciliation(['PURCHASING'])).toBe(true);
       expect(canMutateReconciliation(['SUPER_ADMIN'])).toBe(true);
-      expect(canMutateReconciliation(['ADMIN'])).toBe(true);
+      expect(canMutateReconciliation(['ADMIN'])).toBe(false);
     });
 
     it('should NOT permit PROJECT_MANAGER to mutate reconciliation (read-only for PM)', () => {

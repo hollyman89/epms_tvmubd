@@ -24,6 +24,13 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { PaymentDto } from '@/services/finance.service';
+import UserIdentityDisplay from '@/components/common/UserIdentityDisplay';
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+} from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
 
 const { Text, Title } = Typography;
 
@@ -66,10 +73,6 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
   const paymentMethod = payment.paymentMethod || 'BANK_TRANSFER';
   const referenceNumber = payment.referenceNumber || '—';
   const bankName = payment.bankName || 'Bank Mandiri (Rekening Operasional Proyek)';
-  const createdBy =
-    typeof payment.createdBy === 'number'
-      ? `User #${payment.createdBy}`
-      : (payment.createdBy || 'Finance Team');
   const createdAt = payment.createdAt;
   const notes = payment.notes;
 
@@ -95,9 +98,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
             <CheckCircleOutlined style={{ color: '#059669', fontSize: 16 }} />
             <Text style={{ fontSize: 12 }}>
               Voucher Sah: <strong>{paymentNumber}</strong> — Status:{' '}
-              <Tag color="green" style={{ margin: '0 4px', fontWeight: 700 }}>
-                ● LUNAS (PAID)
-              </Tag>
+              <StatusBadge domain="payment" status="PAID" showDot style={{ margin: '0 4px' }} />
             </Text>
           </div>
 
@@ -142,15 +143,16 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
               TOTAL REALISASI PEMBAYARAN:
             </div>
             <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'monospace', marginTop: 2 }}>
-              Rp {amount.toLocaleString('id-ID')}
+              {formatCurrency(amount)}
             </div>
             <div style={{ fontSize: 11, color: '#d1fae5', marginTop: 2 }}>
               Pelunasan 100% Faktur Invoice: {invoiceNumber}
             </div>
           </div>
 
-          <Tag
-            color="success"
+          <StatusBadge
+            domain="payment"
+            status="PAID"
             style={{
               fontSize: 13,
               fontWeight: 800,
@@ -160,9 +162,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
               color: '#047857',
               border: 'none',
             }}
-          >
-            PAID / LUNAS
-          </Tag>
+          />
         </div>
 
         {/* Top Context Descriptions */}
@@ -182,9 +182,12 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
               <div style={{ fontWeight: 700, fontSize: 12.5, color: '#1d4ed8', fontFamily: 'monospace' }}>
                 {poNumber}
               </div>
-              <Tag color="green" style={{ fontSize: 9.5, margin: 0, marginTop: 2, fontWeight: 700 }}>
-                ● COMPLETED
-              </Tag>
+              <StatusBadge
+                domain="po"
+                status="COMPLETED"
+                showDot
+                style={{ fontSize: 9.5, margin: 0, marginTop: 2 }}
+              />
             </Col>
             <Col xs={24} sm={6}>
               <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>VENDOR PENERIMA:</Text>
@@ -220,7 +223,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
           </Descriptions.Item>
           <Descriptions.Item label="Tanggal Realisasi Bayar">
             <CalendarOutlined style={{ marginRight: 4, color: '#64748b' }} />
-            {paymentDate ? dayjs(paymentDate).format('DD MMMM YYYY') : '—'}
+            {formatDate(paymentDate)}
           </Descriptions.Item>
           <Descriptions.Item label="Metode Pembayaran">
             <Tag color="blue" style={{ fontWeight: 700 }}>
@@ -236,8 +239,18 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
             <BankOutlined style={{ marginRight: 4, color: '#64748b' }} />
             {bankName}
           </Descriptions.Item>
-          <Descriptions.Item label="Diproses Oleh">
-            {createdBy} {createdAt ? `(${dayjs(createdAt).format('DD/MM/YYYY HH:mm')})` : ''}
+          <Descriptions.Item label="Pencatat / Petugas Pembayaran">
+            <UserIdentityDisplay
+              user={(payment as any).creator}
+              userId={payment.createdBy}
+              fallbackRole="Petugas Pembayaran"
+              showEmail
+            />
+            {createdAt && (
+              <span style={{ fontSize: 11, color: '#64748b', marginLeft: 6 }}>
+                ({formatDateTime(createdAt)})
+              </span>
+            )}
           </Descriptions.Item>
           {notes && (
             <Descriptions.Item label="Catatan Transaksi" span={2}>

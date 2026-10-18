@@ -1204,7 +1204,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
     }
   };
 
-  const isProcurementActor = isProcurement || isSuperAdmin;
+  const isProcurementActor = isProcurement;
   const workflow = gateRecord?.workflow;
   const procurementStep = workflow?.steps?.find((s: any) => s.key === 'proc');
   const isWorkflowProcurementActive = Boolean(
@@ -2524,7 +2524,7 @@ export const PmOperationalPlanReviewModal: React.FC<PmOperationalPlanReviewModal
                     : gateRecord?.status === 'READY_FOR_PROCUREMENT'
                     ? 'Operational Plan telah disetujui Manajemen. Alur kerja aktif dialihkan ke proses pengadaan & persetujuan downstream.'
                     : gateRecord?.status === 'REVIEW_PENDING'
-                    ? 'Menunggu keputusan review dari Head of Operations di Tugas Persetujuan Proyek (/governance/tasks).'
+                    ? 'Menunggu keputusan review dari Head of Operations di Approval Center (/governance/tasks).'
                     : gateRecord?.status === 'NEEDS_REVISION'
                     ? 'Menunggu revisi dan pengajuan ulang dari Project Manager.'
                     : 'Menunggu pengajuan resmi dari Project Manager untuk memulai peninjauan eksekutif.'}

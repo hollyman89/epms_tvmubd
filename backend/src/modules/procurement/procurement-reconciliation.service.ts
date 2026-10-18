@@ -547,7 +547,7 @@ export class ProcurementReconciliationService {
     const baselineQty = Number(costItem.quantity || 0);
     const baselineAmount = Number(costItem.subtotal || 0);
 
-    // 1. Reserved Qty: Package status = 'SUBMITTED'
+    // 1. Reserved Qty: Package status = 'SUBMITTED' or 'CLOSED' (deduplicated against active orders)
     const reservedRes = await manager.query(
       `SELECT 
          COALESCE(SUM(ppi.requested_qty), 0) AS reserved_qty,
@@ -555,10 +555,34 @@ export class ProcurementReconciliationService {
        FROM procurement_package_items ppi
        JOIN procurement_packages pkg ON ppi.package_id = pkg.id
        WHERE ppi.cost_item_id = ?
-         AND pkg.status = 'SUBMITTED'
+         AND (
+           pkg.status = 'SUBMITTED'
+           OR (
+             pkg.status = 'CLOSED'
+             AND pkg.id NOT IN (
+               SELECT pr.package_id 
+               FROM purchase_requests pr 
+               JOIN purchase_orders po ON po.pr_id = pr.id 
+               JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
+               WHERE pr.package_id IS NOT NULL 
+                 AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
+                 AND po.deleted_at IS NULL 
+                 AND poi.deleted_at IS NULL
+                 AND (
+                   poi.cost_item_id = ? 
+                   OR poi.pr_item_id IN (SELECT id FROM purchase_request_items WHERE cost_item_id = ?)
+                   OR (
+                     poi.cost_item_id IS NULL AND poi.pr_item_id IS NULL
+                     AND po.pr_id IN (SELECT pr_id FROM purchase_request_items WHERE cost_item_id = ?)
+                     AND poi.item_name IN (SELECT item_name FROM purchase_request_items WHERE cost_item_id = ? AND pr_id = po.pr_id)
+                   )
+                 )
+             )
+           )
+         )
          AND pkg.deleted_at IS NULL
          AND ppi.deleted_at IS NULL`,
-      [costItemId],
+      [costItemId, costItemId, costItemId, costItemId, costItemId],
     );
     const reservedQty = Number(reservedRes[0]?.reserved_qty || 0);
     const reservedAmount = Number(reservedRes[0]?.reserved_amount || 0);
@@ -580,20 +604,28 @@ export class ProcurementReconciliationService {
     const prCommittedAmount = Number(committedRes[0]?.committed_amount || 0);
 
     // 3. Ordered Qty: PO status in ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
-    // Matched by poi.cost_item_id or linked pri.cost_item_id
+    // Matched by poi.cost_item_id, linked pri.cost_item_id, or po.pr_id fallback matching. PO CANCELLED = 0.
     const orderedRes = await manager.query(
       `SELECT 
          COALESCE(SUM(poi.quantity), 0) AS ordered_qty,
          COALESCE(SUM(poi.total_price), 0) AS ordered_amount
        FROM purchase_order_items poi
        JOIN purchase_orders po ON poi.purchase_order_id = po.id
-       WHERE (poi.cost_item_id = ? OR poi.pr_item_id IN (
-         SELECT id FROM purchase_request_items WHERE cost_item_id = ?
-       ))
+       WHERE (
+         poi.cost_item_id = ? 
+         OR poi.pr_item_id IN (
+           SELECT id FROM purchase_request_items WHERE cost_item_id = ?
+         )
+         OR (
+           poi.cost_item_id IS NULL AND poi.pr_item_id IS NULL
+           AND po.pr_id IN (SELECT pr_id FROM purchase_request_items WHERE cost_item_id = ?)
+           AND poi.item_name IN (SELECT item_name FROM purchase_request_items WHERE cost_item_id = ? AND pr_id = po.pr_id)
+         )
+       )
          AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
          AND po.deleted_at IS NULL
          AND poi.deleted_at IS NULL`,
-      [costItemId, costItemId],
+      [costItemId, costItemId, costItemId, costItemId],
     );
     const orderedQty = Number(orderedRes[0]?.ordered_qty || 0);
     const orderedAmount = Number(orderedRes[0]?.ordered_amount || 0);
@@ -605,13 +637,21 @@ export class ProcurementReconciliationService {
        FROM goods_receipt_items gri
        JOIN purchase_order_items poi ON gri.po_item_id = poi.id
        JOIN purchase_orders po ON poi.purchase_order_id = po.id
-       WHERE (poi.cost_item_id = ? OR poi.pr_item_id IN (
-         SELECT id FROM purchase_request_items WHERE cost_item_id = ?
-       ))
+       WHERE (
+         poi.cost_item_id = ? 
+         OR poi.pr_item_id IN (
+           SELECT id FROM purchase_request_items WHERE cost_item_id = ?
+         )
+         OR (
+           poi.cost_item_id IS NULL AND poi.pr_item_id IS NULL
+           AND po.pr_id IN (SELECT pr_id FROM purchase_request_items WHERE cost_item_id = ?)
+           AND poi.item_name IN (SELECT item_name FROM purchase_request_items WHERE cost_item_id = ? AND pr_id = po.pr_id)
+         )
+       )
          AND po.deleted_at IS NULL
          AND poi.deleted_at IS NULL
          AND gri.deleted_at IS NULL`,
-      [costItemId, costItemId],
+      [costItemId, costItemId, costItemId, costItemId],
     );
     const receivedQty = Number(receivedRes[0]?.received_qty || 0);
 

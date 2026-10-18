@@ -54,6 +54,12 @@ export class Task {
   @Column({ length: 50, default: 'PLANNED' })
   status: string;
 
+  @Column({ name: 'actual_start_at', type: 'datetime', nullable: true })
+  actualStartAt: Date | null;
+
+  @Column({ name: 'actual_finish_at', type: 'datetime', nullable: true })
+  actualFinishAt: Date | null;
+
   @Column({
     name: 'assignee_id',
     type: 'bigint',

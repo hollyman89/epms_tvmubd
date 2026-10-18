@@ -76,6 +76,7 @@ describe('P6.5-B1 — Baseline V1 & Routine Progress Submission Spec', () => {
         createdAt: new Date(),
         updatedAt: new Date(),
         deletedAt: null as any,
+        closures: [],
       },
     ];
 
@@ -161,6 +162,8 @@ describe('P6.5-B1 — Baseline V1 & Routine Progress Submission Spec', () => {
         duration: 10,
         progress: 0.0,
         status: 'PLANNED',
+        actualStartAt: null,
+        actualFinishAt: null,
         startDate: '2026-03-01',
         endDate: '2026-03-10',
         assigneeId: 1,
@@ -177,6 +180,8 @@ describe('P6.5-B1 — Baseline V1 & Routine Progress Submission Spec', () => {
         duration: 15,
         progress: 0.0,
         status: 'PLANNED',
+        actualStartAt: null,
+        actualFinishAt: null,
         startDate: '2026-03-11',
         endDate: '2026-03-25',
         assigneeId: 1,
@@ -436,7 +441,7 @@ describe('P6.5-B1 — Baseline V1 & Routine Progress Submission Spec', () => {
       expect(baseline.activated_at).toBeDefined();
     });
 
-    it('2. Baseline contains expected WBS snapshot rows with leaf and task identity', async () => {
+    it('2. Baseline contains expected WBS snapshot rows with leaf, task identity, and planned schedule dates', async () => {
       await service.executeFormalKickoff(
         'PRJ-2026-001',
         { actualKickoffDate: '2026-03-01' },
@@ -452,6 +457,8 @@ describe('P6.5-B1 — Baseline V1 & Routine Progress Submission Spec', () => {
       expect(wbs101?.code).toBe('1.0');
       expect(wbs101?.is_leaf).toBe(false);
       expect(wbs101?.task_id).toBeNull();
+      expect(wbs101?.planned_start_date).toBeNull();
+      expect(wbs101?.planned_end_date).toBeNull();
 
       // Leaf 1.1 (Leaf, linked to Task #1)
       const wbs102 = inMemoryBaselineWbsItems.find((w) => w.wbs_id === 102);
@@ -460,12 +467,49 @@ describe('P6.5-B1 — Baseline V1 & Routine Progress Submission Spec', () => {
       expect(wbs102?.is_leaf).toBe(true);
       expect(wbs102?.task_id).toBe(1);
       expect(wbs102?.task_name_snapshot).toBe('Trenching Task');
+      expect(wbs102?.planned_start_date).toBe('2026-03-01');
+      expect(wbs102?.planned_end_date).toBe('2026-03-10');
+      expect(wbs102?.planned_duration).toBe(10);
+      expect(wbs102?.is_milestone).toBe(false);
 
       // Leaf 2.1 (Leaf, linked to Task #2)
       const wbs202 = inMemoryBaselineWbsItems.find((w) => w.wbs_id === 202);
       expect(wbs202?.is_leaf).toBe(true);
       expect(wbs202?.task_id).toBe(2);
       expect(wbs202?.task_name_snapshot).toBe('Splicing Task');
+      expect(wbs202?.planned_start_date).toBe('2026-03-11');
+      expect(wbs202?.planned_end_date).toBe('2026-03-25');
+      expect(wbs202?.planned_duration).toBe(15);
+      expect(wbs202?.is_milestone).toBe(false);
+
+      // Verify total leaf weight remains exactly 100%
+      const leafItems = inMemoryBaselineWbsItems.filter((w) => w.is_leaf);
+      const totalLeafWeight = leafItems.reduce((acc, curr) => acc + Number(curr.weight_percentage || 0), 0);
+      expect(totalLeafWeight).toBe(100.0);
+    });
+
+    it('2b. Later task mutation cannot silently rewrite historical baseline snapshot dates', async () => {
+      await service.executeFormalKickoff(
+        'PRJ-2026-001',
+        { actualKickoffDate: '2026-03-01' },
+        1,
+        ['PROJECT_MANAGER'],
+      );
+
+      const baselineItem1 = inMemoryBaselineWbsItems.find((w) => w.wbs_id === 102);
+      expect(baselineItem1?.planned_start_date).toBe('2026-03-01');
+      expect(baselineItem1?.planned_end_date).toBe('2026-03-10');
+      expect(baselineItem1?.planned_duration).toBe(10);
+
+      // Mutate task schedule dates and duration post-kickoff
+      inMemoryTasks[0].startDate = '2026-04-01';
+      inMemoryTasks[0].endDate = '2026-04-20';
+      inMemoryTasks[0].duration = 20;
+
+      // Assert historical baseline item remains completely unchanged (immutable SSOT)
+      expect(baselineItem1?.planned_start_date).toBe('2026-03-01');
+      expect(baselineItem1?.planned_end_date).toBe('2026-03-10');
+      expect(baselineItem1?.planned_duration).toBe(10);
     });
 
     it('3. Kickoff is idempotent; does not create duplicate V1 on retry', async () => {
@@ -595,6 +639,68 @@ describe('P6.5-B1 — Baseline V1 & Routine Progress Submission Spec', () => {
       expect(secondLog.reported_progress).toBe(75.0);
       expect(secondLog.progress_delta).toBe(45.0);
       expect(secondLog.status).toBe('OFFICIAL');
+    });
+
+    it('7c. Transition 0 -> >0 sets actualStartAt atomically; subsequent increments preserve original actualStartAt; reaching 100% sets actualFinishAt', async () => {
+      expect(inMemoryTasks[0].actualStartAt).toBeNull();
+      expect(inMemoryTasks[0].actualFinishAt).toBeNull();
+
+      // Step 1: 0% -> 25% (First progress transition: sets actualStartAt)
+      const res1 = await service.updateTaskProgress(
+        10,
+        1,
+        { progress: 25.0, expectedProgress: 0.0 },
+        1,
+        ['PROJECT_MANAGER'],
+      );
+      expect(res1.actualStartAt).toBeDefined();
+      expect(inMemoryTasks[0].actualStartAt).toBeInstanceOf(Date);
+      expect(inMemoryTasks[0].actualFinishAt).toBeNull();
+      const firstStartAt = inMemoryTasks[0].actualStartAt;
+
+      // Step 2: 25% -> 60% (Subsequent progress increment: original actualStartAt MUST NOT change)
+      const res2 = await service.updateTaskProgress(
+        10,
+        1,
+        { progress: 60.0, expectedProgress: 25.0 },
+        1,
+        ['PROJECT_MANAGER'],
+      );
+      expect(res2.actualStartAt).toEqual(firstStartAt);
+      expect(inMemoryTasks[0].actualStartAt).toEqual(firstStartAt);
+      expect(inMemoryTasks[0].actualFinishAt).toBeNull();
+
+      // Step 3: 60% -> 100% (Completion: sets actualFinishAt and status COMPLETED)
+      const res3 = await service.updateTaskProgress(
+        10,
+        1,
+        { progress: 100.0, expectedProgress: 60.0 },
+        1,
+        ['PROJECT_MANAGER'],
+      );
+      expect(res3.actualStartAt).toEqual(firstStartAt);
+      expect(res3.actualFinishAt).toBeDefined();
+      expect(inMemoryTasks[0].actualStartAt).toEqual(firstStartAt);
+      expect(inMemoryTasks[0].actualFinishAt).toBeInstanceOf(Date);
+      expect(inMemoryTasks[0].status).toBe('COMPLETED');
+    });
+
+    it('7d. Progress mutation remains authorized to assigned PM only (unauthorized PM rejected without mutating actualStartAt)', async () => {
+      expect(inMemoryTasks[0].actualStartAt).toBeNull();
+
+      // Unauthorized PM (id: 99) attempts progress mutation
+      await expect(
+        service.updateTaskProgress(
+          10,
+          1,
+          { progress: 20.0, expectedProgress: 0.0 },
+          99,
+          ['PROJECT_MANAGER'],
+        ),
+      ).rejects.toThrow(ForbiddenException);
+
+      expect(inMemoryTasks[0].progress).toBe(0.0);
+      expect(inMemoryTasks[0].actualStartAt).toBeNull();
     });
   });
 

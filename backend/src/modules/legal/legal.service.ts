@@ -4,7 +4,7 @@ import { Repository, DataSource } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Contract, LegalStatus } from '../../entities/contract.entity';
 import { Proposal } from '../../entities/proposal.entity';
-import { Tender, TenderStatus } from '../../entities/tender.entity';
+import { Tender, TenderStatus, RevisionStatus } from '../../entities/tender.entity';
 import { Project } from '../../entities/project.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
@@ -260,6 +260,11 @@ export class LegalService {
         contract.grace_extended_by = userId;
         contract.grace_extended_at = now;
         contract.grace_extension_count = currentCount + 1;
+
+        if (targetTender) {
+          targetTender.revision_status = RevisionStatus.REQUIRED;
+          await queryRunner.manager.save(Tender, targetTender);
+        }
       }
 
       const savedContract = await queryRunner.manager.save(Contract, contract);

@@ -85,21 +85,41 @@ export const ProgressVerificationDrawer: React.FC<ProgressVerificationDrawerProp
         ) : (
           <Space direction="vertical" style={{ width: '100%' }} size="middle">
             {pendingLogs.map((log) => {
-              // SoD Rule: Submitter cannot verify their own claim
-              const isSubmitter = log.submittedBy === currentUserId;
+              const submitterId = Number(log.submittedBy ?? log.submitted_by ?? 0);
+              const isSubmitter = submitterId > 0 && submitterId === Number(currentUserId);
               const allowVerify = canVerify && !isSubmitter;
 
+              const taskTitle =
+                log.taskName ||
+                log.task_name ||
+                log.taskCode ||
+                log.task_code ||
+                (log.taskId || log.task_id ? `Task #${log.taskId || log.task_id}` : 'Task');
+
+              const submitterDisplay =
+                log.submitterName ||
+                log.submitter_name ||
+                (submitterId > 0 ? `User ID ${submitterId}` : 'Submitter');
+
+              const dateVal =
+                log.createdAt || log.created_at || log.effectiveDate || log.effective_date;
+
+              const prevProg = Number(log.previousProgress ?? log.previous_progress ?? 0);
+              const repProg = Number(log.reportedProgress ?? log.reported_progress ?? 0);
+              const eventType = log.eventType || log.event_type || 'TASK_COMPLETION';
+              const reasonText = log.reason || '-';
+
               return (
-                <Card key={log.id} size="small" title={`Task: ${log.taskName || log.taskCode}`}>
+                <Card key={log.id} size="small" title={`Task: ${taskTitle}`}>
                   <Space direction="vertical" style={{ width: '100%' }}>
                     <Row>
                       <Col span={12}>
                         <Text type="secondary">Requested By:</Text>
-                        <div><Text strong>{log.submitterName || `User ID ${log.submittedBy}`}</Text></div>
+                        <div><Text strong>{submitterDisplay}</Text></div>
                       </Col>
                       <Col span={12}>
                         <Text type="secondary">Date:</Text>
-                        <div><Text>{dayjs(log.createdAt).format('DD MMM YYYY HH:mm')}</Text></div>
+                        <div><Text>{dateVal ? dayjs(dateVal).format('DD MMM YYYY HH:mm') : '-'}</Text></div>
                       </Col>
                     </Row>
                     
@@ -107,21 +127,21 @@ export const ProgressVerificationDrawer: React.FC<ProgressVerificationDrawerProp
                       <Col span={12}>
                         <Text type="secondary">Progress Change:</Text>
                         <div>
-                          <Tag color="default">{log.previousProgress}%</Tag>
+                          <Tag color="default">{prevProg}%</Tag>
                           {' -> '}
-                          <Tag color="processing">{log.reportedProgress}%</Tag>
+                          <Tag color="processing">{repProg}%</Tag>
                         </div>
                       </Col>
                       <Col span={12}>
                         <Text type="secondary">Type:</Text>
-                        <div><Tag color={log.progressDelta < 0 ? 'error' : 'warning'}>{log.eventType}</Tag></div>
+                        <div><Tag color="warning">{eventType}</Tag></div>
                       </Col>
                     </Row>
 
                     <div style={{ marginTop: 8 }}>
                       <Text type="secondary">Reason / Remarks:</Text>
                       <div style={{ padding: '8px', background: '#f5f5f5', borderRadius: '4px' }}>
-                        <Text>{log.reason}</Text>
+                        <Text>{reasonText}</Text>
                       </div>
                     </div>
 
@@ -129,18 +149,24 @@ export const ProgressVerificationDrawer: React.FC<ProgressVerificationDrawerProp
                       <div style={{ marginTop: 8 }}>
                         <Text type="secondary">Evidence:</Text>
                         <div>
-                          {log.evidence.map((ev: any) => (
-                            <Button 
-                              key={ev.id} 
-                              type="link" 
-                              icon={<FileTextOutlined />}
-                              size="small"
-                              style={{ padding: 0 }}
-                              // In real implementation, this would trigger document download
-                            >
-                              {ev.fileName || `Document ${ev.documentId}`}
-                            </Button>
-                          ))}
+                          {log.evidence.map((ev: any) => {
+                            const docId = ev.documentId || ev.document_id || ev.id;
+                            const fileName = ev.fileName || ev.file_name || `Document #${docId}`;
+                            return (
+                              <Button 
+                                key={ev.id || docId} 
+                                type="link" 
+                                icon={<FileTextOutlined />}
+                                size="small"
+                                style={{ padding: 0 }}
+                                onClick={() => {
+                                  window.open(`/api/v1/documents/${docId}/download`, '_blank');
+                                }}
+                              >
+                                {fileName}
+                              </Button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}

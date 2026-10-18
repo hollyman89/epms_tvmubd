@@ -19,7 +19,10 @@ const VendorsPage = dynamic(
           borderRadius: '12px'
         }}
       >
-        <Spin size="large" tip="Memuat Data Master Vendor..." />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <Spin size="large" />
+          <span style={{ color: '#64748b', fontSize: 14 }}>Memuat Data Master Vendor...</span>
+        </div>
       </div>
     ),
     ssr: false,

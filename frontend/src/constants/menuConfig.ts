@@ -26,12 +26,12 @@ export const MENU_GROUPS: MenuGroupConfig[] = [
     label: 'MAIN MENU',
     children: [
       {
-        key: '/',
+        key: '/dashboard',
         label: 'Dashboard',
-        path: '/',
+        path: '/dashboard',
         iconName: 'DashboardOutlined',
-        // PROJECT_MANAGER is strictly removed from Executive Dashboard
-        allowedRoles: ['SUPER_ADMIN', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'FINANCE', 'DIRECTOR', 'MANAGER', 'PROCUREMENT', 'PURCHASING'],
+        // PRE-W10 DASHBOARD-ACCESS-F1: Accessible ONLY by ADMIN, SUPER_ADMIN, and DIRECTOR
+        allowedRoles: ['ADMIN', 'SUPER_ADMIN', 'DIRECTOR'],
       },
       {
         key: '/reports',
@@ -114,12 +114,25 @@ export const MENU_GROUPS: MenuGroupConfig[] = [
         ],
       },
       {
-        key: 'dev-projects-data',
-        label: 'Projects',
-        path: 'dev-projects-data',
+        key: '/projects',
+        label: 'Project Master',
+        path: '/projects',
         iconName: 'FolderOpenOutlined',
-        // PROJECT_MANAGER is removed from this inactive development stub
-        allowedRoles: ['SUPER_ADMIN'],
+        allowedRoles: [
+          'SUPER_ADMIN',
+          'ADMIN',
+          'DIRECTOR',
+          'GENERAL_MANAGER',
+          'HEAD_OF_OPERATIONS',
+          'PMO',
+          'PROJECT_MANAGER',
+          'PROCUREMENT',
+          'PURCHASING',
+          'FINANCE',
+          'LEGAL',
+          'MARKETING',
+          'MARKETING_MANAGER',
+        ],
       },
       {
         key: '/documents',
@@ -151,7 +164,7 @@ export const MENU_GROUPS: MenuGroupConfig[] = [
       },
       {
         key: '/governance/tasks',
-        label: 'Tugas Persetujuan Proyek',
+        label: 'Approval Center',
         path: '/governance/tasks',
         iconName: 'AuditOutlined',
         allowedRoles: [
@@ -175,7 +188,9 @@ export const MENU_GROUPS: MenuGroupConfig[] = [
         label: 'Users & Roles',
         path: '/admin/users',
         iconName: 'TeamOutlined',
-        allowedRoles: ['SUPER_ADMIN'],
+        allowedRoles: ['SUPER_ADMIN', 'ADMIN'],
+        // Deduplicated for SUPER_ADMIN (accessible via Settings -> Administration)
+        visibilityRule: (roles: string[]) => !roles.some((r) => r.toUpperCase() === 'SUPER_ADMIN'),
       },
       {
         key: '/workflow',
@@ -183,14 +198,16 @@ export const MENU_GROUPS: MenuGroupConfig[] = [
         path: '/workflow',
         iconName: 'NodeIndexOutlined',
         // PROJECT_MANAGER is strictly removed from Workflow Designer
+        // Deduplicated for SUPER_ADMIN (accessible via Settings -> Administration)
         allowedRoles: ['SUPER_ADMIN', 'HEAD_OF_OPERATIONS'],
+        visibilityRule: (roles: string[]) => !roles.some((r) => r.toUpperCase() === 'SUPER_ADMIN'),
       },
       {
         key: '/inbox',
-        label: 'Unified Inbox',
+        label: 'Pusat Aktivitas',
         path: '/inbox',
         iconName: 'MailOutlined',
-        allowedRoles: ['SUPER_ADMIN', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'PROJECT_MANAGER', 'FINANCE', 'DIRECTOR', 'MANAGER', 'PROCUREMENT', 'PURCHASING'],
+        allowedRoles: ['SUPER_ADMIN', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'PROJECT_MANAGER', 'PMO', 'FINANCE', 'DIRECTOR', 'MANAGER', 'PROCUREMENT', 'PURCHASING', 'LEGAL', 'MARKETING'],
       },
       {
         key: '/audit-trail',
@@ -198,11 +215,13 @@ export const MENU_GROUPS: MenuGroupConfig[] = [
         path: '/audit-trail',
         iconName: 'LineChartOutlined',
         allowedRoles: ['SUPER_ADMIN'],
+        // Deduplicated for SUPER_ADMIN (accessible via Settings -> Administration)
+        visibilityRule: (roles: string[]) => !roles.some((r) => r.toUpperCase() === 'SUPER_ADMIN'),
       },
       {
-        key: 'dev-settings',
+        key: '/settings',
         label: 'Settings',
-        path: 'dev-settings',
+        path: '/settings',
         iconName: 'SettingOutlined',
         allowedRoles: ['SUPER_ADMIN'],
       },
@@ -217,11 +236,12 @@ export const MENU_GROUPS: MenuGroupConfig[] = [
 export function getRouteAllowedRoles(pathname: string): string[] | undefined {
   if (!pathname) return undefined;
   const cleanPath = pathname.split('?')[0].replace(/\/$/, '') || '/';
+  const lookupPath = cleanPath === '/' ? '/dashboard' : cleanPath;
 
   for (const group of MENU_GROUPS) {
     for (const item of group.children) {
       const itemPath = (item.path || item.key).split('?')[0].replace(/\/$/, '') || '/';
-      if (itemPath === cleanPath) {
+      if (itemPath === lookupPath || itemPath === cleanPath) {
         return item.allowedRoles;
       }
     }
@@ -239,3 +259,57 @@ export function isRoleAllowedForRoute(pathname: string, userRoles: string[] = []
   const userUpper = userRoles.map((r) => String(r).toUpperCase());
   return allowed.some((role) => userUpper.includes(String(role).toUpperCase()));
 }
+
+/**
+ * Evaluates whether a menu item should be visible in the navigation sidebar for given user roles.
+ * Evaluates both allowedRoles and any custom visibilityRule.
+ */
+export function isItemVisibleForRoles(item: MenuItemConfig, userRoles: string[] = []): boolean {
+  if (!item) return false;
+  const userUpper = userRoles.map((r) => String(r).toUpperCase());
+  const hasRole = !item.allowedRoles || item.allowedRoles.some((role) => userUpper.includes(String(role).toUpperCase()));
+  if (!hasRole) return false;
+  if (item.visibilityRule) {
+    return item.visibilityRule(userUpper);
+  }
+  return true;
+}
+
+/**
+ * Resolves the canonical landing route for a user based on their roles.
+ * PRE-W10 DASHBOARD-ACCESS-F1 SSOT:
+ * - ADMIN, SUPER_ADMIN, DIRECTOR -> /dashboard
+ * - PM, PMO, HEAD_OF_OPERATIONS -> /project-delivery
+ * - PROCUREMENT, PURCHASING, MANAGER -> /procurement
+ * - FINANCE -> /finance/invoices
+ * - MARKETING, GM_MARKETING -> /sales
+ * - LEGAL -> /legal/review
+ * - GENERAL_MANAGER -> /reports
+ * - Fallback -> /project-delivery
+ */
+export function getCanonicalRoleLandingRoute(userRoles: string[] = []): string {
+  const upper = userRoles.map((r) => String(r).toUpperCase());
+  if (upper.includes('SUPER_ADMIN') || upper.includes('ADMIN') || upper.includes('DIRECTOR')) {
+    return '/dashboard';
+  }
+  if (upper.includes('PROJECT_MANAGER') || upper.includes('PMO') || upper.includes('HEAD_OF_OPERATIONS')) {
+    return '/project-delivery';
+  }
+  if (upper.includes('PROCUREMENT') || upper.includes('PURCHASING') || upper.includes('MANAGER')) {
+    return '/procurement';
+  }
+  if (upper.includes('FINANCE')) {
+    return '/finance/invoices';
+  }
+  if (upper.includes('MARKETING') || upper.includes('GM_MARKETING')) {
+    return '/sales';
+  }
+  if (upper.includes('LEGAL')) {
+    return '/legal/review';
+  }
+  if (upper.includes('GENERAL_MANAGER')) {
+    return '/reports';
+  }
+  return '/project-delivery';
+}
+

@@ -15,6 +15,12 @@ import { BusinessEvent } from '../../shared/contracts/business-event.contract';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { VerifyInvoiceDto } from './dto/verify-invoice.dto';
+import { SubmitPaymentRequestDto } from './dto/submit-payment-request.dto';
+import { DecidePaymentRequestDto, DirectorDecisionAction } from './dto/decide-payment-request.dto';
+import { ResubmitPaymentRequestDto } from './dto/resubmit-payment-request.dto';
+import { PaymentRequest, PaymentRequestStatus, ApprovalSnapshot } from '../../entities/payment-request.entity';
+import { Notification } from '../../entities/notification.entity';
+import { User } from '../../entities/user.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MismatchCode, MatchingMismatch, MatchingResult } from './finance.types';
 
@@ -721,34 +727,38 @@ export class FinanceService {
         throw new BadRequestException('Invoice not found');
       }
 
-      // 1.b Segregation of Duties (SoD): Authoritative Verifier Check
-      let verifierId: number | null = null;
-      const verifyAudit = await queryRunner.manager.findOne(AuditLog, {
-        where: { table_name: 'invoices', record_id: invoice.id, action: 'VERIFY' },
-        order: { id: 'DESC' },
-      });
-      if (verifyAudit && verifyAudit.created_by) {
-        verifierId = Number(verifyAudit.created_by);
-      } else if (invoice.updatedBy) {
-        verifierId = Number(invoice.updatedBy);
+      // 1.b Segregation of Duties (SoD) & Payment Request Gating (Mandatory)
+      if (!dto.paymentRequestId) {
+        throw new BadRequestException('Payment Request ID wajib disertakan untuk eksekusi pembayaran.');
       }
 
-      if (invoice.paymentTermId) {
-        // TERM-BASED INVOICE
-        if (!verifierId || (invoice.createdBy && verifierId === Number(invoice.createdBy))) {
-          throw new BadRequestException('Prinsip Segregation of Duties (SoD) melarang pembuat invoice (Maker) melakukan pembayaran.');
-        }
-        if (verifierId === Number(userId)) {
-          throw new BadRequestException('Prinsip Segregation of Duties (SoD) melarang verifikator invoice (Checker) melakukan pembayaran.');
-        }
-      } else {
-        // LEGACY INVOICE
-        if (invoice.createdBy && Number(invoice.createdBy) === Number(userId)) {
-          throw new BadRequestException('Prinsip Segregation of Duties (SoD) melarang pembuat invoice (Maker) melakukan pembayaran.');
-        }
-        if (verifierId && verifierId === Number(userId)) {
-          throw new BadRequestException('Prinsip Segregation of Duties (SoD) melarang verifikator invoice (Checker) melakukan pembayaran.');
-        }
+      const prq = await queryRunner.manager.findOne(PaymentRequest, {
+        where: { id: dto.paymentRequestId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!prq || prq.deletedAt) {
+        throw new BadRequestException('Payment Request tidak ditemukan.');
+      }
+
+      if (Number(prq.invoiceId) !== Number(invoice.id)) {
+        throw new BadRequestException('Payment Request tidak sesuai dengan invoice yang dituju.');
+      }
+
+      if (prq.status === PaymentRequestStatus.PAID) {
+        throw new BadRequestException('Pembayaran ditolak: Payment Request sudah dibayar (PAID).');
+      }
+
+      if (prq.status !== PaymentRequestStatus.APPROVED_FOR_PAYMENT) {
+        throw new BadRequestException(
+          'Pembayaran ditolak: Payment Request belum disetujui oleh Direktur (APPROVED_FOR_PAYMENT).'
+        );
+      }
+
+      if (prq.approvedBy && Number(prq.approvedBy) === Number(userId)) {
+        throw new BadRequestException(
+          'Prinsip Segregation of Duties (SoD) melarang penyetuju Payment Request (Checker/Direktur) mengeksekusi pembayaran.'
+        );
       }
 
       // 2. Validate Invoice Match / Verification Status (MATCHED or VERIFIED)
@@ -875,6 +885,7 @@ export class FinanceService {
       // 9. Create & Save Payment Entity
       const payment = new Payment();
       payment.invoiceId = invoice.id;
+      payment.paymentRequestId = prq.id;
       payment.paymentNumber = paymentNumber;
       payment.paymentDate = new Date(dto.paymentDate);
       payment.amount = paymentAmount;
@@ -882,6 +893,10 @@ export class FinanceService {
 
       const saved = await queryRunner.manager.save(Payment, payment);
       const savedPayment = (saved && (saved.paymentNumber || saved.id)) ? { ...payment, ...saved } : payment;
+
+      // Update Payment Request status to PAID
+      prq.status = PaymentRequestStatus.PAID;
+      await queryRunner.manager.save(PaymentRequest, prq);
 
       // 10. Update Invoice Payment Status
       const remainingAfter = Math.round((remaining - paymentAmount) * 100) / 100;
@@ -1805,10 +1820,9 @@ export class FinanceService {
         throw new BadRequestException('Invoice tidak ditemukan.');
       }
 
-      // Maker-Checker Segregation of Duties
-      if (invoice.createdBy && Number(invoice.createdBy) === Number(userId)) {
-        throw new BadRequestException('Maker-Checker Violation: Anda tidak dapat memverifikasi invoice yang Anda buat sendiri.');
-      }
+      // Canonical EPMS Finance: Single Finance account handles invoice creation and verification.
+      // Separation of Duties is enforced at Director Payment Request Approval boundary.
+
 
       const oldMatchStatus = invoice.matchStatus;
       const oldTermStatus = invoice.paymentTerm?.status;
@@ -2176,6 +2190,492 @@ export class FinanceService {
       outstanding,
       paidPercentage,
     };
+  }
+
+  /**
+   * Submit a new Payment Request for Director Approval (Finance only)
+   */
+  async submitPaymentRequest(dto: SubmitPaymentRequestDto, userId: number): Promise<PaymentRequest> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // 1. Lock invoice with pessimistic_write
+      const invoice = await queryRunner.manager.findOne(Invoice, {
+        where: { id: dto.invoiceId },
+        relations: ['purchaseOrder', 'purchaseOrder.vendor', 'paymentTerm'],
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!invoice || invoice.deletedAt) {
+        throw new NotFoundException(`Invoice #${dto.invoiceId} tidak ditemukan.`);
+      }
+
+      // 2. 3-Way Match & Verification Check (VERIFIED or MATCHED required)
+      if (invoice.matchStatus !== 'VERIFIED' && invoice.matchStatus !== 'MATCHED') {
+        throw new BadRequestException(
+          `Invoice belum lolos verifikasi 3-Way Match (status: ${invoice.matchStatus || 'PENDING'}). Hanya invoice VERIFIED atau MATCHED yang dapat diajukan pembayarannya.`,
+        );
+      }
+
+      // 3. Payment Status Check
+      if (invoice.paymentStatus === 'PAID') {
+        throw new BadRequestException('Invoice sudah lunas (PAID). Tidak dapat mengajukan pembayaran lagi.');
+      }
+
+      // 4. Duplicate Active Payment Request Protection
+      const activeRequest = await queryRunner.manager.findOne(PaymentRequest, {
+        where: {
+          invoiceId: invoice.id,
+          status: In([
+            PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL,
+            PaymentRequestStatus.NEEDS_REVISION,
+            PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          ]),
+        },
+      });
+
+      if (activeRequest) {
+        throw new BadRequestException(
+          `Terdapat pengajuan pembayaran yang masih aktif (${activeRequest.requestNumber}, status: ${activeRequest.status}) untuk invoice ini.`,
+        );
+      }
+
+      // 5. Calculate remaining unpaid balance
+      const existingPayments = await queryRunner.manager.find(Payment, {
+        where: { invoiceId: invoice.id },
+      });
+      let alreadyPaid = 0;
+      for (const p of existingPayments) {
+        if (!p.deletedAt) {
+          alreadyPaid += Number(p.amount);
+        }
+      }
+      alreadyPaid = Math.round(alreadyPaid * 100) / 100;
+      const totalAmount = Number(invoice.totalAmount);
+      const remainingBalance = Math.round((totalAmount - alreadyPaid) * 100) / 100;
+
+      // 6. Validate requested amount
+      const requestedAmount =
+        dto.requestedAmount !== undefined && dto.requestedAmount !== null
+          ? Number(dto.requestedAmount)
+          : remainingBalance;
+
+      if (isNaN(requestedAmount) || requestedAmount <= 0) {
+        throw new BadRequestException('Jumlah yang diajukan harus lebih besar dari 0.');
+      }
+
+      if (Math.round(requestedAmount * 100) / 100 > remainingBalance + 0.001) {
+        throw new BadRequestException(
+          `Jumlah yang diajukan (Rp ${requestedAmount.toLocaleString('id-ID')}) melebihi sisa tagihan invoice (Rp ${remainingBalance.toLocaleString('id-ID')}).`,
+        );
+      }
+
+      // 7. Generate PRQ Number: PRQ-YYYYMMDD-XXX
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = String(now.getMonth() + 1).padStart(2, '0');
+      const d = String(now.getDate()).padStart(2, '0');
+      const todayStr = `${y}${m}${d}`;
+
+      const countToday = await queryRunner.manager
+        .createQueryBuilder(PaymentRequest, 'prq')
+        .where('prq.requestNumber LIKE :pattern', { pattern: `PRQ-${todayStr}-%` })
+        .getCount();
+      const seq = String(countToday + 1).padStart(3, '0');
+      const requestNumber = `PRQ-${todayStr}-${seq}`;
+
+      // 8. Snapshot
+      const po = invoice.purchaseOrder;
+      const vendor = po?.vendor;
+      const paymentTerm = invoice.paymentTerm;
+
+      let gr: GoodsReceipt | null = null;
+      if (invoice.poId) {
+        gr = await queryRunner.manager.findOne(GoodsReceipt, {
+          where: { poId: invoice.poId },
+          order: { id: 'DESC' },
+        });
+      }
+
+      const snapshot: ApprovalSnapshot = {
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        invoiceAmount: totalAmount,
+        invoiceVersion: invoice.version || 1,
+        invoiceUpdatedAt: invoice.updatedAt ? invoice.updatedAt.toISOString() : undefined,
+        paymentTermId: paymentTerm?.id ? Number(paymentTerm.id) : (dto.paymentTermId ? Number(dto.paymentTermId) : null),
+        paymentTermName: paymentTerm?.termName || null,
+        requestedAmount: requestedAmount,
+        vendorId: vendor?.id ? Number(vendor.id) : null,
+        vendorName: vendor?.name || null,
+        vendorBankAccount: dto.bankAccountNumber || null,
+        vendorBankName: dto.bankName || null,
+        goodsReceiptId: gr?.id ? Number(gr.id) : null,
+        goodsReceiptNumber: gr?.grNumber || null,
+        poId: po?.id ? Number(po.id) : null,
+        poNumber: po?.poNumber || null,
+        timestamp: new Date().toISOString(),
+      };
+
+      // 9. Save PaymentRequest
+      const prq = queryRunner.manager.create(PaymentRequest, {
+        requestNumber,
+        invoiceId: invoice.id,
+        paymentTermId: dto.paymentTermId
+          ? Number(dto.paymentTermId)
+          : (invoice.paymentTermId ? Number(invoice.paymentTermId) : null),
+        requestedAmount,
+        status: PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL,
+        requestedBy: userId,
+        submittedAt: new Date(),
+        notes: dto.notes || null,
+        approvalSnapshot: snapshot,
+        version: 1,
+      });
+
+      const savedPrq = await queryRunner.manager.save(PaymentRequest, prq);
+
+      // 10. Audit Log
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'payment_requests',
+        record_id: savedPrq.id,
+        action: 'SUBMIT',
+        old_value: null,
+        new_value: JSON.stringify({
+          requestNumber: savedPrq.requestNumber,
+          invoiceId: savedPrq.invoiceId,
+          requestedAmount: savedPrq.requestedAmount,
+          status: savedPrq.status,
+          requestedBy: savedPrq.requestedBy,
+        }),
+        created_by: userId,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
+      // 11. Notification for Director (userId 4)
+      const directorUser = await queryRunner.manager.findOne(User, {
+        where: { id: 4 },
+      });
+      if (directorUser) {
+        const notif = queryRunner.manager.create(Notification, {
+          userId: directorUser.id,
+          title: 'Persetujuan Pembayaran',
+          message: `Pengajuan pembayaran ${savedPrq.requestNumber} untuk invoice ${invoice.invoiceNumber} menunggu persetujuan Direktur.`,
+          notificationType: 'TASK',
+          actionLink: `/finance/payments?tab=approvals&requestId=${savedPrq.id}`,
+          isRead: false,
+          createdBy: userId,
+          metaData: {
+            entityType: 'PAYMENT_REQUEST',
+            entityId: savedPrq.id,
+            requestNumber: savedPrq.requestNumber,
+            invoiceNumber: invoice.invoiceNumber,
+          },
+        });
+        await queryRunner.manager.save(Notification, notif);
+      }
+
+      await queryRunner.commitTransaction();
+
+      this.eventEmitter.emit('finance.payment_request.submitted', {
+        requestId: savedPrq.id,
+        requestNumber: savedPrq.requestNumber,
+        invoiceId: savedPrq.invoiceId,
+        requestedAmount: savedPrq.requestedAmount,
+        submittedBy: userId,
+      });
+
+      return this.getPaymentRequestById(savedPrq.id);
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Fetch all Payment Requests
+   */
+  async getPaymentRequests(status?: string): Promise<PaymentRequest[]> {
+    const qb = this.dataSource
+      .getRepository(PaymentRequest)
+      .createQueryBuilder('prq')
+      .leftJoinAndSelect('prq.invoice', 'invoice')
+      .leftJoinAndSelect('invoice.purchaseOrder', 'po')
+      .leftJoinAndSelect('po.vendor', 'vendor')
+      .leftJoinAndSelect('prq.paymentTerm', 'paymentTerm')
+      .leftJoinAndSelect('prq.requester', 'requester')
+      .leftJoinAndSelect('prq.approver', 'approver')
+      .orderBy('prq.id', 'DESC');
+
+    if (status) {
+      qb.andWhere('prq.status = :status', { status });
+    }
+
+    return qb.getMany();
+  }
+
+  /**
+   * Fetch single Payment Request by ID
+   */
+  async getPaymentRequestById(id: number): Promise<PaymentRequest> {
+    const prq = await this.dataSource
+      .getRepository(PaymentRequest)
+      .createQueryBuilder('prq')
+      .leftJoinAndSelect('prq.invoice', 'invoice')
+      .leftJoinAndSelect('invoice.purchaseOrder', 'po')
+      .leftJoinAndSelect('po.vendor', 'vendor')
+      .leftJoinAndSelect('prq.paymentTerm', 'paymentTerm')
+      .leftJoinAndSelect('prq.requester', 'requester')
+      .leftJoinAndSelect('prq.approver', 'approver')
+      .where('prq.id = :id', { id })
+      .getOne();
+
+    if (!prq) {
+      throw new NotFoundException(`Payment Request #${id} tidak ditemukan.`);
+    }
+
+    return prq;
+  }
+
+  /**
+   * Director Decision on Payment Request (APPROVE, RETURN, REJECT)
+   */
+  async decidePaymentRequest(
+    id: number,
+    dto: DecidePaymentRequestDto,
+    userId: number,
+  ): Promise<PaymentRequest> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const prq = await queryRunner.manager.findOne(PaymentRequest, {
+        where: { id },
+        relations: ['invoice'],
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!prq || prq.deletedAt) {
+        throw new NotFoundException(`Payment Request #${id} tidak ditemukan.`);
+      }
+
+      if (prq.status !== PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL) {
+        throw new BadRequestException(
+          `Payment Request tidak dapat diputuskan pada status "${prq.status}". Status harus PENDING_DIRECTOR_APPROVAL.`,
+        );
+      }
+
+      const oldStatus = prq.status;
+
+      if (dto.action === DirectorDecisionAction.APPROVE) {
+        prq.status = PaymentRequestStatus.APPROVED_FOR_PAYMENT;
+        prq.approvedBy = userId;
+        prq.approvedAt = new Date();
+        prq.approvedAmount =
+          dto.approvedAmount !== undefined && dto.approvedAmount !== null
+            ? Number(dto.approvedAmount)
+            : prq.requestedAmount;
+      } else if (dto.action === DirectorDecisionAction.RETURN) {
+        if (!dto.revisionNotes || !dto.revisionNotes.trim()) {
+          throw new BadRequestException('Catatan revisi wajib diisi saat meminta revisi.');
+        }
+        prq.status = PaymentRequestStatus.NEEDS_REVISION;
+        prq.returnedAt = new Date();
+        prq.revisionNotes = dto.revisionNotes.trim();
+      } else if (dto.action === DirectorDecisionAction.REJECT) {
+        if (!dto.rejectionReason || !dto.rejectionReason.trim()) {
+          throw new BadRequestException('Alasan penolakan wajib diisi saat menolak pembayaran.');
+        }
+        prq.status = PaymentRequestStatus.REJECTED;
+        prq.rejectionReason = dto.rejectionReason.trim();
+      } else {
+        throw new BadRequestException(`Aksi keputusan tidak valid: ${dto.action}`);
+      }
+
+      const savedPrq = await queryRunner.manager.save(PaymentRequest, prq);
+
+      // Audit Log
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'payment_requests',
+        record_id: savedPrq.id,
+        action: dto.action,
+        old_value: JSON.stringify({ status: oldStatus }),
+        new_value: JSON.stringify({
+          status: savedPrq.status,
+          approvedBy: savedPrq.approvedBy,
+          approvedAmount: savedPrq.approvedAmount,
+          revisionNotes: savedPrq.revisionNotes,
+          rejectionReason: savedPrq.rejectionReason,
+        }),
+        created_by: userId,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
+      // Notify Finance requester
+      if (savedPrq.requestedBy) {
+        let title = 'Pemberitahuan Persetujuan Pembayaran';
+        let msg = '';
+        if (dto.action === DirectorDecisionAction.APPROVE) {
+          title = 'Pengajuan Pembayaran Disetujui';
+          msg = `Pengajuan pembayaran ${savedPrq.requestNumber} telah DISETUJUI oleh Direktur dan siap dibayarkan.`;
+        } else if (dto.action === DirectorDecisionAction.RETURN) {
+          title = 'Revisi Pengajuan Pembayaran';
+          msg = `Pengajuan pembayaran ${savedPrq.requestNumber} dikembalikan Direktur untuk revisi: ${savedPrq.revisionNotes}`;
+        } else if (dto.action === DirectorDecisionAction.REJECT) {
+          title = 'Pengajuan Pembayaran Ditolak';
+          msg = `Pengajuan pembayaran ${savedPrq.requestNumber} DITOLAK oleh Direktur: ${savedPrq.rejectionReason}`;
+        }
+
+        const notif = queryRunner.manager.create(Notification, {
+          userId: savedPrq.requestedBy,
+          title,
+          message: msg,
+          notificationType: 'TASK',
+          actionLink: `/finance/payments?tab=${dto.action === DirectorDecisionAction.APPROVE ? 'ready_to_pay' : 'requests'}&requestId=${savedPrq.id}`,
+          isRead: false,
+          createdBy: userId,
+          metaData: {
+            entityType: 'PAYMENT_REQUEST',
+            entityId: savedPrq.id,
+            requestNumber: savedPrq.requestNumber,
+          },
+        });
+        await queryRunner.manager.save(Notification, notif);
+      }
+
+      await queryRunner.commitTransaction();
+
+      this.eventEmitter.emit(`finance.payment_request.${dto.action.toLowerCase()}`, {
+        requestId: savedPrq.id,
+        requestNumber: savedPrq.requestNumber,
+        status: savedPrq.status,
+        decidedBy: userId,
+      });
+
+      return this.getPaymentRequestById(savedPrq.id);
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Finance Resubmit returned Payment Request
+   */
+  async resubmitPaymentRequest(
+    id: number,
+    dto: ResubmitPaymentRequestDto,
+    userId: number,
+  ): Promise<PaymentRequest> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const prq = await queryRunner.manager.findOne(PaymentRequest, {
+        where: { id },
+        relations: ['invoice'],
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!prq || prq.deletedAt) {
+        throw new NotFoundException(`Payment Request #${id} tidak ditemukan.`);
+      }
+
+      if (prq.status !== PaymentRequestStatus.NEEDS_REVISION) {
+        throw new BadRequestException(
+          `Hanya pengajuan dengan status NEEDS_REVISION yang dapat diajukan ulang. Status saat ini: ${prq.status}.`,
+        );
+      }
+
+      const oldStatus = prq.status;
+
+      if (dto.requestedAmount !== undefined && dto.requestedAmount !== null) {
+        const amt = Number(dto.requestedAmount);
+        if (isNaN(amt) || amt <= 0) {
+          throw new BadRequestException('Jumlah pengajuan ulang harus lebih besar dari 0.');
+        }
+        prq.requestedAmount = amt;
+      }
+
+      if (dto.notes) {
+        prq.notes = dto.notes;
+      }
+
+      if (prq.approvalSnapshot && (dto.bankName || dto.bankAccountNumber || dto.bankAccountHolder)) {
+        prq.approvalSnapshot = {
+          ...prq.approvalSnapshot,
+          vendorBankName: dto.bankName || prq.approvalSnapshot.vendorBankName,
+          vendorBankAccount: dto.bankAccountNumber || prq.approvalSnapshot.vendorBankAccount,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      prq.status = PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL;
+      prq.submittedAt = new Date();
+
+      const savedPrq = await queryRunner.manager.save(PaymentRequest, prq);
+
+      // Audit Log
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'payment_requests',
+        record_id: savedPrq.id,
+        action: 'RESUBMIT',
+        old_value: JSON.stringify({ status: oldStatus }),
+        new_value: JSON.stringify({
+          status: savedPrq.status,
+          requestedAmount: savedPrq.requestedAmount,
+          revisionNotes: dto.revisionNotes,
+        }),
+        created_by: userId,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
+      // Notify Director (userId 4)
+      const directorUser = await queryRunner.manager.findOne(User, {
+        where: { id: 4 },
+      });
+      if (directorUser) {
+        const notif = queryRunner.manager.create(Notification, {
+          userId: directorUser.id,
+          title: 'Persetujuan Pembayaran',
+          message: `Pengajuan pembayaran ${savedPrq.requestNumber} telah diajukan ulang oleh Finance dan menunggu persetujuan.`,
+          notificationType: 'TASK',
+          actionLink: `/finance/payments?tab=approvals&requestId=${savedPrq.id}`,
+          isRead: false,
+          createdBy: userId,
+          metaData: {
+            entityType: 'PAYMENT_REQUEST',
+            entityId: savedPrq.id,
+            requestNumber: savedPrq.requestNumber,
+          },
+        });
+        await queryRunner.manager.save(Notification, notif);
+      }
+
+      await queryRunner.commitTransaction();
+
+      this.eventEmitter.emit('finance.payment_request.resubmitted', {
+        requestId: savedPrq.id,
+        requestNumber: savedPrq.requestNumber,
+        status: savedPrq.status,
+        resubmittedBy: userId,
+      });
+
+      return this.getPaymentRequestById(savedPrq.id);
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 }
 

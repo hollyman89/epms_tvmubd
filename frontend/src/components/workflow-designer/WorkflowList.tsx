@@ -312,7 +312,7 @@ export const WorkflowList: React.FC<WorkflowListProps> = ({
           <Title level={3} style={{ margin: 0 }}>
             Workflow Definitions
           </Title>
-          <Text type="secondary">Manage enterprise workflows and approvals.</Text>
+          <Text type="secondary" style={{ fontSize: 13, color: '#64748b' }}>Manage enterprise workflows and approvals.</Text>
         </div>
         <Space size="middle">
           <Space>

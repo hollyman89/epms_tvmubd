@@ -448,6 +448,42 @@ export const getWbsStructureMetrics = (nodes: WbsNodeItem[]): WbsStructureMetric
   };
 };
 
+export interface HierarchyViolation {
+  code: string;
+  name: string;
+  parentWeight: number;
+  childrenWeightSum: number;
+  isOverAllocated?: boolean;
+}
+
+export const checkWbsHierarchyIntegrity = (nodes: WbsNodeItem[]): { valid: boolean; violations: HierarchyViolation[] } => {
+  const violations: HierarchyViolation[] = [];
+
+  const traverse = (nodeList: WbsNodeItem[]) => {
+    for (const node of nodeList) {
+      if (node.children && node.children.length > 0) {
+        const childSum = Number(
+          node.children.reduce((acc, c) => acc + Number(c.weightPercentage || 0), 0).toFixed(2),
+        );
+        const parentWeight = Number(Number(node.weightPercentage || 0).toFixed(2));
+        if (Math.abs(childSum - parentWeight) > 0.01) {
+          violations.push({
+            code: node.code,
+            name: node.name,
+            parentWeight,
+            childrenWeightSum: childSum,
+            isOverAllocated: childSum > parentWeight + 0.01,
+          });
+        }
+        traverse(node.children);
+      }
+    }
+  };
+
+  traverse(nodes);
+  return { valid: violations.length === 0, violations };
+};
+
 export const WbsTreeTableModal: React.FC<WbsTreeTableModalProps> = ({
   open,
   onClose,
@@ -569,14 +605,24 @@ export const WbsTreeTableModal: React.FC<WbsTreeTableModalProps> = ({
     };
   }, [open, charter, canonicalProjectId, storageKey]);
 
-  // Calculations
+  // Calculations (R1-1, R1-3, R1-4, R1-24)
   const rootWeightSum = useMemo(() => calculateRootWeightSum(wbsData), [wbsData]);
+  const leafWeightSum = useMemo(() => calculateLeafWeightSum(wbsData), [wbsData]);
   const totalNodesCount = useMemo(() => countTotalNodes(wbsData), [wbsData]);
   const leafNodesCount = useMemo(() => countLeafNodes(wbsData), [wbsData]);
   const rootCount = wbsData.length;
   const structureMetrics = useMemo(() => getWbsStructureMetrics(wbsData), [wbsData]);
+  const hierarchyIntegrity = useMemo(() => checkWbsHierarchyIntegrity(wbsData), [wbsData]);
 
-  const isWeightValid = Math.abs(rootWeightSum - 100) < 0.01;
+  const isRootWeightValid = Math.abs(rootWeightSum - 100) < 0.01;
+  const isLeafWeightValid = Math.abs(leafWeightSum - 100) < 0.01;
+  const isHierarchyValid = hierarchyIntegrity.valid;
+  const isWeightValid = isRootWeightValid && isLeafWeightValid && isHierarchyValid;
+
+  const isRootOverAllocated = rootWeightSum > 100.01;
+  const isLeafOverAllocated = leafWeightSum > 100.01;
+  const hasHierarchyOverAllocation = hierarchyIntegrity.violations.some((v) => v.isOverAllocated);
+  const hasOverAllocation = isRootOverAllocated || isLeafOverAllocated || hasHierarchyOverAllocation;
 
   // Save to Backend Server SSOT
   const handleSaveToServer = async () => {
@@ -590,12 +636,27 @@ export const WbsTreeTableModal: React.FC<WbsTreeTableModalProps> = ({
       return;
     }
 
-    // Pre-validation: Root weight total must be 100.00%
-    if (!isWeightValid) {
-      message.error(
-        `Total bobot Work Package tingkat 1 (Root) harus bernilai 100.00% (saat ini: ${rootWeightSum.toFixed(2)}%). Silakan sesuaikan bobot.`
-      );
-      return;
+    // Pre-validation 1: Block Over-Allocation (Structural Safety)
+    if (hasOverAllocation) {
+      if (isRootOverAllocated) {
+        message.error(
+          `Total bobot Work Package tingkat 1 (Root) (${rootWeightSum.toFixed(2)}%) melebihi 100.00% (Over-allocation). Kurangi bobot sebelum menyimpan.`
+        );
+        return;
+      }
+      if (isLeafOverAllocated) {
+        message.error(
+          `Total bobot deliverables (Leaf) (${leafWeightSum.toFixed(2)}%) melebihi 100.00% (Over-allocation). Kurangi bobot sebelum menyimpan.`
+        );
+        return;
+      }
+      const overViolation = hierarchyIntegrity.violations.find((v) => v.isOverAllocated);
+      if (overViolation) {
+        message.error(
+          `Over-allocation pada "${overViolation.code} ${overViolation.name}": Total bobot anak (${overViolation.childrenWeightSum}%) melebihi bobot induk (${overViolation.parentWeight}%).`
+        );
+        return;
+      }
     }
 
     setIsSaving(true);
@@ -1282,22 +1343,32 @@ export const WbsTreeTableModal: React.FC<WbsTreeTableModalProps> = ({
                 size="small"
                 style={{
                   borderRadius: 8,
-                  border: `1px solid ${isWeightValid ? '#86efac' : '#fde68a'}`,
-                  background: isWeightValid ? '#f0fdf4' : '#fffbeb',
+                  border: `1px solid ${isWeightValid ? '#86efac' : '#fca5a5'}`,
+                  background: isWeightValid ? '#f0fdf4' : '#fef2f2',
                 }}
               >
-                <Text type="secondary" style={{ fontSize: 11 }}>TOTAL BOBOT SCOPE</Text>
-                <div
-                  style={{
-                    fontSize: 18,
-                    fontWeight: 800,
-                    color: isWeightValid ? '#15803d' : '#b45309',
-                  }}
-                >
-                  {rootWeightSum.toFixed(1)}%
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text type="secondary" style={{ fontSize: 11 }}>BOBOT WBS (ROOT / LEAF)</Text>
+                  <Tag color={isWeightValid ? 'success' : 'error'} style={{ fontSize: 9, fontWeight: 700, margin: 0 }}>
+                    {isWeightValid ? 'VALID' : 'INVALID'}
+                  </Tag>
                 </div>
-                <div style={{ fontSize: 10.5, color: isWeightValid ? '#15803d' : '#b45309', marginTop: 2, fontWeight: 600 }}>
-                  {isWeightValid ? 'Bobot Scope Valid' : 'Belum 100.0%'}
+                <div style={{ display: 'flex', gap: 12, marginTop: 4 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>Root:</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: isRootWeightValid ? '#15803d' : '#dc2626' }}>
+                      {rootWeightSum.toFixed(1)}%
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>Leaf:</div>
+                    <div style={{ fontSize: 16, fontWeight: 800, color: isLeafWeightValid ? '#15803d' : '#dc2626' }}>
+                      {leafWeightSum.toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 10, color: isHierarchyValid ? '#15803d' : '#dc2626', marginTop: 2, fontWeight: 600 }}>
+                  Hierarki: {isHierarchyValid ? '✓ Konsisten' : `✗ ${hierarchyIntegrity.violations.length} Cacat`}
                 </div>
               </Card>
             </Col>
@@ -1323,19 +1394,108 @@ export const WbsTreeTableModal: React.FC<WbsTreeTableModalProps> = ({
             />
           )}
 
-          {/* WARNING ALERT IF WEIGHT != 100% */}
-          {!isWeightValid && wbsData.length > 0 && (
+          {/* OVER-ALLOCATION ERROR ALERT (BLOCKS SAVE) */}
+          {hasOverAllocation && wbsData.length > 0 && (
+            <Alert
+              type="error"
+              showIcon
+              icon={<WarningOutlined style={{ color: '#dc2626' }} />}
+              message="Over-Allocation Terdeteksi pada Struktur WBS (Penyimpanan Diblokir)"
+              description={
+                <div style={{ fontSize: 12, marginTop: 4 }}>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 6 }}>
+                    <span>
+                      • Root Weight (Level 1): <strong>{rootWeightSum.toFixed(2)}%</strong>{' '}
+                      <Tag color={isRootOverAllocated ? 'error' : isRootWeightValid ? 'success' : 'warning'} style={{ fontSize: 10, fontWeight: 700 }}>
+                        {isRootOverAllocated ? 'OVER-ALLOCATED (> 100%)' : isRootWeightValid ? '100% PASS' : 'DRAFT INCOMPLETE'}
+                      </Tag>
+                    </span>
+                    <span>
+                      • Leaf Weight (Deliverables): <strong>{leafWeightSum.toFixed(2)}%</strong>{' '}
+                      <Tag color={isLeafOverAllocated ? 'error' : isLeafWeightValid ? 'success' : 'warning'} style={{ fontSize: 10, fontWeight: 700 }}>
+                        {isLeafOverAllocated ? 'OVER-ALLOCATED (> 100%)' : isLeafWeightValid ? '100% PASS' : 'DRAFT INCOMPLETE'}
+                      </Tag>
+                    </span>
+                    <span>
+                      • Hierarchy Integrity:{' '}
+                      <Tag color={hasHierarchyOverAllocation ? 'error' : isHierarchyValid ? 'success' : 'warning'} style={{ fontSize: 10, fontWeight: 700 }}>
+                        {hasHierarchyOverAllocation ? 'OVER-ALLOCATED' : isHierarchyValid ? 'KONSISTEN' : 'DRAFT INCOMPLETE'}
+                      </Tag>
+                    </span>
+                  </div>
+                  <div style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: 6, padding: '6px 10px' }}>
+                    <div style={{ fontWeight: 600, color: '#b91c1c', marginBottom: 2 }}>Pelanggaran Over-allocation:</div>
+                    {hierarchyIntegrity.violations
+                      .filter((v) => v.isOverAllocated)
+                      .map((v) => (
+                        <div key={v.code} style={{ color: '#dc2626', fontSize: 11.5 }}>
+                          • <strong>WBS {v.code} ({v.name}):</strong> Bobot anak {v.childrenWeightSum}% melebihi bobot induk {v.parentWeight}%{' '}
+                          <Tag color="error" style={{ fontSize: 9 }}>OVER-ALLOCATION</Tag>
+                        </div>
+                      ))}
+                    {isRootOverAllocated && (
+                      <div style={{ color: '#dc2626', fontSize: 11.5 }}>
+                        • Total bobot Root {rootWeightSum.toFixed(2)}% melebihi batas 100.00% <Tag color="error" style={{ fontSize: 9 }}>OVER-ALLOCATION</Tag>
+                      </div>
+                    )}
+                    {isLeafOverAllocated && (
+                      <div style={{ color: '#dc2626', fontSize: 11.5 }}>
+                        • Total bobot deliverables (Leaf) {leafWeightSum.toFixed(2)}% melebihi batas 100.00% <Tag color="error" style={{ fontSize: 9 }}>OVER-ALLOCATION</Tag>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              }
+              style={{ marginBottom: 16, borderRadius: 8, borderColor: '#fca5a5', background: '#fef2f2' }}
+            />
+          )}
+
+          {/* DRAFT INCOMPLETE WARNING ALERT (DRAFT SAVE ALLOWED) */}
+          {!hasOverAllocation && !isWeightValid && wbsData.length > 0 && (
             <Alert
               type="warning"
               showIcon
-              icon={<WarningOutlined style={{ color: '#d97706' }} />}
-              message="Total Bobot WBS Belum Mencapai 100%"
+              icon={<InfoCircleOutlined style={{ color: '#d97706' }} />}
+              message="Draft WBS Belum Lengkap (Simpan Draft Diizinkan)"
               description={
-                <span style={{ fontSize: 12 }}>
-                  Total bobot WBS saat ini adalah <strong>{rootWeightSum.toFixed(1)}%</strong>. Pastikan total pembagian bobot seluruh Work Package bernilai tepat <strong>100.0%</strong> sebelum melakukan submit paket operasional.
-                </span>
+                <div style={{ fontSize: 12, marginTop: 4 }}>
+                  <div style={{ marginBottom: 6, color: '#92400e' }}>
+                    Struktur WBS belum mencapai 100.00%. Anda dapat menyimpan draft ini ke server untuk dilanjutkan nanti, namun submission Management Review dan Formal Kickoff tetap diblokir hingga mencapai 100.00%.
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 6 }}>
+                    <span>
+                      • Root Weight (Level 1): <strong>{rootWeightSum.toFixed(2)}%</strong>{' '}
+                      <Tag color={isRootWeightValid ? 'success' : 'warning'} style={{ fontSize: 10, fontWeight: 700 }}>
+                        {isRootWeightValid ? '100% PASS' : 'DRAFT INCOMPLETE'}
+                      </Tag>
+                    </span>
+                    <span>
+                      • Leaf Weight (Deliverables): <strong>{leafWeightSum.toFixed(2)}%</strong>{' '}
+                      <Tag color={isLeafWeightValid ? 'success' : 'warning'} style={{ fontSize: 10, fontWeight: 700 }}>
+                        {isLeafWeightValid ? '100% PASS' : 'DRAFT INCOMPLETE'}
+                      </Tag>
+                    </span>
+                    <span>
+                      • Hierarchy Integrity:{' '}
+                      <Tag color={isHierarchyValid ? 'success' : 'warning'} style={{ fontSize: 10, fontWeight: 700 }}>
+                        {isHierarchyValid ? 'PASS' : 'DRAFT INCOMPLETE'}
+                      </Tag>
+                    </span>
+                  </div>
+                  {!isHierarchyValid && (
+                    <div style={{ background: '#fff', border: '1px solid #fed7aa', borderRadius: 6, padding: '6px 10px' }}>
+                      <div style={{ fontWeight: 600, color: '#c2410c', marginBottom: 2 }}>Paket Kerja Belum Lengkap:</div>
+                      {hierarchyIntegrity.violations.map((v) => (
+                        <div key={v.code} style={{ color: '#ea580c', fontSize: 11.5 }}>
+                          • <strong>WBS {v.code} ({v.name}):</strong> Bobot anak {v.childrenWeightSum}% / Diperlukan {v.parentWeight}%{' '}
+                          <Tag color="warning" style={{ fontSize: 9 }}>DRAFT INCOMPLETE</Tag>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               }
-              style={{ marginBottom: 16, borderRadius: 8 }}
+              style={{ marginBottom: 16, borderRadius: 8, borderColor: '#fcd34d', background: '#fffbeb' }}
             />
           )}
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   Card,
@@ -38,20 +38,86 @@ import {
   CalculatorOutlined,
   ApartmentOutlined,
   MoreOutlined,
+  AppstoreOutlined,
   RollbackOutlined,
   WarningOutlined,
   ShoppingCartOutlined,
+  BankOutlined,
+  RocketOutlined,
+  CheckCircleFilled,
+  SearchOutlined,
+  FilterOutlined,
+  FileTextOutlined,
+  EditOutlined,
+  CalendarOutlined,
+  ScheduleOutlined,
+  CheckSquareOutlined,
+  ExclamationCircleFilled,
+  CheckCircleOutlined,
+  SafetyCertificateOutlined,
+  ToolOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { ProjectService, ProcurementService, EligiblePmItem } from '@/services';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import UserIdentityDisplay from '@/components/common/UserIdentityDisplay';
+import {
+  resolvePmIdentity,
+  resolveMarketingIdentity,
+  getKickoffQueueStatusTags,
+  resolveNextAction,
+  ChipTone,
+} from './project/kickoff-queue.utils';
+import {
+  resolvePlanVsActual,
+  resolveSchedule,
+  resolveOperationalHealth,
+  resolveActiveNextAction,
+} from './project/operational-control.utils';
+import { ProjectService, ProcurementService, EligiblePmItem, OperationalBoardData } from '@/services';
+import { WorkflowEngineService } from '@/services/workflowEngine.service';
+import dynamic from 'next/dynamic';
 import { useAuth } from '../context/AuthContext';
-import { ProjectDetailDrawer } from './project/ProjectDetailDrawer';
-import { PmCostEstimationModal } from './project/PmCostEstimationModal';
-import { WbsTreeTableModal, countLeafNodes } from './project/WbsTreeTableModal';
-import { PmOperationalPlanModal } from './project/PmOperationalPlanModal';
-import { PmProcurementPackageModal } from './project/PmProcurementPackageModal';
+
+const ProjectDetailDrawer = dynamic(
+  () => import('./project/ProjectDetailDrawer').then((m) => m.ProjectDetailDrawer),
+  { ssr: false }
+);
+const PmCostEstimationModal = dynamic(
+  () => import('./project/PmCostEstimationModal').then((m) => m.PmCostEstimationModal),
+  { ssr: false }
+);
+const WbsTreeTableModal = dynamic(
+  () => import('./project/WbsTreeTableModal').then((m) => m.WbsTreeTableModal),
+  { ssr: false }
+);
+const PmOperationalPlanModal = dynamic(
+  () => import('./project/PmOperationalPlanModal').then((m) => m.PmOperationalPlanModal),
+  { ssr: false }
+);
+const PmProcurementPackageModal = dynamic(
+  () => import('./project/PmProcurementPackageModal').then((m) => m.PmProcurementPackageModal),
+  { ssr: false }
+);
+const PmServiceClaimVerificationModal = dynamic(
+  () => import('./project/PmServiceClaimVerificationModal').then((m) => m.PmServiceClaimVerificationModal),
+  { ssr: false }
+);
+
+const ProjectWorkspace = dynamic(
+  () => import('./project/ProjectWorkspace').then((m) => m.ProjectWorkspace),
+  { ssr: false }
+);
 import { detectCircularDependencies, ScheduleTaskItem } from './project/ScheduleGanttTab';
 import { getInitialCondition, isInitialConditionComplete } from './project/ProjectInitialConditionModal';
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatPercentage,
+  formatQuantity,
+} from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
+import styles from './ProjectOperationTab.module.css';
 
 const { Title, Text } = Typography;
 
@@ -68,10 +134,17 @@ export interface ProjectCharter {
   marketingName?: string | null;
   pmName?: string | null;
   managerId?: number | null;
+  manager?: { id: number; fullName: string; email: string } | null;
   projectManagerId?: number | null;
   project_manager_id?: number | null;
-  status: 'PENDING_KICKOFF' | 'IN_PROGRESS' | 'COMPLETED' | string;
+  status: 'PENDING_KICKOFF' | 'IN_PROGRESS' | 'COMPLETED' | 'CLOSED' | string;
   projectStatus?: string;
+  startDate?: string | null;
+  endDate?: string | null;
+  actualKickoffDate?: string | null;
+  actualFinishAt?: string | null;
+  closedAt?: string | null;
+  closureStatus?: string | null;
   created_at?: string;
   overallProgress?: number;
   healthStatus?: 'ON_TRACK' | 'AT_RISK' | 'CRITICAL';
@@ -85,6 +158,8 @@ export interface ProjectCharter {
   operationalPlanStatus?: string;
   handoverStatus?: string;
   readiness?: any;
+  plannedStart?: string | null;
+  control?: any;
 }
 
 export interface ProjectOperationTabProps {
@@ -105,22 +180,291 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     const roles = (user?.roles || []).map((r: any) => String(r.name || r).toUpperCase());
     return roles.includes('DIRECTOR') || roles.includes('GENERAL_MANAGER') || roles.includes('HEAD_OF_OPERATIONS');
   }, [user]);
+  const userRoles = React.useMemo(() => {
+    return (user?.roles || []).map((r: any) => String(r.name || r).toUpperCase());
+  }, [user]);
 
   const searchParams = useSearchParams();
   const projectIdParam = searchParams.get('projectId');
   const contractIdParam = searchParams.get('contractId');
   const actionParam = searchParams.get('action');
+  const viewParam = searchParams.get('view');
+  const serviceClaimIdParam =
+    searchParams.get('serviceClaimId') ||
+    (!searchParams.has('progressClaimId') && searchParams.get('section') !== 'tasks'
+      ? searchParams.get('claimId')
+      : null);
   const autoOpenedPlanRef = useRef<string | null>(null);
   const autoOpenedAssignRef = useRef<string | null>(null);
+  const autoOpenedClaimRef = useRef<string | null>(null);
 
   const [activeTab, setActiveTab] = useState<string>('1');
-  const [loading, setLoading] = useState<boolean>(true);
-  const [pendingKickoff, setPendingKickoff] = useState<ProjectCharter[]>([]);
-  const [activeProjects, setActiveProjects] = useState<ProjectCharter[]>([]);
-  const [localRefreshKey, setLocalRefreshKey] = useState<number>(0);
-  const [readinessMap, setReadinessMap] = useState<Record<number, ProjectReadinessEntry>>({});
-  const [readinessLoading, setReadinessLoading] = useState<boolean>(false);
-  const [projectPrMap, setProjectPrMap] = useState<Record<number, any>>({});
+  const [selectedWorkspaceProjectId, setSelectedWorkspaceProjectId] = useState<number | null>(null);
+  const [selectedWorkspaceSection, setSelectedWorkspaceSection] = useState<'overview' | 'tasks' | 'monitoring' | 'gantt' | 'issue-risk' | 'closure'>('overview');
+
+  useEffect(() => {
+    const tabVal = searchParams.get('subtab') || searchParams.get('tab');
+    if (tabVal === '2' || tabVal === 'active' || tabVal === 'berjalan') {
+      setActiveTab('2');
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const sectionParam = searchParams.get('section') as any;
+    if (viewParam === 'workspace' && projectIdParam) {
+      const pid = parseInt(projectIdParam, 10);
+      if (!isNaN(pid) && pid > 0) {
+        setSelectedWorkspaceProjectId(pid);
+        const validSections = ['overview', 'tasks', 'monitoring', 'gantt', 'issue-risk', 'closure'];
+        setSelectedWorkspaceSection(validSections.includes(sectionParam) ? sectionParam : 'overview');
+      }
+    } else if ((viewParam === 'tasks' || viewParam === 'task-board') && projectIdParam) {
+      const pid = parseInt(projectIdParam, 10);
+      if (!isNaN(pid) && pid > 0) {
+        setSelectedWorkspaceProjectId(pid);
+        setSelectedWorkspaceSection('tasks');
+        if (typeof window !== 'undefined') {
+          const currentUrl = new URL(window.location.href);
+          currentUrl.searchParams.set('view', 'workspace');
+          currentUrl.searchParams.set('projectId', String(pid));
+          currentUrl.searchParams.set('section', 'tasks');
+          window.history.replaceState({}, '', currentUrl.toString());
+        }
+      }
+    } else if ((viewParam === 'monitoring' || viewParam === 'progress-monitoring') && projectIdParam) {
+      const pid = parseInt(projectIdParam, 10);
+      if (!isNaN(pid) && pid > 0) {
+        setSelectedWorkspaceProjectId(pid);
+        setSelectedWorkspaceSection('monitoring');
+        if (typeof window !== 'undefined') {
+          const currentUrl = new URL(window.location.href);
+          currentUrl.searchParams.set('view', 'workspace');
+          currentUrl.searchParams.set('projectId', String(pid));
+          currentUrl.searchParams.set('section', 'monitoring');
+          window.history.replaceState({}, '', currentUrl.toString());
+        }
+      }
+    } else if ((viewParam === 'gantt' || viewParam === 'project-gantt') && projectIdParam) {
+      const pid = parseInt(projectIdParam, 10);
+      if (!isNaN(pid) && pid > 0) {
+        setSelectedWorkspaceProjectId(pid);
+        setSelectedWorkspaceSection('gantt');
+        if (typeof window !== 'undefined') {
+          const currentUrl = new URL(window.location.href);
+          currentUrl.searchParams.set('view', 'workspace');
+          currentUrl.searchParams.set('projectId', String(pid));
+          currentUrl.searchParams.set('section', 'gantt');
+          window.history.replaceState({}, '', currentUrl.toString());
+        }
+      }
+    } else if ((viewParam === 'issue-risk' || viewParam === 'issues') && projectIdParam) {
+      const pid = parseInt(projectIdParam, 10);
+      if (!isNaN(pid) && pid > 0) {
+        setSelectedWorkspaceProjectId(pid);
+        setSelectedWorkspaceSection('issue-risk');
+        if (typeof window !== 'undefined') {
+          const currentUrl = new URL(window.location.href);
+          currentUrl.searchParams.set('view', 'workspace');
+          currentUrl.searchParams.set('projectId', String(pid));
+          currentUrl.searchParams.set('section', 'issue-risk');
+          window.history.replaceState({}, '', currentUrl.toString());
+        }
+      }
+    } else if (!viewParam && !projectIdParam) {
+      setSelectedWorkspaceProjectId(null);
+      setSelectedWorkspaceSection('overview');
+    }
+  }, [viewParam, projectIdParam, searchParams]);
+
+  const queryClient = useQueryClient();
+
+  // 1. Fetch Operational Board via TanStack Query
+  const {
+    data: boardData,
+    isLoading: loading,
+    isFetching: boardFetching,
+  } = useQuery<OperationalBoardData>({
+    queryKey: ['project', 'operational-board'],
+    queryFn: () => ProjectService.getOperationalBoard(),
+    staleTime: 60000,
+  });
+
+  // 2. Fetch Downstream PRs via TanStack Query
+  const {
+    data: allPrs = [],
+  } = useQuery<any[]>({
+    queryKey: ['procurement', 'prs'],
+    queryFn: () => ProcurementService.getPurchaseRequests(),
+    staleTime: 60000,
+  });
+
+  // Derive pending kickoff charters with role-scoping preserved
+  const pendingKickoff = React.useMemo(() => {
+    let pending: ProjectCharter[] = boardData?.pendingKickoff || [];
+    const isManagement = isPmoUser || isSuperAdmin || isDirectorUser;
+    if (!isManagement) {
+      // Project Manager workspace should never display unassigned contracts
+      pending = pending.filter((item: ProjectCharter) => {
+        const pmId = item.managerId ?? item.projectManagerId ?? (item as any).project_manager_id;
+        return pmId && Number(pmId) === Number(user?.sub);
+      });
+    }
+    return pending;
+  }, [boardData?.pendingKickoff, isPmoUser, isSuperAdmin, isDirectorUser, user?.sub]);
+
+  const [searchText, setSearchText] = useState<string>('');
+
+  // Filtered pending kickoff by search query (project, code, client, PM, marketing)
+  const filteredPendingKickoff = React.useMemo(() => {
+    if (!searchText.trim()) return pendingKickoff;
+    const q = searchText.toLowerCase().trim();
+    return pendingKickoff.filter((item: ProjectCharter) => {
+      const pName = (item.project_name || '').toLowerCase();
+      const pCode = (item.project_code || '').toLowerCase();
+      const cName = (item.customerName || '').toLowerCase();
+      const pm = resolvePmIdentity(item).name.toLowerCase();
+      const mkt = resolveMarketingIdentity(item).name.toLowerCase();
+      return (
+        pName.includes(q) ||
+        pCode.includes(q) ||
+        cName.includes(q) ||
+        pm.includes(q) ||
+        mkt.includes(q)
+      );
+    });
+  }, [pendingKickoff, searchText]);
+
+  // Derive active projects
+  // Derive active projects (Excludes CLOSED projects by canonical operational lifecycle rule)
+  const activeProjects = React.useMemo(() => {
+    const list = boardData?.activeProjects || [];
+    return list.filter(
+      (item: ProjectCharter) =>
+        item.status !== 'CLOSED' &&
+        (item as any).projectStatus !== 'CLOSED'
+    );
+  }, [boardData?.activeProjects]);
+
+  // Derive completed projects (Proyek Selesai: status = CLOSED)
+  const completedProjects = React.useMemo(() => {
+    if (boardData?.completedProjects && boardData.completedProjects.length > 0) {
+      return boardData.completedProjects;
+    }
+    // Fallback: extract closed projects if present in boardData.activeProjects
+    const activeList = boardData?.activeProjects || [];
+    return activeList.filter(
+      (item: ProjectCharter) =>
+        item.status === 'CLOSED' ||
+        (item as any).projectStatus === 'CLOSED'
+    );
+  }, [boardData?.completedProjects, boardData?.activeProjects]);
+
+  // Filtered active projects by search query (project, code, client, PM, marketing)
+  const filteredActiveProjects = React.useMemo(() => {
+    if (!searchText.trim()) return activeProjects;
+    const q = searchText.toLowerCase().trim();
+    return activeProjects.filter((item: ProjectCharter) => {
+      const pName = (item.project_name || '').toLowerCase();
+      const pCode = (item.project_code || '').toLowerCase();
+      const cName = (item.customerName || '').toLowerCase();
+      const pm = resolvePmIdentity(item).name.toLowerCase();
+      const mkt = resolveMarketingIdentity(item).name.toLowerCase();
+      return (
+        pName.includes(q) ||
+        pCode.includes(q) ||
+        cName.includes(q) ||
+        pm.includes(q) ||
+        mkt.includes(q)
+      );
+    });
+  }, [activeProjects, searchText]);
+
+  // Filtered completed projects by search query (project, code, client, PM, marketing)
+  const filteredCompletedProjects = React.useMemo(() => {
+    if (!searchText.trim()) return completedProjects;
+    const q = searchText.toLowerCase().trim();
+    return completedProjects.filter((item: ProjectCharter) => {
+      const pName = (item.project_name || '').toLowerCase();
+      const pCode = (item.project_code || '').toLowerCase();
+      const cName = (item.customerName || '').toLowerCase();
+      const pm = resolvePmIdentity(item).name.toLowerCase();
+      const mkt = resolveMarketingIdentity(item).name.toLowerCase();
+      return (
+        pName.includes(q) ||
+        pCode.includes(q) ||
+        cName.includes(q) ||
+        pm.includes(q) ||
+        mkt.includes(q)
+      );
+    });
+  }, [completedProjects, searchText]);
+
+  // Derive selected workspace project
+  const currentWorkspaceProject = React.useMemo(() => {
+    if (!selectedWorkspaceProjectId) return null;
+    return (
+      activeProjects.find(
+        (p: any) =>
+          Number(p.id) === selectedWorkspaceProjectId ||
+          Number(p.projectId) === selectedWorkspaceProjectId
+      ) ||
+      completedProjects.find(
+        (p: any) =>
+          Number(p.id) === selectedWorkspaceProjectId ||
+          Number(p.projectId) === selectedWorkspaceProjectId
+      ) ||
+      pendingKickoff.find(
+        (p: any) =>
+          Number(p.id) === selectedWorkspaceProjectId ||
+          Number(p.projectId) === selectedWorkspaceProjectId
+      ) ||
+      null
+    );
+  }, [selectedWorkspaceProjectId, activeProjects, completedProjects, pendingKickoff]);
+
+  const handleOpenProjectWorkspace = useCallback((
+    record: ProjectCharter,
+    section: 'overview' | 'tasks' | 'monitoring' | 'gantt' | 'issue-risk' | 'closure' = 'overview'
+  ) => {
+    const pid = Number(record.id || record.projectId);
+    setSelectedWorkspaceProjectId(pid);
+    setSelectedWorkspaceSection(section);
+    if (typeof window !== 'undefined') {
+      const currentUrl = new URL(window.location.href);
+      currentUrl.searchParams.set('view', 'workspace');
+      currentUrl.searchParams.set('projectId', String(pid));
+      currentUrl.searchParams.set('section', section);
+      window.history.pushState({}, '', currentUrl.toString());
+    }
+  }, []);
+
+  // Populate readinessMap directly from board projection
+  const readinessMap = React.useMemo(() => {
+    const initialMap: Record<number, ProjectReadinessEntry> = {};
+    for (const p of [...pendingKickoff, ...activeProjects, ...completedProjects]) {
+      const pid = p.projectId ? Number(p.projectId) : 0;
+      if (pid > 0 && p.readiness) {
+        initialMap[pid] = { status: 'SUCCESS', data: p.readiness };
+      }
+    }
+    return initialMap;
+  }, [pendingKickoff, activeProjects, completedProjects]);
+
+  // Populate projectPrMap directly from PR list
+  const projectPrMap = React.useMemo(() => {
+    const prMap: Record<number, any> = {};
+    if (Array.isArray(allPrs)) {
+      for (const pr of allPrs) {
+        const prPid = Number(pr.projectId || pr.project_id || (pr as any).project?.id);
+        if (prPid > 0) {
+          prMap[prPid] = pr;
+        }
+      }
+    }
+    return prMap;
+  }, [allPrs]);
+
+  const readinessLoading = loading || boardFetching;
 
   // Modal / Drawer States
   const [isDetailDrawerOpen, setIsDetailDrawerOpen] = useState(false);
@@ -160,12 +504,45 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
   const [isOperationalPlanOpen, setIsOperationalPlanOpen] = useState(false);
   const [selectedCharterForPlan, setSelectedCharterForPlan] = useState<ProjectCharter | null>(null);
 
+  // Service claims for actionable PM verification check
+  const { data: submittedServiceClaims = [] } = useQuery({
+    queryKey: ['procurement', 'service-claims', 'submitted'],
+    queryFn: () => ProcurementService.getServiceClaims({ status: 'SUBMITTED' }),
+    staleTime: 30 * 1000,
+  });
+
+  const submittedClaimsCountByProject = React.useMemo(() => {
+    const map: Record<number, number> = {};
+    if (Array.isArray(submittedServiceClaims)) {
+      submittedServiceClaims.forEach((c) => {
+        const pid = Number(c.projectId);
+        if (pid) {
+          map[pid] = (map[pid] || 0) + 1;
+        }
+      });
+    }
+    return map;
+  }, [submittedServiceClaims]);
+
   // PM Procurement Package Modal State (Phase 4 Canonical)
   const [isPackageModalOpen, setIsPackageModalOpen] = useState(false);
+  const [packageModalFamily, setPackageModalFamily] = useState<'MATERIAL' | 'SERVICE'>('MATERIAL');
   const [selectedCharterForPackage, setSelectedCharterForPackage] = useState<ProjectCharter | null>(null);
 
-  const handleOpenPackageModal = (charter: ProjectCharter) => {
+  // PM Service Claim Technical Verification Modal State (R1 Canonical)
+  const [isServiceClaimModalOpen, setIsServiceClaimModalOpen] = useState(false);
+  const [selectedClaimIdForModal, setSelectedClaimIdForModal] = useState<number | null>(null);
+  const [selectedProjectForServiceClaim, setSelectedProjectForServiceClaim] = useState<ProjectCharter | null>(null);
+
+  const handleOpenServiceClaimModal = (charter: ProjectCharter) => {
+    setSelectedProjectForServiceClaim(charter);
+    setSelectedClaimIdForModal(null);
+    setIsServiceClaimModalOpen(true);
+  };
+
+  const handleOpenPackageModal = (charter: ProjectCharter, family: 'MATERIAL' | 'SERVICE' = 'MATERIAL') => {
     setSelectedCharterForPackage(charter);
+    setPackageModalFamily(family);
     setIsPackageModalOpen(true);
   };
 
@@ -645,14 +1022,28 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     );
   };
 
-  const handleOpenDetailDrawer = (project: ProjectCharter) => {
+  const [detailDrawerInitialTab, setDetailDrawerInitialTab] = useState<string>('documents');
+  const handleOpenDetailDrawer = (project: ProjectCharter, tabKey: string = 'documents') => {
     setSelectedProjectForDetail(project);
+    setDetailDrawerInitialTab(tabKey);
     setIsDetailDrawerOpen(true);
   };
 
+  // Invalidation helper to refresh operational board and related server state
+  const fetchBoardData = React.useCallback(async () => {
+    await Promise.allSettled([
+      queryClient.invalidateQueries({ queryKey: ['project', 'operational-board'] }),
+      queryClient.invalidateQueries({ queryKey: ['procurement', 'prs'] }),
+      queryClient.invalidateQueries({ queryKey: ['inbox', 'todos'] }),
+    ]);
+  }, [queryClient]);
+
+  // Refresh trigger from parent
   useEffect(() => {
-    fetchBoardData();
-  }, [refreshTrigger, localRefreshKey]);
+    if (refreshTrigger > 0) {
+      void fetchBoardData();
+    }
+  }, [refreshTrigger, fetchBoardData]);
 
   // Canonical Phase G Cross-User Synchronization & Reconnect Resync
   useEffect(() => {
@@ -660,8 +1051,13 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       const detail = (e as CustomEvent).detail;
       if (!detail) return;
       if (
-        detail.aggregateType === 'Project' &&
-        (detail.eventName === 'project.pm.assigned' || detail.eventName === 'project.kickoff.executed')
+        detail.aggregateType === 'Project' ||
+        detail.aggregateType === 'Contract' ||
+        (detail.eventName && (
+          detail.eventName.startsWith('workflow.') ||
+          detail.eventName.startsWith('project.') ||
+          detail.eventName === 'legal.contract.approved'
+        ))
       ) {
         fetchBoardData();
       }
@@ -677,61 +1073,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       window.removeEventListener('epms:business-sync', handleSync);
       window.removeEventListener('epms:reconnect-resync', handleReconnect);
     };
-  }, []);
-
-  const fetchBoardData = async () => {
-    setLoading(true);
-    setReadinessLoading(true);
-    try {
-      const boardData = await ProjectService.getOperationalBoard();
-      let pending: ProjectCharter[] = boardData.pendingKickoff || [];
-      const isManagement = isPmoUser || isSuperAdmin || isDirectorUser;
-      if (!isManagement) {
-        // Project Manager workspace should never display unassigned contracts
-        pending = pending.filter((item: ProjectCharter) => {
-          const pmId = item.managerId ?? item.projectManagerId ?? (item as any).project_manager_id;
-          return pmId && Number(pmId) === Number(user?.sub);
-        });
-      }
-      const active: ProjectCharter[] = boardData.activeProjects || [];
-      setPendingKickoff(pending);
-      setActiveProjects(active);
-      setLoading(false);
-
-      // Populate readinessMap directly from board projection — ZERO N+1 per-project requests!
-      const initialMap: Record<number, ProjectReadinessEntry> = {};
-      for (const p of [...pending, ...active]) {
-        const pid = p.projectId ? Number(p.projectId) : 0;
-        if (pid > 0 && p.readiness) {
-          initialMap[pid] = { status: 'SUCCESS', data: p.readiness };
-        }
-      }
-      setReadinessMap(initialMap);
-
-      // Async fetch downstream Purchase Requests to project PR & workflow status alongside readiness
-      try {
-        const allPrs = await ProcurementService.getPurchaseRequests();
-        const prMap: Record<number, any> = {};
-        if (Array.isArray(allPrs)) {
-          for (const pr of allPrs) {
-            const prPid = Number(pr.projectId || pr.project_id || (pr as any).project?.id);
-            if (prPid > 0) {
-              prMap[prPid] = pr;
-            }
-          }
-        }
-        setProjectPrMap(prMap);
-      } catch (prErr) {
-        console.error('Failed to load downstream PRs for Operational Board:', prErr);
-      }
-    } catch (err) {
-      setPendingKickoff([]);
-      setActiveProjects([]);
-    } finally {
-      setLoading(false);
-      setReadinessLoading(false);
-    }
-  };
+  }, [fetchBoardData]);
 
   // Deep-link support: auto open PM Operational Plan modal if action=operational-plan
   useEffect(() => {
@@ -741,7 +1083,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     const pidNum = Number(projectIdParam);
     if (!Number.isFinite(pidNum) || pidNum <= 0) return;
 
-    const allCharters = [...pendingKickoff, ...activeProjects];
+    const allCharters = [...pendingKickoff, ...activeProjects, ...completedProjects];
     const matchingCharter = allCharters.find(
       (c) => Number(c.projectId) === pidNum || Number(c.id) === pidNum
     );
@@ -797,9 +1139,70 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
 
     if (matchingCharter) {
       autoOpenedAssignRef.current = contractIdParam;
+      setActiveTab('1');
       handleOpenClaimModal(matchingCharter);
+    } else {
+      const alreadyAssigned = pendingKickoff.some((c) => {
+        const isMatch = Number(c.contractId) === cidNum || Number(c.id) === cidNum;
+        const recordPmId = c.managerId ?? c.projectManagerId ?? (c as any).project_manager_id ?? null;
+        return isMatch && Boolean(recordPmId || c.pmName);
+      });
+      if (alreadyAssigned && autoOpenedAssignRef.current !== contractIdParam) {
+        autoOpenedAssignRef.current = contractIdParam;
+        setActiveTab('1');
+        message.info(`Penugasan PM untuk kontrak #${cidNum} sudah selesai.`);
+      }
     }
   }, [actionParam, contractIdParam, pendingKickoff, loading, isPmoUser]);
+
+  // Deep-link support: auto open PM Service Claim Verification modal if serviceClaimId is provided
+  useEffect(() => {
+    if (!serviceClaimIdParam || loading) return;
+    if (autoOpenedClaimRef.current === serviceClaimIdParam) return;
+
+    const cidNum = Number(serviceClaimIdParam);
+    if (!Number.isFinite(cidNum) || cidNum <= 0) return;
+
+    autoOpenedClaimRef.current = serviceClaimIdParam;
+    setSelectedClaimIdForModal(cidNum);
+
+    if (projectIdParam) {
+      const pidNum = Number(projectIdParam);
+      const allCharters = [...pendingKickoff, ...activeProjects, ...completedProjects];
+      const match = allCharters.find((c) => Number(c.projectId) === pidNum || Number(c.id) === pidNum);
+      if (match) {
+        setSelectedProjectForServiceClaim(match);
+      }
+    }
+
+    setIsServiceClaimModalOpen(true);
+  }, [serviceClaimIdParam, projectIdParam, pendingKickoff, activeProjects, completedProjects, loading]);
+
+  // Deep-link support: auto open PM Service Claim modal if action=service-claim or action=verify-claim
+  useEffect(() => {
+    if ((actionParam !== 'service-claim' && actionParam !== 'verify-claim') || !projectIdParam || loading) return;
+    const pidKey = `${projectIdParam}-${actionParam}`;
+    if (autoOpenedClaimRef.current === pidKey) return;
+
+    const pidNum = Number(projectIdParam);
+    if (!Number.isFinite(pidNum) || pidNum <= 0) return;
+
+    const allCharters = [...pendingKickoff, ...activeProjects, ...completedProjects];
+    const match = allCharters.find((c) => Number(c.projectId) === pidNum || Number(c.id) === pidNum);
+
+    autoOpenedClaimRef.current = pidKey;
+    setSelectedClaimIdForModal(null);
+    if (match) {
+      setSelectedProjectForServiceClaim(match);
+    } else {
+      setSelectedProjectForServiceClaim({
+        id: pidNum,
+        projectId: pidNum,
+        project_name: `Project #${pidNum}`,
+      } as any);
+    }
+    setIsServiceClaimModalOpen(true);
+  }, [actionParam, projectIdParam, pendingKickoff, activeProjects, completedProjects, loading]);
 
   const setupKickoffOrClaimModal = async (charter: ProjectCharter, isFormal: boolean = false) => {
     setSelectedCharter(charter);
@@ -870,11 +1273,38 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
         await ProjectService.formalKickoff(canonicalProjectId, formalPayload);
         message.success(`Proyek #${selectedCharter.project_code} berhasil di-kickoff ke status IN_PROGRESS!`);
       } else {
-        // CASE 1: Dedicated PMO PM Assignment (PMO Queue -> PLANNING)
-        const canonicalId = selectedCharter.project_code || selectedCharter.projectId || selectedCharter.id;
-        await ProjectService.assignProjectManager(canonicalId, {
-          projectManagerId: Number(values.projectManagerId),
-        });
+        // CASE 1: Dedicated PMO PM Assignment (PMO Queue -> PLANNING) via Canonical Workflow
+        const contractId = selectedCharter.contractId || selectedCharter.id;
+        let assignedViaWorkflow = false;
+
+        if (contractId) {
+          try {
+            const wfInstance = await WorkflowEngineService.getInstanceByEntity(
+              'CONTRACT',
+              contractId,
+              'PROJECT_INITIATION_WORKFLOW',
+            );
+            const pmoTask = wfInstance?.tasks?.find(
+              (t: any) => t.taskKey === 'PMO_ASSIGN_PM' && t.status === 'PENDING',
+            );
+            if (wfInstance && pmoTask) {
+              await WorkflowEngineService.completeTask(wfInstance.id, pmoTask.id, {
+                action: 'ASSIGN_PM',
+                contextUpdate: { project_manager_id: Number(values.projectManagerId) },
+              });
+              assignedViaWorkflow = true;
+            }
+          } catch (wfErr) {
+            console.warn('[PMO] Workflow task completion fallback:', wfErr);
+          }
+        }
+
+        if (!assignedViaWorkflow) {
+          const canonicalId = selectedCharter.project_code || selectedCharter.projectId || selectedCharter.id;
+          await ProjectService.assignProjectManager(canonicalId, {
+            projectManagerId: Number(values.projectManagerId),
+          });
+        }
         message.success(`Project Manager berhasil ditugaskan ke Proyek #${selectedCharter.project_code}!`);
       }
       setIsClaimModalVisible(false);
@@ -923,7 +1353,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       const errMsg = err?.response?.data?.message || err?.message || 'Gagal mengembalikan Project Charter ke Marketing';
       message.error(errMsg);
     } finally {
-      setPendingKickoff((prev) => prev.filter((p) => p.id !== selectedCharter.id));
+      void fetchBoardData();
       setSubmittingReject(false);
       setIsRejectModalVisible(false);
     }
@@ -932,153 +1362,921 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
 
 
   const activeColumns = [
+    // COLUMN 1: PROJECT / CLIENT
     {
-      title: 'Kode & Proyek',
-      key: 'project',
-      render: (_: any, record: ProjectCharter) => (
-        <Space
-          direction="vertical"
-          size={2}
-          style={{ cursor: 'pointer' }}
-          onClick={() => handleOpenDetailDrawer(record)}
-        >
-          <Text strong style={{ color: '#1d4ed8', fontSize: 13, textDecoration: 'none' }}>
-            {record.project_name}
-          </Text>
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            Kode: <Tag color="blue" style={{ fontSize: 10 }}>{record.project_code}</Tag>
-          </Text>
-        </Space>
-      ),
-    },
-    {
-      title: 'Klien (Customer)',
-      dataIndex: 'customerName',
-      key: 'customerName',
-      render: (val: string | null) => <Text style={{ fontSize: 12, fontWeight: 500 }}>{val ?? '-'}</Text>,
-    },
-    {
-      title: 'Nilai Kontrak',
-      dataIndex: 'contract_total_value',
-      key: 'contract_total_value',
-      render: (val: number | null) => (
-        <Text strong style={{ color: val !== null && val !== undefined ? '#059669' : '#64748b', fontSize: 13 }}>
-          {val !== null && val !== undefined ? `Rp ${Number(val).toLocaleString('id-ID')}` : '-'}
-        </Text>
-      ),
-    },
-    {
-      title: 'Project Manager (PM)',
-      dataIndex: 'pmName',
-      key: 'pmName',
-      render: (val: string | null) => (
+      title: (
         <Space size={4}>
-          <UserOutlined style={{ color: val ? '#3b82f6' : '#9ca3af' }} />
-          <Text style={{ fontSize: 12, fontWeight: 600, color: val ? '#1f2937' : '#6b7280' }}>
-            {val ?? 'Belum Ditugaskan'}
-          </Text>
+          <span>Project / Client</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
         </Space>
       ),
+      key: 'project_client',
+      minWidth: 260,
+      sorter: (a: ProjectCharter, b: ProjectCharter) => (a.project_name || '').localeCompare(b.project_name || ''),
+      render: (_: any, record: ProjectCharter) => {
+        return (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'stretch',
+              gap: 10,
+              cursor: 'pointer',
+            }}
+            onClick={() => handleOpenDetailDrawer(record)}
+          >
+            {/* Visual accent bar */}
+            <div
+              style={{
+                width: 3.5,
+                borderRadius: 2,
+                backgroundColor: '#2563EB',
+                flexShrink: 0,
+              }}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+              {/* Project Name (strongest typography, max 2 lines with tooltip) */}
+              <Tooltip title={record.project_name} placement="topLeft">
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenProjectWorkspace(record, 'overview');
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  className={styles.clickableProjectName}
+                  data-testid={`project-name-link-${record.id || record.projectId}`}
+                  style={{
+                    fontWeight: 700,
+                    fontSize: 13.5,
+                    color: '#1D4ED8',
+                    lineHeight: 1.35,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {record.project_name}
+                </span>
+              </Tooltip>
+
+              {/* Contract / SPK Reference Chip */}
+              <div>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#0891B2',
+                    backgroundColor: '#ECFEFF',
+                    border: '1px solid #A5F3FC',
+                    borderRadius: 4,
+                    padding: '1px 6px',
+                    lineHeight: '16px',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {record.project_code}
+                </span>
+              </div>
+
+              {/* Client Name with building icon */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  color: '#475569',
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
+                <BankOutlined style={{ fontSize: 12, color: '#64748B', flexShrink: 0 }} />
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {record.customerName || '-'}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      },
     },
+
+    // COLUMN 2: PM / MARKETING
     {
-      title: 'Progress Operasional WBS',
-      key: 'progress',
-      render: (_: any, record: ProjectCharter) => (
-        <div style={{ width: 140 }}>
-          <Progress percent={record.overallProgress || 0} size="small" status="active" strokeColor="#10b981" />
-        </div>
+      title: (
+        <Space size={4}>
+          <span>PM / Marketing</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
       ),
+      key: 'pm_marketing',
+      minWidth: 210,
+      sorter: (a: ProjectCharter, b: ProjectCharter) => {
+        const pmA = resolvePmIdentity(a).name;
+        const pmB = resolvePmIdentity(b).name;
+        return pmA.localeCompare(pmB);
+      },
+      render: (_: any, record: ProjectCharter) => {
+        const pm = resolvePmIdentity(record);
+        const mkt = resolveMarketingIdentity(record);
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* PM Row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  backgroundColor: pm.isAssigned ? '#2563EB' : '#94A3B8',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {pm.isAssigned ? pm.initials : <UserOutlined style={{ fontSize: 12 }} />}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+                <span
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: pm.isAssigned ? '#0F172A' : '#64748B',
+                  }}
+                >
+                  {pm.name}
+                </span>
+                <span style={{ fontSize: 11, color: '#64748B' }}>Project Manager</span>
+              </div>
+            </div>
+
+            {/* Marketing Row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  backgroundColor: '#0EA5E9',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {mkt.initials || <UserOutlined style={{ fontSize: 12 }} />}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0F172A' }}>
+                  {mkt.name}
+                </span>
+                <span style={{ fontSize: 11, color: '#64748B' }}>Marketing PIC</span>
+              </div>
+            </div>
+          </div>
+        );
+      },
     },
+
+    // COLUMN 3: PROGRESS (PLAN VS ACTUAL)
     {
-      title: 'Status Operational Plan',
-      key: 'plan_status',
-      width: 215,
-      render: (_: any, record: ProjectCharter) => getOperationalPlanStatusTag(record),
+      title: (
+        <Space size={4}>
+          <span>Progress (Plan vs Actual)</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'progress_plan_vs_actual',
+      minWidth: 220,
+      render: (_: any, record: ProjectCharter) => {
+        const {
+          plannedText,
+          plannedPercent,
+          actualText,
+          actualPercent,
+          varianceText,
+          varianceTone,
+        } = resolvePlanVsActual((record as any).control, record.overallProgress);
+
+        const varColor =
+          varianceTone === 'red'
+            ? '#DC2626'
+            : varianceTone === 'green'
+            ? '#16A34A'
+            : '#64748B';
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%', maxWidth: 200 }}>
+            {/* Rencana Row */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontSize: 11.5, color: '#64748B', fontWeight: 500, width: 50 }}>Rencana</span>
+              <div style={{ flex: 1, maxWidth: 85 }}>
+                <Progress
+                  percent={plannedPercent ?? 0}
+                  size="small"
+                  showInfo={false}
+                  strokeColor="#3B82F6"
+                  trailColor="#E2E8F0"
+                  style={{ margin: 0 }}
+                />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', fontVariantNumeric: 'tabular-nums', width: 36, textAlign: 'right' }}>
+                {plannedText}
+              </span>
+            </div>
+
+            {/* Aktual Row */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <span style={{ fontSize: 11.5, color: '#64748B', fontWeight: 500, width: 50 }}>Aktual</span>
+              <div style={{ flex: 1, maxWidth: 85 }}>
+                <Progress
+                  percent={actualPercent ?? 0}
+                  size="small"
+                  showInfo={false}
+                  strokeColor="#0D9488"
+                  trailColor="#E2E8F0"
+                  style={{ margin: 0 }}
+                />
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', fontVariantNumeric: 'tabular-nums', width: 36, textAlign: 'right' }}>
+                {actualText}
+              </span>
+            </div>
+
+            {/* Deviasi Row */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 2 }}>
+              <span style={{ fontSize: 11.5, color: '#64748B', fontWeight: 500, width: 50 }}>Deviasi</span>
+              <div style={{ flex: 1 }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: varColor, fontVariantNumeric: 'tabular-nums', textAlign: 'right' }}>
+                {varianceText}
+              </span>
+            </div>
+          </div>
+        );
+      },
     },
+
+    // COLUMN 4: SCHEDULE
     {
-      title: 'Health Status',
-      key: 'health',
-      render: () => <Tag color="default" style={{ borderRadius: 10 }}>Belum Tersedia</Tag>,
+      title: (
+        <Space size={4}>
+          <span>Schedule</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'operational_schedule',
+      minWidth: 180,
+      render: (_: any, record: ProjectCharter) => {
+        const {
+          actualStartText,
+          plannedFinishText,
+          overdueCount,
+          overdueText,
+          overdueTone,
+        } = resolveSchedule((record as any).control);
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {/* Mulai Aktual */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+              <CalendarOutlined style={{ color: '#64748B', fontSize: 12, marginTop: 2 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+                <span style={{ fontSize: 10.5, color: '#64748B' }}>Mulai Aktual</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', fontVariantNumeric: 'tabular-nums' }}>
+                  {actualStartText}
+                </span>
+              </div>
+            </div>
+
+            {/* Target Selesai */}
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+              <ScheduleOutlined style={{ color: '#64748B', fontSize: 12, marginTop: 2 }} />
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+                <span style={{ fontSize: 10.5, color: '#64748B' }}>Target Selesai</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', fontVariantNumeric: 'tabular-nums' }}>
+                  {plannedFinishText}
+                </span>
+              </div>
+            </div>
+
+            {/* Overdue Task Count Indicator */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 1 }}>
+              {overdueTone === 'red' ? (
+                <>
+                  <ExclamationCircleFilled style={{ color: '#EF4444', fontSize: 11 }} />
+                  <span style={{ color: '#DC2626', fontSize: 11.5, fontWeight: 600 }}>{overdueText}</span>
+                </>
+              ) : overdueTone === 'green' ? (
+                <>
+                  <CheckCircleFilled style={{ color: '#16A34A', fontSize: 11 }} />
+                  <span style={{ color: '#16A34A', fontSize: 11.5, fontWeight: 500 }}>0 Task Terlambat</span>
+                </>
+              ) : (
+                <span style={{ color: '#94A3B8', fontSize: 11.5 }}>-</span>
+              )}
+            </div>
+          </div>
+        );
+      },
     },
+
+    // COLUMN 5: HEALTH
     {
-      title: 'Aksi',
-      key: 'action',
-      width: 195,
-      render: (_: any, record: ProjectCharter) => (
-        <Space size={6}>
+      title: (
+        <Space size={4}>
+          <span>Health</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'operational_health',
+      minWidth: 155,
+      render: (_: any, record: ProjectCharter) => {
+        const { label, subtext, tone, iconType } = resolveOperationalHealth((record as any).control);
+
+        const toneStyles: Record<string, { bg: string; border: string; color: string }> = {
+          blue: { bg: '#EFF6FF', border: '#BFDBFE', color: '#1D4ED8' },
+          green: { bg: '#F0FDF4', border: '#BBF7D0', color: '#15803D' },
+          red: { bg: '#FEF2F2', border: '#FECACA', color: '#DC2626' },
+          slate: { bg: '#F8FAFC', border: '#E2E8F0', color: '#64748B' },
+        };
+        const s = toneStyles[tone] || toneStyles.slate;
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                fontSize: 11,
+                fontWeight: 700,
+                borderRadius: 4,
+                padding: '3px 8px',
+                lineHeight: '16px',
+                backgroundColor: s.bg,
+                border: `1px solid ${s.border}`,
+                color: s.color,
+                whiteSpace: 'nowrap',
+                letterSpacing: '0.01em',
+              }}
+            >
+              {iconType === 'ahead' ? (
+                <RiseOutlined style={{ fontSize: 11, color: s.color }} />
+              ) : iconType === 'on_plan' ? (
+                <CheckCircleFilled style={{ fontSize: 11, color: s.color }} />
+              ) : iconType === 'behind' ? (
+                <ExclamationCircleFilled style={{ fontSize: 11, color: s.color }} />
+              ) : (
+                <ClockCircleOutlined style={{ fontSize: 11, color: s.color }} />
+              )}
+              <span>{label}</span>
+            </span>
+            <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, paddingLeft: 2 }}>
+              {subtext}
+            </span>
+          </div>
+        );
+      },
+    },
+
+    // COLUMN 6: NEXT ACTION
+    {
+      title: (
+        <Space size={4}>
+          <span>Next Action</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'next_action',
+      minWidth: 165,
+      render: (_: any, record: ProjectCharter) => {
+        const action = resolveActiveNextAction({
+          project: record,
+          user,
+          userRoles,
+        });
+
+        if (action.mode === 'UPDATE_PROGRESS_BUTTON') {
+          return (
+            <Button
+              type="default"
+              icon={<EditOutlined style={{ fontSize: 13, color: '#1D4ED8' }} />}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenDetailDrawer(record, 'progress');
+              }}
+              style={{
+                height: 34,
+                padding: '0 14px',
+                borderRadius: 6,
+                fontWeight: 600,
+                fontSize: 13,
+                borderColor: '#93C5FD',
+                backgroundColor: '#EFF6FF',
+                color: '#1D4ED8',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                width: 'fit-content',
+              }}
+            >
+              {action.buttonLabel || 'Update Progress'}
+            </Button>
+          );
+        }
+
+        if (action.mode === 'REVIEW_PROGRESS_BUTTON') {
+          return (
+            <Button
+              type="default"
+              icon={<CheckSquareOutlined style={{ fontSize: 13, color: '#2563EB' }} />}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenDetailDrawer(record, 'progress');
+              }}
+              style={{
+                height: 34,
+                padding: '0 14px',
+                borderRadius: 6,
+                fontWeight: 600,
+                fontSize: 13,
+                borderColor: '#93C5FD',
+                backgroundColor: '#EFF6FF',
+                color: '#1D4ED8',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                width: 'fit-content',
+              }}
+            >
+              {action.buttonLabel || 'Review Progress'}
+            </Button>
+          );
+        }
+
+        if (action.mode === 'ASSIGN_PM_BUTTON') {
+          return (
+            <Button
+              type="default"
+              icon={<UserOutlined style={{ fontSize: 13, color: '#2563EB' }} />}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleOpenClaimModal(record);
+              }}
+              style={{
+                height: 34,
+                padding: '0 14px',
+                borderRadius: 6,
+                fontWeight: 600,
+                fontSize: 13,
+                borderColor: '#93C5FD',
+                backgroundColor: '#EFF6FF',
+                color: '#1D4ED8',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                width: 'fit-content',
+              }}
+            >
+              {action.buttonLabel || 'Tugaskan PM'}
+            </Button>
+          );
+        }
+
+        if (action.mode === 'WAITING_VERIFICATION') {
+          return (
+            <span
+              style={{
+                color: '#64748B',
+                fontSize: 12,
+                fontWeight: 500,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+              }}
+            >
+              <ClockCircleOutlined /> Menunggu verifikasi
+            </span>
+          );
+        }
+
+        // Monitoring / Detail Proyek for non-PM viewers
+        return (
           <Button
             size="small"
-            icon={<EyeOutlined />}
+            icon={<EyeOutlined style={{ fontSize: 13, color: '#475569' }} />}
             onClick={(e) => {
               e.stopPropagation();
               handleOpenDetailDrawer(record);
             }}
-            style={{ borderRadius: 6, fontWeight: 500 }}
-          >
-            Detail
-          </Button>
-          <Button
-            size="small"
-            icon={<ShoppingCartOutlined />}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleOpenPackageModal(record);
-            }}
             style={{
+              height: 34,
+              padding: '0 14px',
               borderRadius: 6,
               fontWeight: 500,
-              borderColor: '#93c5fd',
-              color: '#1d4ed8',
-              background: '#eff6ff',
+              fontSize: 13,
+              borderColor: '#CBD5E1',
+              backgroundColor: '#FFFFFF',
+              color: '#334155',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              width: 'fit-content',
             }}
           >
-            Paket Pengadaan
+            Detail Proyek
           </Button>
+        );
+      },
+    },
+
+    // COLUMN 7: AKSI
+    {
+      title: (
+        <Space size={4}>
+          <span>Aksi</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
         </Space>
       ),
+      key: 'overflow_action',
+      width: 65,
+      align: 'center' as const,
+      render: (_: any, record: ProjectCharter) => {
+        const moreMenuItems: any[] = [
+          {
+            key: 'workspace',
+            icon: <AppstoreOutlined />,
+            label: 'Buka Project Workspace',
+            onClick: () => handleOpenProjectWorkspace(record, 'overview'),
+          },
+          {
+            key: 'detail',
+            icon: <EyeOutlined />,
+            label: 'Detail Project',
+            onClick: () => handleOpenDetailDrawer(record),
+          },
+          {
+            key: 'task-board',
+            icon: <ProjectOutlined />,
+            label: 'Task Board',
+            onClick: () => handleOpenProjectWorkspace(record, 'tasks'),
+          },
+          {
+            key: 'progress-monitoring',
+            icon: <LineChartOutlined />,
+            label: 'Progress & Monitoring (S-Curve)',
+            onClick: () => handleOpenProjectWorkspace(record, 'monitoring'),
+          },
+          {
+            key: 'gantt',
+            icon: <CalendarOutlined />,
+            label: 'Gantt Chart (Baseline vs Actual)',
+            onClick: () => handleOpenProjectWorkspace(record, 'gantt'),
+          },
+          {
+            key: 'procurement-material',
+            icon: <ShoppingCartOutlined />,
+            label: 'Paket Pengadaan Material',
+            onClick: () => handleOpenPackageModal(record, 'MATERIAL'),
+          },
+          {
+            key: 'procurement-service',
+            icon: <ToolOutlined />,
+            label: 'Pengadaan Jasa',
+            onClick: () => handleOpenPackageModal(record, 'SERVICE'),
+          },
+        ];
+
+        // Verifikasi Klaim Jasa - visible for assigned PM or management
+        const recordPmId = record.managerId ?? record.projectManagerId ?? (record as any).project_manager_id ?? null;
+        const currentUserId = Number(user?.sub || (user as any)?.id);
+        const isAssignedPm = Boolean(recordPmId && Number(recordPmId) === currentUserId);
+        const isManagement = isSuperAdmin || isPmoUser || isDirectorUser;
+        const projectClaimCount = submittedClaimsCountByProject[Number(record.projectId || record.id)] || 0;
+        if (isAssignedPm || isManagement) {
+          moreMenuItems.push({
+            key: 'service-claim',
+            icon: <SafetyCertificateOutlined />,
+            label: (
+              <Space size={6}>
+                <span>Verifikasi Klaim Jasa</span>
+                {projectClaimCount > 0 && (
+                  <Badge count={projectClaimCount} size="small" style={{ backgroundColor: '#2563EB' }} />
+                )}
+              </Space>
+            ),
+            onClick: () => handleOpenServiceClaimModal(record),
+          });
+        }
+
+
+        moreMenuItems.push(
+          {
+            key: 'operational-plan',
+            icon: <ApartmentOutlined />,
+            label: 'Operational Plan',
+            onClick: () => handleOpenOperationalPlan(record),
+          },
+          {
+            key: 'closure',
+            icon: <CheckCircleOutlined />,
+            label: 'Project Closure',
+            onClick: () => handleOpenProjectWorkspace(record, 'closure'),
+          },
+        );
+
+        return (
+          <Dropdown menu={{ items: moreMenuItems }} trigger={['click']}>
+            <Tooltip title="Aksi lainnya">
+              <Button
+                size="small"
+                style={{
+                  width: 32,
+                  height: 32,
+                  padding: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 6,
+                  borderColor: '#E2E8F0',
+                  color: '#64748B',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <MoreOutlined style={{ fontSize: 16 }} />
+              </Button>
+            </Tooltip>
+          </Dropdown>
+        );
+      },
     },
   ];
 
+  // Helper to render restrained status chips matching visual benchmark
+  const renderStatusChip = (descriptor: { text: string; tone: ChipTone; hasCheck?: boolean; hasDot?: boolean }) => {
+    const toneStyles: Record<ChipTone, { bg: string; border: string; color: string }> = {
+      green: { bg: '#F0FDF4', border: '#BBF7D0', color: '#15803D' },
+      purple: { bg: '#F5F3FF', border: '#DDD6FE', color: '#6D28D9' },
+      blue: { bg: '#EFF6FF', border: '#BFDBFE', color: '#1D4ED8' },
+      amber: { bg: '#FFFBEB', border: '#FDE68A', color: '#B45309' },
+      slate: { bg: '#F8FAFC', border: '#E2E8F0', color: '#64748B' },
+      red: { bg: '#FEF2F2', border: '#FECACA', color: '#DC2626' },
+    };
+    const s = toneStyles[descriptor.tone] || toneStyles.slate;
+    return (
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          fontSize: 11,
+          fontWeight: 700,
+          borderRadius: 4,
+          padding: '2px 8px',
+          lineHeight: '16px',
+          backgroundColor: s.bg,
+          border: `1px solid ${s.border}`,
+          color: s.color,
+          whiteSpace: 'nowrap',
+          letterSpacing: '0.01em',
+        }}
+      >
+        {descriptor.hasCheck ? (
+          <CheckCircleFilled style={{ fontSize: 11, color: s.color }} />
+        ) : descriptor.hasDot ? (
+          <span style={{ fontSize: 9, lineHeight: 1 }}>●</span>
+        ) : (
+          <span style={{ fontSize: 9, lineHeight: 1 }}>○</span>
+        )}
+        <span>{descriptor.text}</span>
+      </span>
+    );
+  };
+
   const pendingColumns = [
     {
-      title: 'Kode & Nama SPK',
-      key: 'spk',
-      render: (_: any, record: ProjectCharter) => (
-        <Space
-          direction="vertical"
-          size={2}
-          style={{ cursor: 'pointer' }}
-          onClick={() => handleOpenDetailDrawer(record)}
-        >
-          <Text strong style={{ color: '#1d4ed8', fontSize: 13 }}>{record.project_name}</Text>
-          <Text type="secondary" style={{ fontSize: 11 }}>Ref ID: <Tag color="cyan" style={{ fontSize: 10 }}>{record.project_code}</Tag></Text>
+      title: (
+        <Space size={4}>
+          <span>Project / Client</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
         </Space>
       ),
+      key: 'project_client',
+      minWidth: 260,
+      sorter: (a: ProjectCharter, b: ProjectCharter) => (a.project_name || '').localeCompare(b.project_name || ''),
+      render: (_: any, record: ProjectCharter) => {
+        const isRevision =
+          record.operationalPlanStatus === 'NEEDS_REVISION' ||
+          record.handoverStatus === 'PERLU_REVISI_PM';
+        const accentColor = isRevision ? '#EF4444' : '#2563EB';
+
+        return (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'stretch',
+              gap: 10,
+              cursor: 'pointer',
+            }}
+            onClick={() => handleOpenDetailDrawer(record)}
+          >
+            {/* Visual accent bar */}
+            <div
+              style={{
+                width: 3.5,
+                borderRadius: 2,
+                backgroundColor: accentColor,
+                flexShrink: 0,
+              }}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+              {/* Project Name (strongest typography, max 2 lines with tooltip) */}
+              <Tooltip title={record.project_name} placement="topLeft">
+                <span
+                  style={{
+                    fontWeight: 700,
+                    fontSize: 13.5,
+                    color: '#1D4ED8',
+                    lineHeight: 1.35,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {record.project_name}
+                </span>
+              </Tooltip>
+
+              {/* Contract / SPK Reference Chip */}
+              <div>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#0891B2',
+                    backgroundColor: '#ECFEFF',
+                    border: '1px solid #A5F3FC',
+                    borderRadius: 4,
+                    padding: '1px 6px',
+                    lineHeight: '16px',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {record.project_code}
+                </span>
+              </div>
+
+              {/* Client Name with building icon */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  color: '#475569',
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
+                <BankOutlined style={{ fontSize: 12, color: '#64748B', flexShrink: 0 }} />
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {record.customerName || '-'}
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      },
     },
     {
-      title: 'Klien',
-      dataIndex: 'customerName',
-      key: 'customerName',
-      render: (val: string | null) => <Text style={{ fontSize: 12 }}>{val ?? '-'}</Text>,
-    },
-    {
-      title: 'Nilai SPK Legal',
-      dataIndex: 'contract_total_value',
-      key: 'contract_total_value',
-      render: (val: number | null) => (
-        <Text strong style={{ color: val !== null && val !== undefined ? '#1d4ed8' : '#64748b', fontSize: 13 }}>
-          {val !== null && val !== undefined ? `Rp ${Number(val).toLocaleString('id-ID')}` : '-'}
-        </Text>
+      title: (
+        <Space size={4}>
+          <span>PM / Marketing</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
       ),
+      key: 'pm_marketing',
+      minWidth: 210,
+      sorter: (a: ProjectCharter, b: ProjectCharter) => {
+        const pmA = resolvePmIdentity(a).name;
+        const pmB = resolvePmIdentity(b).name;
+        return pmA.localeCompare(pmB);
+      },
+      render: (_: any, record: ProjectCharter) => {
+        const pm = resolvePmIdentity(record);
+        const mkt = resolveMarketingIdentity(record);
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* PM Row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  backgroundColor: pm.isAssigned ? '#2563EB' : '#94A3B8',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {pm.isAssigned ? pm.initials : <UserOutlined style={{ fontSize: 12 }} />}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+                <span
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: pm.isAssigned ? '#0F172A' : '#64748B',
+                  }}
+                >
+                  {pm.name}
+                </span>
+                <span style={{ fontSize: 11, color: '#64748B' }}>
+                  Project Manager
+                </span>
+              </div>
+            </div>
+
+            {/* Marketing Row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  backgroundColor: mkt.isAssigned ? '#475569' : '#94A3B8',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {mkt.isAssigned ? mkt.initials : <UserOutlined style={{ fontSize: 12 }} />}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0F172A' }}>
+                  {mkt.name}
+                </span>
+                <span style={{ fontSize: 11, color: '#64748B' }}>
+                  Marketing PIC
+                </span>
+              </div>
+            </div>
+          </div>
+        );
+      },
     },
     {
-      title: 'Estimasi Budget Proyek',
-      dataIndex: 'project_budget',
-      key: 'project_budget',
-      render: (val: number | null, record: ProjectCharter) => {
+      title: (
+        <Space size={4}>
+          <span>Nilai Kontrak</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'commercial',
+      minWidth: 175,
+      sorter: (a: ProjectCharter, b: ProjectCharter) => {
+        const valA = Number(a.contract_total_value || 0);
+        const valB = Number(b.contract_total_value || 0);
+        return valA - valB;
+      },
+      render: (_: any, record: ProjectCharter) => {
         const budget =
-          val !== null && val !== undefined
-            ? Number(val)
+          record.project_budget !== null && record.project_budget !== undefined
+            ? Number(record.project_budget)
             : record.contract_total_value !== null && record.contract_total_value !== undefined
             ? Number(record.contract_total_value)
             : null;
@@ -1087,84 +2285,301 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
           record.contract_total_value !== null &&
           record.contract_total_value !== undefined;
         const isAdjusted = hasBoth && budget !== Number(record.contract_total_value);
+
         return (
-          <Space direction="vertical" size={2}>
-            <Text strong style={{ color: budget !== null ? '#059669' : '#64748b', fontSize: 13 }}>
-              {budget !== null ? `Rp ${budget.toLocaleString('id-ID')}` : '-'}
-            </Text>
-            {isAdjusted && (
-              <Tag color="gold" style={{ fontSize: 10, lineHeight: '16px', margin: 0, padding: '0 4px', borderRadius: 4 }}>
-                Penyesuaian RAB
-              </Tag>
-            )}
-          </Space>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 155 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, width: 44 }}>SPK</span>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0F172A', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                {formatCurrency(record.contract_total_value)}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 11, color: '#64748B', fontWeight: 500, width: 44 }}>Budget</span>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#059669', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                  {formatCurrency(budget)}
+                </span>
+                {isAdjusted && (
+                  <Tooltip title="Budget disesuaikan terhadap nilai SPK">
+                    <Tag color="gold" style={{ fontSize: 9.5, lineHeight: '14px', margin: 0, padding: '0 3px', borderRadius: 3 }}>
+                      Adj
+                    </Tag>
+                  </Tooltip>
+                )}
+              </div>
+            </div>
+          </div>
         );
       },
     },
     {
-      title: 'Inisiator Marketing',
-      dataIndex: 'marketingName',
-      key: 'marketingName',
-      render: (val: string | null) => <Text style={{ fontSize: 12, color: '#4b5563' }}>{val ?? '-'}</Text>,
+      title: (
+        <Space size={4}>
+          <span>Status</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'status',
+      minWidth: 235,
+      render: (_: any, record: ProjectCharter) => {
+        const { opTag, hoTag } = getKickoffQueueStatusTags(record, readinessMap);
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {/* Row 1: Operational Plan */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: '#475569',
+                  fontWeight: 500,
+                  width: 96,
+                  flexShrink: 0,
+                }}
+              >
+                Operational Plan
+              </span>
+              <Tooltip title={opTag.tooltip}>{renderStatusChip(opTag)}</Tooltip>
+            </div>
+
+            {/* Row 2: Handover */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: '#475569',
+                  fontWeight: 500,
+                  width: 96,
+                  flexShrink: 0,
+                }}
+              >
+                Handover
+              </span>
+              <Tooltip title={hoTag.tooltip}>{renderStatusChip(hoTag)}</Tooltip>
+            </div>
+          </div>
+        );
+      },
     },
     {
-      title: 'Project Manager (PM)',
-      dataIndex: 'pmName',
-      key: 'pmName',
-      width: 170,
-      render: (val: string | null, record: ProjectCharter) => {
-        const isSelf = user?.sub && record.managerId && Number(record.managerId) === Number(user.sub);
-        if (!val && !record.managerId) {
+      title: (
+        <Space size={4}>
+          <span>Next Action</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'next_action',
+      minWidth: 220,
+      render: (_: any, record: ProjectCharter) => {
+        const action = resolveNextAction(record, readinessMap, user?.sub, userRoles);
+
+        if (action.mode === 'KICKOFF_BUTTON') {
           return (
-            <Tag color="default" style={{ margin: 0, padding: '1px 6px', fontSize: 11, borderRadius: 4 }}>
-              Belum Ditugaskan
-            </Tag>
+            <Tooltip title="Proyek siap untuk Kick Off oleh Project Manager">
+              <Button
+                type="primary"
+                icon={<RocketOutlined style={{ fontSize: 13 }} />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenFormalKickoffModal(record);
+                }}
+                style={{
+                  height: 34,
+                  padding: '0 16px',
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  backgroundColor: '#1677FF',
+                  borderColor: '#1677FF',
+                  boxShadow: '0 1px 2px 0 rgba(22, 119, 255, 0.2)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: 'fit-content',
+                }}
+              >
+                {action.buttonLabel || 'Kick Off Proyek'}
+              </Button>
+            </Tooltip>
           );
         }
+
+        if (action.mode === 'WAITING_PM_KICKOFF') {
+          return (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                color: '#475569',
+                fontSize: 12.5,
+                fontWeight: 500,
+              }}
+            >
+              <ClockCircleOutlined style={{ color: '#2563EB', fontSize: 13 }} />
+              <span>{action.waitingText}</span>
+            </div>
+          );
+        }
+
+        if (action.mode === 'ASSIGN_PM_BUTTON') {
+          return (
+            <Tooltip title="Tugaskan Project Manager ke proyek ini (Status: PLANNING)">
+              <Button
+                type="primary"
+                icon={<UserOutlined style={{ fontSize: 13 }} />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenClaimModal(record);
+                }}
+                style={{
+                  height: 34,
+                  padding: '0 16px',
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  backgroundColor: '#10B981',
+                  borderColor: '#10B981',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: 'fit-content',
+                }}
+              >
+                {action.buttonLabel || 'Tugaskan PM'}
+              </Button>
+            </Tooltip>
+          );
+        }
+
+        if (action.mode === 'WAITING_PMO_ASSIGN') {
+          return (
+            <span
+              style={{
+                color: '#B45309',
+                fontSize: 12,
+                fontWeight: 500,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <ClockCircleOutlined /> {action.waitingText}
+            </span>
+          );
+        }
+
+        if (action.mode === 'WAITING_GOVERNANCE') {
+          return (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'flex-start',
+                gap: 6,
+                color: '#1D4ED8',
+                fontSize: 12,
+                lineHeight: 1.35,
+              }}
+            >
+              <ClockCircleOutlined style={{ marginTop: 2, fontSize: 13, color: '#2563EB' }} />
+              <div>
+                <div style={{ color: '#64748B', fontSize: 11.5 }}>{action.waitingText}</div>
+                <div style={{ fontWeight: 600, color: '#1D4ED8' }}>{action.actorName}</div>
+              </div>
+            </div>
+          );
+        }
+
+        if (action.mode === 'OPERATIONAL_PLAN_BUTTON') {
+          return (
+            <Tooltip title="Buka PM Operational Plan Workspace">
+              <Button
+                icon={<FileTextOutlined style={{ fontSize: 13 }} />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenOperationalPlan(record);
+                }}
+                style={{
+                  height: 34,
+                  padding: '0 16px',
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  borderColor: '#93C5FD',
+                  color: '#1D4ED8',
+                  backgroundColor: '#EFF6FF',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: 'fit-content',
+                }}
+              >
+                {action.buttonLabel || 'Operational Plan'}
+              </Button>
+            </Tooltip>
+          );
+        }
+
+        if (action.mode === 'REVISION_PLAN_BUTTON') {
+          return (
+            <Tooltip title="Operational Plan perlu revisi. Klik untuk membuka workspace.">
+              <Button
+                danger
+                icon={<EditOutlined style={{ fontSize: 13 }} />}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleOpenOperationalPlan(record);
+                }}
+                style={{
+                  height: 34,
+                  padding: '0 16px',
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  width: 'fit-content',
+                }}
+              >
+                {action.buttonLabel || 'Revisi Plan'}
+              </Button>
+            </Tooltip>
+          );
+        }
+
         return (
-          <Space direction="vertical" size={1}>
-            <Space size={4}>
-              <UserOutlined style={{ color: '#3b82f6', fontSize: 12 }} />
-              <Text style={{ fontSize: 12, fontWeight: 600, color: '#1f2937' }}>
-                {val || 'Project Manager'}
-              </Text>
-            </Space>
-            {isSelf && (
-              <Tag color="green" style={{ margin: 0, padding: '0 4px', fontSize: 10, lineHeight: '16px', borderRadius: 4 }}>
-                Project ditugaskan kepada Anda
-              </Tag>
-            )}
-          </Space>
+          <span
+            style={{
+              color: '#64748B',
+              fontSize: 12,
+              fontWeight: 500,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <ClockCircleOutlined /> {action.waitingText || 'Penyusunan Plan'}
+          </span>
         );
       },
     },
     {
-      title: 'Status Operational Plan',
-      key: 'plan_status',
-      width: 215,
-      render: (_: any, record: ProjectCharter) => getOperationalPlanStatusTag(record),
-    },
-    {
-      title: 'Status Handover',
-      key: 'status',
-      width: 210,
-      render: (_: any, record: ProjectCharter) => getHandoverStatusTag(record),
-    },
-    {
-      title: 'Aksi PMO / PM',
-      key: 'action',
-      width: 190,
+      title: (
+        <Space size={4}>
+          <span>Aksi</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'overflow_action',
+      width: 65,
+      align: 'center' as const,
       render: (_: any, record: ProjectCharter) => {
-        const pid = record.projectId ? Number(record.projectId) : 0;
-        const readinessEntry = pid > 0 ? readinessMap[pid] : null;
-        const gateStatus = readinessEntry?.status === 'SUCCESS' ? readinessEntry.data?.gate?.status : null;
-        const currentStage = readinessEntry?.status === 'SUCCESS' ? (readinessEntry.data?.gate?.currentStage || readinessEntry.data?.workflow?.currentStage) : null;
-        const isReadyForKickoff = gateStatus === 'READY_FOR_KICKOFF' || currentStage === 'READY_FOR_KICKOFF';
-        const recordPmId = record.managerId ?? record.projectManagerId ?? (record as any).project_manager_id ?? null;
-        const hasAssignedPm = Boolean(recordPmId || record.pmName);
-        const isAssignedPm = Boolean(user?.sub && recordPmId && Number(recordPmId) === Number(user.sub));
-        const canFormalKickoff = isAssignedPm || isSuperAdmin;
-        const canReject = hasAssignedPm && (isPmoUser || isSuperAdmin || isAssignedPm);
+        const pm = resolvePmIdentity(record);
+        const { isReadyForKickoff } = getKickoffQueueStatusTags(record, readinessMap);
+        const isAssignedPm = Boolean(user?.sub && pm.id && Number(pm.id) === Number(user.sub));
+        const canReject = pm.isAssigned && (isPmoUser || isSuperAdmin || isAssignedPm);
 
         const moreMenuItems: any[] = [
           {
@@ -1175,7 +2590,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
           },
         ];
 
-        // Jika sudah READY FOR KICKOFF, Operational Plan berpindah ke dalam menu More (⋮)
+        // Jika sudah READY FOR KICKOFF, Operational Plan tetap dapat diakses di menu More (⋮)
         if (isReadyForKickoff && (isAssignedPm || isPmoUser || isSuperAdmin || isDirectorUser)) {
           moreMenuItems.push({
             key: 'operational-plan',
@@ -1185,12 +2600,9 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
           });
         }
 
-        // Sembunyikan "Kembalikan ke Marketing" jika record belum memiliki PM
         if (canReject) {
           moreMenuItems.push(
-            {
-              type: 'divider',
-            },
+            { type: 'divider' },
             {
               key: 'reject',
               icon: <RollbackOutlined />,
@@ -1202,195 +2614,544 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
         }
 
         return (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' }}>
-            {/* 1. PRIMARY ACTION CONTEXTUAL (Fixed width 136px for perfect row-to-row alignment) */}
-            {isReadyForKickoff ? (
-              // Tahap READY FOR KICKOFF: Formal Kickoff adalah primary CTA
-              <Tooltip
-                placement="top"
-                title={canFormalKickoff ? "Proyek siap untuk Formal Kickoff oleh PM." : "Hanya Project Manager yang ditugaskan yang berwenang."}
+          <Dropdown menu={{ items: moreMenuItems }} trigger={['click']}>
+            <Tooltip title="Aksi lainnya">
+              <Button
+                size="small"
+                style={{
+                  width: 32,
+                  height: 32,
+                  padding: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  borderRadius: 6,
+                  borderColor: '#E2E8F0',
+                  color: '#64748B',
+                }}
+                onClick={(e) => e.stopPropagation()}
               >
-                <Button
-                  type="primary"
-                  size="small"
-                  icon={<PlayCircleOutlined />}
-                  onClick={() => handleOpenFormalKickoffModal(record)}
-                  disabled={!canFormalKickoff}
-                  style={{
-                    width: 136,
-                    height: 28,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: canFormalKickoff ? '#7c3aed' : undefined,
-                    borderColor: canFormalKickoff ? '#7c3aed' : undefined,
-                    borderRadius: 6,
-                    fontWeight: 600,
-                    boxShadow: canFormalKickoff ? '0 1px 2px 0 rgba(124, 58, 237, 0.2)' : undefined,
-                  }}
-                >
-                  Formal Kickoff
-                </Button>
-              </Tooltip>
-            ) : (!hasAssignedPm) ? (
-              // Tahap UNASSIGNED: Penugasan PM oleh PMO
-              isPmoUser ? (
-                <Tooltip title="Tugaskan Project Manager ke proyek ini (Status: PLANNING)">
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<UserOutlined />}
-                    onClick={() => handleOpenClaimModal(record)}
-                    style={{
-                      width: 136,
-                      height: 28,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      backgroundColor: '#10b981',
-                      borderColor: '#10b981',
-                      borderRadius: 6,
-                      fontWeight: 600,
-                    }}
-                  >
-                    Tugaskan PM
-                  </Button>
-                </Tooltip>
-              ) : (
-                <Tag color="orange" style={{ margin: 0, padding: '3px 8px', fontSize: 11.5, fontWeight: 500, borderRadius: 6 }}>
-                  Menunggu penugasan PMO
-                </Tag>
-              )
-            ) : (
-              // Tahap BELUM READY: Operational Plan adalah direct primary action
-              <Tooltip title={isAssignedPm ? "Project ditugaskan kepada Anda (Buka Operational Plan)" : "Buka PM Operational Plan Workspace"}>
-                <Button
-                  type="primary"
-                  size="small"
-                  icon={<ApartmentOutlined />}
-                  onClick={() => handleOpenOperationalPlan(record)}
-                  disabled={!isAssignedPm && !isPmoUser && !isSuperAdmin && !isDirectorUser}
-                  style={{
-                    width: 136,
-                    height: 28,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: '#1d4ed8',
-                    borderColor: '#1d4ed8',
-                    color: '#ffffff',
-                    borderRadius: 6,
-                    fontWeight: 600,
-                  }}
-                >
-                  Operational Plan
-                </Button>
-              </Tooltip>
-            )}
+                <MoreOutlined style={{ fontSize: 16 }} />
+              </Button>
+            </Tooltip>
+          </Dropdown>
+        );
+      },
+    },
+  ];
 
-            {/* 2. MORE ACTIONS MENU (Fixed 28x28px compact square button) */}
-            <Dropdown menu={{ items: moreMenuItems }} trigger={['click']}>
-              <Tooltip title="Aksi lainnya">
-                <Button
-                  size="small"
+  const completedColumns = [
+    // COLUMN 1: PROJECT / CLIENT
+    {
+      title: (
+        <Space size={4}>
+          <span>Project / Client</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'project_client',
+      minWidth: 260,
+      sorter: (a: ProjectCharter, b: ProjectCharter) => (a.project_name || '').localeCompare(b.project_name || ''),
+      render: (_: any, record: ProjectCharter) => {
+        return (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'stretch',
+              gap: 10,
+              cursor: 'pointer',
+            }}
+            onClick={() => handleOpenDetailDrawer(record)}
+          >
+            {/* Visual accent bar for completed: emerald green */}
+            <div
+              style={{
+                width: 3.5,
+                borderRadius: 2,
+                backgroundColor: '#10B981',
+                flexShrink: 0,
+              }}
+            />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
+              {/* Project Name */}
+              <Tooltip title={record.project_name} placement="topLeft">
+                <span
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleOpenProjectWorkspace(record, 'overview');
+                  }}
+                  role="button"
+                  tabIndex={0}
+                  className={styles.clickableProjectName}
+                  data-testid={`project-name-link-${record.id || record.projectId}`}
                   style={{
-                    width: 28,
-                    height: 28,
-                    minWidth: 28,
-                    padding: 0,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    borderRadius: 6,
-                    borderColor: '#cbd5e1',
-                    color: '#475569',
+                    fontWeight: 700,
+                    fontSize: 13.5,
+                    color: '#047857',
+                    lineHeight: 1.35,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                   }}
                 >
-                  <MoreOutlined style={{ fontSize: 14 }} />
-                </Button>
+                  {record.project_name}
+                </span>
               </Tooltip>
-            </Dropdown>
+
+              {/* Contract / SPK Reference Chip */}
+              <div>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: '#065F46',
+                    backgroundColor: '#ECFDF5',
+                    border: '1px solid #A7F3D0',
+                    borderRadius: 4,
+                    padding: '1px 6px',
+                    lineHeight: '16px',
+                    fontVariantNumeric: 'tabular-nums',
+                  }}
+                >
+                  {record.project_code}
+                </span>
+              </div>
+
+              {/* Client Name with building icon */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  color: '#475569',
+                  fontSize: 12,
+                  fontWeight: 500,
+                }}
+              >
+                <BankOutlined style={{ fontSize: 12, color: '#64748B', flexShrink: 0 }} />
+                <span
+                  style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {record.customerName || '-'}
+                </span>
+              </div>
+            </div>
           </div>
+        );
+      },
+    },
+
+    // COLUMN 2: PM / MARKETING
+    {
+      title: (
+        <Space size={4}>
+          <span>PM / Marketing</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'pm_marketing',
+      minWidth: 210,
+      sorter: (a: ProjectCharter, b: ProjectCharter) => {
+        const pmA = resolvePmIdentity(a).name;
+        const pmB = resolvePmIdentity(b).name;
+        return pmA.localeCompare(pmB);
+      },
+      render: (_: any, record: ProjectCharter) => {
+        const pm = resolvePmIdentity(record);
+        const mkt = resolveMarketingIdentity(record);
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* PM Row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  backgroundColor: pm.isAssigned ? '#2563EB' : '#94A3B8',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {pm.isAssigned ? pm.initials : <UserOutlined style={{ fontSize: 12 }} />}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+                <span
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: pm.isAssigned ? '#0F172A' : '#64748B',
+                  }}
+                >
+                  {pm.name}
+                </span>
+                <span style={{ fontSize: 11, color: '#64748B' }}>Project Manager</span>
+              </div>
+            </div>
+
+            {/* Marketing Row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: '50%',
+                  backgroundColor: '#0EA5E9',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 11,
+                  fontWeight: 700,
+                  flexShrink: 0,
+                }}
+              >
+                {mkt.initials || <UserOutlined style={{ fontSize: 12 }} />}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: '#0F172A' }}>
+                  {mkt.name}
+                </span>
+                <span style={{ fontSize: 11, color: '#64748B' }}>Marketing PIC</span>
+              </div>
+            </div>
+          </div>
+        );
+      },
+    },
+
+    // COLUMN 3: FINAL PROGRESS
+    {
+      title: (
+        <Space size={4}>
+          <span>Final Progress</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'final_progress',
+      minWidth: 160,
+      render: (_: any, record: ProjectCharter) => {
+        const prog = record.overallProgress ?? 100;
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%', maxWidth: 160 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#059669' }}>
+                {prog}%
+              </span>
+              <span style={{ fontSize: 11, color: '#059669', fontWeight: 600, background: '#ECFDF5', padding: '1px 6px', borderRadius: 4, border: '1px solid #A7F3D0' }}>
+                Selesai 100%
+              </span>
+            </div>
+            <Progress
+              percent={prog}
+              size="small"
+              showInfo={false}
+              strokeColor="#10B981"
+              trailColor="#E2E8F0"
+            />
+          </div>
+        );
+      },
+    },
+
+    // COLUMN 4: OPERATIONAL FINISH
+    {
+      title: (
+        <Space size={4}>
+          <span>Operational Finish</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'operational_finish',
+      minWidth: 150,
+      render: (_: any, record: ProjectCharter) => {
+        const rawDate = (record as any).actualFinishAt || record.endDate || record.actualKickoffDate;
+        const formatted = rawDate ? dayjs(rawDate).format('DD MMM YYYY') : '-';
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#0F172A', fontSize: 12.5, fontWeight: 600 }}>
+              <CalendarOutlined style={{ color: '#10B981', fontSize: 13 }} />
+              <span>{formatted}</span>
+            </div>
+            <span style={{ fontSize: 11, color: '#64748B' }}>Fisik 100% Tercapai</span>
+          </div>
+        );
+      },
+    },
+
+    // COLUMN 5: FORMAL CLOSED DATE
+    {
+      title: (
+        <Space size={4}>
+          <span>Formal Closed Date</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'formal_closed_date',
+      minWidth: 150,
+      render: (_: any, record: ProjectCharter) => {
+        const rawDate = (record as any).closedAt || (record as any).actualFinishAt;
+        const formatted = rawDate ? dayjs(rawDate).format('DD MMM YYYY') : '-';
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#0F172A', fontSize: 12.5, fontWeight: 600 }}>
+              <CheckCircleOutlined style={{ color: '#2563EB', fontSize: 13 }} />
+              <span>{formatted}</span>
+            </div>
+            <span style={{ fontSize: 11, color: '#64748B' }}>Persetujuan Direktur</span>
+          </div>
+        );
+      },
+    },
+
+    // COLUMN 6: CLOSURE STATUS
+    {
+      title: (
+        <Space size={4}>
+          <span>Closure Status</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'closure_status',
+      minWidth: 170,
+      render: (_: any, record: ProjectCharter) => {
+        const cStatus = (record as any).closureStatus || 'APPROVED';
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <Tag
+              color="success"
+              style={{
+                borderRadius: 4,
+                fontWeight: 700,
+                fontSize: 11,
+                padding: '1px 8px',
+                margin: 0,
+                background: '#ECFDF5',
+                borderColor: '#A7F3D0',
+                color: '#065F46',
+              }}
+            >
+              CLOSED
+            </Tag>
+            <Tag
+              color="blue"
+              style={{
+                borderRadius: 4,
+                fontWeight: 700,
+                fontSize: 11,
+                padding: '1px 8px',
+                margin: 0,
+                background: '#EFF6FF',
+                borderColor: '#BFDBFE',
+                color: '#1D4ED8',
+              }}
+            >
+              {cStatus}
+            </Tag>
+          </div>
+        );
+      },
+    },
+
+    // COLUMN 7: AKSI (Terminal action: Lihat Detail only, no operational mutations)
+    {
+      title: (
+        <Space size={4}>
+          <span>Aksi</span>
+          <span style={{ color: '#94A3B8', fontSize: 11 }}>↕</span>
+        </Space>
+      ),
+      key: 'aksi',
+      minWidth: 130,
+      render: (_: any, record: ProjectCharter) => {
+        return (
+          <Button
+            size="small"
+            icon={<EyeOutlined style={{ fontSize: 13, color: '#475569' }} />}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleOpenDetailDrawer(record);
+            }}
+            style={{
+              height: 34,
+              padding: '0 14px',
+              borderRadius: 6,
+              fontWeight: 500,
+              fontSize: 13,
+              borderColor: '#CBD5E1',
+              backgroundColor: '#FFFFFF',
+              color: '#334155',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              width: 'fit-content',
+            }}
+          >
+            Lihat Detail
+          </Button>
         );
       },
     },
   ];
 
   return (
-    <div style={{ background: '#f8fafc', padding: 16, borderRadius: 12 }}>
-      {/* Header Metrics */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
-        <Col xs={24} sm={12} md={8}>
-          <Card bodyStyle={{ padding: 16 }} style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-            <Space size={12}>
-              <div style={{ padding: 10, background: '#eff6ff', borderRadius: 8 }}>
-                <ClockCircleOutlined style={{ fontSize: 22, color: '#3b82f6' }} />
+    <div className={styles.workspaceContainer}>
+      {selectedWorkspaceProjectId ? (
+        <ProjectWorkspace
+          projectId={selectedWorkspaceProjectId}
+          project={currentWorkspaceProject || undefined}
+          loading={loading}
+          initialSection={selectedWorkspaceSection}
+          onBack={() => {
+            setSelectedWorkspaceProjectId(null);
+            setSelectedWorkspaceSection('overview');
+            if (typeof window !== 'undefined') {
+              const currentUrl = new URL(window.location.href);
+              currentUrl.searchParams.delete('view');
+              currentUrl.searchParams.delete('projectId');
+              currentUrl.searchParams.delete('section');
+              window.history.pushState({}, '', currentUrl.toString());
+            }
+          }}
+          onOpenDetailDrawer={(record, tab) => handleOpenDetailDrawer(record, tab)}
+          onOpenProcurementPackage={(record, family) => handleOpenPackageModal(record, family)}
+          onOpenServiceClaimVerification={(record) => handleOpenServiceClaimModal(record)}
+          onOpenOperationalPlan={(record) => handleOpenOperationalPlan(record)}
+          onUpdateProgress={(record) => handleOpenDetailDrawer(record, 'progress')}
+        />
+      ) : (
+        <>
+          {/* Header Metrics */}
+      <Row gutter={[16, 16]} className={styles.metricsRow}>
+        <Col xs={24} sm={12} lg={8}>
+          <div className={styles.summaryCard}>
+            <div className={styles.cardHeader}>
+              <div className={styles.iconSurface} style={{ background: '#EFF6FF', color: '#2563EB' }}>
+                <ClockCircleOutlined />
               </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>SPK Menunggu Kick-off</Text>
-                <Title level={3} style={{ margin: 0, color: '#1d4ed8' }}>
-                  {pendingKickoff.length} <Text type="secondary" style={{ fontSize: 13 }}>SPK</Text>
-                </Title>
+              <span className={styles.cardLabel}>SPK Menunggu Kick-off</span>
+            </div>
+            <div className={styles.cardValueRow}>
+              <div className={styles.cardValue}>
+                {loading ? <Spin size="small" /> : pendingKickoff.length}
+                <span className={styles.cardUnit}>SPK</span>
               </div>
-            </Space>
-          </Card>
+              <div className={styles.cardSubtext}>
+                Antrean penugasan PM & perencanaan operasional
+              </div>
+            </div>
+          </div>
         </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card bodyStyle={{ padding: 16 }} style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-            <Space size={12}>
-              <div style={{ padding: 10, background: '#ecfdf5', borderRadius: 8 }}>
-                <ProjectOutlined style={{ fontSize: 22, color: '#10b981' }} />
+
+        <Col xs={24} sm={12} lg={8}>
+          <div className={styles.summaryCard}>
+            <div className={styles.cardHeader}>
+              <div className={styles.iconSurface} style={{ background: '#F0FDF4', color: '#16A34A' }}>
+                <ProjectOutlined />
               </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Proyek Berjalan (Active)</Text>
-                <Title level={3} style={{ margin: 0, color: '#047857' }}>
-                  {activeProjects.length} <Text type="secondary" style={{ fontSize: 13 }}>Proyek</Text>
-                </Title>
+              <span className={styles.cardLabel}>Proyek Berjalan (Active)</span>
+            </div>
+            <div className={styles.cardValueRow}>
+              <div className={styles.cardValue}>
+                {loading ? <Spin size="small" /> : activeProjects.length}
+                <span className={styles.cardUnit}>Proyek</span>
               </div>
-            </Space>
-          </Card>
+              <div className={styles.cardSubtext}>
+                Proyek aktif dalam fase pelaksanaan lapangan
+              </div>
+            </div>
+          </div>
         </Col>
-        <Col xs={24} sm={12} md={8}>
-          <Card bodyStyle={{ padding: 16 }} style={{ borderRadius: 10, boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-            <Space size={12}>
-              <div style={{ padding: 10, background: '#f1f5f9', borderRadius: 8 }}>
-                <RiseOutlined style={{ fontSize: 22, color: '#64748b' }} />
+
+        <Col xs={24} sm={24} lg={8}>
+          <div className={styles.summaryCard}>
+            <div className={styles.cardHeader}>
+              <div className={styles.iconSurface} style={{ background: '#ECFDF5', color: '#059669', border: '1px solid #A7F3D0' }}>
+                <CheckCircleOutlined />
               </div>
-              <div>
-                <Text type="secondary" style={{ fontSize: 12, display: 'block' }}>Kinerja SPI / CPI Average</Text>
-                <Title level={3} style={{ margin: 0, color: '#475569' }}>
-                  N/A <Tag color="default" style={{ fontSize: 11, marginLeft: 6 }}>Belum Tersedia</Tag>
-                </Title>
+              <span className={styles.cardLabel}>Proyek Selesai</span>
+            </div>
+            <div className={styles.cardValueRow}>
+              <div className={styles.cardValue}>
+                {loading ? <Spin size="small" /> : completedProjects.length}
+                <span className={styles.cardUnit}>Proyek</span>
               </div>
-            </Space>
-          </Card>
+              <div className={styles.cardSubtext}>
+                Proyek resmi ditutup &amp; serah terima selesai
+              </div>
+            </div>
+          </div>
         </Col>
       </Row>
 
       {/* Main Tabs Workspace */}
-      <Card bodyStyle={{ padding: '12px 20px' }} style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
+      <div className={styles.tabsCard}>
         <Tabs
+          data-testid="project-delivery-tabs"
+          className={styles.deliveryTabs}
           activeKey={activeTab}
           onChange={setActiveTab}
+          tabBarExtraContent={{
+            right: (
+              <Space size={8} style={{ paddingBottom: 6 }}>
+                <Input
+                  prefix={<SearchOutlined style={{ color: '#94A3B8' }} />}
+                  placeholder="Cari proyek, klien, atau PM..."
+                  value={searchText}
+                  onChange={(e) => setSearchText(e.target.value)}
+                  allowClear
+                  style={{ width: 230, borderRadius: 6, height: 32, fontSize: 13 }}
+                />
+                <Button
+                  icon={<FilterOutlined />}
+                  style={{ borderRadius: 6, height: 32, fontSize: 13, color: '#475569', borderColor: '#CBD5E1' }}
+                >
+                  Filter
+                </Button>
+              </Space>
+            ),
+          }}
           items={[
             {
               key: '1',
               label: (
-                <Space>
+                <Space size={6}>
                   <ClockCircleOutlined />
                   <span>Antrean Kick-off Charter</span>
-                  <Badge count={pendingKickoff.length} overflowCount={99} style={{ backgroundColor: '#f59e0b' }} />
+                  <span className={`${styles.tabBadge} ${activeTab === '1' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+                    {pendingKickoff.length}
+                  </span>
                 </Space>
               ),
               children: (
-                <div style={{ paddingTop: 12 }}>
+                <div className={styles.tableContainer}>
                   <Table
-                    dataSource={pendingKickoff}
+                    className={styles.deliveryTable}
+                    dataSource={filteredPendingKickoff}
                     columns={pendingColumns}
                     rowKey="id"
                     loading={loading}
                     pagination={false}
-                    size="small"
+                    size="middle"
+                    scroll={{ x: 1100 }}
+                    rowClassName={(record: ProjectCharter) => {
+                      const cidNum = contractIdParam ? Number(contractIdParam) : null;
+                      const isFocused = cidNum && (Number(record.contractId) === cidNum || Number(record.id) === cidNum);
+                      return isFocused ? 'ant-table-row-selected' : '';
+                    }}
                   />
                 </div>
               ),
@@ -1398,21 +3159,25 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
             {
               key: '2',
               label: (
-                <Space>
+                <Space size={6}>
                   <ProjectOutlined />
                   <span>Daftar Proyek Berjalan</span>
-                  <Badge count={activeProjects.length} overflowCount={99} style={{ backgroundColor: '#10b981' }} />
+                  <span className={`${styles.tabBadge} ${activeTab === '2' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+                    {activeProjects.length}
+                  </span>
                 </Space>
               ),
               children: (
-                <div style={{ paddingTop: 12 }}>
+                <div className={styles.tableContainer} data-testid="active-projects-table">
                   <Table
-                    dataSource={activeProjects}
+                    className={styles.deliveryTable}
+                    dataSource={filteredActiveProjects}
                     columns={activeColumns}
                     rowKey="id"
                     loading={loading}
                     pagination={false}
-                    size="small"
+                    size="middle"
+                    scroll={{ x: 1150 }}
                   />
                 </div>
               ),
@@ -1420,50 +3185,40 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
             {
               key: '3',
               label: (
-                <Space>
-                  <LineChartOutlined />
-                  <span>Grafik S-Curve EVM Performance</span>
+                <Space size={6}>
+                  <CheckCircleOutlined />
+                  <span>Proyek Selesai</span>
+                  <span className={`${styles.tabBadge} ${activeTab === '3' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+                    {completedProjects.length}
+                  </span>
                 </Space>
               ),
               children: (
-                <div style={{ paddingTop: 16 }}>
-                  <Row gutter={[16, 16]}>
-                    <Col span={24}>
-                      <Card
-                        title="Earned Value Management (EVM) S-Curve Project Monitoring"
-                        size="small"
-                        style={{ borderRadius: 8 }}
-                      >
-                        <div style={{ padding: '48px 16px', textAlign: 'center' }}>
-                          <Empty
-                            image={Empty.PRESENTED_IMAGE_SIMPLE}
-                            description={
-                              <Space direction="vertical" size={4}>
-                                <Text strong style={{ color: '#334155', fontSize: 14 }}>
-                                  Data S-Curve & EVM Belum Tersedia
-                                </Text>
-                                <Text type="secondary" style={{ fontSize: 12 }}>
-                                  Kalkulasi Planned Value (PV), Earned Value (EV), serta Actual Cost (AC) dan kurva S performa proyek akan tersedia secara otomatis setelah sumber pencatatan progres eksekusi aktif.
-                                </Text>
-                              </Space>
-                            }
-                          />
-                        </div>
-                      </Card>
-                    </Col>
-                  </Row>
+                <div className={styles.tableContainer} data-testid="completed-projects-table">
+                  <Table
+                    className={styles.deliveryTable}
+                    dataSource={filteredCompletedProjects}
+                    columns={completedColumns}
+                    rowKey="id"
+                    loading={loading}
+                    pagination={false}
+                    size="middle"
+                    scroll={{ x: 1150 }}
+                  />
                 </div>
               ),
             },
           ]}
         />
-      </Card>
+      </div>
+    </>
+  )}
 
       {/* Modal Penugasan PM (PMO) / Formal Kick-off */}
       <Modal
         title={
           <Space>
-            <ProjectOutlined style={{ color: isFormalKickoffMode ? '#7c3aed' : '#10b981' }} />
+            <ProjectOutlined style={{ color: '#1677ff' }} />
             <Text strong style={{ fontSize: 15, color: '#1f2937' }}>
               {isFormalKickoffMode ? 'Formal Kick-off Proyek (Aktivasi ke IN_PROGRESS)' : 'Penugasan Project Manager (PMO)'}
             </Text>
@@ -1475,7 +3230,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
         okText={isFormalKickoffMode ? "Formal Kickoff" : "Tugaskan PM"}
         cancelText="Batal"
         confirmLoading={submittingClaim}
-        okButtonProps={{ style: { backgroundColor: isFormalKickoffMode ? '#7c3aed' : '#10b981', borderColor: isFormalKickoffMode ? '#7c3aed' : '#10b981' } }}
+        okButtonProps={{ style: { backgroundColor: '#1677ff', borderColor: '#1677ff' } }}
       >
         <Form form={claimForm} layout="vertical" onFinish={handleClaimSubmit} style={{ marginTop: 12 }}>
           {isFormalKickoffMode ? (
@@ -1488,11 +3243,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
                 <Col span={12}>
                   <Form.Item label="Nilai SPK Legal">
                     <Input
-                      value={
-                        selectedCharter?.contract_total_value !== null && selectedCharter?.contract_total_value !== undefined
-                          ? `Rp ${Number(selectedCharter.contract_total_value).toLocaleString('id-ID')}`
-                          : '-'
-                      }
+                      value={formatCurrency(selectedCharter?.contract_total_value)}
                       disabled
                       style={{ color: '#1d4ed8', fontWeight: 600 }}
                     />
@@ -1501,13 +3252,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
                 <Col span={12}>
                   <Form.Item label="Estimasi Budget Proyek">
                     <Input
-                      value={
-                        selectedCharter?.project_budget !== null && selectedCharter?.project_budget !== undefined
-                          ? `Rp ${Number(selectedCharter.project_budget).toLocaleString('id-ID')}`
-                          : selectedCharter?.contract_total_value !== null && selectedCharter?.contract_total_value !== undefined
-                          ? `Rp ${Number(selectedCharter.contract_total_value).toLocaleString('id-ID')}`
-                          : '-'
-                      }
+                      value={formatCurrency(selectedCharter?.project_budget ?? selectedCharter?.contract_total_value)}
                       disabled
                       style={{ color: '#059669', fontWeight: 600 }}
                     />
@@ -1614,11 +3359,7 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
               {/* 4. Nilai SPK Legal (Read-only) */}
               <Form.Item label="Nilai SPK Legal">
                 <Input
-                  value={
-                    selectedCharter?.contract_total_value !== null && selectedCharter?.contract_total_value !== undefined
-                      ? `Rp ${Number(selectedCharter.contract_total_value).toLocaleString('id-ID')}`
-                      : '-'
-                  }
+                  value={formatCurrency(selectedCharter?.contract_total_value)}
                   disabled
                   style={{ color: '#1d4ed8', fontWeight: 600 }}
                 />
@@ -1725,70 +3466,109 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
       </Modal>
 
       {/* Project Detail Drawer */}
-      <ProjectDetailDrawer
-        open={isDetailDrawerOpen}
-        onClose={() => {
-          setIsDetailDrawerOpen(false);
-          setSelectedProjectForDetail(null);
-        }}
-        project={
-          selectedProjectForDetail
-            ? {
-                ...selectedProjectForDetail,
-                created_at: selectedProjectForDetail.created_at || new Date().toISOString(),
-              }
-            : null
-        }
-        onOpenOperationalPlan={(p) => {
-          handleOpenOperationalPlan(p);
-        }}
-      />
+      {isDetailDrawerOpen && (
+        <ProjectDetailDrawer
+          open={isDetailDrawerOpen}
+          initialTabKey={detailDrawerInitialTab}
+          onClose={() => {
+            setIsDetailDrawerOpen(false);
+            setSelectedProjectForDetail(null);
+          }}
+          project={
+            selectedProjectForDetail
+              ? {
+                  ...selectedProjectForDetail,
+                  created_at: selectedProjectForDetail.created_at || new Date().toISOString(),
+                }
+              : null
+          }
+          onOpenOperationalPlan={(p) => {
+            handleOpenOperationalPlan(p);
+          }}
+          onOpenWorkspaceSection={(p, section) => {
+            setIsDetailDrawerOpen(false);
+            setSelectedProjectForDetail(null);
+            handleOpenProjectWorkspace(p, section as any);
+          }}
+        />
+      )}
 
       {/* PM Cost Estimation & Budget Review Modal */}
-      <PmCostEstimationModal
-        open={isEstimateModalVisible}
-        onClose={() => {
-          setIsEstimateModalVisible(false);
-          setSelectedCharterForEstimate(null);
-        }}
-        charter={selectedCharterForEstimate}
-      />
+      {isEstimateModalVisible && selectedCharterForEstimate && (
+        <PmCostEstimationModal
+          open={isEstimateModalVisible}
+          onClose={() => {
+            setIsEstimateModalVisible(false);
+            setSelectedCharterForEstimate(null);
+          }}
+          charter={selectedCharterForEstimate}
+        />
+      )}
 
       {/* PM Pre-Kickoff Work Breakdown Structure (WBS) Modal */}
-      <WbsTreeTableModal
-        open={isWbsModalVisible}
-        onClose={() => {
-          setIsWbsModalVisible(false);
-          setSelectedCharterForWbs(null);
-        }}
-        charter={selectedCharterForWbs}
-      />
+      {isWbsModalVisible && selectedCharterForWbs && (
+        <WbsTreeTableModal
+          open={isWbsModalVisible}
+          onClose={() => {
+            setIsWbsModalVisible(false);
+            setSelectedCharterForWbs(null);
+          }}
+          charter={selectedCharterForWbs}
+        />
+      )}
 
       {/* PM Unified Operational Plan Workspace Modal */}
-      <PmOperationalPlanModal
-        open={isOperationalPlanOpen}
-        onClose={() => {
-          setIsOperationalPlanOpen(false);
-          setSelectedCharterForPlan(null);
-          setLocalRefreshKey((k) => k + 1);
-        }}
-        charter={selectedCharterForPlan}
-        onRefreshParent={() => {
-          setLocalRefreshKey((k) => k + 1);
-          fetchBoardData();
-        }}
-      />
+      {isOperationalPlanOpen && selectedCharterForPlan && (
+        <PmOperationalPlanModal
+          open={isOperationalPlanOpen}
+          onClose={() => {
+            setIsOperationalPlanOpen(false);
+            setSelectedCharterForPlan(null);
+            void fetchBoardData();
+          }}
+          charter={selectedCharterForPlan}
+          onRefreshParent={() => {
+            void fetchBoardData();
+          }}
+        />
+      )}
 
       {/* PM Procurement Package Authoring Modal (Phase 4 Canonical) */}
-      <PmProcurementPackageModal
-        open={isPackageModalOpen}
-        onClose={() => {
-          setIsPackageModalOpen(false);
-          setSelectedCharterForPackage(null);
-        }}
-        project={selectedCharterForPackage}
-        onRefreshParent={() => fetchBoardData()}
-      />
+      {isPackageModalOpen && selectedCharterForPackage && (
+        <PmProcurementPackageModal
+          open={isPackageModalOpen}
+          packageFamily={packageModalFamily}
+          onClose={() => {
+            setIsPackageModalOpen(false);
+            setSelectedCharterForPackage(null);
+          }}
+          project={selectedCharterForPackage}
+          onRefreshParent={() => fetchBoardData()}
+        />
+      )}
+
+      {/* PM Service Claim Technical Verification Modal (R1 Canonical) */}
+      {isServiceClaimModalOpen && (
+        <PmServiceClaimVerificationModal
+          open={isServiceClaimModalOpen}
+          claimId={selectedClaimIdForModal}
+          projectId={
+            selectedProjectForServiceClaim
+              ? Number(selectedProjectForServiceClaim.projectId || selectedProjectForServiceClaim.id)
+              : projectIdParam
+              ? Number(projectIdParam)
+              : undefined
+          }
+          onClose={() => {
+            setIsServiceClaimModalOpen(false);
+            setSelectedClaimIdForModal(null);
+            setSelectedProjectForServiceClaim(null);
+          }}
+          onSuccess={() => {
+            void fetchBoardData();
+          }}
+        />
+      )}
     </div>
   );
 };

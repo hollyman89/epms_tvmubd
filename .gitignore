@@ -3,13 +3,10 @@
 .env
 .env.backup
 .env.production
-.phpactor.json
-.phpunit.result.cache
 /.codex
 /.cursor/
 /.idea
 /.nova
-/.phpunit.cache
 /.vscode
 /.zed
 /auth.json
@@ -20,10 +17,6 @@
 /public/storage
 /storage/*.key
 /storage/pail
-/vendor
-_ide_helper.php
-Homestead.json
-Homestead.yaml
 Thumbs.db
 
 # Security Exclusions (Phase 2)
@@ -59,3 +52,13 @@ backend/audit_procurement.js
 /.playwright-mcp/
 /graphify-out/
 /reports/test_20260922.md
+/.gemini/
+/artifacts/
+/test-results/
+/outputs/
+/screenshots/
+/frontend/scratch/
+/frontend/screenshots/
+/backend/scratch/
+/frontend/tests/audit-measurements.json
+/frontend/tests/f1-measurements.json

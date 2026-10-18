@@ -9,17 +9,14 @@ import {
   Button,
   Space,
   Select,
-  Input,
   Alert,
   Empty,
-  Badge,
 } from 'antd';
 import {
   SafetyCertificateOutlined,
   CheckCircleFilled,
   ExclamationCircleFilled,
   SyncOutlined,
-  EyeOutlined,
   FilterOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
@@ -29,8 +26,10 @@ import {
 } from '@/services/procurement.service';
 import { ReconciliationItemModal } from './ReconciliationItemModal';
 import { useAuth } from '@/context/AuthContext';
+import { formatCurrency, formatQuantity } from '@/lib/formatters';
+import styles from './ProcurementPage.module.css';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 export interface ReconciliationTabProps {
   onReconciliationChanged?: () => void;
@@ -50,12 +49,10 @@ export const ReconciliationTab: React.FC<ReconciliationTabProps> = ({
     userRoles.includes('PURCHASING') ||
     userRoles.includes('ADMIN');
 
-  // Authorized Mutation roles matching backend @Roles: PROCUREMENT, PURCHASING, SUPER_ADMIN, ADMIN
+  // Authorized Mutation roles: PROCUREMENT, PURCHASING
   const canMutate =
     isProcurement ||
-    isSuperAdmin ||
-    userRoles.includes('PURCHASING') ||
-    userRoles.includes('ADMIN');
+    userRoles.includes('PURCHASING');
 
   const [originFilter, setOriginFilter] = useState<'ALL' | 'LEGACY' | 'AD_HOC'>('ALL');
   const [selectedPrItemId, setSelectedPrItemId] = useState<number | null>(null);
@@ -64,8 +61,6 @@ export const ReconciliationTab: React.FC<ReconciliationTabProps> = ({
   const {
     data: unresolvedItems = [],
     isLoading,
-    isError,
-    error,
     refetch,
   } = useQuery({
     queryKey: ['procurement', 'reconciliations', originFilter],
@@ -79,86 +74,94 @@ export const ReconciliationTab: React.FC<ReconciliationTabProps> = ({
 
   const columns = [
     {
-      title: 'Nomor PR',
+      title: 'NOMOR PR',
       key: 'prNumber',
       width: 170,
       render: (_: any, r: UnresolvedReconciliationItem) => (
         <div>
-          <span style={{ fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>
+          <span className={styles.idMonospace} style={{ fontWeight: 700, color: '#0F172A' }}>
             {r.purchaseRequest?.prNumber || `PR-${r.prId}`}
           </span>
-          <div style={{ fontSize: 10.5, color: '#64748b' }}>Item ID: #{r.id}</div>
+          <div style={{ fontSize: 10.5, color: '#64748B' }}>Item ID: #{r.id}</div>
         </div>
       ),
     },
     {
-      title: 'Asal Pengadaan (Origin)',
+      title: 'ASAL PENGADAAN',
       key: 'origin',
-      width: 130,
+      width: 140,
       render: (_: any, r: UnresolvedReconciliationItem) => {
         const origin = r.purchaseRequest?.origin || 'AD_HOC';
         const color = origin === 'LEGACY' ? 'purple' : 'orange';
         return (
-          <Tag color={color} style={{ fontWeight: 700, borderRadius: 4, margin: 0 }}>
+          <Tag color={color} style={{ fontWeight: 700, borderRadius: 4, margin: 0, fontSize: 11 }}>
             ● {origin}
           </Tag>
         );
       },
     },
     {
-      title: 'Proyek',
+      title: 'PROYEK',
       key: 'project',
-      width: 240,
+      width: 220,
       render: (_: any, r: UnresolvedReconciliationItem) => {
         const p = r.purchaseRequest?.project;
         return p ? (
           <div>
-            <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0f172a' }}>{p.name}</div>
-            {p.code && <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>{p.code}</Tag>}
+            <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0F172A' }}>{p.name}</div>
+            {p.code && (
+              <span className={styles.subtleCodeTag} style={{ background: '#F1F5F9', color: '#475569', display: 'inline-block', marginTop: 2 }}>
+                {p.code}
+              </span>
+            )}
           </div>
         ) : (
-          <span style={{ color: '#94a3b8' }}>Proyek #{r.purchaseRequest?.projectId || '—'}</span>
+          <span style={{ color: '#94A3B8' }}>Proyek #{r.purchaseRequest?.projectId || '—'}</span>
         );
       },
     },
     {
-      title: 'Nama Item PR Historis',
+      title: 'NAMA ITEM PR HISTORIS',
       dataIndex: 'itemName',
       key: 'itemName',
-      render: (val: string) => <span style={{ fontWeight: 600, color: '#1e293b' }}>{val}</span>,
+      render: (val: string) => <span style={{ fontWeight: 600, color: '#1E293B', fontSize: 12.5 }}>{val}</span>,
     },
     {
-      title: 'Jumlah',
+      title: 'JUMLAH',
       key: 'quantity',
-      width: 120,
+      width: 130,
       align: 'right' as const,
       render: (_: any, r: UnresolvedReconciliationItem) => (
-        <span style={{ fontWeight: 700, color: '#1d4ed8' }}>
-          {Number(r.quantity || 0).toLocaleString('id-ID')} {r.uom || 'Unit'}
+        <span className={styles.currencyText} style={{ color: '#1D4ED8' }}>
+          {formatQuantity(Number(r.quantity || 0))} {r.uom || 'Unit'}
         </span>
       ),
     },
     {
-      title: 'Estimasi Harga Satuan',
+      title: 'ESTIMASI HARGA SATUAN',
       dataIndex: 'estimatedUnitPrice',
       key: 'estimatedUnitPrice',
-      width: 140,
+      width: 160,
       align: 'right' as const,
-      render: (val: number) => `Rp ${Number(val || 0).toLocaleString('id-ID')}`,
+      render: (val: number) => (
+        <span className={styles.currencyText} style={{ color: '#0F172A' }}>
+          {formatCurrency(Number(val || 0))}
+        </span>
+      ),
     },
     {
-      title: 'Status PR',
+      title: 'STATUS PR',
       key: 'status',
-      width: 120,
+      width: 130,
       align: 'center' as const,
       render: (_: any, r: UnresolvedReconciliationItem) => (
-        <Tag color="cyan" style={{ fontWeight: 600, margin: 0 }}>
+        <Tag color="cyan" style={{ fontWeight: 600, margin: 0, borderRadius: 4 }}>
           {r.purchaseRequest?.status || 'SUBMITTED'}
         </Tag>
       ),
     },
     {
-      title: 'Aksi',
+      title: 'AKSI',
       key: 'action',
       width: 140,
       align: 'center' as const,
@@ -171,15 +174,9 @@ export const ReconciliationTab: React.FC<ReconciliationTabProps> = ({
             setSelectedPrItemId(r.id);
             setIsModalOpen(true);
           }}
-          style={{
-            backgroundColor: canMutate ? '#2563eb' : '#64748b',
-            borderColor: canMutate ? '#2563eb' : '#64748b',
-            borderRadius: 6,
-            fontWeight: 600,
-            fontSize: 11.5,
-          }}
+          className={canMutate ? styles.btnActionBlue : styles.btnActionSecondary}
         >
-          {canMutate ? 'Rekonsiliasi Item' : 'Lihat Detail'}
+          {canMutate ? 'Rekonsiliasi' : 'Lihat Detail'}
         </Button>
       ),
     },
@@ -192,98 +189,83 @@ export const ReconciliationTab: React.FC<ReconciliationTabProps> = ({
         showIcon
         message="Akses Rekonsiliasi Terbatas"
         description="Tab Rekonsiliasi hanya dapat diakses oleh role Procurement, Purchasing, Project Manager, dan Super Admin sesuai kebijakan backend."
-        style={{ margin: '16px 0' }}
+        style={{ margin: '16px 0', borderRadius: 8 }}
       />
     );
   }
 
   return (
     <div>
-      <Card
-        size="small"
-        style={{
-          borderRadius: 8,
-          border: '1px solid #e2e8f0',
-          marginBottom: 24,
-          background: '#ffffff',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-        }}
-        title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '4px 0' }}>
-            <Space size={8}>
-              <SafetyCertificateOutlined style={{ color: '#2563eb', fontSize: 17 }} />
-              <span style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
-                Antrean Rekonsiliasi Pengadaan Historis (LEGACY &amp; AD_HOC)
-              </span>
-              <Tag
-                color={unresolvedItems.length > 0 ? 'volcano' : 'green'}
-                style={{ fontWeight: 700, borderRadius: 4, margin: 0 }}
-              >
-                {unresolvedItems.length} Item Belum Selesai
-              </Tag>
-            </Space>
-
-            <Space size={10}>
-              <Space size={4}>
-                <FilterOutlined style={{ color: '#64748b', fontSize: 12 }} />
-                <span style={{ fontSize: 12, color: '#64748b' }}>Origin:</span>
-                <Select
-                  size="small"
-                  value={originFilter}
-                  onChange={(v) => setOriginFilter(v)}
-                  style={{ width: 130 }}
-                  options={[
-                    { value: 'ALL', label: 'Semua Origin' },
-                    { value: 'LEGACY', label: 'LEGACY' },
-                    { value: 'AD_HOC', label: 'AD_HOC' },
-                  ]}
-                />
-              </Space>
-
-              <Button
-                size="small"
-                type="text"
-                icon={<SyncOutlined spin={isLoading} />}
-                onClick={() => refetch()}
-                style={{ fontSize: 11.5, color: '#2563eb', fontWeight: 600 }}
-              >
-                Refresh
-              </Button>
-            </Space>
+      {/* Refined Compact Safety Gate Banner */}
+      {unresolvedItems.length > 0 ? (
+        <div className={styles.safetyGateWarning}>
+          <ExclamationCircleFilled style={{ color: '#D97706', fontSize: 18, flexShrink: 0 }} />
+          <div>
+            <div className={styles.safetyGateTitle} style={{ color: '#92400E' }}>
+              Safety Gate Concurrency &amp; Quota Aktif ({unresolvedItems.length} Item Menunggu Rekonsiliasi)
+            </div>
+            <div className={styles.safetyGateDesc} style={{ color: '#B45309' }}>
+              Item pengadaan langsung historis atau ad-hoc belum dipetakan ke CostItem RAB aktif. Selesaikan rekonsiliasi agar paket pengadaan baru pada proyek terkait dapat disetujui.
+            </div>
           </div>
-        }
-      >
-        {unresolvedItems.length > 0 ? (
-          <Alert
-            type="warning"
-            showIcon
-            icon={<ExclamationCircleFilled style={{ color: '#d97706' }} />}
-            message={<span style={{ fontWeight: 700 }}>Safety Gate Concurrency &amp; Quota Aktif</span>}
-            description={
-              <div style={{ fontSize: 12, color: '#92400e' }}>
-                Item di bawah merupakan pengadaan langsung historis atau ad-hoc yang belum dipetakan ke CostItem RAB aktif.
-                Paket pengadaan baru pada proyek yang bersangkutan akan ditangguhkan oleh server (HTTP 422) hingga seluruh item direkonsiliasi atau dieksklusi.
-              </div>
-            }
-            style={{ marginBottom: 16, backgroundColor: '#fffbeb', border: '1px solid #fde68a' }}
-          />
-        ) : (
-          <Alert
-            type="success"
-            showIcon
-            icon={<CheckCircleFilled style={{ color: '#059669' }} />}
-            message={<span style={{ fontWeight: 700 }}>Safety Gate Bersih — Seluruh Item Terekonsiliasi</span>}
-            description="Tidak ada item PR legacy atau ad-hoc yang menggantung. Seluruh pengadaan proyek berada pada jalur paket pengadaan canonical."
-            style={{ marginBottom: 16, backgroundColor: '#ecfdf5', border: '1px solid #a7f3d0' }}
-          />
-        )}
+        </div>
+      ) : (
+        <div className={styles.safetyGateSuccess}>
+          <CheckCircleFilled style={{ color: '#059669', fontSize: 18, flexShrink: 0 }} />
+          <div>
+            <div className={styles.safetyGateTitle} style={{ color: '#065F46' }}>
+              Safety Gate Bersih — Seluruh Item Terekonsiliasi
+            </div>
+            <div className={styles.safetyGateDesc} style={{ color: '#047857' }}>
+              Tidak ada item PR legacy atau ad-hoc yang menggantung. Seluruh pengadaan proyek berada pada jalur paket pengadaan canonical.
+            </div>
+          </div>
+        </div>
+      )}
 
+      {/* Toolbar & Filter */}
+      <div className={styles.tabToolbar}>
+        <Space size={12} wrap align="center">
+          <span style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+            <FilterOutlined style={{ marginRight: 6 }} />
+            Origin Pengadaan:
+          </span>
+          <Select
+            size="small"
+            value={originFilter}
+            onChange={(v) => setOriginFilter(v)}
+            style={{ width: 140 }}
+            options={[
+              { value: 'ALL', label: 'Semua Origin' },
+              { value: 'LEGACY', label: 'LEGACY' },
+              { value: 'AD_HOC', label: 'AD_HOC' },
+            ]}
+          />
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            Menampilkan {unresolvedItems.length} item antrean
+          </Text>
+        </Space>
+
+        <Button
+          size="small"
+          icon={<SyncOutlined spin={isLoading} />}
+          onClick={() => refetch()}
+          className={styles.btnActionSecondary}
+        >
+          Refresh
+        </Button>
+      </div>
+
+      {/* Table */}
+      <div className={styles.tableContainer}>
         <Table
+          className={styles.procurementTable}
           columns={columns}
           dataSource={unresolvedItems}
           rowKey="id"
           loading={isLoading}
-          pagination={{ pageSize: 8 }}
+          pagination={{ pageSize: 8, showSizeChanger: false }}
+          scroll={{ x: 1050 }}
           locale={{
             emptyText: (
               <Empty
@@ -302,7 +284,7 @@ export const ReconciliationTab: React.FC<ReconciliationTabProps> = ({
             ),
           }}
         />
-      </Card>
+      </div>
 
       {/* Reconcile / Exclude Modal */}
       {selectedPrItemId && (

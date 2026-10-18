@@ -1,6 +1,13 @@
 export class TodoReadModelDto {
   todoId: string;
-  sourceType: 'WORKFLOW_TASK' | 'DOMAIN_CONTRACT' | 'DOMAIN_TENDER';
+  sourceType:
+    | 'WORKFLOW_TASK'
+    | 'DOMAIN_CONTRACT'
+    | 'DOMAIN_TENDER'
+    | 'DOMAIN_PAYMENT_REQUEST'
+    | 'DOMAIN_PROGRESS_CLAIM'
+    | 'DOMAIN_SERVICE_CLAIM'
+    | 'DOMAIN_PROJECT_CLOSURE';
   sourceId: string;
   taskId?: number;
   assignedUserId?: number;
@@ -27,4 +34,29 @@ export class TodoReadModelDto {
 export class InboxSummaryDto {
   todoCount: number;
   unreadNotificationCount: number;
+}
+
+export class HistoryItemDto {
+  historyId: string;
+  taskId: number;
+  workflowInstanceId: number;
+  workflowKey?: string;
+  taskKey: string;
+  entityType: string;
+  entityId: number;
+  projectId?: number;
+  projectName?: string;
+  customerName?: string;
+  contractNumber?: string;
+  vendorName?: string;
+  title: string;
+  status: string;
+  action?: string;
+  decidedBy?: number;
+  decidedByName?: string;
+  decidedAt?: string;
+  comments?: string;
+  dueAt?: string;
+  createdAt: string;
+  completedAt?: string;
 }

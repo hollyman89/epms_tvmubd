@@ -92,7 +92,7 @@ epms_tvmubd/
 ├── docker-compose.yml        # Docker Multi-container Specification
 ├── SIT_READY_REPORT.md       # Laporan Kesiapan Testing SIT & Handover QA
 ├── EPMS_ARCHITECTURE_AUDIT_V2.md # Laporan Audit Arsitektur V2
-├── .postman_environment.json # Postman Environment Config
+├── docs/postman/.postman_environment.json # Postman Environment Config
 └── README.md                 # Dokumentasi Proyek ini
 ```
 
@@ -226,7 +226,7 @@ bash monitor.sh
 ```
 
 ### 2. Pengujian E2E & Postman Collection
-Gunakan file `epms_e2e_collection.json` dan `.postman_environment.json` untuk menjalankan alur pengujian integrasi P2P dari `Login` $\rightarrow$ `PR` $\rightarrow$ `Vendor Comparison` $\rightarrow$ `PO` $\rightarrow$ `GR` $\rightarrow$ `Invoice` $\rightarrow$ `Payment`.
+Gunakan file `epms_e2e_collection.json` dan `docs/postman/.postman_environment.json` untuk menjalankan alur pengujian integrasi P2P dari `Login` $\rightarrow$ `PR` $\rightarrow$ `Vendor Comparison` $\rightarrow$ `PO` $\rightarrow$ `GR` $\rightarrow$ `Invoice` $\rightarrow$ `Payment`.
 
 ---
 

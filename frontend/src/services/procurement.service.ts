@@ -1,7 +1,8 @@
 import { apiClient } from '@/lib/axios';
 import type { CanonicalCostItem } from './project.service';
 
-export interface ProcurementCostItemAvailability extends CanonicalCostItem {
+export interface ProcurementCostItemAvailability extends Omit<CanonicalCostItem, 'quantity'> {
+  quantity?: number;
   categoryKey: string;
   baselineQty: number;
   reservedQty: number;
@@ -10,6 +11,7 @@ export interface ProcurementCostItemAvailability extends CanonicalCostItem {
   availableQty: number;
   availabilityStatus: 'AVAILABLE' | 'FULLY_ALLOCATED';
   unavailableReason: string | null;
+  [key: string]: any;
 }
 
 // --- DTOs & INTERFACES ---
@@ -134,16 +136,91 @@ export interface PoPaymentTermRecord {
   status?: string;
 }
 
+export type PurchaseOrderType = 'MATERIAL' | 'SERVICE' | 'LEGACY_MIXED';
+
+export type ServiceOrderDocumentType = 'SPK' | 'WORK_ORDER';
+export type ServiceOrderStatus = 'DRAFT' | 'ISSUED' | 'CANCELLED';
+
+export interface ServiceOrder {
+  id: number;
+  serviceOrderNumber: string;
+  purchaseOrderId: number;
+  poId?: number;
+  projectId: number;
+  vendorId: number;
+  documentType: ServiceOrderDocumentType;
+  status: ServiceOrderStatus;
+  scopeOfWork: string;
+  workLocation?: string | null;
+  location?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  notes?: string | null;
+  issuedAt?: string | null;
+  issuedBy?: number | null;
+  cancelledAt?: string | null;
+  cancelledBy?: number | null;
+  cancellationReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  purchaseOrder?: PurchaseOrder;
+  po?: PurchaseOrder;
+  vendor?: MasterVendor;
+  project?: {
+    id: number;
+    code?: string;
+    name?: string;
+    status?: string;
+  };
+}
+
+export interface CreateServiceOrderPayload {
+  purchaseOrderId?: number;
+  poId?: number;
+  documentType?: ServiceOrderDocumentType;
+  scopeOfWork: string;
+  workLocation?: string;
+  location?: string;
+  startDate?: string;
+  endDate?: string;
+  notes?: string;
+}
+
+export interface UpdateServiceOrderPayload {
+  documentType?: ServiceOrderDocumentType;
+  scopeOfWork?: string;
+  workLocation?: string;
+  location?: string;
+  startDate?: string;
+  endDate?: string;
+  notes?: string;
+}
+
+export interface CancelServiceOrderPayload {
+  reason: string;
+}
+
+export interface QueryServiceOrderPayload {
+  projectId?: number;
+  purchaseOrderId?: number;
+  poId?: number;
+  vendorId?: number;
+  status?: ServiceOrderStatus;
+  documentType?: ServiceOrderDocumentType;
+}
+
 export interface PurchaseOrder {
   id: number;
   poNumber: string;
   totalAmount: number;
   status: string;
+  orderType?: PurchaseOrderType;
   deliveryLocation?: string;
   deliveryDate?: string;
   notes?: string;
   paymentTerms?: PoPaymentTermRecord[];
   items?: any[];
+  serviceOrders?: ServiceOrder[];
   vendorId?: number;
   vendor?: MasterVendor;
   vendorName?: string;
@@ -487,7 +564,21 @@ export interface PaginatedVendorsResponse {
   totalPages: number;
 }
 
+export interface ProcurementDashboardSummary {
+  packageQueueCount: number | null;
+  reconciliationCount: number | null;
+  purchaseRequestCount: number;
+  purchaseOrderCount: number;
+  goodsReceiptCount: number;
+}
+
 export class ProcurementService {
+  // --- DASHBOARD SUMMARY (EPMS — PROCUREMENT-SUMMARY-LAZYLOAD-R1) ---
+  static async getDashboardSummary(): Promise<ProcurementDashboardSummary> {
+    const res = await apiClient.get('/procurement/summary');
+    return res.data?.data || res.data;
+  }
+
   // --- VENDOR MASTER (LEGACY & SSOT LIST) ---
   static async getVendors(): Promise<MasterVendor[]> {
     const res = await apiClient.get('/procurement/vendors');
@@ -574,6 +665,11 @@ export class ProcurementService {
     return res.data?.data || res.data;
   }
 
+  static async cancelPurchaseRequest(id: number, reason: string): Promise<any> {
+    const res = await apiClient.post(`/procurement/pr/${id}/cancel`, { reason });
+    return res.data?.data || res.data;
+  }
+
   // --- PURCHASE ORDER ---
   static async getPurchaseOrders(): Promise<PurchaseOrder[]> {
     const res = await apiClient.get('/procurement/purchase-orders');
@@ -603,6 +699,11 @@ export class ProcurementService {
 
   static async createRfq(payload: CreateRfqPayload): Promise<RfqRecord> {
     const res = await apiClient.post('/procurement/rfqs', payload);
+    return res.data?.data || res.data;
+  }
+
+  static async cancelRfq(id: number, reason: string): Promise<RfqRecord> {
+    const res = await apiClient.post(`/procurement/rfqs/${id}/cancel`, { reason });
     return res.data?.data || res.data;
   }
 
@@ -758,6 +859,273 @@ export class ProcurementService {
     const res = await apiClient.post(`/procurement/reconciliations/items/${prItemId}/exclude`, payload);
     return res.data;
   }
+
+  // --- SERVICE ORDERS (SPK / WORK ORDER - PHASE 20 CANONICAL) ---
+
+  static async getServiceOrders(query?: QueryServiceOrderPayload): Promise<ServiceOrder[]> {
+    const params: Record<string, any> = {};
+    if (query?.projectId) params.projectId = query.projectId;
+    if (query?.poId) params.poId = query.poId;
+    if (query?.vendorId) params.vendorId = query.vendorId;
+    if (query?.status) params.status = query.status;
+    if (query?.documentType) params.documentType = query.documentType;
+
+    const res = await apiClient.get('/procurement/service-orders', { params });
+    const list = res.data?.data || res.data || [];
+    return Array.isArray(list) ? list : [];
+  }
+
+  static async getServiceOrdersByPo(poId: number): Promise<ServiceOrder[]> {
+    const res = await apiClient.get(`/procurement/service-orders/by-po/${poId}`);
+    const list = res.data && 'data' in res.data ? res.data.data : res.data;
+    if (Array.isArray(list)) return list;
+    if (list && typeof list === 'object') return [list];
+    return [];
+  }
+
+  static async getServiceOrderByPo(poId: number): Promise<ServiceOrder | null> {
+    const list = await this.getServiceOrdersByPo(poId);
+    return list[0] ?? null;
+  }
+
+  static async getServiceOrderById(id: number): Promise<ServiceOrder> {
+    const res = await apiClient.get(`/procurement/service-orders/${id}`);
+    return res.data?.data || res.data;
+  }
+
+  static async createServiceOrder(payload: CreateServiceOrderPayload): Promise<ServiceOrder> {
+    const body = {
+      purchaseOrderId: Number(payload.purchaseOrderId || payload.poId),
+      documentType: payload.documentType || 'SPK',
+      scopeOfWork: payload.scopeOfWork,
+      workLocation: payload.workLocation || payload.location || undefined,
+      startDate: payload.startDate || undefined,
+      endDate: payload.endDate || undefined,
+      notes: payload.notes || undefined,
+    };
+    const res = await apiClient.post('/procurement/service-orders', body);
+    return res.data?.data || res.data;
+  }
+
+  static async updateServiceOrder(id: number, payload: UpdateServiceOrderPayload): Promise<ServiceOrder> {
+    const body = {
+      documentType: payload.documentType,
+      scopeOfWork: payload.scopeOfWork,
+      workLocation: payload.workLocation || payload.location || undefined,
+      startDate: payload.startDate || undefined,
+      endDate: payload.endDate || undefined,
+      notes: payload.notes || undefined,
+    };
+    const res = await apiClient.patch(`/procurement/service-orders/${id}`, body);
+    return res.data?.data || res.data;
+  }
+
+  static async issueServiceOrder(id: number): Promise<ServiceOrder> {
+    const res = await apiClient.post(`/procurement/service-orders/${id}/issue`);
+    return res.data?.data || res.data;
+  }
+
+  static async cancelServiceOrder(id: number, payload: CancelServiceOrderPayload): Promise<ServiceOrder> {
+    const res = await apiClient.post(`/procurement/service-orders/${id}/cancel`, payload);
+    return res.data?.data || res.data;
+  }
+
+  // --- SERVICE CLAIMS ---
+
+  static async getServiceClaims(query?: { poId?: number; projectId?: number; vendorId?: number; status?: string }): Promise<ServiceClaimRecord[]> {
+    const params: Record<string, any> = {};
+    if (query?.poId) params.poId = query.poId;
+    if (query?.projectId) params.projectId = query.projectId;
+    if (query?.vendorId) params.vendorId = query.vendorId;
+    if (query?.status) params.status = query.status;
+
+    const res = await apiClient.get('/procurement/service-claims', { params });
+    const list = res.data?.data || res.data || [];
+    return Array.isArray(list) ? list : [];
+  }
+
+  static async getServiceClaimById(id: number): Promise<ServiceClaimRecord> {
+    const res = await apiClient.get(`/procurement/service-claims/${id}`);
+    return res.data?.data || res.data;
+  }
+
+  static async getPoServiceClaimBalance(poId: number): Promise<PoServiceClaimBalance> {
+    const res = await apiClient.get(`/procurement/service-claims/po/${poId}/balance`);
+    return res.data?.data || res.data;
+  }
+
+  static async createServiceClaim(payload: CreateServiceClaimPayload): Promise<ServiceClaimRecord> {
+    const { poId, ...rest } = payload;
+    const body: any = {
+      ...rest,
+      purchaseOrderId: Number(payload.purchaseOrderId || poId),
+    };
+    Object.keys(body).forEach((k) => {
+      if (body[k] === undefined) delete body[k];
+    });
+    const res = await apiClient.post('/procurement/service-claims', body);
+    return res.data?.data || res.data;
+  }
+
+  static async updateServiceClaim(id: number, payload: UpdateServiceClaimPayload): Promise<ServiceClaimRecord> {
+    const body: any = { ...payload };
+    Object.keys(body).forEach((k) => {
+      if (body[k] === undefined) delete body[k];
+    });
+    const res = await apiClient.patch(`/procurement/service-claims/${id}`, body);
+    return res.data?.data || res.data;
+  }
+
+  static async submitServiceClaim(id: number): Promise<ServiceClaimRecord> {
+    const res = await apiClient.post(`/procurement/service-claims/${id}/submit`);
+    return res.data?.data || res.data;
+  }
+
+  static async verifyTechnicalServiceClaim(id: number, payload: TechnicalVerificationPayload): Promise<ServiceClaimRecord> {
+    const res = await apiClient.post(`/procurement/service-claims/${id}/verify-technical`, payload);
+    return res.data?.data || res.data;
+  }
+
+  static async verifyCommercialServiceClaim(id: number, payload: CommercialVerificationPayload): Promise<ServiceClaimRecord> {
+    const res = await apiClient.post(`/procurement/service-claims/${id}/verify-commercial`, payload);
+    return res.data?.data || res.data;
+  }
+
+  static async cancelServiceClaim(id: number, payload: CancelServiceClaimPayload): Promise<ServiceClaimRecord> {
+    const res = await apiClient.post(`/procurement/service-claims/${id}/cancel`, payload);
+    return res.data?.data || res.data;
+  }
+}
+
+export interface ServiceClaimItemRecord {
+  id: number;
+  serviceClaimId: number;
+  poItemId: number;
+  itemNameSnapshot: string;
+  uomSnapshot?: string;
+  contractQuantitySnapshot: number;
+  contractUnitRateSnapshot: number;
+  contractValueSnapshot: number;
+  previousApprovedQuantity: number;
+  currentClaimQuantity: number;
+  cumulativeApprovedQuantity: number;
+  remainingQuantity: number;
+  previousApprovedAmount: number;
+  currentClaimAmount: number;
+  cumulativeApprovedAmount: number;
+  remainingContractValue: number;
+  workLocation?: string | null;
+  notes?: string | null;
+  version?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ServiceClaimRecord {
+  id: number;
+  claimNumber: string;
+  poId: number;
+  serviceOrderId?: number | null;
+  projectId: number;
+  vendorId: number;
+  claimPeriodStart?: string | null;
+  claimPeriodEnd?: string | null;
+  status: 'DRAFT' | 'SUBMITTED' | 'NEEDS_REVISION' | 'PM_VERIFIED' | 'APPROVED_FOR_INVOICE' | 'REJECTED' | 'CANCELLED';
+  totalClaimAmount: number;
+  approvedClaimAmount: number;
+  acceptanceType?: string | null;
+  acceptanceReference?: string | null;
+  acceptanceDate?: string | null;
+  notes?: string | null;
+  createdBy: number;
+  submittedBy?: number | null;
+  submittedAt?: string | null;
+  pmVerifierId?: number | null;
+  pmVerifiedAt?: string | null;
+  commercialVerifierId?: number | null;
+  commercialVerifiedAt?: string | null;
+  revisionNotes?: string | null;
+  rejectionReason?: string | null;
+  cancelledBy?: number | null;
+  cancelledAt?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  items?: ServiceClaimItemRecord[];
+  purchaseOrder?: any;
+  serviceOrder?: any;
+  project?: any;
+  vendor?: any;
+  invoices?: any[];
+}
+
+export interface PoServiceClaimBalance {
+  poId: number;
+  contractTotalAmount: number;
+  totalApprovedClaimAmount: number;
+  remainingContractValue: number;
+  items: Array<{
+    poItemId: number;
+    itemName: string;
+    uom: string;
+    contractQuantity: number;
+    contractUnitPrice: number;
+    contractTotalPrice: number;
+    approvedQuantity: number;
+    remainingQuantity: number;
+    approvedAmount: number;
+    remainingAmount: number;
+  }>;
+}
+
+export interface CreateServiceClaimPayload {
+  poId?: number;
+  purchaseOrderId?: number;
+  serviceOrderId?: number;
+  claimPeriodStart?: string;
+  claimPeriodEnd?: string;
+  acceptanceType?: string;
+  acceptanceReference?: string;
+  acceptanceDate?: string;
+  notes?: string;
+  items: Array<{
+    poItemId: number;
+    currentClaimQuantity: number;
+    workLocation?: string;
+    notes?: string;
+  }>;
+}
+
+export interface UpdateServiceClaimPayload {
+  serviceOrderId?: number;
+  claimPeriodStart?: string;
+  claimPeriodEnd?: string;
+  acceptanceType?: string;
+  acceptanceReference?: string;
+  acceptanceDate?: string;
+  notes?: string;
+  items?: Array<{
+    poItemId: number;
+    currentClaimQuantity: number;
+    workLocation?: string;
+    notes?: string;
+  }>;
+}
+
+export interface TechnicalVerificationPayload {
+  decision: 'APPROVE' | 'RETURN' | 'REJECT';
+  revisionNotes?: string;
+  rejectionReason?: string;
+}
+
+export interface CommercialVerificationPayload {
+  decision: 'APPROVE' | 'RETURN' | 'REJECT';
+  revisionNotes?: string;
+  rejectionReason?: string;
+}
+
+export interface CancelServiceClaimPayload {
+  reason: string;
 }
 
 export default ProcurementService;

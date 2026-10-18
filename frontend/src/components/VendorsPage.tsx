@@ -7,20 +7,20 @@ import {
   Button,
   Input,
   Select,
-  Tag,
-  Space,
   Modal,
   Drawer,
   Descriptions,
   message,
   Card,
-  Row,
-  Col,
   Typography,
   Tooltip,
   Form,
   Popconfirm,
-  Badge,
+  Alert,
+  Breadcrumb,
+  Empty,
+  Spin,
+  Pagination,
 } from 'antd';
 import {
   ShopOutlined,
@@ -30,9 +30,6 @@ import {
   EyeOutlined,
   ReloadOutlined,
   SearchOutlined,
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
-  FileTextOutlined,
   EnvironmentOutlined,
   BankOutlined,
   CalendarOutlined,
@@ -45,10 +42,12 @@ import {
   CreateVendorPayload,
   UpdateVendorPayload,
 } from '@/services/procurement.service';
+import styles from './VendorsPage.module.css';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
 
+// Available filter categories (Vendor Type is free text in DB; these provide quick filter options)
 const VENDOR_TYPES = [
   'Hardware',
   'Software',
@@ -58,25 +57,6 @@ const VENDOR_TYPES = [
   'Services',
   'Other',
 ];
-
-const getVendorTypeColor = (type?: string) => {
-  switch ((type || '').toLowerCase()) {
-    case 'hardware':
-      return 'blue';
-    case 'software':
-      return 'cyan';
-    case 'construction':
-      return 'orange';
-    case 'logistics':
-      return 'purple';
-    case 'services':
-      return 'geekblue';
-    case 'general':
-      return 'gold';
-    default:
-      return 'default';
-  }
-};
 
 export const VendorsPage: React.FC = () => {
   const queryClient = useQueryClient();
@@ -117,6 +97,8 @@ export const VendorsPage: React.FC = () => {
     data: queryData,
     isLoading,
     isFetching,
+    isError,
+    error,
     refetch,
   } = useQuery({
     queryKey: ['vendors', pagination.current, pagination.pageSize, searchTerm, vendorTypeFilter],
@@ -220,7 +202,7 @@ export const VendorsPage: React.FC = () => {
     }
   };
 
-  // Submit Soft Delete Vendor
+  // Submit Soft Delete Vendor (Guarded by F0 delete-safety backend check)
   const handleSoftDelete = async (vendor: MasterVendor) => {
     try {
       const res = await ProcurementService.softDeleteVendor(vendor.id);
@@ -237,221 +219,181 @@ export const VendorsPage: React.FC = () => {
     }
   };
 
-  // Table Columns
-  const columns = [
-    {
-      title: 'Kode Vendor',
-      dataIndex: 'code',
-      key: 'code',
-      width: 140,
-      render: (code: string) => (
-        <Space size={6}>
-          <ShopOutlined style={{ color: '#0284c7' }} />
-          <Text strong style={{ fontFamily: 'monospace', color: '#0f172a' }}>
-            {code}
-          </Text>
-        </Space>
-      ),
-    },
-    {
-      title: 'Nama Vendor',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string, record: MasterVendor) => (
-        <div>
-          <Text strong style={{ fontSize: 13, color: '#1e293b' }}>
-            {name}
-          </Text>
-          {record.address && (
-            <div style={{ fontSize: 11, color: '#64748b' }}>
-              <EnvironmentOutlined style={{ marginRight: 4 }} />
-              {record.address.length > 55
-                ? `${record.address.substring(0, 55)}...`
-                : record.address}
-            </div>
-          )}
-        </div>
-      ),
-    },
-    {
-      title: 'Tipe Vendor',
-      dataIndex: 'vendorType',
-      key: 'vendorType',
-      width: 140,
-      render: (type?: string) =>
-        type ? (
-          <Tag color={getVendorTypeColor(type)} style={{ fontWeight: 500, borderRadius: 4 }}>
-            {type}
-          </Tag>
-        ) : (
-          <Text type="secondary">—</Text>
-        ),
-    },
-    {
-      title: 'NPWP / Tax ID',
-      dataIndex: 'taxId',
-      key: 'taxId',
-      width: 170,
-      render: (taxId?: string) =>
-        taxId ? (
-          <Space size={4}>
-            <BankOutlined style={{ color: '#64748b', fontSize: 11 }} />
-            <Text style={{ fontFamily: 'monospace', fontSize: 12 }}>{taxId}</Text>
-          </Space>
-        ) : (
-          <Text type="secondary">—</Text>
-        ),
-    },
-    {
-      title: 'Status',
-      key: 'status',
-      width: 100,
-      render: () => (
-        <Badge status="success" text={<Text style={{ color: '#166534', fontWeight: 500, fontSize: 12 }}>Aktif</Text>} />
-      ),
-    },
-    {
-      title: 'Aksi',
-      key: 'actions',
-      width: 150,
-      align: 'center' as const,
-      render: (_: any, record: MasterVendor) => (
-        <Space size={6}>
-          <Tooltip title="Lihat Detail Vendor">
-            <Button
-              type="text"
-              size="small"
-              icon={<EyeOutlined style={{ color: '#0284c7' }} />}
-              onClick={() => handleOpenDetail(record)}
-            />
-          </Tooltip>
+  // Restrained Vendor Type Presentation
+  const renderVendorType = (type?: string) => {
+    if (!type) return <Text type="secondary">—</Text>;
+    return <span className={styles.vendorTypeTag}>{type}</span>;
+  };
 
-          {canMutate && (
-            <>
-              <Tooltip title="Edit Informasi Vendor">
-                <Button
-                  type="text"
-                  size="small"
-                  icon={<EditOutlined style={{ color: '#d97706' }} />}
-                  onClick={() => handleOpenEdit(record)}
-                />
-              </Tooltip>
+  // Table Columns - Canonical light-slate header structure, NO fake status column
+  const columns = useMemo(
+    () => [
+      {
+        title: 'KODE VENDOR',
+        dataIndex: 'code',
+        key: 'code',
+        width: 140,
+        render: (code: string) => (
+          <span className={styles.vendorCodeBadge}>{code || '—'}</span>
+        ),
+      },
+      {
+        title: 'NAMA VENDOR',
+        dataIndex: 'name',
+        key: 'name',
+        render: (name: string, record: MasterVendor) => (
+          <div className={styles.vendorNameGroup}>
+            <Tooltip title={name} placement="topLeft">
+              <span className={styles.vendorName}>{name || 'Vendor Tanpa Nama'}</span>
+            </Tooltip>
+            {record.address && (
+              <span className={styles.vendorAddressMeta} title={record.address}>
+                <EnvironmentOutlined style={{ fontSize: 11, flexShrink: 0 }} />
+                <span>{record.address}</span>
+              </span>
+            )}
+          </div>
+        ),
+      },
+      {
+        title: 'TIPE VENDOR',
+        dataIndex: 'vendorType',
+        key: 'vendorType',
+        width: 150,
+        render: (type?: string) => renderVendorType(type),
+      },
+      {
+        title: 'NPWP / TAX ID',
+        dataIndex: 'taxId',
+        key: 'taxId',
+        width: 170,
+        render: (taxId?: string) =>
+          taxId ? (
+            <span className={styles.taxIdText}>
+              <BankOutlined style={{ marginRight: 5, color: '#64748B', fontSize: 11 }} />
+              {taxId}
+            </span>
+          ) : (
+            <Text type="secondary">—</Text>
+          ),
+      },
+      {
+        title: 'AKSI',
+        key: 'actions',
+        width: 130,
+        align: 'right' as const,
+        render: (_: any, record: MasterVendor) => (
+          <div className={styles.actionGroup}>
+            <Tooltip title="Lihat Detail Vendor">
+              <Button
+                className={styles.btnActionView}
+                icon={<EyeOutlined style={{ fontSize: 13 }} />}
+                onClick={() => handleOpenDetail(record)}
+              />
+            </Tooltip>
 
-              <Popconfirm
-                title="Nonaktifkan Vendor?"
-                description={
-                  <div style={{ maxWidth: 280 }}>
-                    Vendor <strong>{record.code}</strong> akan dinonaktifkan. Data transaksi historis (PO, Quotation, Komparasi) tetap dipertahankan.
-                  </div>
-                }
-                okText="Nonaktifkan Vendor"
-                cancelText="Batal"
-                okButtonProps={{ danger: true }}
-                onConfirm={() => handleSoftDelete(record)}
-              >
-                <Tooltip title="Nonaktifkan Vendor (Soft Delete)">
+            {canMutate && (
+              <>
+                <Tooltip title="Edit Informasi Vendor">
                   <Button
-                    type="text"
-                    size="small"
-                    danger
-                    icon={<DeleteOutlined />}
+                    className={styles.btnActionEdit}
+                    icon={<EditOutlined style={{ fontSize: 13 }} />}
+                    onClick={() => handleOpenEdit(record)}
                   />
                 </Tooltip>
-              </Popconfirm>
-            </>
-          )}
-        </Space>
-      ),
-    },
-  ];
+
+                <Popconfirm
+                  title="Nonaktifkan Vendor?"
+                  description={
+                    <div style={{ maxWidth: 280 }}>
+                      Vendor <strong>{record.code}</strong> akan dinonaktifkan. Data transaksi historis (PO, Quotation, Komparasi) tetap dipertahankan.
+                    </div>
+                  }
+                  okText="Nonaktifkan Vendor"
+                  cancelText="Batal"
+                  okButtonProps={{ danger: true }}
+                  onConfirm={() => handleSoftDelete(record)}
+                >
+                  <Tooltip title="Nonaktifkan Vendor">
+                    <Button
+                      className={styles.btnActionDelete}
+                      icon={<DeleteOutlined style={{ fontSize: 13 }} />}
+                    />
+                  </Tooltip>
+                </Popconfirm>
+              </>
+            )}
+          </div>
+        ),
+      },
+    ],
+    [canMutate]
+  );
 
   return (
-    <div style={{ padding: '24px 32px', minHeight: '85vh', background: '#f8fafc' }}>
-      {/* Header Bar */}
-      <div style={{ marginBottom: 24 }}>
-        <Row justify="space-between" align="middle" gutter={[16, 16]}>
-          <Col xs={24} sm={16}>
-            <Space align="center" size={12}>
-              <div
-                style={{
-                  width: 44,
-                  height: 44,
-                  borderRadius: 10,
-                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 4px 12px rgba(2, 132, 199, 0.25)',
-                }}
-              >
-                <ShopOutlined style={{ fontSize: 22, color: '#ffffff' }} />
-              </div>
-              <div>
-                <Title level={3} style={{ margin: 0, color: '#0f172a', fontWeight: 700 }}>
-                  Data Master Vendor
-                </Title>
-                <Paragraph style={{ margin: 0, color: '#64748b', fontSize: 13 }}>
-                  Direktori rekanan vendor dan penyedia jasa pengadaan canonical pada EPMS.
-                </Paragraph>
-              </div>
-            </Space>
-          </Col>
-          <Col xs={24} sm={8} style={{ textAlign: 'right' }}>
-            {canMutate && (
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                size="large"
-                style={{
-                  background: '#0284c7',
-                  borderColor: '#0284c7',
-                  borderRadius: 8,
-                  fontWeight: 600,
-                  boxShadow: '0 2px 8px rgba(2, 132, 199, 0.35)',
-                }}
-                onClick={() => {
-                  createForm.resetFields();
-                  setIsCreateModalOpen(true);
-                }}
-              >
-                Tambah Vendor
-              </Button>
-            )}
-          </Col>
-        </Row>
+    <div className={styles.pageContainer} style={{ padding: '24px', minHeight: 'calc(100vh - 64px)' }}>
+      {/* Header Section */}
+      <div className={styles.pageHeader}>
+        <div className={styles.headerLeft}>
+          <Breadcrumb
+            className={styles.breadcrumb}
+            items={[{ title: 'Data Master' }, { title: 'Vendors' }]}
+          />
+          <div className={styles.titleRow}>
+            <div className={styles.headerIconSurface}>
+              <ShopOutlined />
+            </div>
+            <div>
+              <Title level={4} className={styles.pageTitle}>
+                Vendor Master
+              </Title>
+              <Text className={styles.pageSubtitle}>
+                Direktori vendor dan penyedia barang/jasa untuk proses pengadaan.
+              </Text>
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.headerRight}>
+          {canMutate && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              className={styles.btnCreate}
+              onClick={() => {
+                createForm.resetFields();
+                setIsCreateModalOpen(true);
+              }}
+            >
+              Tambah Vendor
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Main Card: Search, Filter, & Table */}
-      <Card
-        bordered={false}
-        style={{
-          borderRadius: 12,
-          boxShadow: '0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.03)',
-        }}
-      >
-        {/* Filter Controls */}
-        <Row gutter={[12, 12]} style={{ marginBottom: 18 }} align="middle">
-          <Col xs={24} sm={10} md={8}>
+      {/* Toolbar & Filter Bar */}
+      <div className={styles.toolbarCard}>
+        <div className={styles.toolbarContent}>
+          <div className={styles.toolbarFilters}>
             <Input.Search
               placeholder="Cari kode atau nama vendor..."
               allowClear
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onSearch={handleSearch}
-              prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
-              style={{ width: '100%', borderRadius: 6 }}
+              prefix={<SearchOutlined style={{ color: '#94A3B8' }} />}
+              className={styles.searchInput}
             />
-          </Col>
-          <Col xs={24} sm={8} md={6}>
+
             <Select
-              placeholder="Filter Tipe Vendor"
+              placeholder="Semua Tipe Vendor"
               allowClear
               value={vendorTypeFilter}
               onChange={(val) => {
                 setVendorTypeFilter(val);
                 setPagination((prev) => ({ ...prev, current: 1 }));
               }}
-              style={{ width: '100%' }}
+              className={styles.typeSelect}
             >
               {VENDOR_TYPES.map((t) => (
                 <Option key={t} value={t}>
@@ -459,57 +401,201 @@ export const VendorsPage: React.FC = () => {
                 </Option>
               ))}
             </Select>
-          </Col>
-          <Col xs={24} sm={6} md={4}>
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={handleResetFilters}
-              style={{ borderRadius: 6 }}
-            >
-              Reset
+
+            {(searchTerm || vendorTypeFilter || searchInput) && (
+              <Button
+                type="text"
+                icon={<ReloadOutlined />}
+                onClick={handleResetFilters}
+                className={styles.btnReset}
+              >
+                Reset Filter
+              </Button>
+            )}
+          </div>
+
+          <div className={styles.toolbarStats}>
+            Total <strong>{totalVendors}</strong> vendor
+          </div>
+        </div>
+      </div>
+
+      {/* Error Alert if query fails */}
+      {isError && (
+        <Alert
+          type="error"
+          message="Gagal Memuat Direktori Vendor"
+          description={
+            (error as any)?.response?.data?.message ||
+            (error as any)?.message ||
+            'Terjadi kesalahan saat memuat data vendor.'
+          }
+          showIcon
+          action={
+            <Button size="small" type="primary" danger onClick={() => refetch()}>
+              Coba Lagi
             </Button>
-          </Col>
-        </Row>
-
-        {/* Vendors Table */}
-        <Table
-          columns={columns}
-          dataSource={vendors}
-          rowKey="id"
-          loading={isLoading || isFetching}
-          pagination={{
-            current: pagination.current,
-            pageSize: pagination.pageSize,
-            total: totalVendors,
-            showTotal: (total) => `Total ${total} vendor aktif`,
-            showSizeChanger: true,
-            pageSizeOptions: ['10', '20', '50'],
-            onChange: (page, pageSize) => {
-              setPagination({ current: page, pageSize });
-            },
-          }}
-          locale={{
-            emptyText: (
-              <div style={{ padding: '36px 0', textAlign: 'center' }}>
-                <ShopOutlined style={{ fontSize: 36, color: '#cbd5e1', marginBottom: 12 }} />
-                <Paragraph style={{ color: '#64748b', margin: 0 }}>
-                  {searchTerm || vendorTypeFilter
-                    ? 'Tidak ditemukan vendor yang sesuai kriteria pencarian.'
-                    : 'Belum ada data master vendor terdaftar.'}
-                </Paragraph>
-              </div>
-            ),
-          }}
+          }
+          style={{ borderRadius: 8 }}
         />
-      </Card>
+      )}
 
-      {/* Detail Drawer */}
+      {/* Desktop / Tablet Table View */}
+      <div className={styles.desktopTableView}>
+        <div className={styles.tableCard}>
+          <Table
+            className={styles.vendorTable}
+            columns={columns}
+            dataSource={vendors}
+            rowKey="id"
+            loading={isLoading || isFetching}
+            pagination={{
+              current: pagination.current,
+              pageSize: pagination.pageSize,
+              total: totalVendors,
+              showTotal: (total) => `Total ${total} vendor`,
+              showSizeChanger: true,
+              pageSizeOptions: ['10', '20', '50'],
+              onChange: (page, pageSize) => {
+                setPagination({ current: page, pageSize });
+              },
+            }}
+            locale={{
+              emptyText: (
+                <div style={{ padding: '36px 0', textAlign: 'center' }}>
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={
+                      searchTerm || vendorTypeFilter
+                        ? 'Tidak ada vendor yang sesuai dengan pencarian atau filter.'
+                        : 'Belum ada data master vendor terdaftar.'
+                    }
+                  />
+                </div>
+              ),
+            }}
+            scroll={{ x: 800 }}
+          />
+        </div>
+      </div>
+
+      {/* Mobile Vendor Cards View (<= 768px) */}
+      <div className={styles.mobileCardsView}>
+        {isLoading ? (
+          <Card className={styles.tableCard} style={{ padding: '40px 0', textAlign: 'center' }}>
+            <Spin tip="Memuat vendor..." />
+          </Card>
+        ) : vendors.length === 0 ? (
+          <Card className={styles.tableCard} style={{ padding: '32px 16px', textAlign: 'center' }}>
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={
+                searchTerm || vendorTypeFilter
+                  ? 'Tidak ada vendor yang sesuai dengan pencarian atau filter.'
+                  : 'Belum ada data master vendor terdaftar.'
+              }
+            />
+          </Card>
+        ) : (
+          <>
+            {vendors.map((vendor) => (
+              <div key={vendor.id} className={styles.mobileVendorCard}>
+                <div className={styles.mobileCardTop}>
+                  <div className={styles.mobileVendorHeader}>
+                    <span className={styles.mobileVendorName}>
+                      {vendor.name || 'Vendor Tanpa Nama'}
+                    </span>
+                    <span className={styles.vendorCodeBadge} style={{ alignSelf: 'flex-start' }}>
+                      {vendor.code || '—'}
+                    </span>
+                  </div>
+                  <div>{renderVendorType(vendor.vendorType)}</div>
+                </div>
+
+                <div className={styles.mobileCardGrid}>
+                  <div className={styles.mobileGridItem}>
+                    <span className={styles.mobileLabel}>NPWP / Tax ID</span>
+                    <span className={styles.mobileValue} style={{ fontFamily: 'ui-monospace, monospace' }}>
+                      {vendor.taxId || '—'}
+                    </span>
+                  </div>
+
+                  <div className={styles.mobileGridItem}>
+                    <span className={styles.mobileLabel}>Tipe Vendor</span>
+                    <span className={styles.mobileValue}>
+                      {vendor.vendorType || '—'}
+                    </span>
+                  </div>
+
+                  <div className={styles.mobileGridItemFull}>
+                    <span className={styles.mobileLabel}>Alamat Kantor</span>
+                    <span className={styles.mobileValue}>
+                      {vendor.address || '—'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className={styles.mobileCardFooter}>
+                  <Button
+                    size="small"
+                    className={styles.btnActionView}
+                    icon={<EyeOutlined style={{ fontSize: 13 }} />}
+                    onClick={() => handleOpenDetail(vendor)}
+                  />
+
+                  {canMutate && (
+                    <>
+                      <Button
+                        size="small"
+                        className={styles.btnActionEdit}
+                        icon={<EditOutlined style={{ fontSize: 13 }} />}
+                        onClick={() => handleOpenEdit(vendor)}
+                      />
+
+                      <Popconfirm
+                        title="Nonaktifkan Vendor?"
+                        description={
+                          <div style={{ maxWidth: 280 }}>
+                            Vendor <strong>{vendor.code}</strong> akan dinonaktifkan.
+                          </div>
+                        }
+                        okText="Nonaktifkan"
+                        cancelText="Batal"
+                        okButtonProps={{ danger: true }}
+                        onConfirm={() => handleSoftDelete(vendor)}
+                      >
+                        <Button
+                          size="small"
+                          className={styles.btnActionDelete}
+                          icon={<DeleteOutlined style={{ fontSize: 13 }} />}
+                        />
+                      </Popconfirm>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            <div className={styles.mobilePagination}>
+              <Pagination
+                current={pagination.current}
+                pageSize={pagination.pageSize}
+                total={totalVendors}
+                onChange={(page, pageSize) => setPagination({ current: page, pageSize })}
+                simple
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Detail Drawer - Only Authoritative Fields, NO fake status */}
       <Drawer
         title={
-          <Space>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ShopOutlined style={{ color: '#0284c7' }} />
             <span>Detail Master Vendor</span>
-          </Space>
+          </div>
         }
         placement="right"
         width={480}
@@ -523,58 +609,52 @@ export const VendorsPage: React.FC = () => {
           <div>
             <div
               style={{
-                background: '#f1f5f9',
+                background: '#f8fafc',
+                border: '1px solid #e2e8f0',
                 padding: '16px 20px',
                 borderRadius: 8,
                 marginBottom: 20,
               }}
             >
-              <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase' }}>
-                Vendor Resmi
+              <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                Identitas Vendor
               </Text>
-              <Title level={4} style={{ margin: '4px 0 0 0', color: '#0f172a' }}>
+              <Title level={4} style={{ margin: '4px 0 6px 0', color: '#0f172a' }}>
                 {selectedVendor.name}
               </Title>
-              <Tag color="blue" style={{ marginTop: 8, fontFamily: 'monospace' }}>
+              <span className={styles.vendorCodeBadge}>
                 {selectedVendor.code}
-              </Tag>
+              </span>
             </div>
 
             <Descriptions bordered column={1} size="small">
               <Descriptions.Item label="Kode Vendor">
-                <Text strong style={{ fontFamily: 'monospace' }}>
+                <Text strong style={{ fontFamily: 'ui-monospace, monospace' }}>
                   {selectedVendor.code}
                 </Text>
               </Descriptions.Item>
-              <Descriptions.Item label="Nama Lengkap">
+              <Descriptions.Item label="Nama Perusahaan">
                 {selectedVendor.name}
               </Descriptions.Item>
               <Descriptions.Item label="Tipe / Kategori">
-                {selectedVendor.vendorType ? (
-                  <Tag color={getVendorTypeColor(selectedVendor.vendorType)}>
-                    {selectedVendor.vendorType}
-                  </Tag>
+                {renderVendorType(selectedVendor.vendorType)}
+              </Descriptions.Item>
+              <Descriptions.Item label="NPWP / Tax ID">
+                {selectedVendor.taxId ? (
+                  <span style={{ fontFamily: 'ui-monospace, monospace' }}>{selectedVendor.taxId}</span>
                 ) : (
                   <Text type="secondary">—</Text>
                 )}
               </Descriptions.Item>
-              <Descriptions.Item label="NPWP / Tax ID">
-                {selectedVendor.taxId || <Text type="secondary">—</Text>}
-              </Descriptions.Item>
               <Descriptions.Item label="Alamat Kantor">
                 {selectedVendor.address || <Text type="secondary">—</Text>}
               </Descriptions.Item>
-              <Descriptions.Item label="Status Akun">
-                <Tag color="success" icon={<CheckCircleOutlined />}>
-                  Aktif
-                </Tag>
-              </Descriptions.Item>
               <Descriptions.Item label="Tanggal Pendaftaran">
                 {selectedVendor.createdAt ? (
-                  <Space size={4}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <CalendarOutlined style={{ color: '#64748b' }} />
                     <Text>{dayjs(selectedVendor.createdAt).format('DD MMMM YYYY, HH:mm')}</Text>
-                  </Space>
+                  </div>
                 ) : (
                   <Text type="secondary">—</Text>
                 )}
@@ -594,10 +674,10 @@ export const VendorsPage: React.FC = () => {
       {/* Modal: Tambah Vendor */}
       <Modal
         title={
-          <Space>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <ShopOutlined style={{ color: '#0284c7' }} />
             <span>Pendaftaran Master Vendor Baru</span>
-          </Space>
+          </div>
         }
         open={isCreateModalOpen}
         onCancel={() => {
@@ -644,7 +724,7 @@ export const VendorsPage: React.FC = () => {
             <Input
               disabled
               placeholder="[Otomatis dari Sistem]"
-              style={{ fontFamily: 'monospace', background: '#f8fafc', color: '#64748b' }}
+              style={{ fontFamily: 'ui-monospace, monospace', background: '#f8fafc', color: '#64748b' }}
             />
           </Form.Item>
 
@@ -682,10 +762,10 @@ export const VendorsPage: React.FC = () => {
       {/* Modal: Edit Vendor */}
       <Modal
         title={
-          <Space>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <EditOutlined style={{ color: '#d97706' }} />
             <span>Edit Data Master Vendor</span>
-          </Space>
+          </div>
         }
         open={isEditModalOpen}
         onCancel={() => {
@@ -732,7 +812,7 @@ export const VendorsPage: React.FC = () => {
                 value={selectedVendor.code}
                 disabled
                 style={{
-                  fontFamily: 'monospace',
+                  fontFamily: 'ui-monospace, monospace',
                   background: '#f1f5f9',
                   color: '#64748b',
                 }}

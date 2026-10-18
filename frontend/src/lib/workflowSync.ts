@@ -41,13 +41,17 @@ export function shouldRefreshOperationalPlan(
 /**
  * Predicate to decide if a canonical event requires a Project Delivery workspace refresh.
  * 
- * Returns true if eventName starts with 'workflow.'
+ * Returns true if eventName starts with 'workflow.', 'project.', or is 'legal.contract.approved'.
  */
 export function shouldRefreshProjectDelivery(
   envelope: CanonicalEventEnvelope | null | undefined
 ): boolean {
   if (!envelope || typeof envelope.eventName !== 'string') return false;
-  return envelope.eventName.startsWith('workflow.');
+  return (
+    envelope.eventName.startsWith('workflow.') ||
+    envelope.eventName.startsWith('project.') ||
+    envelope.eventName === 'legal.contract.approved'
+  );
 }
 
 export interface OperationalPlanSyncOptions {

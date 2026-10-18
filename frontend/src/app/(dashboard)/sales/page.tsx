@@ -20,7 +20,10 @@ const SalesPipelinePage = dynamic(
           borderRadius: '12px'
         }}
       >
-        <Spin size="large" tip="Memuat Sales Pipeline..." />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <Spin size="large" />
+          <span style={{ color: '#64748b', fontSize: 14 }}>Memuat Sales Pipeline...</span>
+        </div>
       </div>
     ),
     ssr: false,
@@ -50,7 +53,10 @@ export default function SalesRoute() {
   if (redirecting) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <Spin size="large" tip="Mengalihkan ke Project Delivery..." />
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+          <Spin size="large" />
+          <span style={{ color: '#64748b', fontSize: 14 }}>Mengalihkan ke Project Delivery...</span>
+        </div>
       </div>
     );
   }

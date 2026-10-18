@@ -1,5 +1,13 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn } from 'typeorm';
 
+export enum DocumentCategory {
+  CUSTOMER_BAST = 'CUSTOMER_BAST',
+  INTERNAL_HANDOVER = 'INTERNAL_HANDOVER',
+  FINAL_REPORT = 'FINAL_REPORT',
+  TECHNICAL = 'TECHNICAL',
+  OTHER = 'OTHER',
+}
+
 @Entity('documents')
 export class Document {
   @PrimaryGeneratedColumn()
@@ -10,6 +18,13 @@ export class Document {
 
   @Column({ name: 'entity_id' })
   entityId: number;
+
+  @Column({
+    type: 'varchar',
+    length: 50,
+    default: DocumentCategory.OTHER,
+  })
+  category: DocumentCategory;
 
   @Column({ name: 'file_name', length: 255 })
   fileName: string;

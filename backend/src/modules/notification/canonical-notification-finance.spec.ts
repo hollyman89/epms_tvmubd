@@ -163,7 +163,7 @@ describe('Phase N7: Finance Canonical Notification Migration & Decoupling Suite'
       expect(pmNotif!.message).toContain(PAYMENT_NUMBER);
       expect(pmNotif!.message).toContain('PO #' + PO_ID);
       expect(pmNotif!.notificationType).toBe('ALERT');
-      expect(pmNotif!.actionLink).toBe(`/projects/pos/${PO_ID}`);
+      expect(pmNotif!.actionLink).toBe(`/procurement?tab=po&poId=${PO_ID}`);
       expect(pmNotif!.dedupeKey).toBe(`evt-fin-pay-001:${PM_ID}:FINANCE_PAYMENT_RECORDED_PM`);
 
       // Finance Payer Bell verification
@@ -172,7 +172,7 @@ describe('Phase N7: Finance Canonical Notification Migration & Decoupling Suite'
       expect(payerNotif!.title).toBe('Transaksi Berhasil');
       expect(payerNotif!.message).toContain('berhasil dicatat');
       expect(payerNotif!.notificationType).toBe('SYSTEM');
-      expect(payerNotif!.actionLink).toBe(`/finance/payments/${PAYMENT_ID}`);
+      expect(payerNotif!.actionLink).toBe('/finance/payments');
       expect(payerNotif!.dedupeKey).toBe(`evt-fin-pay-001:${FINANCE_PAYER_ID}:FINANCE_PAYMENT_RECORDED_PAYER`);
 
       // WebSocket verification: exactly 2 pushes to respective recipients

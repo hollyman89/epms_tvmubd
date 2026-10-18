@@ -4,8 +4,8 @@ import React, { useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
 import { Typography, Spin } from 'antd';
-import { useSocket } from '@/context/SocketProvider';
 import { setupProjectDeliverySync } from '@/lib/workflowSync';
+import { useQueryClient } from '@tanstack/react-query';
 
 const { Title } = Typography;
 
@@ -32,39 +32,23 @@ const ProjectOperationTab = dynamic(
 
 export default function ProjectDeliveryRoute() {
   const [pmoRefreshTrigger, setPmoRefreshTrigger] = useState(0);
-  const { notificationSocket } = useSocket();
+  const queryClient = useQueryClient();
 
-  // Active Pre-Kickoff Socket Transports (Legal & Marketing)
-  useEffect(() => {
-    if (!notificationSocket) return;
-
-    const handleRealtimeUpdate = (payload?: any) => {
-      console.log('[Project Delivery] Real-time update diterima:', payload);
-      // Trigger refetch di ProjectOperationTab
-      setPmoRefreshTrigger(prev => prev + 1);
-    };
-
-    notificationSocket.on('legal.queue.updated', handleRealtimeUpdate);
-    notificationSocket.on('marketing.tender.management_update', handleRealtimeUpdate);
-
-    return () => {
-      notificationSocket.off('legal.queue.updated', handleRealtimeUpdate);
-      notificationSocket.off('marketing.tender.management_update', handleRealtimeUpdate);
-    };
-  }, [notificationSocket]);
-
-  // Canonical Workflow Realtime Synchronization & Reconnect Recovery
+  // Canonical Realtime Synchronization & Reconnect Recovery (Phase W8-CP3)
   useEffect(() => {
     return setupProjectDeliverySync({
-      onRefresh: () => setPmoRefreshTrigger(prev => prev + 1),
+      onRefresh: () => {
+        setPmoRefreshTrigger(prev => prev + 1);
+        queryClient.invalidateQueries({ queryKey: ['project', 'operational-board'] });
+      },
     });
-  }, []);
+  }, [queryClient]);
 
   return (
     <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'PROJECT_MANAGER', 'PMO', 'DIRECTOR']}>
       <div style={{ padding: '24px', background: '#fff', borderRadius: '12px', minHeight: '80vh' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-          <Title level={3} style={{ margin: 0, background: 'linear-gradient(90deg, #1677ff, #722ed1)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+          <Title level={3} style={{ margin: 0, fontSize: '24px', fontWeight: 600, lineHeight: '32px', color: '#0f172a' }}>
             Project Delivery Workspace
           </Title>
         </div>

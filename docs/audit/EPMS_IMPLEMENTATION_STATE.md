@@ -396,7 +396,7 @@ Setiap agent yang bekerja pada repositori ini terikat pada kontrak berikut:
 
 ## Verification Snapshot — 2026-09-22
 
-Local execution evidence is recorded in [the 22 September test report](../../reports/test_20260922.md). Both frontend and backend TypeScript checks passed. Frontend Jest: 46 passed across 3 suites. Backend Jest, excluding 5 shared-database suites: 1,155 passed and 77 failed across 61 suites (54 passed, 7 failed). Of the backend failures, 67 are missing test-module dependencies; 10 involve fixtures/expectations inconsistent with current project status and progress rules.
+Both frontend and backend TypeScript checks passed. Frontend Jest: 46 passed across 3 suites. Backend Jest, excluding 5 shared-database suites: 1,155 passed and 77 failed across 61 suites (54 passed, 7 failed). Of the backend failures, 67 are missing test-module dependencies; 10 involve fixtures/expectations inconsistent with current project status and progress rules.
 
 Eight existing authentication browser tests initially produced 7 passes and 1 login redirect timeout; the failed test passed on an unchanged targeted recheck. Forty API smoke checks passed with explicit MARKETING-role expectations, including expected 401/403 denials. No production build, shared-database migrations, or business-lifecycle mutations were performed. This snapshot does not supersede historical phase records or establish production readiness.
 

@@ -6,10 +6,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Table,
   Typography,
-  Card,
   Row,
   Col,
-  Statistic,
   Tag,
   Button,
   Space,
@@ -21,7 +19,9 @@ import {
   Tabs,
   Input,
   Select,
-  Badge,
+  Spin,
+  Dropdown,
+  type MenuProps,
 } from 'antd';
 import {
   FileDoneOutlined,
@@ -38,6 +38,8 @@ import {
   FilterOutlined,
   ReloadOutlined,
   FileTextOutlined,
+  StopOutlined,
+  MoreOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
@@ -46,28 +48,191 @@ import {
   ProcurementPackageStatus,
   RfqRecord,
 } from '@/services/procurement.service';
+import dynamic from 'next/dynamic';
 import { useAuth } from '@/context/AuthContext';
 import {
   PrApprovalWorkflow,
   PrStatusBadge,
   PrApprovalStatus,
 } from '@/components/procurement/PrApprovalWorkflow';
+import type { PurchaseOrderPrototypeRecord } from '@/components/procurement/PurchaseOrderModal';
+import type { GoodsReceiptRecord } from '@/components/procurement/GoodsReceiptModal';
+import UserIdentityDisplay from '@/components/common/UserIdentityDisplay';
+import { resolveStatusPresentation } from '@/lib/statusPresentation';
 import {
-  CreateRfqModal,
-} from '@/components/procurement/CreateRfqModal';
-import {
-  PurchaseOrderModal,
-  PurchaseOrderPrototypeRecord,
-} from '@/components/procurement/PurchaseOrderModal';
-import {
-  GoodsReceiptModal,
-  GoodsReceiptRecord,
-} from '@/components/procurement/GoodsReceiptModal';
-import {
-  ProcurementPackageDetailDrawer,
-  getPackageStatusTag,
-} from '@/components/procurement/ProcurementPackageDetailDrawer';
-import { ReconciliationTab } from '@/components/procurement/ReconciliationTab';
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatQuantity,
+  formatNumber,
+} from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
+import styles from './procurement/ProcurementPage.module.css';
+
+const PurchaseOrderModal = dynamic(
+  () => import('@/components/procurement/PurchaseOrderModal').then((m) => m.PurchaseOrderModal),
+  { ssr: false }
+);
+
+const GoodsReceiptModal = dynamic(
+  () => import('@/components/procurement/GoodsReceiptModal').then((m) => m.GoodsReceiptModal),
+  { ssr: false }
+);
+
+const CreateRfqModal = dynamic(
+  () => import('@/components/procurement/CreateRfqModal').then((m) => m.CreateRfqModal),
+  { ssr: false }
+);
+
+const ProcurementPackageDetailDrawer = dynamic(
+  () => import('@/components/procurement/ProcurementPackageDetailDrawer').then((m) => m.ProcurementPackageDetailDrawer),
+  { ssr: false }
+);
+
+const ServiceOrderModal = dynamic(
+  () => import('@/components/procurement/ServiceOrderModal').then((m) => m.ServiceOrderModal),
+  { ssr: false }
+);
+
+const ServiceClaimModal = dynamic(
+  () => import('@/components/procurement/ServiceClaimModal').then((m) => m.ServiceClaimModal),
+  { ssr: false }
+);
+
+const ReconciliationTab = dynamic(
+  () => import('@/components/procurement/ReconciliationTab').then((m) => m.ReconciliationTab),
+  { ssr: false }
+);
+
+const getPackageStatusTag = (status: ProcurementPackageStatus | string) => {
+  const p = resolveStatusPresentation('package', status);
+  let icon: React.ReactNode = null;
+  if (p.rawStatus === 'SUBMITTED') icon = <ClockCircleFilled />;
+  else if (p.rawStatus === 'PR_CREATED') icon = <CheckCircleFilled />;
+  else if (p.rawStatus === 'RETURNED') icon = <RollbackOutlined />;
+  else if (p.rawStatus === 'CANCELLED') icon = <StopOutlined />;
+
+  return (
+    <Tag color={p.color} icon={icon} style={{ fontWeight: 600, padding: '2px 8px', borderRadius: 12, fontSize: 11 }}>
+      {p.label}
+    </Tag>
+  );
+};
+
+/**
+ * EPMS — PROCUREMENT-EMPTY-COUNT-R1
+ * Resolves safe count representation for Procurement summary cards.
+ * Never returns '—' or undefined; empty or loading fallback is numeric 0.
+ */
+export function resolveProcurementCount(value: number | any[] | undefined | null): number {
+  if (value === null || value === undefined) return 0;
+  if (Array.isArray(value)) return value.length;
+  if (typeof value === 'number') {
+    return isNaN(value) ? 0 : Math.max(0, value);
+  }
+  return 0;
+}
+
+export function formatProcurementSummaryCount(value: number | any[] | undefined | null, unit: 'PR' | 'PO'): string {
+  const count = resolveProcurementCount(value);
+  return `${count} ${unit}`;
+}
+
+export interface ResolveSummaryMetricParams {
+  summaryCount?: number | null;
+  localArray?: any[];
+  isLoading?: boolean;
+  isAuthorized?: boolean;
+}
+
+export function resolveSummaryCardValue(params: ResolveSummaryMetricParams): {
+  displayValue: number | string;
+  isLoading: boolean;
+  isUnauthorized: boolean;
+} {
+  const { summaryCount, localArray = [], isLoading = false, isAuthorized = true } = params;
+  if (isLoading && summaryCount === undefined && localArray.length === 0) {
+    return { displayValue: 'LOADING', isLoading: true, isUnauthorized: !isAuthorized };
+  }
+  if (!isAuthorized && (summaryCount === undefined || summaryCount === null)) {
+    return { displayValue: 0, isLoading: false, isUnauthorized: true };
+  }
+  if (summaryCount !== undefined && summaryCount !== null) {
+    return { displayValue: summaryCount, isLoading: false, isUnauthorized: false };
+  }
+  return { displayValue: localArray.length, isLoading: false, isUnauthorized: false };
+}
+
+/**
+ * EPMS — Authoritative PR Domain Resolution
+ * Distinguishes MATERIAL vs SERVICE Purchase Requests.
+ * Primary discriminator: resourceType === 'SERVICE' -> SERVICE, resourceType === 'MATERIAL' -> MATERIAL.
+ * Category 'SUBCONTRACTOR' supports SERVICE only where backed by resourceType or not explicitly MATERIAL.
+ * EQUIPMENT and OPERATIONAL are NOT classified as SERVICE solely by category.
+ */
+export function checkIsServicePr(r: any): boolean {
+  if (!r) return false;
+
+  // Direct domain or orderType if already resolved
+  if (r.domain === 'SERVICE' || r.orderType === 'SERVICE') {
+    return true;
+  }
+  if (r.domain === 'MATERIAL' || r.orderType === 'MATERIAL') {
+    return false;
+  }
+
+  // Top-level resourceType
+  const topResourceType = (r.resourceType || r.resource_type)?.toUpperCase();
+  if (topResourceType === 'SERVICE') return true;
+  if (topResourceType === 'MATERIAL') return false;
+
+  // Inspect PR items
+  if (Array.isArray(r.items) && r.items.length > 0) {
+    return r.items.some((it: any) => {
+      const ci = it.costItem || it;
+      const resType = (ci.resourceType || ci.resource_type || it.resourceType || it.resource_type)?.toUpperCase();
+      if (resType === 'SERVICE') return true;
+      if (resType === 'MATERIAL') return false;
+
+      // Category check: only SUBCONTRACTOR supports SERVICE when resourceType is not MATERIAL
+      const catKey = (ci.categoryKey || ci.category_key || it.categoryKey || it.category_key)?.toUpperCase();
+      if (catKey === 'SERVICE') return true;
+      if (catKey === 'SUBCONTRACTOR' && resType !== 'MATERIAL') return true;
+
+      // EQUIPMENT and OPERATIONAL are NEVER auto-classified as SERVICE solely by category
+      return false;
+    });
+  }
+
+  return false;
+}
+
+/**
+ * EPMS — Domain-Isolated Duplicate Detection
+ * Compares PRs only within the SAME procurement domain (Material vs Service).
+ * A Material PR and a Service PR on the same project are NEVER duplicates of each other.
+ */
+export function checkIsDuplicatePr(r: any, allPrs: any[]): boolean {
+  if (!r || !Array.isArray(allPrs)) return false;
+  const rIsService = checkIsServicePr(r);
+  const effectiveStatus = r.status || 'SUBMITTED';
+  const isApproved = effectiveStatus === 'APPROVED';
+
+  const hasCanonicalApproved = allPrs.some((otherPr) => {
+    if (String(otherPr.id) === String(r.id)) return false;
+    if (String(otherPr.projectId) !== String(r.projectId)) return false;
+
+    // Strict domain isolation:
+    const otherIsService = checkIsServicePr(otherPr);
+    if (otherIsService !== rIsService) {
+      return false; // Cross-domain PRs on the same project are NEVER duplicates
+    }
+
+    return otherPr.status === 'APPROVED';
+  });
+
+  return hasCanonicalApproved && !isApproved;
+}
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -77,33 +242,52 @@ export const ProcurementPage: React.FC = () => {
   const { user, isProcurement, isFinance, isDirector, isSuperAdmin, isProjectManager, isHeadOfOperations } = useAuth();
   const userRoles = (user?.roles || []).map((r: any) => String(r.name || r).toUpperCase());
   const isPurchasing = userRoles.includes('PURCHASING');
-  const canPerformProcurementAction = isProcurement || isSuperAdmin || isPurchasing;
+  const canPerformProcurementAction = isProcurement || isPurchasing;
 
   const canReceiveGoods =
     isProcurement ||
-    isSuperAdmin ||
+    isPurchasing ||
     isProjectManager ||
     isHeadOfOperations ||
-    userRoles.includes('PMO') ||
-    userRoles.includes('ADMIN');
+    userRoles.includes('PMO');
 
-  // Authorized GET roles for reconciliation matching backend: PROCUREMENT, PURCHASING, PROJECT_MANAGER, SUPER_ADMIN, ADMIN
+  // Authorized GET roles for reconciliation matching backend: PROCUREMENT, PURCHASING, PROJECT_MANAGER, SUPER_ADMIN, ADMIN, DIRECTOR, MANAGEMENT, GENERAL_MANAGER, HEAD_OF_OPERATIONS
   const canReadReconciliation =
     isProcurement ||
     isSuperAdmin ||
     isProjectManager ||
+    isDirector ||
+    isHeadOfOperations ||
     userRoles.includes('PURCHASING') ||
-    userRoles.includes('ADMIN');
+    userRoles.includes('ADMIN') ||
+    userRoles.includes('DIRECTOR') ||
+    userRoles.includes('GENERAL_MANAGER') ||
+    userRoles.includes('MANAGEMENT') ||
+    userRoles.includes('MANAGER');
 
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
   const prIdParam = searchParams.get('prId');
+  const poIdParam = searchParams.get('poId');
+  const domainParam = searchParams.get('domain');
   const autoOpenedPrRef = useRef<string | null>(null);
+  const autoOpenedPoRef = useRef<string | null>(null);
 
   // Workstation Tab
-  const [activeTabKey, setActiveTabKey] = useState<string>(
-    tabParam === 'pr' || prIdParam ? 'pr' : 'packages'
-  );
+  const [activeTabKey, setActiveTabKey] = useState<string>(() => {
+    if (tabParam === 'po' || poIdParam) return 'po';
+    if (tabParam === 'pr' || prIdParam) return 'pr';
+    if (tabParam === 'gr') return 'gr';
+    if (tabParam === 'reconciliation') return 'reconciliation';
+    if (tabParam === 'packages') return 'packages';
+    return 'packages';
+  });
+
+  // PR Domain Sub-Tab (Material vs Jasa)
+  const [prDomainTab, setPrDomainTab] = useState<'MATERIAL' | 'SERVICE'>(() => {
+    if (domainParam?.toUpperCase() === 'SERVICE') return 'SERVICE';
+    return 'MATERIAL';
+  });
 
   // Package Intake Filters
   const [statusFilter, setStatusFilter] = useState<string>('SUBMITTED');
@@ -132,12 +316,32 @@ export const ProcurementPage: React.FC = () => {
 
   const [selectedPoForView, setSelectedPoForView] = useState<PurchaseOrderPrototypeRecord | null>(null);
   const [isPoModalOpen, setIsPoModalOpen] = useState<boolean>(false);
+  const [selectedPrForServicePo, setSelectedPrForServicePo] = useState<any | null>(null);
+  const [isServicePoModalOpen, setIsServicePoModalOpen] = useState<boolean>(false);
   const [poVersion, setPoVersion] = useState<number>(0);
+
+  const [selectedPoForServiceOrder, setSelectedPoForServiceOrder] = useState<PurchaseOrderPrototypeRecord | null>(null);
+  const [isServiceOrderModalOpen, setIsServiceOrderModalOpen] = useState<boolean>(false);
+
+  const [selectedPoForServiceClaim, setSelectedPoForServiceClaim] = useState<PurchaseOrderPrototypeRecord | null>(null);
+  const [isServiceClaimModalOpen, setIsServiceClaimModalOpen] = useState<boolean>(false);
 
   const [selectedPoForGr, setSelectedPoForGr] = useState<PurchaseOrderPrototypeRecord | null>(null);
   const [selectedGrForView, setSelectedGrForView] = useState<GoodsReceiptRecord | null>(null);
   const [isGrModalOpen, setIsGrModalOpen] = useState<boolean>(false);
   const [grVersion, setGrVersion] = useState<number>(0);
+
+  // 0. AUTHORITATIVE DASHBOARD SUMMARY (EPMS — PROCUREMENT-SUMMARY-LAZYLOAD-R1)
+  const {
+    data: dashboardSummary,
+    isLoading: summaryLoading,
+    refetch: refetchSummary,
+  } = useQuery({
+    queryKey: ['procurement', 'summary'],
+    queryFn: () => ProcurementService.getDashboardSummary(),
+    enabled: Boolean(user),
+    staleTime: 60 * 1000,
+  });
 
   // 1. CANONICAL INTAKE: GET /procurement/packages
   const packageQueryFilters = useMemo(() => {
@@ -152,19 +356,19 @@ export const ProcurementPage: React.FC = () => {
     data: packages = [],
     isLoading: packagesLoading,
     isError: packagesError,
-    error: packagesFetchError,
     refetch: refetchPackages,
   } = useQuery({
     queryKey: ['procurement', 'packages', packageQueryFilters],
     queryFn: () => ProcurementService.getPackages(packageQueryFilters),
-    staleTime: 30 * 1000,
+    enabled: Boolean(user) && activeTabKey === 'packages',
+    staleTime: 60 * 1000,
   });
 
-  // Query for unresolved reconciliations count badge (only for authorized roles)
+  // Query for unresolved reconciliations count badge (tab-scoped for authorized roles)
   const { data: unresolvedReconciliations = [], refetch: refetchReconciliations } = useQuery({
     queryKey: ['procurement', 'reconciliations'],
     queryFn: () => ProcurementService.getUnresolvedReconciliations(),
-    enabled: Boolean(user && canReadReconciliation),
+    enabled: Boolean(user && canReadReconciliation && activeTabKey === 'reconciliation'),
     staleTime: 60 * 1000,
   });
 
@@ -173,58 +377,162 @@ export const ProcurementPage: React.FC = () => {
     return packages.filter((p) => p.status === 'SUBMITTED').length;
   }, [packages, statusFilter]);
 
-  // 2. Existing Downstream PR, PO & GR Queries
-  const { data: procurementData, isLoading: loadingPrPo, refetch: refetchPrPo } = useQuery({
-    queryKey: ['procurement', 'prs-pos', user?.sub, prVersion, rfqVersion, poVersion, grVersion],
-    enabled: Boolean(user),
+  // Authoritative counters with tab-local fallback
+  // Card 1: Antrean Paket
+  const hasPackageQueueAccess = dashboardSummary ? dashboardSummary.packageQueueCount !== null : true;
+  const effectivePackageCount =
+    dashboardSummary?.packageQueueCount !== null && dashboardSummary?.packageQueueCount !== undefined
+      ? dashboardSummary.packageQueueCount
+      : submittedPackagesCount;
+
+  // Card 2: Perlu Rekonsiliasi
+  const effectiveReconciliationCount = canReadReconciliation
+    ? (dashboardSummary?.reconciliationCount !== null && dashboardSummary?.reconciliationCount !== undefined
+        ? dashboardSummary.reconciliationCount
+        : unresolvedReconciliations.length)
+    : (dashboardSummary?.reconciliationCount ?? 0);
+
+  // 2. Tab-Scoped Downstream Queries (PR, RFQ, PO, GR) - Lazy loaded per active tab
+  const {
+    data: prs = [],
+    isLoading: prsLoading,
+    refetch: refetchPrs,
+  } = useQuery({
+    queryKey: ['procurement', 'prs'],
     queryFn: async () => {
       try {
-        const [prData, rfqData, poData, grData] = await Promise.all([
-          ProcurementService.getPurchaseRequests().catch((e) => {
-            console.warn('Failed to load purchase requests:', e);
-            return [];
-          }),
-          ProcurementService.getRfqs().catch((e) => {
-            console.warn('Failed to load RFQs:', e);
-            return [];
-          }),
-          ProcurementService.getPurchaseOrders().catch((e) => {
-            console.warn('Failed to load purchase orders:', e);
-            return [];
-          }),
-          ProcurementService.getGoodsReceipts().catch((e) => {
-            console.warn('Failed to load goods receipts:', e);
-            return [];
-          }),
-        ]);
-        return {
-          prs: Array.isArray(prData) ? prData : [],
-          rfqs: Array.isArray(rfqData) ? rfqData : [],
-          pos: Array.isArray(poData) ? poData : [],
-          grs: Array.isArray(grData) ? grData : [],
-        };
-      } catch (error: any) {
-        if (error.response?.status === 401) {
+        const prData = await ProcurementService.getPurchaseRequests();
+        return Array.isArray(prData) ? prData : [];
+      } catch (e: any) {
+        if (e.response?.status === 401) {
           message.warning('Anda belum login. Beberapa data mungkin tidak tampil.');
         } else {
-          message.error('Gagal mengambil data downstream Procurement');
+          message.error('Gagal mengambil data Purchase Request');
         }
-        throw error;
+        return [];
       }
     },
-    staleTime: 5 * 60 * 1000,
+    enabled: Boolean(user) && (activeTabKey === 'pr' || Boolean(prIdParam)),
+    staleTime: 60 * 1000,
   });
 
-  const prs = useMemo(() => procurementData?.prs || [], [procurementData]);
-  const rfqs = useMemo(() => procurementData?.rfqs || [], [procurementData]);
-  const pos = useMemo(() => procurementData?.pos || [], [procurementData]);
+  const {
+    data: rfqs = [],
+    isLoading: rfqsLoading,
+    refetch: refetchRfqs,
+  } = useQuery({
+    queryKey: ['procurement', 'rfqs'],
+    queryFn: async () => {
+      try {
+        const rfqData = await ProcurementService.getRfqs();
+        return Array.isArray(rfqData) ? rfqData : [];
+      } catch (e: any) {
+        console.warn('Failed to load RFQs:', e);
+        return [];
+      }
+    },
+    enabled: Boolean(user) && activeTabKey === 'pr',
+    staleTime: 60 * 1000,
+  });
 
-  // Deep-link support: Auto-select 'pr' tab and open PrApprovalWorkflow for prId
+  const {
+    data: pos = [],
+    isLoading: posLoading,
+    refetch: refetchPos,
+  } = useQuery({
+    queryKey: ['procurement', 'purchase-orders'],
+    queryFn: async () => {
+      try {
+        const poData = await ProcurementService.getPurchaseOrders();
+        return Array.isArray(poData) ? poData : [];
+      } catch (e: any) {
+        if (e.response?.status === 401) {
+          message.warning('Anda belum login. Beberapa data mungkin tidak tampil.');
+        } else {
+          message.error('Gagal mengambil data Purchase Order');
+        }
+        return [];
+      }
+    },
+    enabled:
+      Boolean(user) &&
+      (activeTabKey === 'po' ||
+        activeTabKey === 'pr' ||
+        Boolean(poIdParam) ||
+        isCreateRfqModalOpen ||
+        Boolean(selectedPrForRfq)),
+    staleTime: 60 * 1000,
+  });
+
+  const {
+    data: rawGrs = [],
+    isLoading: grsLoading,
+    refetch: refetchGrs,
+  } = useQuery({
+    queryKey: ['procurement', 'goods-receipts'],
+    queryFn: async () => {
+      try {
+        const grData = await ProcurementService.getGoodsReceipts();
+        return Array.isArray(grData) ? grData : [];
+      } catch (e: any) {
+        console.warn('Failed to load goods receipts:', e);
+        return [];
+      }
+    },
+    enabled: Boolean(user) && (activeTabKey === 'gr' || activeTabKey === 'po'),
+    staleTime: 60 * 1000,
+  });
+
+  // Card 3: Total Purchase Request
+  const prSummaryCount =
+    dashboardSummary?.purchaseRequestCount !== undefined
+      ? dashboardSummary.purchaseRequestCount
+      : resolveProcurementCount(prs);
+
+  // Card 4: Total Purchase Order
+  const poSummaryCount =
+    dashboardSummary?.purchaseOrderCount !== undefined
+      ? dashboardSummary.purchaseOrderCount
+      : resolveProcurementCount(pos);
+
+  // Tab Badge: Goods Receipt
+  const grBadgeCount =
+    dashboardSummary?.goodsReceiptCount !== undefined
+      ? dashboardSummary.goodsReceiptCount
+      : rawGrs.length;
+
+  // Deep-link support: Auto-select tab based on tabParam / query params
   useEffect(() => {
-    if (tabParam === 'pr' || prIdParam) {
+    if (tabParam === 'po' || poIdParam) {
+      setActiveTabKey('po');
+    } else if (tabParam === 'pr' || prIdParam) {
       setActiveTabKey('pr');
+    } else if (tabParam === 'gr') {
+      setActiveTabKey('gr');
+    } else if (tabParam === 'reconciliation') {
+      setActiveTabKey('reconciliation');
+    } else if (tabParam === 'packages') {
+      setActiveTabKey('packages');
     }
-  }, [tabParam, prIdParam]);
+  }, [tabParam, prIdParam, poIdParam]);
+
+  // Deep-link support: Auto-open PO modal for poIdParam
+  useEffect(() => {
+    if (!poIdParam) return;
+    if (autoOpenedPoRef.current === poIdParam) return;
+
+    const poRecord = pos.find(
+      (p: any) =>
+        String(p.id) === poIdParam ||
+        String(p.poId) === poIdParam ||
+        String(p.poNumber) === poIdParam
+    );
+    if (poRecord) {
+      autoOpenedPoRef.current = poIdParam;
+      setSelectedPoForView((poRecord as any).rawRecord || (poRecord as any));
+      setIsPoModalOpen(true);
+    }
+  }, [poIdParam, pos]);
 
   useEffect(() => {
     if (!prIdParam) return;
@@ -242,8 +550,7 @@ export const ProcurementPage: React.FC = () => {
       return;
     }
 
-    // If prs list is still loading, wait for it unless loading completed
-    if (loadingPrPo) return;
+    if (prsLoading) return;
 
     // Otherwise, fetch authoritative PR by ID directly
     let isCancelled = false;
@@ -262,7 +569,7 @@ export const ProcurementPage: React.FC = () => {
     return () => {
       isCancelled = true;
     };
-  }, [prIdParam, prs, loadingPrPo]);
+  }, [prIdParam, prs, prsLoading]);
 
   const rfqMapByPrId = useMemo(() => {
     const map: Record<string, RfqRecord> = {};
@@ -272,6 +579,26 @@ export const ProcurementPage: React.FC = () => {
     }
     return map;
   }, [rfqs]);
+
+  const poMapByPrId = useMemo(() => {
+    const map: Record<string, any> = {};
+    for (const p of pos) {
+      const anyP = p as any;
+      const prId = anyP.purchaseRequestId || anyP.purchaseRequest?.id || anyP.prId;
+      if (prId) map[String(prId)] = p;
+      const prNum = anyP.purchaseRequest?.prNumber || anyP.prNumber;
+      if (prNum) map[String(prNum)] = p;
+    }
+    return map;
+  }, [pos]);
+
+  const materialPrs = useMemo(() => prs.filter((p: any) => !checkIsServicePr(p)), [prs]);
+  const servicePrs = useMemo(() => prs.filter((p: any) => checkIsServicePr(p)), [prs]);
+
+  const checkIsDuplicate = useCallback(
+    (r: any) => checkIsDuplicatePr(r, prs),
+    [prs]
+  );
 
   const existingPoForSelectedPr = useMemo(() => {
     if (!selectedPrForRfq) return null;
@@ -292,7 +619,6 @@ export const ProcurementPage: React.FC = () => {
   };
 
   // 3. ACTION HANDLERS FOR PROCUREMENT PACKAGE
-
   const handleOpenDetail = (pkgId: number) => {
     setSelectedPackageId(pkgId);
     setIsPackageDrawerOpen(true);
@@ -318,6 +644,7 @@ export const ProcurementPage: React.FC = () => {
       message.success(`Paket pengadaan ${packageToReturn.packageNumber} berhasil dikembalikan ke PM.`);
       queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
       queryClient.invalidateQueries({ queryKey: ['procurement', 'packages', packageToReturn.id] });
+      queryClient.invalidateQueries({ queryKey: ['procurement', 'summary'] });
       setReturnModalOpen(false);
       setPackageToReturn(null);
       setReturnReason('');
@@ -343,7 +670,8 @@ export const ProcurementPage: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['procurement', 'packages', pkg.id] });
       queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
       queryClient.invalidateQueries({ queryKey: ['procurement', 'prs'] });
-      refetchPrPo();
+      queryClient.invalidateQueries({ queryKey: ['procurement', 'summary'] });
+      refetchPrs();
       if (isPackageDrawerOpen) {
         setIsPackageDrawerOpen(false);
       }
@@ -357,7 +685,6 @@ export const ProcurementPage: React.FC = () => {
         queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
         queryClient.invalidateQueries({ queryKey: ['procurement', 'packages', pkg.id] });
       } else if (status === 422) {
-        // Safety Gate active: unresolved reconciliation items exist for this project
         Modal.warning({
           title: 'Safety Gate Aktif — Rekonsiliasi Belum Selesai',
           centered: true,
@@ -402,7 +729,6 @@ export const ProcurementPage: React.FC = () => {
       message.info('Informasi Purchase Request tidak tersedia');
       return;
     }
-    // Check if we can find full PR record from prs list
     const found = prs.find(
       (p: any) =>
         String(p.id) === String(linkedPr.id) ||
@@ -413,96 +739,107 @@ export const ProcurementPage: React.FC = () => {
   };
 
   // 4. COLUMNS DEFINITIONS
-
   const packageColumns = useMemo(
     () => [
       {
-        title: 'Nomor Paket & Judul',
+        title: 'NOMOR PAKET & JUDUL',
         key: 'packageNumber',
-        width: 240,
-        render: (_: any, r: ProcurementPackage) => (
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 13, color: '#1d4ed8', fontFamily: 'monospace' }}>
-              {r.packageNumber || `PKG-${r.id}`}
+        width: 250,
+        render: (_: any, r: ProcurementPackage) => {
+          const isService = (r.items || []).some((item) =>
+            ['SUBCONTRACTOR', 'EQUIPMENT', 'OPERATIONAL'].includes(item.costItem?.categoryKey || '')
+          );
+          return (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span className={styles.idMonospace} style={{ fontWeight: 700, fontSize: 13, color: '#1D4ED8' }}>
+                  {r.packageNumber || `PKG-${r.id}`}
+                </span>
+                <Tag color={isService ? 'purple' : 'cyan'} style={{ fontSize: 9.5, lineHeight: '14px', margin: 0, fontWeight: 700 }}>
+                  {isService ? 'JASA' : 'MATERIAL'}
+                </Tag>
+              </div>
+              <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0F172A', marginTop: 2 }}>
+                {r.title}
+              </div>
+              <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 2 }}>
+                Ref ID: #{r.id}
+              </div>
             </div>
-            <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0f172a', marginTop: 2 }}>
-              {r.title}
-            </div>
-            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
-              Ref ID: #{r.id}
-            </div>
-          </div>
-        ),
+          );
+        },
       },
       {
-        title: 'Proyek',
+        title: 'PROYEK',
         key: 'project',
         width: 220,
         render: (_: any, r: ProcurementPackage) => (
           <div>
-            <div style={{ fontWeight: 600, fontSize: 12, color: '#0f172a' }}>
+            <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0F172A' }}>
               {r.project?.name || 'Tanpa Nama Proyek'}
             </div>
-            <Space size={4} style={{ marginTop: 2 }}>
-              <Tag color="blue" style={{ margin: 0, fontFamily: 'monospace', fontSize: 10.5 }}>
-                {r.project?.code || `ID-${r.projectId}`}
-              </Tag>
-            </Space>
+            {r.project?.code && (
+              <span className={styles.subtleCodeTag} style={{ background: '#F1F5F9', color: '#475569', display: 'inline-block', marginTop: 2 }}>
+                {r.project.code}
+              </span>
+            )}
           </div>
         ),
       },
       {
-        title: 'Pembuat (PM)',
+        title: 'PEMBUAT (PM)',
         key: 'requester',
-        width: 160,
+        width: 170,
         render: (_: any, r: ProcurementPackage) => (
           <div>
-            <div style={{ fontWeight: 500, fontSize: 12, color: '#0f172a' }}>
+            <div style={{ fontWeight: 500, fontSize: 12, color: '#0F172A' }}>
               {r.requester?.fullName || r.requester?.email || '—'}
             </div>
             {r.submittedAt && (
-              <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
-                Diajukan: {dayjs(r.submittedAt).format('DD/MM/YYYY HH:mm')}
+              <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 2 }}>
+                Diajukan: {formatDateTime(r.submittedAt)}
               </div>
             )}
           </div>
         ),
       },
       {
-        title: 'Target Dibutuhkan',
+        title: 'TARGET DIBUTUHKAN',
         dataIndex: 'requiredDate',
         key: 'requiredDate',
-        width: 140,
+        width: 150,
         render: (date: string) => (
-          <span style={{ fontSize: 12, color: date ? '#0f172a' : '#94a3b8' }}>
-            {date ? dayjs(date).format('DD MMM YYYY') : '—'}
+          <span className={styles.idMonospace} style={{ fontSize: 12, color: date ? '#0F172A' : '#94A3B8' }}>
+            {formatDate(date)}
           </span>
         ),
       },
       {
-        title: 'Item & Estimasi Total',
+        title: 'ITEM & ESTIMASI TOTAL',
         key: 'itemsTotal',
         width: 170,
+        align: 'right' as const,
         render: (_: any, r: ProcurementPackage) => (
           <div>
-            <div style={{ fontWeight: 700, fontSize: 12.5, color: '#059669' }}>
-              Rp {Number(r.totalEstimatedAmount || 0).toLocaleString('id-ID')}
+            <div className={styles.currencyText} style={{ color: '#059669', fontSize: 13 }}>
+              {formatCurrency(r.totalEstimatedAmount)}
             </div>
-            <span style={{ fontSize: 11, color: '#64748b' }}>
+            <span style={{ fontSize: 11, color: '#64748B' }}>
               {(r.items || []).length} Item RAB
             </span>
           </div>
         ),
       },
       {
-        title: 'Status',
+        title: 'STATUS',
         dataIndex: 'status',
         key: 'status',
-        width: 130,
+        width: 140,
+        align: 'center' as const,
         render: (status: ProcurementPackageStatus) => getPackageStatusTag(status),
       },
       {
-        title: 'Aksi',
+        title: 'AKSI',
         key: 'action',
         width: 220,
         align: 'center' as const,
@@ -517,14 +854,7 @@ export const ProcurementPage: React.FC = () => {
                 size="small"
                 icon={<EyeOutlined />}
                 onClick={() => handleOpenDetail(r.id)}
-                style={{
-                  borderRadius: 6,
-                  fontWeight: 600,
-                  fontSize: 11.5,
-                  borderColor: '#93c5fd',
-                  color: '#1d4ed8',
-                  background: '#eff6ff',
-                }}
+                className={styles.btnActionBlue}
               >
                 Detail
               </Button>
@@ -537,26 +867,15 @@ export const ProcurementPage: React.FC = () => {
                     icon={<SendOutlined />}
                     loading={createPrLoadingId === r.id}
                     onClick={() => handleCreatePr(r)}
-                    style={{
-                      backgroundColor: '#059669',
-                      borderColor: '#059669',
-                      borderRadius: 6,
-                      fontWeight: 600,
-                      fontSize: 11.5,
-                    }}
+                    className={styles.btnActionPrimary}
                   >
                     Buat PR
                   </Button>
                   <Button
-                    danger
                     size="small"
                     icon={<RollbackOutlined />}
                     onClick={() => handleOpenReturnModal(r)}
-                    style={{
-                      borderRadius: 6,
-                      fontWeight: 600,
-                      fontSize: 11.5,
-                    }}
+                    className={styles.btnActionDanger}
                   >
                     Kembalikan
                   </Button>
@@ -572,9 +891,9 @@ export const ProcurementPage: React.FC = () => {
                     borderRadius: 6,
                     fontWeight: 600,
                     fontSize: 11.5,
-                    borderColor: '#86efac',
-                    color: '#15803d',
-                    background: '#f0fdf4',
+                    borderColor: '#86EFAC',
+                    color: '#15803D',
+                    background: '#F0FDF4',
                   }}
                 >
                   Lihat PR
@@ -583,7 +902,7 @@ export const ProcurementPage: React.FC = () => {
 
               {isReturned && (
                 <Tooltip title={r.rejectionReason || 'Paket dikembalikan ke PM untuk revisi'}>
-                  <Tag color="volcano" style={{ fontSize: 10, margin: 0 }}>
+                  <Tag color="volcano" style={{ fontSize: 10, margin: 0, borderRadius: 4 }}>
                     Dalam Revisi PM
                   </Tag>
                 </Tooltip>
@@ -596,165 +915,582 @@ export const ProcurementPage: React.FC = () => {
     [canPerformProcurementAction, createPrLoadingId]
   );
 
-  const prColumns = useMemo(
+  // Helper: Service Sourcing Presentation (Section 4)
+  const renderServiceSourcing = useCallback((r: any, rfq: any, po: any) => {
+    if (po) {
+      return (
+        <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+          <Tag color="cyan" style={{ fontWeight: 700, fontSize: 10, margin: 0, padding: '0 5px', lineHeight: '18px', whiteSpace: 'nowrap' }}>
+            SERVICE PO ISSUED
+          </Tag>
+          {rfq ? (
+            <span style={{ fontSize: 10.5, color: '#64748B' }}>
+              via {rfq.rfqNumber}
+            </span>
+          ) : (
+            <span style={{ fontSize: 10.5, color: '#64748B' }}>
+              Direct PO
+            </span>
+          )}
+        </div>
+      );
+    }
+
+    if (rfq && rfq.status === 'OPEN') {
+      return (
+        <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexWrap: 'nowrap' }}>
+            <Tag color="blue" style={{ fontWeight: 700, fontSize: 10, margin: 0, padding: '0 5px', lineHeight: '18px', whiteSpace: 'nowrap' }}>
+              COMPETITIVE RFQ
+            </Tag>
+            <Tag color="processing" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', fontWeight: 600, lineHeight: '18px', whiteSpace: 'nowrap' }}>
+              OPEN
+            </Tag>
+          </div>
+          <span className={styles.idMonospace} style={{ fontSize: 11, color: '#1D4ED8', fontWeight: 600, whiteSpace: 'nowrap' }}>
+            {rfq.rfqNumber}
+          </span>
+        </div>
+      );
+    }
+
+    if (rfq && rfq.status === 'CANCELLED') {
+      return (
+        <div style={{ display: 'inline-flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+          <Tag color="default" style={{ fontWeight: 700, fontSize: 10, margin: 0, padding: '0 5px', color: '#475569', background: '#F1F5F9', lineHeight: '18px', whiteSpace: 'nowrap' }}>
+            DIRECT
+          </Tag>
+          <span style={{ fontSize: 10, color: '#94A3B8' }}>
+            {rfq.rfqNumber} Dibatalkan
+          </span>
+        </div>
+      );
+    }
+
+    return (
+      <Tag color="default" style={{ fontWeight: 700, fontSize: 10, margin: 0, padding: '0 5px', color: '#475569', background: '#F1F5F9', lineHeight: '18px', whiteSpace: 'nowrap' }}>
+        DIRECT
+      </Tag>
+    );
+  }, []);
+
+  // Helper: Service PO / SPK Presentation (Section 3)
+  const renderServicePoOrSpk = useCallback((po: any) => {
+    if (!po) {
+      return <span style={{ color: '#94A3B8', fontSize: 12 }}>Belum Terbit</span>;
+    }
+    return (
+      <Space direction="vertical" size={2}>
+        <span className={styles.idMonospace} style={{ fontWeight: 700, color: '#0F172A', fontSize: 11.5 }}>
+          {po.poNumber || `PO-${po.id}`}
+        </span>
+        <Tag color="purple" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', fontWeight: 600 }}>
+          SPK Aktif
+        </Tag>
+      </Space>
+    );
+  }, []);
+
+  // ─────────────────────────────────────────────
+  // MATERIAL PR COLUMNS (Section 2)
+  // Columns: PR, Nilai, Approval, RFQ, Vendor, PO, Aksi
+  // ─────────────────────────────────────────────
+  const materialPrColumns = useMemo(
     () => [
       {
-        title: 'Nomor PR',
+        title: 'PR',
         dataIndex: 'prNumber',
         key: 'prNumber',
+        width: 170,
         render: (val: string, r: any) => {
-          const effectiveStatus = r.status || 'SUBMITTED';
-          const isApproved = effectiveStatus === 'APPROVED';
-          const hasCanonicalApproved = prs.some(
-            (otherPr) =>
-              String(otherPr.projectId) === String(r.projectId) &&
-              String(otherPr.id) !== String(r.id) &&
-              otherPr.status === 'APPROVED'
-          );
-          const isDuplicate = hasCanonicalApproved && !isApproved;
-
+          const isDuplicate = checkIsDuplicate(r);
           return (
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                <span style={{ fontWeight: 700, color: '#0f172a' }}>{val || `PR-${r.id}`}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
+                <span className={styles.idMonospace} style={{ fontWeight: 700, color: '#0F172A', fontSize: 12.5 }}>
+                  {val || `PR-${r.id}`}
+                </span>
                 {isDuplicate && (
-                  <Tag color="volcano" style={{ fontSize: 9.5, fontWeight: 700, margin: 0, padding: '0 4px', borderRadius: 3 }}>
-                    DUPLICATE
-                  </Tag>
+                  <Tooltip title={`Terdeteksi lebih dari satu PR untuk proyek ini (#${r.projectId}). Data tetap dipreservasi.`}>
+                    <Tag className={styles.duplicateTag}>DUPLIKAT</Tag>
+                  </Tooltip>
                 )}
               </div>
-              <div style={{ fontSize: 10.5, color: '#64748b' }}>Ref ID: #{r.id}</div>
+              <span style={{ fontSize: 11, color: '#64748B' }}>Ref ID: #{r.id}</span>
             </div>
           );
         },
       },
       {
-        title: 'Estimasi Total',
+        title: 'NILAI',
         dataIndex: 'totalEstimatedAmount',
         key: 'totalEstimatedAmount',
+        width: 140,
+        align: 'right' as const,
         render: (val: number) => (
-          <span style={{ fontWeight: 700, color: '#1d4ed8' }}>
-            Rp {Number(val || 0).toLocaleString('id-ID')}
+          <span className={styles.currencyText} style={{ color: '#0F172A', fontWeight: 600, fontSize: 12.5 }}>
+            {formatCurrency(val)}
           </span>
         ),
       },
       {
-        title: 'Status Alur Approval',
+        title: 'APPROVAL',
         key: 'approvalStatus',
+        width: 180,
         render: (_: any, r: any) => {
           const effectiveStatus: PrApprovalStatus = (r.status as PrApprovalStatus) || 'SUBMITTED';
           return <PrStatusBadge status={effectiveStatus} />;
         },
       },
       {
-        title: 'Status RFQ',
+        title: 'RFQ',
         key: 'rfqStatus',
+        width: 170,
         render: (_: any, r: any) => {
           const rfq = rfqMapByPrId[String(r.id)] || (r.prNumber ? rfqMapByPrId[String(r.prNumber)] : undefined);
-          if (!rfq) return <span style={{ color: '#94a3b8' }}>—</span>;
+          if (!rfq) return <span style={{ color: '#94A3B8' }}>—</span>;
           return (
             <Space direction="vertical" size={2}>
-              <Tag color="geekblue" style={{ fontWeight: 700, margin: 0, borderRadius: 4, fontSize: 11 }}>
+              <span className={styles.idMonospace} style={{ fontWeight: 700, color: '#1D4ED8', fontSize: 11.5 }}>
                 {rfq.rfqNumber}
-              </Tag>
-              <Tag color={rfq.status === 'EVALUATED' ? 'purple' : 'green'} style={{ fontSize: 9.5, margin: 0, padding: '0 4px', borderRadius: 3, fontWeight: 600 }}>
-                ● {rfq.status}
-              </Tag>
-              {rfq.comparison?.selectedWinnerVendorName && (
-                <span style={{ fontSize: 9.5, color: '#6b21a8', fontWeight: 600 }}>
-                  {rfq.comparison.selectedWinnerVendorName}
-                </span>
-              )}
+              </span>
+              <StatusBadge domain="rfq" status={rfq.status} showDot />
             </Space>
           );
         },
       },
       {
-        title: 'Tanggal Dibuat',
-        dataIndex: 'createdAt',
-        key: 'createdAt',
-        render: (date: string) => (date ? dayjs(date).format('DD MMM YYYY HH:mm') : '—'),
+        title: 'VENDOR',
+        key: 'vendor',
+        width: 180,
+        render: (_: any, r: any) => {
+          const po = poMapByPrId[String(r.id)] || (r.prNumber ? poMapByPrId[String(r.prNumber)] : undefined);
+          const rfq = rfqMapByPrId[String(r.id)] || (r.prNumber ? rfqMapByPrId[String(r.prNumber)] : undefined);
+          const vendorName =
+            po?.vendor?.name ||
+            po?.vendorName ||
+            po?.vendor_name ||
+            rfq?.comparison?.selectedWinnerVendorName;
+          if (!vendorName) return <span style={{ color: '#94A3B8' }}>—</span>;
+          return (
+            <span style={{ fontSize: 12, color: '#334155', fontWeight: 600 }} title={vendorName}>
+              {vendorName}
+            </span>
+          );
+        },
       },
       {
-        title: 'Aksi',
-        key: 'approvalAction',
+        title: 'PO',
+        key: 'po',
+        width: 160,
+        render: (_: any, r: any) => {
+          const po = poMapByPrId[String(r.id)] || (r.prNumber ? poMapByPrId[String(r.prNumber)] : undefined);
+          if (!po) return <span style={{ color: '#94A3B8' }}>—</span>;
+          return (
+            <Space direction="vertical" size={2}>
+              <span className={styles.idMonospace} style={{ fontWeight: 700, color: '#0F172A', fontSize: 11.5 }}>
+                {po.poNumber || `PO-${po.id}`}
+              </span>
+              <StatusBadge domain="po" status={po.status} />
+            </Space>
+          );
+        },
+      },
+      {
+        title: 'AKSI',
+        key: 'action',
         align: 'center' as const,
+        width: 160,
         render: (_: any, r: any) => {
           const effectiveStatus = r.status || 'SUBMITTED';
           const isApproved = effectiveStatus === 'APPROVED';
           const rfq = rfqMapByPrId[String(r.id)] || (r.prNumber ? rfqMapByPrId[String(r.prNumber)] : undefined);
-          const canCreateRfq = isProcurement || isSuperAdmin;
+          const po = poMapByPrId[String(r.id)] || (r.prNumber ? poMapByPrId[String(r.prNumber)] : undefined);
+          const canActOnPr = isProcurement || isPurchasing;
 
-          return (
-            <Space size={6} wrap>
+          let primaryBtn: React.ReactNode = null;
+          if (po) {
+            primaryBtn = (
+              <Button
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => {
+                  setSelectedPoForView((po as any).rawRecord || po);
+                  setIsPoModalOpen(true);
+                }}
+                className={styles.btnActionSecondary}
+              >
+                Lihat PO
+              </Button>
+            );
+          } else if (rfq) {
+            primaryBtn = (
+              <Button
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => {
+                  setSelectedPrForRfq(r);
+                  setIsCreateRfqModalOpen(true);
+                }}
+                className={styles.btnActionSecondary}
+              >
+                Kelola RFQ
+              </Button>
+            );
+          } else if (isApproved && canActOnPr) {
+            primaryBtn = (
+              <Button
+                type="primary"
+                size="small"
+                icon={<SendOutlined />}
+                onClick={() => {
+                  setSelectedPrForRfq(r);
+                  setIsCreateRfqModalOpen(true);
+                }}
+                className={styles.btnActionPrimary}
+              >
+                Buat RFQ
+              </Button>
+            );
+          } else {
+            primaryBtn = (
               <Button
                 size="small"
                 icon={<AuditOutlined />}
                 onClick={() => handleOpenPrApproval(r)}
-                style={{
-                  borderRadius: 6,
-                  fontWeight: 600,
-                  fontSize: 11.5,
-                  borderColor: '#93c5fd',
-                  color: '#1d4ed8',
-                  background: '#eff6ff',
-                }}
+                className={styles.btnActionBlue}
               >
                 Alur Approval
               </Button>
+            );
+          }
 
-              {isApproved && canCreateRfq && (
-                !rfq ? (
-                  <Button
-                    type="primary"
-                    size="small"
-                    icon={<SendOutlined />}
-                    onClick={() => {
+          const overflowItems: MenuProps['items'] = [
+            {
+              key: 'approval',
+              icon: <AuditOutlined />,
+              label: 'Lihat Alur Approval',
+              onClick: () => handleOpenPrApproval(r),
+            },
+            {
+              key: 'detail',
+              icon: <FileTextOutlined />,
+              label: 'Lihat Detail PR',
+              onClick: () => handleOpenPrApproval(r),
+            },
+            ...(rfq
+              ? [
+                  {
+                    key: 'rfq',
+                    icon: <EyeOutlined />,
+                    label: 'Lihat RFQ',
+                    onClick: () => {
                       setSelectedPrForRfq(r);
                       setIsCreateRfqModalOpen(true);
-                    }}
-                    style={{
-                      backgroundColor: '#059669',
-                      borderColor: '#059669',
-                      borderRadius: 6,
-                      fontWeight: 600,
-                      fontSize: 11.5,
-                    }}
-                  >
-                    Buat RFQ
-                  </Button>
-                ) : (
-                  <Button
-                    size="small"
-                    icon={<EyeOutlined />}
-                    onClick={() => {
-                      setSelectedPrForRfq(r);
-                      setIsCreateRfqModalOpen(true);
-                    }}
-                    style={{
-                      borderColor: '#0284c7',
-                      color: '#0284c7',
-                      background: '#f0f9ff',
-                      borderRadius: 6,
-                      fontWeight: 600,
-                      fontSize: 11.5,
-                    }}
-                  >
-                    Lihat RFQ
-                  </Button>
-                )
-              )}
-            </Space>
+                    },
+                  },
+                ]
+              : []),
+            ...(po
+              ? [
+                  {
+                    key: 'po',
+                    icon: <ShoppingCartOutlined />,
+                    label: 'Lihat PO',
+                    onClick: () => {
+                      setSelectedPoForView((po as any).rawRecord || po);
+                      setIsPoModalOpen(true);
+                    },
+                  },
+                ]
+              : []),
+          ];
+
+          return (
+            <div className={styles.actionCell}>
+              {primaryBtn}
+              <Dropdown menu={{ items: overflowItems }} trigger={['click']} placement="bottomRight">
+                <Button size="small" icon={<MoreOutlined />} title="Menu Lainnya" />
+              </Dropdown>
+            </div>
           );
         },
       },
     ],
-    [prVersion, rfqVersion, isProcurement, isSuperAdmin, prs, rfqMapByPrId]
+    [prVersion, rfqVersion, poVersion, isProcurement, isPurchasing, prs, pos, rfqMapByPrId, poMapByPrId, checkIsDuplicate]
+  );
+
+  // ─────────────────────────────────────────────
+  // SERVICE PR COLUMNS (Section 3 & 4)
+  // Columns: PR Jasa, Scope, Nilai, Approval, Sourcing, Service PO / SPK, Aksi
+  // ─────────────────────────────────────────────
+  const servicePrColumns = useMemo(
+    () => [
+      {
+        title: 'PR JASA',
+        dataIndex: 'prNumber',
+        key: 'prNumber',
+        width: 160,
+        render: (val: string, r: any) => {
+          const isDuplicate = checkIsDuplicate(r);
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
+                <span className={styles.idMonospace} style={{ fontWeight: 700, color: '#0F172A', fontSize: 12.5 }}>
+                  {val || `PR-${r.id}`}
+                </span>
+                {isDuplicate && (
+                  <Tooltip title={`Terdeteksi lebih dari satu PR untuk proyek ini (#${r.projectId}). Data tetap dipreservasi.`}>
+                    <Tag className={styles.duplicateTag}>DUPLIKAT</Tag>
+                  </Tooltip>
+                )}
+              </div>
+              <span style={{ fontSize: 11, color: '#64748B' }}>Ref ID: #{r.id}</span>
+            </div>
+          );
+        },
+      },
+      {
+        title: 'SCOPE',
+        key: 'scope',
+        width: 260,
+        render: (_: any, r: any) => {
+          const firstItem = r.items?.[0];
+          const scopeText =
+            firstItem?.itemName ||
+            firstItem?.item_name ||
+            r.project?.name ||
+            r.projectName ||
+            'Layanan Jasa';
+          const otherItemsCount = (r.items?.length || 1) - 1;
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Tooltip title={scopeText}>
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    color: '#1E293B',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden',
+                    lineHeight: '16px',
+                  }}
+                >
+                  {scopeText}
+                </span>
+              </Tooltip>
+              {otherItemsCount > 0 && (
+                <span style={{ fontSize: 10.5, color: '#64748B' }}>
+                  +{otherItemsCount} item lainnya
+                </span>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        title: 'NILAI',
+        dataIndex: 'totalEstimatedAmount',
+        key: 'totalEstimatedAmount',
+        width: 130,
+        align: 'right' as const,
+        render: (val: number) => (
+          <span className={styles.currencyText} style={{ color: '#0F172A', fontWeight: 600, fontSize: 12.5 }}>
+            {formatCurrency(val)}
+          </span>
+        ),
+      },
+      {
+        title: 'APPROVAL',
+        key: 'approvalStatus',
+        width: 160,
+        render: (_: any, r: any) => {
+          const effectiveStatus: PrApprovalStatus = (r.status as PrApprovalStatus) || 'SUBMITTED';
+          return <PrStatusBadge status={effectiveStatus} />;
+        },
+      },
+      {
+        title: 'SOURCING',
+        key: 'sourcing',
+        width: 220,
+        render: (_: any, r: any) => {
+          const rfq = rfqMapByPrId[String(r.id)] || (r.prNumber ? rfqMapByPrId[String(r.prNumber)] : undefined);
+          const po = poMapByPrId[String(r.id)] || (r.prNumber ? poMapByPrId[String(r.prNumber)] : undefined);
+          return renderServiceSourcing(r, rfq, po);
+        },
+      },
+      {
+        title: 'SERVICE PO / SPK',
+        key: 'servicePo',
+        width: 150,
+        render: (_: any, r: any) => {
+          const po = poMapByPrId[String(r.id)] || (r.prNumber ? poMapByPrId[String(r.prNumber)] : undefined);
+          return renderServicePoOrSpk(po);
+        },
+      },
+      {
+        title: 'AKSI',
+        key: 'action',
+        align: 'center' as const,
+        width: 160,
+        render: (_: any, r: any) => {
+          const effectiveStatus = r.status || 'SUBMITTED';
+          const isApproved = effectiveStatus === 'APPROVED';
+          const rfq = rfqMapByPrId[String(r.id)] || (r.prNumber ? rfqMapByPrId[String(r.prNumber)] : undefined);
+          const po = poMapByPrId[String(r.id)] || (r.prNumber ? poMapByPrId[String(r.prNumber)] : undefined);
+          const canActOnPr = isProcurement || isPurchasing;
+
+          let primaryBtn: React.ReactNode = null;
+          if (po) {
+            primaryBtn = (
+              <Button
+                size="small"
+                icon={<FileTextOutlined />}
+                onClick={() => {
+                  setSelectedPoForServiceOrder((po as any).rawRecord || po);
+                  setIsServiceOrderModalOpen(true);
+                }}
+                className={styles.btnActionSecondary}
+              >
+                Kelola SPK / WO
+              </Button>
+            );
+          } else if (rfq && rfq.status === 'OPEN') {
+            primaryBtn = (
+              <Button
+                size="small"
+                icon={<EyeOutlined />}
+                onClick={() => {
+                  setSelectedPrForRfq(r);
+                  setIsCreateRfqModalOpen(true);
+                }}
+                className={styles.btnActionSecondary}
+              >
+                Kelola RFQ
+              </Button>
+            );
+          } else if (isApproved && canActOnPr && (!rfq || rfq.status === 'CANCELLED')) {
+            primaryBtn = (
+              <Button
+                size="small"
+                icon={<FileTextOutlined />}
+                onClick={() => {
+                  setSelectedPrForServicePo(r);
+                  setIsServicePoModalOpen(true);
+                }}
+                className={styles.btnActionSecondary}
+              >
+                Buat Service PO
+              </Button>
+            );
+          } else {
+            primaryBtn = (
+              <Button
+                size="small"
+                icon={<AuditOutlined />}
+                onClick={() => handleOpenPrApproval(r)}
+                className={styles.btnActionBlue}
+              >
+                Alur Approval
+              </Button>
+            );
+          }
+
+          const overflowItems: MenuProps['items'] = [
+            {
+              key: 'approval',
+              icon: <AuditOutlined />,
+              label: 'Lihat Alur Approval',
+              onClick: () => handleOpenPrApproval(r),
+            },
+            {
+              key: 'detail',
+              icon: <FileTextOutlined />,
+              label: 'Lihat Detail PR',
+              onClick: () => handleOpenPrApproval(r),
+            },
+            ...(rfq
+              ? [
+                  {
+                    key: 'rfq',
+                    icon: <EyeOutlined />,
+                    label: 'Lihat RFQ',
+                    onClick: () => {
+                      setSelectedPrForRfq(r);
+                      setIsCreateRfqModalOpen(true);
+                    },
+                  },
+                ]
+              : []),
+            ...(po
+              ? [
+                  {
+                    key: 'po-view',
+                    icon: <EyeOutlined />,
+                    label: 'Lihat Service PO',
+                    onClick: () => {
+                      setSelectedPoForView((po as any).rawRecord || po);
+                      setIsPoModalOpen(true);
+                    },
+                  },
+                  {
+                    key: 'spk-manage',
+                    icon: <FileTextOutlined />,
+                    label: 'Kelola SPK / WO',
+                    onClick: () => {
+                      setSelectedPoForServiceOrder((po as any).rawRecord || po);
+                      setIsServiceOrderModalOpen(true);
+                    },
+                  },
+                ]
+              : []),
+            ...(!rfq && isApproved && canActOnPr
+              ? [
+                  {
+                    key: 'create-rfq-jasa',
+                    icon: <SendOutlined />,
+                    label: 'Buat RFQ Jasa',
+                    onClick: () => {
+                      setSelectedPrForRfq(r);
+                      setIsCreateRfqModalOpen(true);
+                    },
+                  },
+                ]
+              : []),
+          ];
+
+          return (
+            <div className={styles.actionCell}>
+              {primaryBtn}
+              <Dropdown menu={{ items: overflowItems }} trigger={['click']} placement="bottomRight">
+                <Button size="small" icon={<MoreOutlined />} title="Menu Lainnya" />
+              </Dropdown>
+            </div>
+          );
+        },
+      },
+    ],
+    [
+      prVersion,
+      rfqVersion,
+      poVersion,
+      isProcurement,
+      isPurchasing,
+      prs,
+      pos,
+      rfqMapByPrId,
+      poMapByPrId,
+      checkIsDuplicate,
+      renderServiceSourcing,
+      renderServicePoOrSpk,
+    ]
   );
 
   const allGoodsReceipts: GoodsReceiptRecord[] = useMemo(() => {
-    const rawGrs = procurementData?.grs || [];
-    return rawGrs.map((g: any) => {
+    return (rawGrs || []).map((g: any) => {
       const items = Array.isArray(g.items) ? g.items : [];
       const totalQty = items.reduce((sum: number, it: any) => sum + Number(it.receivedQuantity || 0), 0);
       return {
@@ -774,88 +1510,126 @@ export const ProcurementPage: React.FC = () => {
         remarks: g.remarks,
         status: (g.purchaseOrder?.status === 'COMPLETED' ? 'COMPLETED' : 'PARTIAL') as 'COMPLETED' | 'PARTIAL',
         createdAt: g.createdAt,
-        createdBy: g.createdBy ? `User #${g.createdBy}` : 'Petugas Logistik',
+        createdBy: g.createdBy,
+        createdByRaw: g.createdBy,
+        creator: (g as any).creator,
+        receiver: (g as any).receiver,
         totalItemsCount: items.length,
         totalQtyReceivedInGr: totalQty,
         items: items,
       };
     });
-  }, [procurementData, grVersion]);
+  }, [rawGrs, grVersion]);
 
   const poColumns = useMemo(
     () => [
       {
-        title: 'Nomor PO',
+        title: 'NOMOR PO',
         dataIndex: 'poNumber',
         key: 'poNumber',
+        width: 170,
         render: (poNum: string) => (
-          <span style={{ fontWeight: 700, color: '#1d4ed8', fontFamily: 'monospace' }}>
+          <span className={styles.idMonospace} style={{ fontWeight: 700, color: '#1D4ED8' }}>
             {poNum}
           </span>
         ),
       },
       {
-        title: 'Vendor Pemenang',
+        title: 'VENDOR PEMENANG',
         key: 'vendor',
+        width: 220,
         render: (_: any, r: any) => {
           const vName = r.vendor?.name || r.vendorName || '—';
           const vCode = r.vendor?.code || r.vendorCode;
           return (
             <div>
-              <div style={{ fontWeight: 600, fontSize: 12, color: '#0f172a' }}>{vName}</div>
+              <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0F172A' }}>{vName}</div>
               {vCode && (
-                <Tag color="blue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', marginTop: 2 }}>
+                <span className={styles.subtleCodeTag} style={{ background: '#F1F5F9', color: '#475569', display: 'inline-block', marginTop: 2 }}>
                   {vCode}
-                </Tag>
+                </span>
               )}
             </div>
           );
         },
       },
       {
-        title: 'Total Pembelian',
+        title: 'TOTAL PEMBELIAN',
         dataIndex: 'totalAmount',
         key: 'totalAmount',
+        width: 160,
         align: 'right' as const,
         render: (val: number) => (
-          <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 12, color: '#059669' }}>
-            Rp {Number(val || 0).toLocaleString('id-ID')}
+          <span className={styles.currencyText} style={{ color: '#059669', fontSize: 13 }}>
+            {formatCurrency(val)}
           </span>
         ),
       },
       {
-        title: 'Status',
+        title: 'TIPE PO',
+        dataIndex: 'orderType',
+        key: 'orderType',
+        width: 140,
+        align: 'center' as const,
+        render: (type: string) => {
+          if (type === 'SERVICE') {
+            return <Tag color="cyan" style={{ fontWeight: 600 }}>Jasa / Subcon</Tag>;
+          }
+          if (type === 'LEGACY_MIXED') {
+            return <Tag color="orange" style={{ fontWeight: 600 }}>Legacy Campuran</Tag>;
+          }
+          return <Tag color="blue" style={{ fontWeight: 600 }}>Material</Tag>;
+        },
+      },
+      {
+        title: 'STATUS',
         dataIndex: 'status',
         key: 'status',
         width: 140,
         align: 'center' as const,
-        render: (status: string) => {
-          const color =
-            status === 'COMPLETED'
-              ? 'green'
-              : status === 'PARTIALLY_FULFILLED'
-              ? 'gold'
-              : 'blue';
-          return (
-            <Tag color={color} style={{ fontWeight: 700 }}>
-              ● {status}
-            </Tag>
-          );
-        },
+        render: (status: string) => <StatusBadge domain="po" status={status} showDot />,
       },
       {
-        title: 'Tanggal Terbit',
+        title: 'TANGGAL TERBIT',
         dataIndex: 'createdAt',
         key: 'createdAt',
-        render: (date: string) => (date ? dayjs(date).format('DD MMM YYYY HH:mm') : '—'),
+        width: 150,
+        render: (date: string) => <span className={styles.idMonospace} style={{ fontSize: 12 }}>{formatDateTime(date)}</span>,
       },
       {
-        title: 'Aksi',
+        title: 'AKSI',
         key: 'action',
         width: 250,
         align: 'center' as const,
         render: (_: any, r: any) => {
-          const poRecord: PurchaseOrderPrototypeRecord = r.rawRecord || r;
+          const poRecord: PurchaseOrderPrototypeRecord = {
+            poId: String(r.id || r.poId),
+            poNumber: r.poNumber,
+            comparisonId: r.comparisonId || '',
+            rfqId: r.rfqId || '',
+            rfqNumber: r.rfqNumber || '',
+            prId: r.purchaseRequestId || r.purchaseRequest?.id || '',
+            prNumber: r.purchaseRequest?.prNumber || '',
+            projectId: r.projectId || r.purchaseRequest?.projectId || r.purchaseRequest?.project?.id || '',
+            projectName: r.projectName || r.purchaseRequest?.projectName || r.purchaseRequest?.project?.name || r.project?.name || '',
+            vendorId: r.vendorId || r.vendor?.id || 0,
+            vendorCode: r.vendorCode || r.vendor?.code || '',
+            vendorName: r.vendorName || r.vendor?.name || '—',
+            totalAmount: Number(r.totalAmount || 0),
+            budgetCeiling: 0,
+            orderType: r.orderType,
+            status: r.status,
+            issuedAt: r.createdAt,
+            issuedBy: r.issuedBy || 'Purchasing',
+            deliveryDate: r.deliveryDate,
+            deliveryLocation: r.deliveryLocation,
+            paymentTerms: r.paymentTerms,
+            notes: r.notes,
+            items: r.items || [],
+            serviceOrders: r.serviceOrders || [],
+            vendor: r.vendor,
+            purchaseRequest: r.purchaseRequest,
+          };
           const poGrs = allGoodsReceipts.filter(
             (g) =>
               String(g.poId) === String(poRecord.poId || (poRecord as any).id) ||
@@ -874,19 +1648,12 @@ export const ProcurementPage: React.FC = () => {
                   setSelectedPoForView(poRecord);
                   setIsPoModalOpen(true);
                 }}
-                style={{
-                  borderColor: '#0284c7',
-                  color: '#0284c7',
-                  background: '#f0f9ff',
-                  borderRadius: 6,
-                  fontWeight: 600,
-                  fontSize: 11,
-                }}
+                className={styles.btnActionSecondary}
               >
                 Lihat PO
               </Button>
 
-              {isEligibleForGr && (
+              {isEligibleForGr && r.orderType !== 'SERVICE' && (
                 <Button
                   size="small"
                   icon={<InboxOutlined />}
@@ -895,22 +1662,42 @@ export const ProcurementPage: React.FC = () => {
                     setSelectedGrForView(null);
                     setIsGrModalOpen(true);
                   }}
-                  style={{
-                    borderColor: '#0d9488',
-                    color: '#0d9488',
-                    background: '#f0fdfa',
-                    borderRadius: 6,
-                    fontWeight: 600,
-                    fontSize: 11,
-                  }}
+                  className={styles.btnActionTeal}
                 >
                   Terima Barang
                 </Button>
               )}
 
+              {r.orderType === 'SERVICE' && (
+                <>
+                  <Button
+                    size="small"
+                    icon={<FileTextOutlined />}
+                    onClick={() => {
+                      setSelectedPoForServiceOrder(poRecord);
+                      setIsServiceOrderModalOpen(true);
+                    }}
+                    className={styles.btnActionBlue}
+                  >
+                    SPK / Work Order
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<SafetyCertificateOutlined />}
+                    onClick={() => {
+                      setSelectedPoForServiceClaim(poRecord);
+                      setIsServiceClaimModalOpen(true);
+                    }}
+                    className={styles.btnActionTeal}
+                  >
+                    Klaim Jasa
+                  </Button>
+                </>
+              )}
+
               {isCompleted && (
-                <Tag color="green" style={{ fontWeight: 700, margin: 0, padding: '2px 6px', fontSize: 10.5 }}>
-                  Selesai Diterima
+                <Tag color="green" style={{ fontWeight: 700, margin: 0, padding: '2px 8px', borderRadius: 12, fontSize: 10.5 }}>
+                  ● Selesai Diterima
                 </Tag>
               )}
 
@@ -922,14 +1709,7 @@ export const ProcurementPage: React.FC = () => {
                     setSelectedPoForGr(null);
                     setIsGrModalOpen(true);
                   }}
-                  style={{
-                    borderColor: '#d97706',
-                    color: '#b45309',
-                    background: '#fffbeb',
-                    borderRadius: 6,
-                    fontWeight: 600,
-                    fontSize: 11,
-                  }}
+                  className={styles.btnActionAmber}
                 >
                   Riwayat GR ({poGrs.length})
                 </Button>
@@ -945,81 +1725,92 @@ export const ProcurementPage: React.FC = () => {
   const grColumns = useMemo(
     () => [
       {
-        title: 'Nomor GR',
+        title: 'NOMOR GR',
         dataIndex: 'grNumber',
         key: 'grNumber',
+        width: 170,
         render: (grNum: string) => (
-          <span style={{ fontWeight: 700, color: '#0f766e', fontFamily: 'monospace' }}>
+          <span className={styles.idMonospace} style={{ fontWeight: 700, color: '#0F766E' }}>
             {grNum}
           </span>
         ),
       },
       {
-        title: 'Nomor PO',
+        title: 'NOMOR PO',
         dataIndex: 'poNumber',
         key: 'poNumber',
+        width: 160,
         render: (poNum: string) => (
-          <span style={{ fontWeight: 600, color: '#1d4ed8', fontFamily: 'monospace' }}>
+          <span className={styles.idMonospace} style={{ fontWeight: 600, color: '#1D4ED8' }}>
             {poNum}
           </span>
         ),
       },
       {
-        title: 'Vendor',
+        title: 'VENDOR',
         key: 'vendor',
+        width: 200,
         render: (_: any, r: GoodsReceiptRecord) => (
           <div>
-            <div style={{ fontWeight: 600, fontSize: 12, color: '#0f172a' }}>{r.vendorName}</div>
-            <Tag color="cyan" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', marginTop: 2 }}>
-              {r.vendorCode}
-            </Tag>
+            <div style={{ fontWeight: 600, fontSize: 12.5, color: '#0F172A' }}>{r.vendorName}</div>
+            {r.vendorCode && (
+              <span className={styles.subtleCodeTag} style={{ background: '#F1F5F9', color: '#475569', display: 'inline-block', marginTop: 2 }}>
+                {r.vendorCode}
+              </span>
+            )}
           </div>
         ),
       },
       {
-        title: 'Tanggal Terima',
+        title: 'TANGGAL TERIMA',
         dataIndex: 'receiptDate',
         key: 'receiptDate',
-        render: (date: string) => (date ? dayjs(date).format('DD MMM YYYY') : '—'),
+        width: 140,
+        render: (date: string) => <span className={styles.idMonospace} style={{ fontSize: 12 }}>{formatDate(date)}</span>,
       },
       {
-        title: 'No. Surat Jalan / DO',
+        title: 'NO. SURAT JALAN / DO',
         dataIndex: 'deliveryNoteNumber',
         key: 'deliveryNoteNumber',
-        render: (val: string) => <span style={{ fontSize: 11.5 }}>{val || '—'}</span>,
+        width: 160,
+        render: (val: string) => <span style={{ fontSize: 12, color: val ? '#0F172A' : '#94A3B8' }}>{val || '—'}</span>,
       },
       {
-        title: 'Total Item Diterima',
+        title: 'TOTAL ITEM DITERIMA',
         key: 'totalReceived',
         align: 'center' as const,
+        width: 180,
         render: (_: any, r: GoodsReceiptRecord) => (
-          <Tag color="teal" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
-            {r.totalQtyReceivedInGr} Unit ({r.totalItemsCount} Item)
+          <Tag color="teal" style={{ fontWeight: 600, fontSize: 11, margin: 0, borderRadius: 12, padding: '2px 8px' }}>
+            {formatQuantity(r.totalQtyReceivedInGr)} Unit · {formatQuantity(r.totalItemsCount)} Item
           </Tag>
         ),
       },
       {
-        title: 'Status Pemenuhan',
+        title: 'STATUS PEMENUHAN',
         dataIndex: 'status',
         key: 'status',
-        width: 120,
+        width: 140,
         align: 'center' as const,
-        render: (status: string) => (
-          <Tag color={status === 'COMPLETED' ? 'green' : 'gold'} style={{ fontWeight: 700 }}>
-            ● {status === 'COMPLETED' ? 'COMPLETED' : 'PARTIAL'}
-          </Tag>
+        render: (status: string) => <StatusBadge domain="gr" status={status} showDot />,
+      },
+      {
+        title: 'PENERIMA',
+        key: 'createdBy',
+        width: 160,
+        render: (_: any, r: GoodsReceiptRecord) => (
+          <UserIdentityDisplay
+            user={(r as any).receiver || (r as any).creator}
+            userId={(r as any).createdByRaw || r.createdBy}
+            fallbackRole="Petugas Logistik"
+            textStyle={{ fontSize: 12 }}
+          />
         ),
       },
       {
-        title: 'Penerima',
-        dataIndex: 'createdBy',
-        key: 'createdBy',
-        render: (val: string) => <span style={{ fontSize: 11.5, color: '#64748b' }}>{val || '—'}</span>,
-      },
-      {
-        title: 'Aksi',
+        title: 'AKSI',
         key: 'action',
-        width: 100,
+        width: 110,
         align: 'center' as const,
         render: (_: any, r: GoodsReceiptRecord) => (
           <Button
@@ -1030,14 +1821,7 @@ export const ProcurementPage: React.FC = () => {
               setSelectedPoForGr(null);
               setIsGrModalOpen(true);
             }}
-            style={{
-              borderColor: '#0d9488',
-              color: '#0d9488',
-              background: '#f0fdfa',
-              borderRadius: 6,
-              fontWeight: 600,
-              fontSize: 11,
-            }}
+            className={styles.btnActionTeal}
           >
             Lihat GR
           </Button>
@@ -1045,6 +1829,279 @@ export const ProcurementPage: React.FC = () => {
       },
     ],
     []
+  );
+
+  // ─────────────────────────────────────────────
+  // RESPONSIVE MOBILE PR CARD (Section 12)
+  // ─────────────────────────────────────────────
+  const renderPrMobileCard = useCallback(
+    (r: any, isService: boolean) => {
+      const isDuplicate = checkIsDuplicate(r);
+      const effectiveStatus: PrApprovalStatus = (r.status as PrApprovalStatus) || 'SUBMITTED';
+      const rfq = rfqMapByPrId[String(r.id)] || (r.prNumber ? rfqMapByPrId[String(r.prNumber)] : undefined);
+      const po = poMapByPrId[String(r.id)] || (r.prNumber ? poMapByPrId[String(r.prNumber)] : undefined);
+      const isApproved = effectiveStatus === 'APPROVED';
+      const canActOnPr = isProcurement || isPurchasing;
+
+      let primaryBtn: React.ReactNode = null;
+      if (isService) {
+        if (po) {
+          primaryBtn = (
+            <Button
+              size="small"
+              icon={<FileTextOutlined />}
+              onClick={() => {
+                setSelectedPoForServiceOrder((po as any).rawRecord || po);
+                setIsServiceOrderModalOpen(true);
+              }}
+              className={styles.btnActionSecondary}
+            >
+              Kelola SPK / WO
+            </Button>
+          );
+        } else if (rfq && rfq.status === 'OPEN') {
+          primaryBtn = (
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => {
+                setSelectedPrForRfq(r);
+                setIsCreateRfqModalOpen(true);
+              }}
+              className={styles.btnActionSecondary}
+            >
+              Kelola RFQ
+            </Button>
+          );
+        } else if (isApproved && canActOnPr && (!rfq || rfq.status === 'CANCELLED')) {
+          primaryBtn = (
+            <Button
+              size="small"
+              icon={<FileTextOutlined />}
+              onClick={() => {
+                setSelectedPrForServicePo(r);
+                setIsServicePoModalOpen(true);
+              }}
+              className={styles.btnActionSecondary}
+            >
+              Buat Service PO
+            </Button>
+          );
+        } else {
+          primaryBtn = (
+            <Button
+              size="small"
+              icon={<AuditOutlined />}
+              onClick={() => handleOpenPrApproval(r)}
+              className={styles.btnActionBlue}
+            >
+              Alur Approval
+            </Button>
+          );
+        }
+      } else {
+        if (po) {
+          primaryBtn = (
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => {
+                setSelectedPoForView((po as any).rawRecord || po);
+                setIsPoModalOpen(true);
+              }}
+              className={styles.btnActionSecondary}
+            >
+              Lihat PO
+            </Button>
+          );
+        } else if (rfq) {
+          primaryBtn = (
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => {
+                setSelectedPrForRfq(r);
+                setIsCreateRfqModalOpen(true);
+              }}
+              className={styles.btnActionSecondary}
+            >
+              Kelola RFQ
+            </Button>
+          );
+        } else if (isApproved && canActOnPr) {
+          primaryBtn = (
+            <Button
+              type="primary"
+              size="small"
+              icon={<SendOutlined />}
+              onClick={() => {
+                setSelectedPrForRfq(r);
+                setIsCreateRfqModalOpen(true);
+              }}
+              className={styles.btnActionPrimary}
+            >
+              Buat RFQ
+            </Button>
+          );
+        } else {
+          primaryBtn = (
+            <Button
+              size="small"
+              icon={<AuditOutlined />}
+              onClick={() => handleOpenPrApproval(r)}
+              className={styles.btnActionBlue}
+            >
+              Alur Approval
+            </Button>
+          );
+        }
+      }
+
+      const overflowItems: MenuProps['items'] = [
+        {
+          key: 'approval',
+          icon: <AuditOutlined />,
+          label: 'Lihat Alur Approval',
+          onClick: () => handleOpenPrApproval(r),
+        },
+        {
+          key: 'detail',
+          icon: <FileTextOutlined />,
+          label: 'Lihat Detail PR',
+          onClick: () => handleOpenPrApproval(r),
+        },
+        ...(rfq
+          ? [
+              {
+                key: 'rfq',
+                icon: <EyeOutlined />,
+                label: 'Lihat RFQ',
+                onClick: () => {
+                  setSelectedPrForRfq(r);
+                  setIsCreateRfqModalOpen(true);
+                },
+              },
+            ]
+          : []),
+        ...(po
+          ? [
+              {
+                key: 'po',
+                icon: <ShoppingCartOutlined />,
+                label: isService ? 'Lihat Service PO' : 'Lihat PO',
+                onClick: () => {
+                  setSelectedPoForView((po as any).rawRecord || po);
+                  setIsPoModalOpen(true);
+                },
+              },
+            ]
+          : []),
+        ...(isService && po
+          ? [
+              {
+                key: 'spk-manage',
+                icon: <FileTextOutlined />,
+                label: 'Kelola SPK / WO',
+                onClick: () => {
+                  setSelectedPoForServiceOrder((po as any).rawRecord || po);
+                  setIsServiceOrderModalOpen(true);
+                },
+              },
+            ]
+          : []),
+      ];
+
+      return (
+        <div key={r.id} className={styles.prMobileCard}>
+          <div className={styles.prMobileCardHeader}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span className={styles.idMonospace} style={{ fontWeight: 700, fontSize: 13, color: '#0F172A' }}>
+                  {r.prNumber || `PR-${r.id}`}
+                </span>
+                <Tag color={isService ? 'cyan' : 'blue'} style={{ fontSize: 9.5, margin: 0, fontWeight: 700, padding: '0 4px' }}>
+                  {isService ? 'JASA' : 'MATERIAL'}
+                </Tag>
+                {isDuplicate && (
+                  <Tooltip title={`Terdeteksi lebih dari satu PR untuk proyek ini (#${r.projectId}). Data tetap dipreservasi.`}>
+                    <Tag className={styles.duplicateTag}>DUPLIKAT</Tag>
+                  </Tooltip>
+                )}
+              </div>
+              <span style={{ fontSize: 11, color: '#64748B' }}>Ref ID: #{r.id}</span>
+            </div>
+            <span className={styles.currencyText} style={{ color: '#0F172A', fontSize: 13 }}>
+              {formatCurrency(r.totalEstimatedAmount)}
+            </span>
+          </div>
+
+          {isService && (
+            <div className={styles.prMobileCardRow}>
+              <span className={styles.prMobileCardLabel}>Scope:</span>
+              <span style={{ fontWeight: 600, color: '#1E293B', textAlign: 'right', maxWidth: '65%' }}>
+                {r.items?.[0]?.itemName || r.project?.name || 'Layanan Jasa'}
+              </span>
+            </div>
+          )}
+
+          <div className={styles.prMobileCardRow}>
+            <span className={styles.prMobileCardLabel}>Approval:</span>
+            <PrStatusBadge status={effectiveStatus} />
+          </div>
+
+          {isService ? (
+            <div className={styles.prMobileCardRow}>
+              <span className={styles.prMobileCardLabel}>Sourcing:</span>
+              <div>{renderServiceSourcing(r, rfq, po)}</div>
+            </div>
+          ) : (
+            <div className={styles.prMobileCardRow}>
+              <span className={styles.prMobileCardLabel}>RFQ:</span>
+              {rfq ? (
+                <Space size={4}>
+                  <span className={styles.idMonospace} style={{ fontSize: 11, color: '#1D4ED8', fontWeight: 600 }}>{rfq.rfqNumber}</span>
+                  <StatusBadge domain="rfq" status={rfq.status} showDot />
+                </Space>
+              ) : (
+                <span style={{ color: '#94A3B8' }}>—</span>
+              )}
+            </div>
+          )}
+
+          <div className={styles.prMobileCardRow}>
+            <span className={styles.prMobileCardLabel}>{isService ? 'Service PO / SPK:' : 'PO:'}</span>
+            {isService ? (
+              <div>{renderServicePoOrSpk(po)}</div>
+            ) : (
+              po ? (
+                <Space size={4}>
+                  <span className={styles.idMonospace} style={{ fontSize: 11, fontWeight: 600 }}>{po.poNumber || `PO-${po.id}`}</span>
+                  <StatusBadge domain="po" status={po.status} />
+                </Space>
+              ) : (
+                <span style={{ color: '#94A3B8' }}>—</span>
+              )
+            )}
+          </div>
+
+          <div className={styles.prMobileCardActions}>
+            {primaryBtn}
+            <Dropdown menu={{ items: overflowItems }} trigger={['click']} placement="bottomRight">
+              <Button size="small" icon={<MoreOutlined />} title="Menu Lainnya" />
+            </Dropdown>
+          </div>
+        </div>
+      );
+    },
+    [
+      checkIsDuplicate,
+      rfqMapByPrId,
+      poMapByPrId,
+      isProcurement,
+      isPurchasing,
+      renderServiceSourcing,
+      renderServicePoOrSpk,
+    ]
   );
 
   // 5. TABS ITEMS
@@ -1055,79 +2112,69 @@ export const ProcurementPage: React.FC = () => {
         <span>
           <InboxOutlined style={{ marginRight: 6 }} />
           Paket Pengadaan
-          {submittedPackagesCount > 0 && (
-            <Badge
-              count={submittedPackagesCount}
-              style={{ marginLeft: 8, backgroundColor: '#f59e0b' }}
-            />
-          )}
+          <span className={`${styles.tabBadge} ${activeTabKey === 'packages' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+            {hasPackageQueueAccess ? effectivePackageCount : 0}
+          </span>
         </span>
       ),
       children: (
         <div>
           {/* Package Filter & Refresh Toolbar */}
-          <Card
-            size="small"
-            style={{ marginBottom: 16, borderRadius: 8, border: '1px solid #e2e8f0' }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-              <Space size={12} wrap align="center">
-                <span style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
-                  <FilterOutlined style={{ marginRight: 6 }} />
-                  Filter Status Paket:
-                </span>
-                <Select
-                  value={statusFilter}
-                  onChange={(val) => setStatusFilter(val)}
-                  style={{ width: 180 }}
-                  options={[
-                    { label: 'SUBMITTED (Antrean)', value: 'SUBMITTED' },
-                    { label: 'RETURNED (Revisi PM)', value: 'RETURNED' },
-                    { label: 'PR_CREATED (Terbit PR)', value: 'PR_CREATED' },
-                    { label: 'CANCELLED (Dibatalkan)', value: 'CANCELLED' },
-                    { label: 'CLOSED (Selesai)', value: 'CLOSED' },
-                    { label: 'Semua Status (ALL)', value: 'ALL' },
-                  ]}
-                />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  Menampilkan {packages.length} paket
-                </Text>
-              </Space>
-
-              <Button
+          <div className={styles.tabToolbar}>
+            <Space size={12} wrap align="center">
+              <span style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+                <FilterOutlined style={{ marginRight: 6 }} />
+                Filter Status Paket:
+              </span>
+              <Select
                 size="small"
-                icon={<ReloadOutlined />}
-                onClick={() => refetchPackages()}
-                loading={packagesLoading}
-                style={{ fontSize: 12 }}
-              >
-                Segarkan Antrean
-              </Button>
-            </div>
-          </Card>
+                value={statusFilter}
+                onChange={(val) => setStatusFilter(val)}
+                style={{ width: 190 }}
+                options={[
+                  { label: 'SUBMITTED (Antrean)', value: 'SUBMITTED' },
+                  { label: 'RETURNED (Revisi PM)', value: 'RETURNED' },
+                  { label: 'PR_CREATED (Terbit PR)', value: 'PR_CREATED' },
+                  { label: 'CANCELLED (Dibatalkan)', value: 'CANCELLED' },
+                  { label: 'CLOSED (Selesai)', value: 'CLOSED' },
+                  { label: 'Semua Status (ALL)', value: 'ALL' },
+                ]}
+              />
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                Menampilkan {packages.length} paket
+              </Text>
+            </Space>
+
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                refetchPackages();
+                refetchSummary();
+              }}
+              loading={packagesLoading}
+              className={styles.btnActionSecondary}
+            >
+              Segarkan Antrean
+            </Button>
+          </div>
 
           {/* Package Table */}
-          <Card
-            size="small"
-            style={{
-              borderRadius: 8,
-              border: '1px solid #e2e8f0',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
-            }}
-            bodyStyle={{ padding: 0 }}
-          >
+          <div className={styles.tableContainer}>
             <Table
+              className={styles.procurementTable}
               columns={packageColumns}
               dataSource={packages}
               rowKey="id"
               loading={packagesLoading}
-              pagination={{ pageSize: 10, showSizeChanger: true }}
+              pagination={{ pageSize: 8, showSizeChanger: false }}
+              scroll={{ x: 1050 }}
               locale={{
                 emptyText: (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                     description={
-                      <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                      <div style={{ textAlign: 'center', padding: '12px 0' }}>
                         <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
                           Tidak ada paket pengadaan dengan filter ini
                         </div>
@@ -1140,7 +2187,7 @@ export const ProcurementPage: React.FC = () => {
                 ),
               }}
             />
-          </Card>
+          </div>
         </div>
       ),
     },
@@ -1152,11 +2199,10 @@ export const ProcurementPage: React.FC = () => {
               <span>
                 <SafetyCertificateOutlined style={{ marginRight: 6 }} />
                 Rekonsiliasi
-                {unresolvedReconciliations.length > 0 && (
-                  <Badge
-                    count={unresolvedReconciliations.length}
-                    style={{ marginLeft: 8, backgroundColor: '#ef4444' }}
-                  />
+                {effectiveReconciliationCount !== null && (
+                  <span className={`${styles.tabBadge} ${activeTabKey === 'reconciliation' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+                    {effectiveReconciliationCount}
+                  </span>
                 )}
               </span>
             ),
@@ -1165,7 +2211,9 @@ export const ProcurementPage: React.FC = () => {
                 onReconciliationChanged={() => {
                   queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
                   queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'] });
+                  queryClient.invalidateQueries({ queryKey: ['procurement', 'summary'] });
                   refetchReconciliations();
+                  refetchSummary();
                 }}
               />
             ),
@@ -1177,52 +2225,105 @@ export const ProcurementPage: React.FC = () => {
       label: (
         <span>
           <FileDoneOutlined style={{ marginRight: 6 }} />
-          Purchase Request ({prs.length})
+          Purchase Request
+          {prSummaryCount > 0 && (
+            <span className={`${styles.tabBadge} ${activeTabKey === 'pr' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+              {prSummaryCount}
+            </span>
+          )}
         </span>
       ),
       children: (
-        <Card
-          title={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-              <Space size={8}>
-                <FileDoneOutlined style={{ color: '#2563eb' }} />
-                <span style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
-                  Daftar Purchase Request (PR) &amp; Status Approval
-                </span>
-              </Space>
-              <span style={{ fontSize: 11.5, color: '#64748b' }}>
+        <div>
+          <div className={styles.tabDescBar}>
+            <div>
+              <div style={{ fontWeight: 600, color: '#0F172A', fontSize: 13 }}>
+                {prDomainTab === 'MATERIAL'
+                  ? 'Daftar Purchase Request Material (Barang Fisik)'
+                  : 'Daftar Purchase Request Jasa (Subcon & Layanan Operasional)'}
+              </div>
+              <div style={{ fontSize: 11.5, color: '#64748B' }}>
                 Alur 2-Level: Procurement (Maker) → Finance (Reviewer) → Director (Final Approval)
-              </span>
+              </div>
             </div>
-          }
-          size="small"
-          style={{ borderRadius: 8, border: '1px solid #e2e8f0' }}
-        >
-          <Table
-            columns={prColumns}
-            dataSource={prs}
-            rowKey="id"
-            loading={loadingPrPo}
-            pagination={{ pageSize: 10 }}
-            locale={{
-              emptyText: (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
-                        Belum ada Purchase Request
-                      </div>
-                      <Text type="secondary" style={{ fontSize: 11.5 }}>
-                        Buat PR dari Paket Pengadaan berstatus SUBMITTED di tab &ldquo;Paket Pengadaan&rdquo;.
-                      </Text>
+            <div className={styles.subTabSegmentWrapper}>
+              <div className={styles.subTabSegment}>
+                <button
+                  type="button"
+                  className={`${styles.subTabBtn} ${prDomainTab === 'MATERIAL' ? styles.subTabBtnActive : ''}`}
+                  onClick={() => setPrDomainTab('MATERIAL')}
+                >
+                  <span>Material</span>
+                  <span className={styles.subTabCount}>{materialPrs.length}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.subTabBtn} ${prDomainTab === 'SERVICE' ? styles.subTabBtnActive : ''}`}
+                  onClick={() => setPrDomainTab('SERVICE')}
+                >
+                  <span>Jasa</span>
+                  <span className={styles.subTabCount}>{servicePrs.length}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Desktop Structured Table View */}
+          <div className={styles.desktopTableView}>
+            <div className={styles.tableContainer}>
+              <Table
+                className={styles.procurementTable}
+                columns={prDomainTab === 'MATERIAL' ? materialPrColumns : servicePrColumns}
+                dataSource={prDomainTab === 'MATERIAL' ? materialPrs : servicePrs}
+                rowKey="id"
+                loading={prsLoading || rfqsLoading || posLoading}
+                pagination={{ pageSize: 8, showSizeChanger: false }}
+                scroll={{ x: prDomainTab === 'MATERIAL' ? 1040 : 1240 }}
+                locale={{
+                  emptyText: (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={
+                        <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+                            {prDomainTab === 'MATERIAL'
+                              ? 'Belum ada Purchase Request Material'
+                              : 'Belum ada Purchase Request Jasa'}
+                          </div>
+                          <Text type="secondary" style={{ fontSize: 11.5 }}>
+                            Buat PR dari Paket Pengadaan berstatus SUBMITTED di tab &ldquo;Paket Pengadaan&rdquo;.
+                          </Text>
+                        </div>
+                      }
+                    />
+                  ),
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Mobile & Tablet Compact Card View */}
+          <div className={styles.mobileCardView}>
+            {(prDomainTab === 'MATERIAL' ? materialPrs : servicePrs).length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+                      {prDomainTab === 'MATERIAL'
+                        ? 'Belum ada Purchase Request Material'
+                        : 'Belum ada Purchase Request Jasa'}
                     </div>
-                  }
-                />
-              ),
-            }}
-          />
-        </Card>
+                  </div>
+                }
+              />
+            ) : (
+              (prDomainTab === 'MATERIAL' ? materialPrs : servicePrs).map((r) =>
+                renderPrMobileCard(r, prDomainTab === 'SERVICE')
+              )
+            )}
+          </div>
+        </div>
       ),
     },
     {
@@ -1230,23 +2331,50 @@ export const ProcurementPage: React.FC = () => {
       label: (
         <span>
           <ShoppingCartOutlined style={{ marginRight: 6 }} />
-          Purchase Order ({pos.length})
+          Purchase Order
+          {poSummaryCount > 0 && (
+            <span className={`${styles.tabBadge} ${activeTabKey === 'po' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+              {poSummaryCount}
+            </span>
+          )}
         </span>
       ),
       children: (
-        <Card
-          title="Daftar Purchase Order (PO)"
-          size="small"
-          style={{ borderRadius: 8, border: '1px solid #e2e8f0' }}
-        >
-          <Table
-            columns={poColumns}
-            dataSource={pos}
-            rowKey="id"
-            loading={loadingPrPo}
-            pagination={{ pageSize: 10 }}
-          />
-        </Card>
+        <div>
+          <div className={styles.tabDescBar}>
+            <div>
+              Daftar Purchase Order (PO) resmi yang diterbitkan ke vendor rekanan terpilih.
+            </div>
+          </div>
+          <div className={styles.tableContainer}>
+            <Table
+              className={styles.procurementTable}
+              columns={poColumns}
+              dataSource={pos}
+              rowKey="id"
+              loading={posLoading}
+              pagination={{ pageSize: 8, showSizeChanger: false }}
+              scroll={{ x: 1050 }}
+              locale={{
+                emptyText: (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={
+                      <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+                          Belum ada Purchase Order
+                        </div>
+                        <Text type="secondary" style={{ fontSize: 11.5 }}>
+                          Terbitkan PO melalui alur evaluasi vendor RFQ pada PR yang telah disetujui Direktur.
+                        </Text>
+                      </div>
+                    }
+                  />
+                ),
+              }}
+            />
+          </div>
+        </div>
       ),
     },
     {
@@ -1254,123 +2382,214 @@ export const ProcurementPage: React.FC = () => {
       label: (
         <span>
           <InboxOutlined style={{ marginRight: 6 }} />
-          Goods Receipt ({allGoodsReceipts.length})
+          Goods Receipt
+          {grBadgeCount > 0 && (
+            <span className={`${styles.tabBadge} ${activeTabKey === 'gr' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+              {grBadgeCount}
+            </span>
+          )}
         </span>
       ),
       children: (
-        <Card
-          title={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-              <Space size={8}>
-                <InboxOutlined style={{ color: '#0d9488', fontSize: 16 }} />
-                <span style={{ fontWeight: 700, fontSize: 14, color: '#0f172a' }}>
-                  Daftar Goods Receipt (GR) &amp; Riwayat Penerimaan Fisik Barang
-                </span>
-                <Tag color="teal" style={{ fontWeight: 700, borderRadius: 4, margin: 0 }}>
-                  {allGoodsReceipts.length} Penerimaan Tercatat
-                </Tag>
-              </Space>
-              <span style={{ fontSize: 11.5, color: '#64748b' }}>
-                Bukti Penerimaan Fisik di Gudang/Site dengan Validasi Anti Over-Receipt
-              </span>
+        <div>
+          <div className={styles.tabDescBar}>
+            <div>
+              Daftar Goods Receipt (GR) &amp; Riwayat Penerimaan Fisik Barang di Site/Gudang.
             </div>
-          }
-          size="small"
-          style={{ borderRadius: 8, border: '1px solid #ccfbf1', background: '#ffffff' }}
-        >
-          <Table
-            columns={grColumns}
-            dataSource={allGoodsReceipts}
-            rowKey="grId"
-            pagination={{ pageSize: 10 }}
-            locale={{
-              emptyText: (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                      <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
-                        Belum ada Goods Receipt yang diterbitkan
+            <div style={{ fontSize: 11.5, color: '#0F766E', fontWeight: 600 }}>
+              Proteksi Validasi Anti Over-Receipt Aktif
+            </div>
+          </div>
+          <div className={styles.tableContainer}>
+            <Table
+              className={styles.procurementTable}
+              columns={grColumns}
+              dataSource={allGoodsReceipts}
+              rowKey="grId"
+              loading={grsLoading}
+              pagination={{ pageSize: 8, showSizeChanger: false }}
+              scroll={{ x: 1050 }}
+              locale={{
+                emptyText: (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={
+                      <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                        <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+                          Belum ada Goods Receipt yang diterbitkan
+                        </div>
+                        <Text type="secondary" style={{ fontSize: 11.5 }}>
+                          Klik tombol &ldquo;Terima Barang&rdquo; pada PO berstatus ISSUED untuk memproses penerimaan barang fisik.
+                        </Text>
                       </div>
-                      <Text type="secondary" style={{ fontSize: 11.5 }}>
-                        Klik tombol &ldquo;Terima Barang&rdquo; pada PO berstatus ISSUED untuk memproses penerimaan barang fisik.
-                      </Text>
-                    </div>
-                  }
-                />
-              ),
-            }}
-          />
-        </Card>
+                    }
+                  />
+                ),
+              }}
+            />
+          </div>
+        </div>
       ),
     },
   ];
 
   return (
-    <div style={{ padding: 24 }}>
-      {/* Workstation Header */}
-      <div style={{ marginBottom: 20 }}>
-        <Title level={3} style={{ margin: 0, color: '#0f172a' }}>
-          Procurement Workstation
-        </Title>
-        <Text type="secondary" style={{ fontSize: 13 }}>
-          Antrean Paket Pengadaan (Intake), Rekonsiliasi Item Legacy/Ad-hoc, Purchase Request (PR), dan Purchase Order (PO)
-        </Text>
+    <div className={styles.pageContainer}>
+      {/* Header Section */}
+      <div className={styles.pageHeader}>
+        <div>
+          <Title level={3} className={styles.headerTitle}>
+            Procurement
+          </Title>
+          <div className={styles.headerSubtitle}>
+            Paket pengadaan, rekonsiliasi RAB, purchase request, purchase order, dan penerimaan barang (goods receipt).
+          </div>
+        </div>
       </div>
 
       {/* Summary Statistic Cards */}
-      <Row gutter={16} style={{ marginBottom: 20 }}>
-        <Col xs={24} sm={canReadReconciliation ? 6 : 8}>
-          <Card size="small" style={{ borderRadius: 8, border: '1px solid #fed7aa', background: '#fffbeb' }}>
-            <Statistic
-              title="Antrean Paket (SUBMITTED)"
-              value={submittedPackagesCount}
-              prefix={<InboxOutlined />}
-              valueStyle={{ color: '#d97706', fontWeight: 700 }}
-            />
-          </Card>
+      <Row gutter={[16, 16]} className={styles.metricsRow}>
+        {/* Card 1: Antrean Paket */}
+        <Col xs={24} sm={12} md={12} xl={6}>
+          <div className={styles.summaryCard}>
+            <div>
+              <div className={styles.cardHeader}>
+                <div className={styles.iconSurface} style={{ background: '#FEF3C7', color: '#D97706' }}>
+                  <InboxOutlined />
+                </div>
+                <span className={styles.cardLabel} title="Antrean Paket (SUBMITTED)">
+                  Antrean Paket
+                </span>
+              </div>
+              <div className={styles.cardValueRow}>
+                <span className={styles.cardValue} style={{ color: '#D97706' }}>
+                  {summaryLoading && !dashboardSummary && packages.length === 0 ? (
+                    <Spin size="small" />
+                  ) : (
+                    effectivePackageCount ?? 0
+                  )}
+                </span>
+                <span className={styles.cardUnit}>Paket</span>
+              </div>
+            </div>
+            <div className={styles.cardSubtext}>
+              Status: SUBMITTED
+            </div>
+          </div>
         </Col>
-        {canReadReconciliation && (
-          <Col xs={24} sm={6}>
-            <Card size="small" style={{ borderRadius: 8, border: '1px solid #fecaca', background: '#fef2f2' }}>
-              <Statistic
-                title="Perlu Rekonsiliasi"
-                value={unresolvedReconciliations.length}
-                prefix={<SafetyCertificateOutlined />}
-                valueStyle={{ color: '#dc2626', fontWeight: 700 }}
-              />
-            </Card>
-          </Col>
-        )}
-        <Col xs={24} sm={canReadReconciliation ? 6 : 8}>
-          <Card size="small" style={{ borderRadius: 8, border: '1px solid #e2e8f0' }}>
-            <Statistic
-              title="Total Purchase Request"
-              value={prs.length}
-              prefix={<FileDoneOutlined />}
-              valueStyle={{ color: '#2563eb', fontWeight: 700 }}
-            />
-          </Card>
+
+        {/* Card 2: Perlu Rekonsiliasi */}
+        <Col xs={24} sm={12} md={12} xl={6}>
+          <div className={styles.summaryCard}>
+            <div>
+              <div className={styles.cardHeader}>
+                <div
+                  className={styles.iconSurface}
+                  style={{
+                    background: (effectiveReconciliationCount ?? 0) > 0 ? '#FEE2E2' : '#ECFDF5',
+                    color: (effectiveReconciliationCount ?? 0) > 0 ? '#DC2626' : '#059669',
+                  }}
+                >
+                  <SafetyCertificateOutlined />
+                </div>
+                <span className={styles.cardLabel} title="Perlu Rekonsiliasi">
+                  Perlu Rekonsiliasi
+                </span>
+              </div>
+              <div className={styles.cardValueRow}>
+                <span
+                  className={styles.cardValue}
+                  style={{ color: (effectiveReconciliationCount ?? 0) > 0 ? '#DC2626' : '#059669' }}
+                >
+                  {summaryLoading && !dashboardSummary && unresolvedReconciliations.length === 0 ? (
+                    <Spin size="small" />
+                  ) : (
+                    effectiveReconciliationCount ?? 0
+                  )}
+                </span>
+                <span className={styles.cardUnit}>Item</span>
+              </div>
+            </div>
+            <div className={styles.cardSubtext}>
+              {effectiveReconciliationCount && effectiveReconciliationCount > 0
+                ? 'Item pengadaan legacy/ad-hoc'
+                : 'Safety Gate: Bersih'}
+            </div>
+          </div>
         </Col>
-        <Col xs={24} sm={canReadReconciliation ? 6 : 8}>
-          <Card size="small" style={{ borderRadius: 8, border: '1px solid #e2e8f0' }}>
-            <Statistic
-              title="Total Purchase Order"
-              value={pos.length}
-              prefix={<ShoppingCartOutlined />}
-              valueStyle={{ color: '#059669', fontWeight: 700 }}
-            />
-          </Card>
+
+        {/* Card 3: Total Purchase Request */}
+        <Col xs={24} sm={12} md={12} xl={6}>
+          <div className={styles.summaryCard}>
+            <div>
+              <div className={styles.cardHeader}>
+                <div className={styles.iconSurface} style={{ background: '#EFF6FF', color: '#2563EB' }}>
+                  <FileDoneOutlined />
+                </div>
+                <span className={styles.cardLabel} title="Total Purchase Request">
+                  Total Purchase Request
+                </span>
+              </div>
+              <div className={styles.cardValueRow}>
+                <span className={styles.cardValue} style={{ color: '#0F172A' }}>
+                  {summaryLoading && !dashboardSummary && prs.length === 0 ? (
+                    <Spin size="small" />
+                  ) : (
+                    prSummaryCount
+                  )}
+                </span>
+                <span className={styles.cardUnit}>PR</span>
+              </div>
+            </div>
+            <div className={styles.cardSubtext}>
+              {prSummaryCount > 0
+                ? 'Tercatat di sistem SSOT'
+                : (activeTabKey === 'pr' ? 'Belum ada PR' : 'Dimuat saat tab PR aktif')}
+            </div>
+          </div>
+        </Col>
+
+        {/* Card 4: Total Purchase Order */}
+        <Col xs={24} sm={12} md={12} xl={6}>
+          <div className={styles.summaryCard}>
+            <div>
+              <div className={styles.cardHeader}>
+                <div className={styles.iconSurface} style={{ background: '#E0E7FF', color: '#4F46E5' }}>
+                  <ShoppingCartOutlined />
+                </div>
+                <span className={styles.cardLabel} title="Total Purchase Order">
+                  Total Purchase Order
+                </span>
+              </div>
+              <div className={styles.cardValueRow}>
+                <span className={styles.cardValue} style={{ color: '#0F172A' }}>
+                  {summaryLoading && !dashboardSummary && pos.length === 0 ? (
+                    <Spin size="small" />
+                  ) : (
+                    poSummaryCount
+                  )}
+                </span>
+                <span className={styles.cardUnit}>PO</span>
+              </div>
+            </div>
+            <div className={styles.cardSubtext}>
+              {poSummaryCount > 0
+                ? 'PO terbit ke vendor'
+                : (activeTabKey === 'po' ? 'Belum ada PO' : 'Dimuat saat tab PO aktif')}
+            </div>
+          </div>
         </Col>
       </Row>
 
-      {/* Main Tabs */}
-      <Tabs
-        activeKey={activeTabKey}
-        onChange={(k) => setActiveTabKey(k)}
-        items={tabItems}
-        type="card"
-      />
+      {/* Main Tabs Container */}
+      <div className={styles.tabsCard}>
+        <Tabs
+          className={styles.procurementTabs}
+          activeKey={activeTabKey}
+          onChange={(k) => setActiveTabKey(k)}
+          items={tabItems}
+        />
+      </div>
 
       {/* PACKAGE DETAIL DRAWER */}
       <ProcurementPackageDetailDrawer
@@ -1471,7 +2690,9 @@ export const ProcurementPage: React.FC = () => {
               currentUserName={user?.fullName || user?.email || 'User'}
               onStatusChange={() => {
                 setPrVersion((v) => v + 1);
-                refetchPrPo();
+                queryClient.invalidateQueries({ queryKey: ['procurement', 'prs'] });
+                queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
+                refetchPrs();
               }}
               onCreateRfqClick={() => {
                 setIsPrApprovalModalOpen(false);
@@ -1504,11 +2725,29 @@ export const ProcurementPage: React.FC = () => {
             setRfqVersion((v) => v + 1);
             setPrVersion((v) => v + 1);
             setPoVersion((v) => v + 1);
-            refetchPrPo();
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'rfqs'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'prs'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
+            refetchRfqs();
+            refetchPrs();
+          }}
+          onRfqCancelled={() => {
+            setRfqVersion((v) => v + 1);
+            setPrVersion((v) => v + 1);
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'rfqs'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'prs'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'] });
+            refetchRfqs();
+            refetchPrs();
           }}
           onPoCreated={() => {
             setPoVersion((v) => v + 1);
-            refetchPrPo();
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'rfqs'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
+            refetchPos();
+            refetchRfqs();
           }}
           currentUserName={user?.fullName || user?.email || 'Procurement Team'}
         />
@@ -1535,6 +2774,41 @@ export const ProcurementPage: React.FC = () => {
             setSelectedGrForView(null);
             setIsGrModalOpen(true);
           }}
+          onOpenServiceOrder={(targetPoRecord) => {
+            setIsPoModalOpen(false);
+            setSelectedPoForView(null);
+            setSelectedPoForServiceOrder(targetPoRecord);
+            setIsServiceOrderModalOpen(true);
+          }}
+        />
+      )}
+
+      {/* SERVICE PO CREATION MODAL (DIRECT SERVICE SOURCING) */}
+      {selectedPrForServicePo && (
+        <PurchaseOrderModal
+          open={isServicePoModalOpen}
+          onClose={() => {
+            setIsServicePoModalOpen(false);
+            setSelectedPrForServicePo(null);
+          }}
+          targetPr={selectedPrForServicePo}
+          comparison={null}
+          rfq={null}
+          existingPo={null}
+          viewOnly={false}
+          canReceiveGoods={false}
+          currentUserName={user?.fullName || user?.email || 'Procurement Team'}
+          onPoCreated={() => {
+            setIsServicePoModalOpen(false);
+            setSelectedPrForServicePo(null);
+            setPoVersion((v) => v + 1);
+            setPrVersion((v) => v + 1);
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'prs'] });
+            refetchPos();
+            refetchPrs();
+          }}
         />
       )}
 
@@ -1552,11 +2826,48 @@ export const ProcurementPage: React.FC = () => {
           viewOnly={Boolean(selectedGrForView)}
           canReceiveGoods={canReceiveGoods}
           currentUserName={user?.fullName || user?.email || 'Petugas Logistik'}
-          onGrCreated={(savedGr, updatedPo) => {
+          onGrCreated={() => {
             setGrVersion((v) => v + 1);
             setPoVersion((v) => v + 1);
-            refetchPrPo();
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'goods-receipts'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
+            refetchGrs();
+            refetchPos();
           }}
+        />
+      )}
+
+      {/* SERVICE ORDER MODAL (SPK / WORK ORDER) */}
+      {selectedPoForServiceOrder && (
+        <ServiceOrderModal
+          open={isServiceOrderModalOpen}
+          onClose={() => {
+            setIsServiceOrderModalOpen(false);
+            setSelectedPoForServiceOrder(null);
+          }}
+          po={selectedPoForServiceOrder}
+          onOrderUpdated={() => {
+            refetchPos();
+          }}
+          canManage={isProcurement || isPurchasing || isSuperAdmin}
+        />
+      )}
+
+      {/* SERVICE CLAIM MODAL (KLAIM JASA) */}
+      {selectedPoForServiceClaim && (
+        <ServiceClaimModal
+          open={isServiceClaimModalOpen}
+          onClose={() => {
+            setIsServiceClaimModalOpen(false);
+            setSelectedPoForServiceClaim(null);
+          }}
+          po={selectedPoForServiceClaim}
+          onClaimUpdated={() => {
+            refetchPos();
+          }}
+          userRole={user?.roles?.[0]}
+          userId={user?.sub ? Number(user.sub) : undefined}
         />
       )}
     </div>

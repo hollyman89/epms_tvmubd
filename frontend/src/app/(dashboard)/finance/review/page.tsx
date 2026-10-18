@@ -24,7 +24,7 @@ export default function FinanceReviewPage() {
         minHeight: '60vh',
       }}
     >
-      <Spin tip="Mengalihkan ke Tugas Persetujuan Proyek..." size="large" />
+      <Spin tip="Mengalihkan ke Approval Center..." size="large" />
     </div>
   );
 }

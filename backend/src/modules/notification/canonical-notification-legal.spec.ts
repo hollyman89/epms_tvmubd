@@ -135,7 +135,7 @@ describe('Phase N4: Legal Canonical Bell Projection & Decoupling', () => {
       const pmNotif = inMemoryNotifications.find((n) => n.userId === 40);
 
       expect(pmoNotif).toBeDefined();
-      expect(pmoNotif?.title).toBe('Project Siap Kick Off');
+      expect(pmoNotif?.title).toBe('Kontrak Disetujui Legal — Siap Penugasan PM');
       expect(pmoNotif?.actionLink).toBe('/project-delivery');
       expect(pmoNotif?.notificationType).toBe('ALERT');
       expect(pmoNotif?.dedupeKey).toBe('evt-legal-appr-001:30:LEGAL_CONTRACT_APPROVED_PMO');

@@ -71,6 +71,11 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   const [loadingGrs, setLoadingGrs] = useState<boolean>(false);
   const [selectedGrId, setSelectedGrId] = useState<number | undefined>(undefined);
 
+  // Canonical Service Claim States for SERVICE PO
+  const [approvedServiceClaims, setApprovedServiceClaims] = useState<any[]>([]);
+  const [loadingClaims, setLoadingClaims] = useState<boolean>(false);
+  const [selectedServiceClaimId, setSelectedServiceClaimId] = useState<number | undefined>(undefined);
+
   // Authoritative Existing Invoices for PO (Phase GR-8C)
   const [existingInvoices, setExistingInvoices] = useState<InvoiceDto[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState<boolean>(false);
@@ -167,12 +172,36 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
           setLoadingGrs(false);
           setLoadingInvoices(false);
         });
+
+      if (po?.orderType === 'SERVICE') {
+        setLoadingClaims(true);
+        ProcurementService.getServiceClaims({ poId: Number(poId), status: 'APPROVED_FOR_INVOICE' })
+          .then((claims) => {
+            const validClaims = (claims || []).filter(c => c.status === 'APPROVED_FOR_INVOICE');
+            setApprovedServiceClaims(validClaims);
+            if (validClaims.length === 1) {
+              setSelectedServiceClaimId(validClaims[0].id);
+            } else {
+              setSelectedServiceClaimId(undefined);
+            }
+          })
+          .catch((err) => {
+            console.error('Failed to load service claims for CreateInvoiceModal:', err);
+            setApprovedServiceClaims([]);
+          })
+          .finally(() => setLoadingClaims(false));
+      } else {
+        setApprovedServiceClaims([]);
+        setSelectedServiceClaimId(undefined);
+      }
     } else {
       setGoodsReceipts([]);
       setExistingInvoices([]);
       setSelectedGrId(undefined);
+      setApprovedServiceClaims([]);
+      setSelectedServiceClaimId(undefined);
     }
-  }, [open, poId]);
+  }, [open, poId, po]);
 
   // Selected Canonical Goods Receipt
   const selectedGr = useMemo(() => {
@@ -368,6 +397,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     const tName = (term.termName || '').toUpperCase();
     const isProgress = tType === 'PROGRESS' || tName.includes('PROGRESS');
     if (!isProgress) return { passed: true, reason: '' };
+    if (po?.orderType === 'SERVICE') return { passed: true, reason: '' };
 
     const is100Percent =
       /100%|fisik\s*100%|lengkap/i.test(term.triggerCondition || '') ||
@@ -446,7 +476,15 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     const tName = (term.termName || '').toUpperCase();
     const isProgress = tType === 'PROGRESS' || tName.includes('PROGRESS');
 
-    if (isProgress) {
+    if (po?.orderType === 'SERVICE') {
+      const isTermDp = (term.termType || '').toUpperCase() === 'DP' || (term.termName || '').toUpperCase().includes('DP');
+      if (!isTermDp) {
+        if (approvedServiceClaims.length === 0) {
+          capPassed = false;
+          capReason = 'Belum ada Klaim Jasa yang disetujui (APPROVED_FOR_INVOICE) untuk PO Jasa ini.';
+        }
+      }
+    } else if (isProgress) {
       if (goodsReceipts.length === 0) {
         capPassed = false;
         capReason = 'Belum ada dokumen Goods Receipt (GR) aktif sebagai dasar fisik penagihan.';
@@ -522,8 +560,13 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
       return;
     }
 
-    // Frontend Safety Guard for PROGRESS terms
-    if (isProgressTerm) {
+    // Frontend Safety Guard for PROGRESS / SERVICE terms
+    if (po?.orderType === 'SERVICE' && !isDpTerm) {
+      if (!selectedServiceClaimId) {
+        message.error('Wajib memilih Klaim Jasa yang telah disetujui (APPROVED_FOR_INVOICE) sebagai dasar penagihan jasa.');
+        return;
+      }
+    } else if (po?.orderType !== 'SERVICE' && isProgressTerm) {
       if (!selectedGrId || !selectedGr) {
         message.error('Wajib memilih Goods Receipt (GR) yang sah sebagai dasar fisik penagihan Progress.');
         return;
@@ -550,7 +593,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
       const termIdToSubmit = values.paymentTermId ? Number(values.paymentTermId) : undefined;
 
       // Items payload: For PROGRESS, strictly use justified GR items; for others, use poItems
-      const itemsPayload = isProgressTerm
+      const itemsPayload = (po?.orderType !== 'SERVICE' && isProgressTerm)
         ? progressInvoiceItems.map((it) => ({
             poItemId: it.poItemId,
             quantity: it.quantity,
@@ -573,8 +616,9 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
         items: itemsPayload,
       };
 
-      // Canonical Goods Receipt reference for PROGRESS
-      if (isProgressTerm) {
+      if (po?.orderType === 'SERVICE' && !isDpTerm) {
+        payload.serviceClaimId = Number(selectedServiceClaimId);
+      } else if (po?.orderType !== 'SERVICE' && isProgressTerm && selectedGr) {
         payload.goodsReceiptId = Number(selectedGrId);
         payload.evidenceRef = selectedGr.grNumber;
       }
@@ -604,7 +648,9 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   if (!po) return null;
 
   // Validation state for submission button
-  const isProgressBlocked = isProgressTerm && (!selectedGrId || progressInvoiceItems.length === 0);
+  const isProgressBlocked = po?.orderType === 'SERVICE'
+    ? (isProgressTerm && !selectedServiceClaimId)
+    : (isProgressTerm && (!selectedGrId || progressInvoiceItems.length === 0));
   const isTermIneligible = Boolean(activeTerm && !activeTermEligibility.isEligible);
   const isSubmitDisabled = !canCreateInvoice || isSubmitting || isProgressBlocked || isTermIneligible;
 
@@ -862,8 +908,114 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
             </Col>
           </Row>
 
-          {/* CANONICAL GOODS RECEIPT SELECTOR FOR PROGRESS TERMIN (Phase GR-6) */}
-          {isProgressTerm && (
+          {/* CANONICAL SERVICE CLAIM SELECTOR FOR SERVICE PO */}
+          {po?.orderType === 'SERVICE' && !isDpTerm && (
+            <Card
+              size="small"
+              style={{
+                marginBottom: 16,
+                borderRadius: 8,
+                border: '1px solid #93c5fd',
+                background: '#eff6ff',
+              }}
+              title={
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Space size={8}>
+                    <SafetyCertificateOutlined style={{ color: '#2563eb', fontSize: 16 }} />
+                    <span style={{ fontWeight: 700, fontSize: 13, color: '#1e3a8a' }}>
+                      Klaim Jasa Disetujui
+                    </span>
+                  </Space>
+                  <Tag color="blue" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
+                    VALIDASI CANONICAL SSOT
+                  </Tag>
+                </div>
+              }
+            >
+              {loadingClaims ? (
+                <div style={{ padding: '12px 0', textAlign: 'center' }}>
+                  <Spin size="small" />{' '}
+                  <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                    Memuat daftar Klaim Jasa yang disetujui...
+                  </Text>
+                </div>
+              ) : approvedServiceClaims.length === 0 ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="Belum Ada Klaim Jasa Disetujui (APPROVED_FOR_INVOICE) Pada PO Ini"
+                  description="Penagihan termin progress/final jasa memerlukan Klaim Jasa yang telah disetujui secara komersial oleh tim Procurement dan diverifikasi teknis oleh Project Manager."
+                  style={{ borderRadius: 6 }}
+                />
+              ) : (
+                <div>
+                  <div style={{ marginBottom: 6 }}>
+                    <Text strong style={{ fontSize: 12, color: '#1e3a8a' }}>
+                      Pilih Klaim Jasa yang Sah <span style={{ color: '#dc2626' }}>*</span>:
+                    </Text>
+                  </div>
+                  <Select
+                    placeholder="Pilih Klaim Jasa yang memvalidasi penagihan termin ini..."
+                    style={{ width: '100%', borderRadius: 6 }}
+                    value={selectedServiceClaimId}
+                    onChange={(val) => setSelectedServiceClaimId(val)}
+                    options={approvedServiceClaims.map((claim) => ({
+                      value: claim.id,
+                      label: `${claim.claimNumber} | Nilai Disetujui: Rp ${Number(claim.approvedClaimAmount || claim.totalClaimAmount || 0).toLocaleString('id-ID')} | Vendor: ${vendorName}${claim.acceptanceReference ? ` | Bukti: ${claim.acceptanceReference}` : ''}`,
+                    }))}
+                  />
+
+                  {selectedServiceClaimId && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        padding: '10px 14px',
+                        background: '#ffffff',
+                        borderRadius: 6,
+                        border: '1px solid #bfdbfe',
+                      }}
+                    >
+                      {(() => {
+                        const sc = approvedServiceClaims.find(c => Number(c.id) === Number(selectedServiceClaimId));
+                        if (!sc) return null;
+                        return (
+                          <Row gutter={[12, 8]} align="middle">
+                            <Col xs={24} sm={6}>
+                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>NOMOR KLAIM:</Text>
+                              <div style={{ fontWeight: 700, fontSize: 12.5, color: '#1e40af', fontFamily: 'monospace' }}>
+                                {sc.claimNumber}
+                              </div>
+                            </Col>
+                            <Col xs={24} sm={6}>
+                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>PERIODE KLAIM:</Text>
+                              <div style={{ fontWeight: 600, fontSize: 12, color: '#334155' }}>
+                                {sc.claimPeriodStart && sc.claimPeriodEnd ? `${dayjs(sc.claimPeriodStart).format('DD/MM/YYYY')} - ${dayjs(sc.claimPeriodEnd).format('DD/MM/YYYY')}` : '—'}
+                              </div>
+                            </Col>
+                            <Col xs={24} sm={6}>
+                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>NILAI DISETUJUI:</Text>
+                              <div style={{ fontWeight: 700, fontSize: 12.5, color: '#059669', fontFamily: 'monospace' }}>
+                                Rp {Number(sc.approvedClaimAmount || sc.totalClaimAmount || 0).toLocaleString('id-ID')}
+                              </div>
+                            </Col>
+                            <Col xs={24} sm={6}>
+                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>REFERENSI BUKTI:</Text>
+                              <div style={{ fontWeight: 600, fontSize: 12, color: '#334155' }}>
+                                {sc.acceptanceReference || sc.acceptanceType || '—'}
+                              </div>
+                            </Col>
+                          </Row>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          )}
+
+          {/* CANONICAL GOODS RECEIPT SELECTOR FOR PROGRESS TERMIN (MATERIAL PO ONLY) */}
+          {po?.orderType !== 'SERVICE' && isProgressTerm && (
             <Card
               size="small"
               style={{

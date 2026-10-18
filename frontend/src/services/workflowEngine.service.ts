@@ -153,8 +153,12 @@ export class WorkflowEngineService {
   static async getInstanceByEntity(
     entityType: string,
     entityId: string | number,
+    workflowKey?: string,
   ): Promise<WorkflowInstance | null> {
-    const res = await apiClient.get(`/workflow/instances/entity/${entityType}/${entityId}`);
+    const url = workflowKey
+      ? `/workflow/instances/entity/${entityType}/${entityId}?workflowKey=${encodeURIComponent(workflowKey)}`
+      : `/workflow/instances/entity/${entityType}/${entityId}`;
+    const res = await apiClient.get(url);
     const data = extractData<any>(res);
     return (data && typeof data === 'object' && 'id' in data) ? (data as WorkflowInstance) : null;
   }

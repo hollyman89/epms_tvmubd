@@ -64,6 +64,8 @@ import {
   convertUiNodesToSavePayload,
   recomputeWbsHierarchy,
   calculateRootWeightSum,
+  calculateLeafWeightSum,
+  checkWbsHierarchyIntegrity,
   countLeafNodes,
   countTotalNodes,
   countDescendants,
@@ -251,8 +253,6 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
-  // Track if PM has saved a draft since revision was requested
-  const [hasSavedDraftSinceRevision, setHasSavedDraftSinceRevision] = useState<boolean>(false);
 
   // Procurement Gate state (Database SSOT)
   const [gateRecord, setGateRecord] = useState<{
@@ -547,11 +547,6 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
             } else {
               setGateRecord({ status: 'NOT_SUBMITTED' });
             }
-            // Clean up deprecated localStorage gate key
-            const gateKey = `epms_procurement_gate_${canonicalProjectId}`;
-            if (typeof window !== 'undefined') {
-              localStorage.removeItem(gateKey);
-            }
           })
           .catch((err) => {
             console.error('Failed to load management review in PM modal:', err);
@@ -660,11 +655,25 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     return (estimatedMarginNominal / contractLegalValue) * 100;
   }, [estimatedMarginNominal, contractLegalValue]);
 
-  // --- WBS CALCULATIONS ---
+  // --- WBS CALCULATIONS (R1-1, R1-3, R1-4, R1-24, R1-C1) ---
   const rootWeightSum = useMemo(() => calculateRootWeightSum(wbsData), [wbsData]);
-  const isWbsWeightValid = Math.abs(rootWeightSum - 100) < 0.01;
+  const leafWeightSum = useMemo(() => calculateLeafWeightSum(wbsData), [wbsData]);
+  const hierarchyIntegrity = useMemo(() => checkWbsHierarchyIntegrity(wbsData), [wbsData]);
+  const isRootWeightValid = Math.abs(rootWeightSum - 100) < 0.01;
+  const isLeafWeightValid = Math.abs(leafWeightSum - 100) < 0.01;
+  const isHierarchyValid = hierarchyIntegrity.valid;
+  const isWbsWeightValid = isRootWeightValid && isLeafWeightValid && isHierarchyValid;
   const isWbsComplete = wbsData.length > 0 && isWbsWeightValid;
   const wbsStructureMetrics = useMemo(() => getWbsStructureMetrics(wbsData), [wbsData]);
+
+  // C1-1 to C1-4: Separate Structural Safety & Over-Allocation from Business Completeness
+  const isRootOverAllocated = rootWeightSum > 100.01;
+  const isLeafOverAllocated = leafWeightSum > 100.01;
+  const overAllocatedHierarchyViolation = useMemo(
+    () => hierarchyIntegrity.violations.find((v) => v.isOverAllocated),
+    [hierarchyIntegrity]
+  );
+  const hasWbsOverAllocation = isRootOverAllocated || isLeafOverAllocated || Boolean(overAllocatedHierarchyViolation);
 
   // --- SCHEDULE CALCULATIONS ---
   const leafNodesCount = useMemo(() => countLeafNodes(wbsData), [wbsData]);
@@ -725,9 +734,33 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
   const isCostComplete = hasCostInput && totalPmEstimate > 0 && isCostMappingValid;
   const isConditionComplete = isInitialConditionComplete(initialCondition);
 
-  const isRevisionWorkflow = gateRecord?.workflow
-    ? gateRecord.workflow.current?.nodeKey === 'PM_REVISION'
-    : gateRecord?.status === 'NEEDS_REVISION';
+  const isRevisionWorkflow = Boolean(
+    (gateRecord?.workflow
+      ? gateRecord.workflow.current?.nodeKey === 'PM_REVISION'
+      : gateRecord?.status === 'NEEDS_REVISION') ||
+    operationalReadinessData?.gate?.status === 'NEEDS_REVISION' ||
+    operationalReadinessData?.workflow?.currentNodeId?.startsWith('node_pm_revision') ||
+    operationalReadinessData?.gate?.currentNodeId?.startsWith('node_pm_revision')
+  );
+
+  const effectiveHasPersistedRevisionAfterReturn = useMemo(() => {
+    if (!isRevisionWorkflow) return true;
+    if (typeof operationalReadinessData?.hasPersistedRevisionAfterReturn === 'boolean') {
+      return operationalReadinessData.hasPersistedRevisionAfterReturn;
+    }
+    if (typeof operationalReadinessData?.gate?.hasPersistedRevisionAfterReturn === 'boolean') {
+      return operationalReadinessData.gate.hasPersistedRevisionAfterReturn;
+    }
+    if (typeof (gateRecord as any)?.hasPersistedRevisionAfterReturn === 'boolean') {
+      return (gateRecord as any).hasPersistedRevisionAfterReturn;
+    }
+    return false;
+  }, [
+    isRevisionWorkflow,
+    operationalReadinessData?.hasPersistedRevisionAfterReturn,
+    operationalReadinessData?.gate?.hasPersistedRevisionAfterReturn,
+    (gateRecord as any)?.hasPersistedRevisionAfterReturn,
+  ]);
 
   const readinessEvaluation = useMemo(() => {
     return evaluateOperationalPlanReadiness({
@@ -743,7 +776,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
       isScheduleServerSynced,
       isConditionComplete,
       initialConditionId: initialCondition?.id,
-      hasSavedDraftSinceRevision,
+      hasSavedDraftSinceRevision: effectiveHasPersistedRevisionAfterReturn,
+      hasPersistedRevisionAfterReturn: effectiveHasPersistedRevisionAfterReturn,
       isRevisionMode: isRevisionWorkflow,
     });
   }, [
@@ -759,7 +793,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     isScheduleServerSynced,
     isConditionComplete,
     initialCondition?.id,
-    hasSavedDraftSinceRevision,
+    effectiveHasPersistedRevisionAfterReturn,
     isRevisionWorkflow,
   ]);
 
@@ -841,48 +875,66 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         }
       }
 
-      // 2. Save WBS via Canonical API SSOT
+      // 2. Save WBS via Canonical API SSOT (C1-1 to C1-4: Structural Safety vs Completeness)
       if (wbsAttempted) {
-        setIsWbsSaving(true);
-        try {
-          const wbsTreePayload = {
-            nodes: convertUiNodesToSavePayload(wbsData),
-          };
-          const res = await ProjectService.saveWbsTree(canonicalProjectId, wbsTreePayload);
-
-          // Phase C & Phase D: Robust envelope extraction and permanent ID assertion
-          const rawNodes = extractPersistedWbsArray(res);
-          if (!rawNodes || !Array.isArray(rawNodes) || rawNodes.length === 0) {
-            wbsSaveError = true;
-            setIsWbsServerSynced(false);
-            console.error('[WBS Save] Failed to extract persisted WBS array from response:', res);
-            message.error('WBS: Gagal mengekstrak struktur WBS tersimpan dari server. Format respons server tidak valid.');
-          } else {
-            const serverTree = convertBackendTreeToUiNodes(rawNodes);
-            if (!serverTree || serverTree.length === 0 || !assertPersistedWbsNodesHaveDbIds(serverTree)) {
-              wbsSaveError = true;
-              setIsWbsServerSynced(false);
-              console.error('[WBS Save] Persisted WBS nodes lack valid permanent database IDs:', serverTree);
-              message.error('WBS: Node WBS tersimpan tidak memiliki ID database permanen yang valid.');
-            } else {
-              // Buffer — deferred to Coordinated State Commit
-              pendingWbsTree = serverTree;
-              pendingExpandedKeys = getAllNodeIds(serverTree);
-              if (wbsStorageKey && typeof window !== 'undefined') {
-                localStorage.removeItem(wbsStorageKey);
-              }
-              setIsWbsServerSynced(true);
-              setIsLegacyWbsDraftDetected(false);
-            }
-          }
-        } catch (err: any) {
+        if (hasWbsOverAllocation) {
           wbsSaveError = true;
           setIsWbsServerSynced(false);
-          console.error('Failed to save WBS tree to server:', err);
-          const errMsg = err.response?.data?.message || err.message || 'Gagal menyimpan Struktur WBS ke server';
-          message.error(`WBS: ${errMsg}`);
-        } finally {
-          setIsWbsSaving(false);
+          if (isRootOverAllocated) {
+            message.error(
+              `WBS Over-allocation: Total bobot Root (${rootWeightSum.toFixed(2)}%) melebihi 100.00%. Kurangi bobot sebelum menyimpan.`
+            );
+          } else if (isLeafOverAllocated) {
+            message.error(
+              `WBS Over-allocation: Total bobot Leaf (${leafWeightSum.toFixed(2)}%) melebihi 100.00%. Kurangi bobot sebelum menyimpan.`
+            );
+          } else if (overAllocatedHierarchyViolation) {
+            message.error(
+              `WBS Over-allocation: Total bobot anak (${overAllocatedHierarchyViolation.childrenWeightSum}%) melebihi induk (${overAllocatedHierarchyViolation.parentWeight}%) pada "${overAllocatedHierarchyViolation.code} ${overAllocatedHierarchyViolation.name}".`
+            );
+          }
+        } else {
+          setIsWbsSaving(true);
+          try {
+            const wbsTreePayload = {
+              nodes: convertUiNodesToSavePayload(wbsData),
+            };
+            const res = await ProjectService.saveWbsTree(canonicalProjectId, wbsTreePayload);
+
+            // Phase C & Phase D: Robust envelope extraction and permanent ID assertion
+            const rawNodes = extractPersistedWbsArray(res);
+            if (!rawNodes || !Array.isArray(rawNodes) || rawNodes.length === 0) {
+              wbsSaveError = true;
+              setIsWbsServerSynced(false);
+              console.error('[WBS Save] Failed to extract persisted WBS array from response:', res);
+              message.error('WBS: Gagal mengekstrak struktur WBS tersimpan dari server. Format respons server tidak valid.');
+            } else {
+              const serverTree = convertBackendTreeToUiNodes(rawNodes);
+              if (!serverTree || serverTree.length === 0 || !assertPersistedWbsNodesHaveDbIds(serverTree)) {
+                wbsSaveError = true;
+                setIsWbsServerSynced(false);
+                console.error('[WBS Save] Persisted WBS nodes lack valid permanent database IDs:', serverTree);
+                message.error('WBS: Node WBS tersimpan tidak memiliki ID database permanen yang valid.');
+              } else {
+                // Buffer — deferred to Coordinated State Commit
+                pendingWbsTree = serverTree;
+                pendingExpandedKeys = getAllNodeIds(serverTree);
+                if (wbsStorageKey && typeof window !== 'undefined') {
+                  localStorage.removeItem(wbsStorageKey);
+                }
+                setIsWbsServerSynced(true);
+                setIsLegacyWbsDraftDetected(false);
+              }
+            }
+          } catch (err: any) {
+            wbsSaveError = true;
+            setIsWbsServerSynced(false);
+            console.error('Failed to save WBS tree to server:', err);
+            const errMsg = err.response?.data?.message || err.message || 'Gagal menyimpan Struktur WBS ke server';
+            message.error(`WBS: ${errMsg}`);
+          } finally {
+            setIsWbsSaving(false);
+          }
         }
       }
 
@@ -990,29 +1042,19 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
       // On schedule save failure: preserve current scheduleData unchanged.
       // isScheduleServerSynced remains false — UI reflects unsaved state.
 
-      // 4. Update revisionDraftSavedAt in Procurement Gate if in NEEDS_REVISION
-      try {
-        const gateKey = `epms_procurement_gate_${canonicalProjectId}`;
-        const storedGate = localStorage.getItem(gateKey);
-        if (storedGate) {
-          const parsed = JSON.parse(storedGate);
-          if (parsed.status === 'NEEDS_REVISION') {
-            const updatedGate = {
-              ...parsed,
-              revisionDraftSavedAt: new Date().toISOString(),
-            };
-            localStorage.setItem(gateKey, JSON.stringify(updatedGate));
-            setGateRecord(updatedGate);
-            setHasSavedDraftSinceRevision(true);
-          }
-        }
-      } catch (e) {
-        console.warn('Failed to update gate on draft save:', e);
-      }
-
+      // 4. Refetch authoritative backend operational readiness SSOT after all pillar saves resolve
       // Refetch authoritative backend operational readiness SSOT after all pillar saves resolve
       if (canonicalProjectId > 0) {
         await fetchOperationalReadiness(canonicalProjectId);
+        ProjectService.getManagementReview(canonicalProjectId)
+          .then((serverGate) => {
+            if (serverGate && serverGate.status) {
+              setGateRecord(serverGate);
+            }
+          })
+          .catch((err) => {
+            console.warn('Failed to refetch management review after draft save:', err);
+          });
       }
 
       setLastSavedTime(nowStr);
@@ -1095,22 +1137,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     try {
       const serverResult = await ProjectService.submitManagementReview(pid);
       setGateRecord(serverResult);
-      setHasSavedDraftSinceRevision(false);
       setIsSubmitModalOpen(false);
-
-      // Clean up deprecated localStorage gate key
-      const gateKey = `epms_procurement_gate_${canonicalProjectId}`;
-      if (typeof window !== 'undefined') {
-        localStorage.removeItem(gateKey);
-      }
 
       // Refresh live readiness from server
       await fetchOperationalReadiness(pid);
 
       if (isResubmission) {
-        message.success('Operational Plan hasil revisi berhasil diajukan kembali kepada Head of Operations untuk Management Review!');
+        message.success('Operational Plan hasil revisi berhasil diajukan kembali untuk Management Review!');
       } else {
-        message.success('Operational Plan berhasil diajukan kepada Head of Operations untuk Management Review!');
+        message.success('Operational Plan berhasil diajukan untuk Management Review!');
       }
       if (onRefreshParent) onRefreshParent();
     } catch (err: any) {
@@ -3663,6 +3698,34 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                         </Space>
                       </div>
 
+                      {/* OVER-ALLOCATION ERROR ALERT (BLOCKS SAVE) */}
+                      {hasWbsOverAllocation && (
+                        <Alert
+                          type="error"
+                          showIcon
+                          message="Over-Allocation Terdeteksi pada Bobot WBS"
+                          description={
+                            isRootOverAllocated
+                              ? `Total bobot Work Package Utama / Root (${rootWeightSum.toFixed(2)}%) melebihi batas 100.00%. Harap kurangi bobot.`
+                              : isLeafOverAllocated
+                              ? `Total bobot Deliverables / Leaf (${leafWeightSum.toFixed(2)}%) melebihi batas 100.00%. Harap sesuaikan bobot.`
+                              : `Total bobot anak (${overAllocatedHierarchyViolation?.childrenWeightSum}%) melebihi bobot induk (${overAllocatedHierarchyViolation?.parentWeight}%) pada "${overAllocatedHierarchyViolation?.code} ${overAllocatedHierarchyViolation?.name}".`
+                          }
+                          style={{ borderRadius: 6, fontSize: 12, padding: '6px 12px' }}
+                        />
+                      )}
+
+                      {/* INCOMPLETE DRAFT WARNING ALERT (SAVE ALLOWED, REVIEW BLOCKED) */}
+                      {!isWbsWeightValid && !hasWbsOverAllocation && wbsData.length > 0 && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          message="Draf WBS Belum Lengkap (Incomplete)"
+                          description={`Bobot Root: ${rootWeightSum.toFixed(2)}% (target 100.00%) · Bobot Leaf: ${leafWeightSum.toFixed(2)}% (target 100.00%). Anda dapat menyimpan draf ini, namun Management Review tetap diblokir hingga semua bobot mencapai 100.00% konsisten.`}
+                          style={{ borderRadius: 6, fontSize: 12, padding: '6px 12px' }}
+                        />
+                      )}
+
                       {/* EDUCATIONAL ALERT IF STRUCTURE IS FLAT (NON-BLOCKING) */}
                       {wbsStructureMetrics.isFlat && wbsData.length > 0 && (
                         <Alert
@@ -4378,6 +4441,11 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
             setInitialCondition(saved);
             if (canonicalProjectId > 0) {
               fetchOperationalReadiness(canonicalProjectId);
+              ProjectService.getManagementReview(canonicalProjectId)
+                .then((serverGate) => {
+                  if (serverGate && serverGate.status) setGateRecord(serverGate);
+                })
+                .catch(() => {});
             }
             if (onRefreshParent) onRefreshParent();
           }}

@@ -46,6 +46,18 @@ export class ProjectBaselineWbsItem {
   @Column({ type: 'varchar', length: 255, nullable: true })
   task_name_snapshot: string | null;
 
+  @Column({ type: 'date', name: 'planned_start_date', nullable: true })
+  planned_start_date: string | null;
+
+  @Column({ type: 'date', name: 'planned_end_date', nullable: true })
+  planned_end_date: string | null;
+
+  @Column({ type: 'int', unsigned: true, name: 'planned_duration', nullable: true })
+  planned_duration: number | null;
+
+  @Column({ type: 'tinyint', width: 1, name: 'is_milestone', default: 0 })
+  is_milestone: boolean;
+
   @ManyToOne(() => ProjectBaseline, (baseline) => baseline.wbs_items, {
     onDelete: 'CASCADE',
   })

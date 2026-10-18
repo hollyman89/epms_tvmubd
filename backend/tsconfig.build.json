@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": [
+    "node_modules",
+    "dist",
+    "_legacy_archive",
+    "**/*.spec.ts",
+    "**/*.test.ts",
+    "src/fixtures/**/*",
+    "src/scripts/**/*",
+    "src/database/scripts/**/*",
+    "src/database/seeds/**/*"
+  ]
+}
+

@@ -9,6 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { apiClient } from '@/lib/axios';
 import { queryClient, updateAllTenderCaches, removeTenderFromCache } from '../lib/queryClient';
 import { consumePendingSalesDrawerRequest, clearPendingSalesDrawerRequest } from '@/lib/salesNavigation';
+import { WorkflowEngineService } from '@/services/workflowEngine.service';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -536,12 +537,22 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   const handleDiscountDecision = async (tenderId: number, is_approved: boolean) => {
     setIsSubmittingDiscount(true);
     try {
-      const payload = {
-        is_approved,
-        notes: discountNotes.trim() || undefined,
-      };
-      const res = await apiClient.patch(`/marketing/tenders/${tenderId}/approve-discount`, payload);
-      message.success(res.data?.message || (is_approved ? 'Diskon berhasil disetujui' : 'Diskon ditolak, harga dikembalikan ke estimasi'));
+      // 1. Resolve active DISCOUNT_APPROVAL workflow instance & task
+      const instance = await WorkflowEngineService.getInstanceByEntity('TENDER', tenderId, 'DISCOUNT_APPROVAL_WORKFLOW');
+      const pendingTask = instance?.tasks?.find(
+        (t) => (t.taskKey === 'DISCOUNT_APPROVAL' || t.nodeId === 'node_discount_approval') && t.status === 'PENDING',
+      );
+
+      if (!instance || !pendingTask) {
+        throw new Error('Tugas persetujuan diskon aktif tidak ditemukan untuk tender ini');
+      }
+
+      await WorkflowEngineService.completeTask(instance.id, pendingTask.id, {
+        action: is_approved ? 'APPROVE' : 'REJECT',
+        reason: discountNotes.trim() || undefined,
+      });
+
+      message.success(is_approved ? 'Diskon berhasil disetujui' : 'Diskon ditolak, harga dikembalikan ke estimasi');
 
       const newPrice = is_approved ? drawerTender?.negotiated_price : drawerTender?.estimated_budget;
       const updatedFields = {

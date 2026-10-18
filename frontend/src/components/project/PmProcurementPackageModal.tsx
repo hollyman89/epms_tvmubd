@@ -30,6 +30,7 @@ import {
   CheckCircleOutlined,
   EyeOutlined,
   ShoppingCartOutlined,
+  ToolOutlined,
   ClockCircleFilled,
   ExclamationCircleFilled,
 } from '@ant-design/icons';
@@ -53,6 +54,8 @@ import { getPackageStatusTag } from '@/components/procurement/ProcurementPackage
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
+
+export type { ProcurementCostItemAvailability };
 
 export interface EligibleCostItemRow extends CanonicalCostItem {
   categoryKey: string;
@@ -142,6 +145,9 @@ export function resolveWbsDisplay(
   return { isProjectLevel: false, label: `WBS Node #${item.wbsId}` };
 }
 
+export const SERVICE_FAMILY_CATEGORIES = ['SUBCONTRACTOR', 'EQUIPMENT', 'OPERATIONAL'];
+export const MATERIAL_FAMILY_CATEGORIES = ['MATERIAL'];
+
 export interface PmProcurementPackageModalProps {
   open: boolean;
   onClose: () => void;
@@ -155,6 +161,7 @@ export interface PmProcurementPackageModalProps {
     managerId?: number | null;
   } | null;
   onRefreshParent?: () => void;
+  packageFamily?: 'MATERIAL' | 'SERVICE';
 }
 
 export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps> = ({
@@ -162,10 +169,12 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
   onClose,
   project,
   onRefreshParent,
+  packageFamily = 'MATERIAL',
 }) => {
   const queryClient = useQueryClient();
   const { user, isProjectManager, isSuperAdmin } = useAuth();
   const projectId = Number(project?.id || 0);
+  const isServiceMode = packageFamily === 'SERVICE';
 
   const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
   const [editingPackage, setEditingPackage] = useState<ProcurementPackage | null>(null);
@@ -211,9 +220,37 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
     return buildWbsMap(costEstimateData?.wbsCostSummary);
   }, [costEstimateData]);
 
-  const eligibleCostItems = useMemo(() => availableItems.filter(item =>
-    showAllocatedItems || item.availableQty > 0 || selectedCostItemIds.includes(item.id)
-  ), [availableItems, showAllocatedItems, selectedCostItemIds]);
+  const eligibleCostItems = useMemo(() => {
+    return availableItems
+      .filter((item) => {
+        if (packageFamily === 'SERVICE') {
+          return SERVICE_FAMILY_CATEGORIES.includes(item.categoryKey);
+        }
+        if (packageFamily === 'MATERIAL') {
+          return MATERIAL_FAMILY_CATEGORIES.includes(item.categoryKey);
+        }
+        return true;
+      })
+      .filter((item) =>
+        showAllocatedItems || item.availableQty > 0 || selectedCostItemIds.includes(item.id)
+      );
+  }, [availableItems, showAllocatedItems, selectedCostItemIds, packageFamily]);
+
+  const displayedPackages = useMemo(() => {
+    if (!packageFamily) return packages;
+    return packages.filter((pkg) => {
+      const isService = (pkg.items || []).some((item) =>
+        SERVICE_FAMILY_CATEGORIES.includes(item.costItem?.categoryKey || '')
+      );
+      return packageFamily === 'SERVICE' ? isService : !isService;
+    });
+  }, [packages, packageFamily]);
+
+  const hasDirectMaterial = useMemo(() => {
+    return costEstimateData?.categories?.some(
+      (c: any) => c.categoryKey === 'MATERIAL' && c.mode === 'DIRECT',
+    );
+  }, [costEstimateData]);
 
   useEffect(() => {
     if (open) {
@@ -519,14 +556,24 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       title: 'Nomor Paket',
       key: 'packageNumber',
       width: 180,
-      render: (_: any, r: ProcurementPackage) => (
-        <div>
-          <span style={{ fontWeight: 700, fontFamily: 'monospace', color: '#1d4ed8' }}>
-            {r.packageNumber}
-          </span>
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#0f172a' }}>{r.title}</div>
-        </div>
-      ),
+      render: (_: any, r: ProcurementPackage) => {
+        const isService = (r.items || []).some((i) =>
+          SERVICE_FAMILY_CATEGORIES.includes(i.costItem?.categoryKey || '')
+        );
+        return (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, fontFamily: 'monospace', color: '#1d4ed8' }}>
+                {r.packageNumber}
+              </span>
+              <Tag color={isService ? 'purple' : 'cyan'} style={{ fontSize: 9.5, lineHeight: '14px', margin: 0, fontWeight: 700 }}>
+                {isService ? 'JASA' : 'MATERIAL'}
+              </Tag>
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#0f172a' }}>{r.title}</div>
+          </div>
+        );
+      },
     },
     {
       title: 'Status',
@@ -643,12 +690,16 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       centered
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ShoppingCartOutlined style={{ color: '#2563eb', fontSize: 18 }} />
+          {isServiceMode ? (
+            <ToolOutlined style={{ color: '#7c3aed', fontSize: 18 }} />
+          ) : (
+            <ShoppingCartOutlined style={{ color: '#2563eb', fontSize: 18 }} />
+          )}
           <span style={{ fontWeight: 700, fontSize: 16 }}>
-            Paket Pengadaan Proyek — {project?.project_name || project?.name || `Proyek #${projectId}`}
+            {isServiceMode ? 'Pengadaan Jasa Proyek' : 'Paket Pengadaan Material Proyek'} — {project?.project_name || project?.name || `Proyek #${projectId}`}
           </span>
           {project?.project_code && (
-            <Tag color="blue" style={{ fontFamily: 'monospace' }}>{project.project_code}</Tag>
+            <Tag color={isServiceMode ? 'purple' : 'blue'} style={{ fontFamily: 'monospace' }}>{project.project_code}</Tag>
           )}
         </div>
       }
@@ -659,26 +710,30 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
             <div>
               <Text strong style={{ fontSize: 13.5, color: '#0f172a' }}>
-                Daftar Paket Pengadaan (Procurement Packages)
+                {isServiceMode
+                  ? 'Daftar Paket Pengadaan Jasa (Service Procurement Packages)'
+                  : 'Daftar Paket Pengadaan Material (Material Procurement Packages)'}
               </Text>
               <div style={{ fontSize: 11.5, color: '#64748b' }}>
-                Paket pengadaan dibentuk dari item RAB yang disetujui, diajukan oleh PM, dan diproses oleh tim Procurement.
+                {isServiceMode
+                  ? 'Paket pengadaan jasa (Subkontraktor, Sewa Alat, Operasional) dibentuk dari item RAB yang disetujui, diajukan oleh PM, dan diproses oleh tim Procurement hingga penerbitan Service PO & SPK/WO.'
+                  : 'Paket pengadaan material dibentuk dari item RAB yang disetujui, diajukan oleh PM, dan diproses oleh tim Procurement hingga penerbitan PO Material & Goods Receipt.'}
               </div>
             </div>
             <Button
               type="primary"
               icon={<PlusOutlined />}
               onClick={handleOpenCreateForm}
-              style={{ backgroundColor: '#2563eb', fontWeight: 600 }}
+              style={{ backgroundColor: isServiceMode ? '#7c3aed' : '#2563eb', borderColor: isServiceMode ? '#7c3aed' : '#2563eb', fontWeight: 600 }}
             >
-              Buat Paket Pengadaan Baru
+              {isServiceMode ? 'Buat Pengadaan Jasa Baru' : 'Buat Paket Pengadaan Baru'}
             </Button>
           </div>
 
           <Table
             size="small"
             columns={packageListColumns}
-            dataSource={packages}
+            dataSource={displayedPackages}
             rowKey="id"
             loading={loadingPackages}
             pagination={false}
@@ -688,9 +743,13 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description={
                     <div style={{ padding: '16px 0' }}>
-                      <div style={{ fontWeight: 600, color: '#475569' }}>Belum ada paket pengadaan untuk proyek ini</div>
+                      <div style={{ fontWeight: 600, color: '#475569' }}>
+                        {isServiceMode
+                          ? 'Belum ada paket pengadaan jasa untuk proyek ini'
+                          : 'Belum ada paket pengadaan material untuk proyek ini'}
+                      </div>
                       <Text type="secondary" style={{ fontSize: 11.5 }}>
-                        Klik &ldquo;Buat Paket Pengadaan Baru&rdquo; untuk memilih item dari RAB yang telah disetujui.
+                        Klik &ldquo;{isServiceMode ? 'Buat Pengadaan Jasa Baru' : 'Buat Paket Pengadaan Baru'}&rdquo; untuk memilih item dari RAB yang telah disetujui.
                       </Text>
                     </div>
                   }
@@ -704,7 +763,9 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
           {/* Form Create / Edit */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <Title level={5} style={{ margin: 0 }}>
-              {editingPackage ? `Ubah / Revisi Paket ${editingPackage.packageNumber}` : 'Penyusunan Paket Pengadaan Baru'}
+              {editingPackage
+                ? `Ubah / Revisi ${isServiceMode ? 'Pengadaan Jasa' : 'Paket'} ${editingPackage.packageNumber}`
+                : `Penyusunan ${isServiceMode ? 'Pengadaan Jasa Baru' : 'Paket Pengadaan Baru'}`}
             </Title>
             <Button size="small" onClick={() => setViewMode('list')}>
               Kembali ke Daftar
@@ -725,11 +786,18 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
           <Form form={form} layout="vertical">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
               <Form.Item
-                label="Judul Paket Pengadaan"
+                label={`Judul ${isServiceMode ? 'Pengadaan Jasa' : 'Paket Pengadaan'}`}
                 name="title"
-                rules={[{ required: true, message: 'Judul paket wajib diisi!' }]}
+                rules={[{ required: true, message: `Judul ${isServiceMode ? 'pengadaan jasa' : 'paket'} wajib diisi!` }]}
               >
-                <Input placeholder="Contoh: Pengadaan Kabel MV & LV Substation" maxLength={255} />
+                <Input
+                  placeholder={
+                    isServiceMode
+                      ? 'Contoh: Pekerjaan Subkon Pemasangan Kabel FO & Jointing'
+                      : 'Contoh: Pengadaan Kabel MV & LV Substation'
+                  }
+                  maxLength={255}
+                />
               </Form.Item>
 
               <Form.Item
@@ -750,10 +818,14 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <div>
                 <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
-                  Pilih Item Biaya dari RAB Aktif yang Disetujui
+                  {isServiceMode
+                    ? 'Pilih Item Biaya Jasa dari RAB Aktif yang Disetujui (Subkon / Sewa Alat / Operasional)'
+                    : 'Pilih Item Biaya dari RAB Aktif yang Disetujui'}
                 </Text>
                 <div style={{ fontSize: 11, color: '#64748b' }}>
-                  *Centang item yang ingin dimasukkan ke dalam paket ini. Tentukan kuantitas yang diminta.
+                  {isServiceMode
+                    ? '*Centang item jasa yang ingin dimasukkan ke dalam paket ini. Tentukan kuantitas yang diminta.'
+                    : '*Centang item yang ingin dimasukkan ke dalam paket ini. Tentukan kuantitas yang diminta.'}
                 </div>
               </div>
               <Tag color="blue" style={{ fontWeight: 600 }}>
@@ -761,6 +833,15 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
               </Tag>
             </div>
 
+            {!isServiceMode && hasDirectMaterial && (
+              <Alert
+                type="warning"
+                showIcon
+                message="Material belum dirinci dan belum dapat dimasukkan ke Paket Pengadaan."
+                description="Perencanaan RAB untuk kategori Material & Consumables berstatus Lump Sum / Direct. Untuk dapat mengemas material ke dalam Paket Pengadaan, rincikan material menjadi baris item (ITEMIZED) pada perencanaan proyek."
+                style={{ marginBottom: 10, borderRadius: 6, fontSize: 12 }}
+              />
+            )}
             {availabilityError && <Alert type="error" showIcon message="Sisa kuota gagal dimuat. Coba buka kembali formulir." style={{ marginBottom: 8 }} />}
             <Checkbox checked={showAllocatedItems} onChange={event => setShowAllocatedItems(event.target.checked)} style={{ marginBottom: 8 }}>
               Tampilkan item sudah dialokasikan
@@ -771,7 +852,14 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
               dataSource={eligibleCostItems}
               rowKey="id"
               loading={loadingAvailability}
-              locale={{ emptyText: 'Tidak ada item RAB dengan sisa kuota pengadaan.' }}
+              locale={{
+                emptyText:
+                  !isServiceMode && hasDirectMaterial && eligibleCostItems.length === 0
+                    ? 'Material belum dirinci dan belum dapat dimasukkan ke Paket Pengadaan.'
+                    : isServiceMode
+                    ? 'Tidak ada item RAB jasa (Subkontraktor/Alat/Operasional) dengan sisa kuota pengadaan.'
+                    : 'Tidak ada item RAB dengan sisa kuota pengadaan.',
+              }}
               pagination={false}
               scroll={{ x: 1100, y: 260 }}
               rowSelection={{

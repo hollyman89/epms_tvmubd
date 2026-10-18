@@ -23,6 +23,16 @@ export class PoItemDto {
   @IsNumber()
   @IsNotEmpty()
   total_price: number;
+
+  @ApiProperty({ example: 1, required: false })
+  @IsOptional()
+  @IsNumber()
+  pr_item_id?: number;
+
+  @ApiProperty({ example: 1, required: false })
+  @IsOptional()
+  @IsNumber()
+  cost_item_id?: number;
 }
 
 export class CreatePurchaseOrderDto {

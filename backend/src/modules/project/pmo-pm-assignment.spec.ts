@@ -168,6 +168,16 @@ describe('PMO -> Project Manager Assignment (Tests A - L)', () => {
         }
         return Promise.resolve(null);
       }),
+      find: jest.fn().mockImplementation((options) => {
+        if (!mockContract) return Promise.resolve([]);
+        if (options?.where?.project_manager_id !== undefined) {
+          if (mockContract.project_manager_id === options.where.project_manager_id) {
+            return Promise.resolve([{ ...mockContract }]);
+          }
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([{ ...mockContract }]);
+      }),
       save: jest.fn().mockImplementation((entity) => {
         mockContract = { ...mockContract, ...entity };
         return Promise.resolve(mockContract);
@@ -194,6 +204,17 @@ describe('PMO -> Project Manager Assignment (Tests A - L)', () => {
         }
         return Promise.resolve(null);
       }),
+      find: jest.fn().mockImplementation((options) => {
+        if (!mockProject) return Promise.resolve([]);
+        if (options?.where?.managerId !== undefined) {
+          if (mockProject.managerId === options.where.managerId) {
+            return Promise.resolve([{ ...mockProject }]);
+          }
+          return Promise.resolve([]);
+        }
+        return Promise.resolve([{ ...mockProject }]);
+      }),
+      create: jest.fn().mockImplementation((data) => ({ ...data })),
       save: jest.fn().mockImplementation((entity) => {
         mockProject = { ...(mockProject || {}), ...entity };
         return Promise.resolve(mockProject);
@@ -705,6 +726,193 @@ describe('PMO -> Project Manager Assignment (Tests A - L)', () => {
       await expect(
         service.saveWbsTree(PROJECT_ID, validWbsDto, OTHER_PM_ID, ['PROJECT_MANAGER']),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('Fix 6 Canonical Regression Suite (Tests A - J)', () => {
+    it('Test A — Legal-approved unassigned Contract appears in PMO queue', async () => {
+      mockContract.legal_status = LegalStatus.APPROVED;
+      mockContract.status = 'ACTIVE';
+      mockContract.project_manager_id = null as any;
+      mockProject = null;
+
+      const board = await service.getOperationalBoard(PMO_USER_ID, ['PMO']);
+      expect(board.data.pendingKickoff).toBeDefined();
+      expect(board.data.pendingKickoff.length).toBeGreaterThan(0);
+
+      const intakeItem = board.data.pendingKickoff.find((i: any) => i.contractId === CONTRACT_ID);
+      expect(intakeItem).toBeDefined();
+      expect(intakeItem.projectId).toBeNull();
+      expect(intakeItem.contractNumber).toBe(CONTRACT_NUMBER);
+      expect(intakeItem.status).toBe('PENDING_KICKOFF');
+      expect(intakeItem.assignmentStatus).toBe('UNASSIGNED');
+      expect(intakeItem.nextAction).toBe('ASSIGN_PM');
+      expect(intakeItem.pmName).toBeNull();
+      expect(intakeItem.managerId).toBeNull();
+    });
+
+    it('Test B — Calling GET operational-board: strictly read-only (does not create Project, mutate Contract, assign manager, emit outbox, or create audit log)', async () => {
+      mockContract.legal_status = LegalStatus.APPROVED;
+      mockContract.status = 'ACTIVE';
+      mockContract.project_manager_id = null as any;
+      mockProject = null;
+      savedEntitiesInTx = [];
+      createdAuditLogs = [];
+      jest.clearAllMocks();
+
+      const board = await service.getOperationalBoard(PMO_USER_ID, ['PMO']);
+      expect(board.data.pendingKickoff).toBeDefined();
+
+      // Invariant checks:
+      expect(projectRepoMock.create).not.toHaveBeenCalled();
+      expect(projectRepoMock.save).not.toHaveBeenCalled();
+      expect(contractRepoMock.save).not.toHaveBeenCalled();
+      expect(mockContract.project_manager_id).toBeNull();
+      expect(eventEmitterMock.emit).not.toHaveBeenCalled();
+      expect(createdAuditLogs).toHaveLength(0);
+      expect(mockProject).toBeNull();
+    });
+
+    it('Test C — SUPER_ADMIN without PMO cannot assign PM', async () => {
+      mockContract.legal_status = LegalStatus.APPROVED;
+      mockContract.status = 'ACTIVE';
+
+      await expect(
+        service.assignProjectManager(CONTRACT_ID, TARGET_PM_ID, 1, ['SUPER_ADMIN']),
+      ).rejects.toThrow(ForbiddenException);
+
+      await expect(
+        service.assignProjectManager(CONTRACT_ID, TARGET_PM_ID, 1, ['SUPER_ADMIN']),
+      ).rejects.toThrow(/Hanya pengguna dengan peran PMO yang berhak menugaskan Project Manager/);
+    });
+
+    it('Test D — PMO can assign a valid PM', async () => {
+      mockContract.legal_status = LegalStatus.APPROVED;
+      mockContract.status = 'ACTIVE';
+      mockContract.project_manager_id = null as any;
+      mockProject = null;
+
+      const res = await service.assignProjectManager(
+        CONTRACT_ID,
+        TARGET_PM_ID,
+        PMO_USER_ID,
+        ['PMO'],
+      );
+
+      expect(res.statusCode).toBe(200);
+      expect(res.data.managerId).toBe(TARGET_PM_ID);
+      expect(res.data.status).toBe('PLANNING');
+    });
+
+    it('Test E — PM assignment: sets Contract.project_manager_id, creates Project if absent, Project.status = PLANNING, Project.managerId = assigned PM, emits project.pm.assigned', async () => {
+      mockContract.legal_status = LegalStatus.APPROVED;
+      mockContract.status = 'ACTIVE';
+      mockContract.project_manager_id = null as any;
+      mockProject = null;
+      savedEntitiesInTx = [];
+      jest.clearAllMocks();
+
+      const res = await service.assignProjectManager(
+        CONTRACT_ID,
+        TARGET_PM_ID,
+        PMO_USER_ID,
+        ['PMO'],
+      );
+
+      expect(res.statusCode).toBe(200);
+
+      const contractUpdate = savedEntitiesInTx.find((e) => e.cls === Contract || e.entity?.contract_number);
+      expect(contractUpdate).toBeDefined();
+      expect(contractUpdate.entity.project_manager_id).toBe(TARGET_PM_ID);
+
+      const createdProject = savedEntitiesInTx.find((e) => e.cls === Project);
+      expect(createdProject).toBeDefined();
+      expect(createdProject.entity.status).toBe('PLANNING');
+      expect(createdProject.entity.managerId).toBe(TARGET_PM_ID);
+      expect(createdProject.entity.contractId).toBe(CONTRACT_ID);
+
+      const outboxSaved = savedEntitiesInTx.find(
+        (e) => e.entity?.event_name === 'project.pm.assigned',
+      );
+      expect(outboxSaved).toBeDefined();
+      expect(outboxSaved.entity.event_name).toBe('project.pm.assigned');
+      expect(outboxSaved.entity.payload.businessPayload.projectManagerId).toBe(TARGET_PM_ID);
+      expect(outboxSaved.entity.payload.businessPayload.assignedBy).toBe(PMO_USER_ID);
+    });
+
+    it('Test F — Assigned PM can see Project', async () => {
+      mockContract.legal_status = LegalStatus.APPROVED;
+      mockContract.status = 'ACTIVE';
+      mockContract.project_manager_id = TARGET_PM_ID;
+      mockProject = {
+        id: PROJECT_ID,
+        code: PROJECT_CODE,
+        name: 'Proyek Jaringan Fiber Optic',
+        managerId: TARGET_PM_ID,
+        status: 'PLANNING',
+        contractId: CONTRACT_ID,
+      };
+
+      const board = await service.getOperationalBoard(TARGET_PM_ID, ['PROJECT_MANAGER']);
+      expect(board.data.pendingKickoff).toBeDefined();
+      const item = board.data.pendingKickoff.find((i: any) => i.contractId === CONTRACT_ID);
+      expect(item).toBeDefined();
+      expect(item.managerId).toBe(TARGET_PM_ID);
+    });
+
+    it('Test G — Other PM cannot see Project', async () => {
+      mockContract.legal_status = LegalStatus.APPROVED;
+      mockContract.status = 'ACTIVE';
+      mockContract.project_manager_id = TARGET_PM_ID;
+      mockProject = {
+        id: PROJECT_ID,
+        code: PROJECT_CODE,
+        name: 'Proyek Jaringan Fiber Optic',
+        managerId: TARGET_PM_ID,
+        status: 'PLANNING',
+        contractId: CONTRACT_ID,
+      };
+
+      const board = await service.getOperationalBoard(OTHER_PM_ID, ['PROJECT_MANAGER']);
+      expect(board.data.pendingKickoff).toBeDefined();
+      const item = board.data.pendingKickoff.find((i: any) => i.contractId === CONTRACT_ID);
+      expect(item).toBeUndefined();
+    });
+
+    it('Test H — Unassigned Project/Contract not visible to PM', async () => {
+      mockContract.legal_status = LegalStatus.APPROVED;
+      mockContract.status = 'ACTIVE';
+      mockContract.project_manager_id = null as any;
+      mockProject = null;
+
+      const board = await service.getOperationalBoard(TARGET_PM_ID, ['PROJECT_MANAGER']);
+      expect(board.data.pendingKickoff).toBeDefined();
+      const item = board.data.pendingKickoff.find((i: any) => i.contractId === CONTRACT_ID);
+      expect(item).toBeUndefined();
+    });
+
+    it('Test I — Legal approval notification never contains "Siap Kick Off"', () => {
+      const canonicalTitle = 'Kontrak Disetujui Legal — Siap Penugasan PM';
+      const canonicalMessage = (tenderTitle: string) =>
+        `Kontrak "${tenderTitle}" telah disetujui oleh tim Legal dan siap untuk penugasan Project Manager oleh PMO.`;
+
+      expect(canonicalTitle).not.toContain('Siap Kick Off');
+      expect(canonicalTitle).not.toContain('Ready for Kickoff');
+      expect(canonicalTitle).not.toContain('Jadwalkan Kick Off');
+      expect(canonicalMessage('Project Alpha')).not.toContain('Siap Kick Off');
+      expect(canonicalMessage('Project Alpha')).not.toContain('Ready for Kickoff');
+    });
+
+    it('Test J — Legal approval does not set READY_FOR_KICKOFF or IN_PROGRESS', () => {
+      const approvedContractState = {
+        status: 'ACTIVE',
+        legal_status: LegalStatus.APPROVED,
+      };
+
+      expect(approvedContractState.status).not.toBe('READY_FOR_KICKOFF');
+      expect(approvedContractState.status).not.toBe('IN_PROGRESS');
+      expect(approvedContractState.legal_status).not.toBe('READY_FOR_KICKOFF');
+      expect(approvedContractState.legal_status).not.toBe('IN_PROGRESS');
     });
   });
 });

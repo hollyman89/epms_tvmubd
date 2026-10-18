@@ -17,6 +17,13 @@ import {
   DollarOutlined,
 } from '@ant-design/icons';
 
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+} from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
+
 const { Title, Text } = Typography;
 
 interface LegalWorkstationHeaderProps {
@@ -37,6 +44,8 @@ interface LegalWorkstationHeaderProps {
   onEscalate: () => void;
   onForward: () => void;
   onCancel: () => void;
+  onReject?: () => void;
+  canReview?: boolean;
 }
 
 export const LegalWorkstationHeader: React.FC<LegalWorkstationHeaderProps> = ({
@@ -59,6 +68,8 @@ export const LegalWorkstationHeader: React.FC<LegalWorkstationHeaderProps> = ({
   onEscalate,
   onForward,
   onCancel,
+  onReject,
+  canReview = true,
 }) => {
   const moreMenuItems: MenuProps['items'] = [
     {
@@ -83,9 +94,15 @@ export const LegalWorkstationHeader: React.FC<LegalWorkstationHeaderProps> = ({
       type: 'divider',
     },
     {
+      key: 'reject',
+      icon: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
+      label: 'Tolak Kontrak (Reject)',
+      danger: true,
+      onClick: onReject || onCancel,
+    },
+    {
       key: 'cancel',
       label: 'Batalkan Peninjauan Dokumen',
-      danger: true,
       onClick: onCancel,
     },
   ];
@@ -163,10 +180,14 @@ export const LegalWorkstationHeader: React.FC<LegalWorkstationHeaderProps> = ({
               {projectName}
             </Text>
           </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>Status Dokumen</Text>
+            <StatusBadge domain="legal" status={status} />
+          </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 6, borderTop: '1px dashed #e2e8f0' }}>
             <Text type="secondary" style={{ fontSize: 12, color: '#64748b' }}>Nilai</Text>
             <Text strong style={{ fontSize: 13, color: '#059669' }}>
-              Rp {Number(nominal || 0).toLocaleString('id-ID')}
+              {formatCurrency(nominal)}
             </Text>
           </div>
         </div>
@@ -194,65 +215,73 @@ export const LegalWorkstationHeader: React.FC<LegalWorkstationHeaderProps> = ({
           {renderAutosaveBadge()}
         </div>
 
-        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <Tooltip title="Simpan draft sementara (Ctrl+S)">
-              <Button size="middle" style={{ borderRadius: 6, fontSize: 12, fontWeight: 500 }} icon={<SaveOutlined />} onClick={onSaveDraft}>
-                Simpan
-              </Button>
-            </Tooltip>
+        {canReview ? (
+          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <Tooltip title="Simpan draft sementara (Ctrl+S)">
+                <Button size="middle" style={{ borderRadius: 6, fontSize: 12, fontWeight: 500 }} icon={<SaveOutlined />} onClick={onSaveDraft}>
+                  Simpan
+                </Button>
+              </Tooltip>
 
-            <Tooltip title="Minta revisi klausul/dokumen ke tim Marketing">
-              <Button
-                size="middle"
-                style={{ borderRadius: 6, fontSize: 12, color: '#d97706', borderColor: '#fcd34d', backgroundColor: '#fffbe6', fontWeight: 600 }}
-                icon={<CloseCircleOutlined style={{ color: '#d97706' }} />}
-                onClick={onRequestRevision}
-              >
-                Revisi
-              </Button>
-            </Tooltip>
+              <Tooltip title="Minta revisi klausul/dokumen ke tim Marketing">
+                <Button
+                  size="middle"
+                  style={{ borderRadius: 6, fontSize: 12, color: '#d97706', borderColor: '#fcd34d', backgroundColor: '#fffbe6', fontWeight: 600 }}
+                  icon={<CloseCircleOutlined style={{ color: '#d97706' }} />}
+                  onClick={onRequestRevision}
+                >
+                  Revisi
+                </Button>
+              </Tooltip>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              {(() => {
+                const isRevisionPending = status === 'REVISION' || status === 'REVISION_NEEDED' || status === 'REVISION_REQUESTED';
+                const tooltipTitle = isRevisionPending
+                  ? 'Menunggu dokumen revisi dari Marketing'
+                  : !isFormValid
+                  ? 'Selesaikan seluruh 10 checklist terlebih dahulu'
+                  : 'Setujui Kontrak (Ctrl+Enter)';
+                const canApprove = isFormValid && !isRevisionPending;
+
+                return (
+                  <Tooltip title={tooltipTitle} style={{ flex: 1 }}>
+                    <Button
+                      size="middle"
+                      type="primary"
+                      icon={<CheckCircleOutlined />}
+                      disabled={!canApprove}
+                      onClick={onApprove}
+                      style={{
+                        flex: 1,
+                        backgroundColor: canApprove ? '#00b578' : undefined,
+                        borderColor: canApprove ? '#00b578' : undefined,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        fontSize: 12,
+                        boxShadow: canApprove ? '0 2px 6px rgba(0, 181, 120, 0.25)' : undefined,
+                      }}
+                    >
+                      Setujui & Rilis
+                    </Button>
+                  </Tooltip>
+                );
+              })()}
+
+              <Dropdown menu={{ items: moreMenuItems }} trigger={['click']}>
+                <Button size="middle" style={{ borderRadius: 6 }} icon={<MoreOutlined />} />
+              </Dropdown>
+            </div>
           </div>
-
-          <div style={{ display: 'flex', gap: 8 }}>
-            {(() => {
-              const isRevisionPending = status === 'REVISION' || status === 'REVISION_NEEDED' || status === 'REVISION_REQUESTED';
-              const tooltipTitle = isRevisionPending
-                ? 'Menunggu dokumen revisi dari Marketing'
-                : !isFormValid
-                ? 'Selesaikan seluruh 10 checklist terlebih dahulu'
-                : 'Setujui Kontrak (Ctrl+Enter)';
-              const canApprove = isFormValid && !isRevisionPending;
-
-              return (
-                <Tooltip title={tooltipTitle} style={{ flex: 1 }}>
-                  <Button
-                    size="middle"
-                    type="primary"
-                    icon={<CheckCircleOutlined />}
-                    disabled={!canApprove}
-                    onClick={onApprove}
-                    style={{
-                      flex: 1,
-                      backgroundColor: canApprove ? '#00b578' : undefined,
-                      borderColor: canApprove ? '#00b578' : undefined,
-                      fontWeight: 600,
-                      borderRadius: 6,
-                      fontSize: 12,
-                      boxShadow: canApprove ? '0 2px 6px rgba(0, 181, 120, 0.25)' : undefined,
-                    }}
-                  >
-                    Setujui & Rilis
-                  </Button>
-                </Tooltip>
-              );
-            })()}
-
-            <Dropdown menu={{ items: moreMenuItems }} trigger={['click']}>
-              <Button size="middle" style={{ borderRadius: 6 }} icon={<MoreOutlined />} />
-            </Dropdown>
+        ) : (
+          <div style={{ padding: '12px 14px', textAlign: 'center' }}>
+            <Tag color="default" style={{ width: '100%', padding: '6px 0', fontSize: 11, margin: 0 }}>
+              Mode Observasi (Read-Only)
+            </Tag>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

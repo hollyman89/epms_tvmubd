@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException, HttpException, HttpStatus, Inject, Optional, ForbiddenException, UnauthorizedException, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Like } from 'typeorm';
+import { Repository, DataSource, Like, EntityManager } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Customer } from '../../entities/customer.entity';
 import { Tender, TenderStatus, GoNoGoStatus, TenderStage, RevisionStatus } from '../../entities/tender.entity';
@@ -2504,7 +2504,7 @@ export class MarketingService {
             [finalContractNumber, newId]
           );
 
-          contract = { id: newId, contract_number: finalContractNumber };
+          contract = { id: newId, contract_number: finalContractNumber, tender_id: tenderId, created_by: userId };
           this.logger.log(`[SPK Upload] Contract baru (ID #${newId}) dibuat dengan nomor: ${finalContractNumber}`);
         }
 
@@ -2634,6 +2634,15 @@ export class MarketingService {
             retry_count: 0,
           });
           await manager.save(OutboxEvent, spkOutbox);
+        }
+
+        // 5. Workflow Coordination inside transaction (Canonical LEGAL_REVIEW_WORKFLOW start)
+        if (this.workflowEngineService && contract?.id) {
+          if (isRevisionUpload) {
+            await this.handleSpkRevisionWorkflowResubmit(contract, updatedTender, userId, manager);
+          } else {
+            await this.reconcileLegalReviewWorkflow(contract, updatedTender, userId, manager);
+          }
         }
 
         return {
@@ -2853,6 +2862,132 @@ export class MarketingService {
     }
 
     return finalFilePath;
+  }
+
+  async reconcileLegalReviewWorkflow(
+    contract: any,
+    tender: any,
+    userId: number,
+    externalManager?: EntityManager,
+  ): Promise<void> {
+    if (!this.workflowEngineService || !contract?.id) {
+      return;
+    }
+
+    let instance = await this.workflowEngineService.getInstanceByEntity(
+      'CONTRACT',
+      contract.id,
+    );
+
+    if (instance && instance.status === WorkflowInstanceStatus.IN_PROGRESS) {
+      const hasReviewTask = instance.tasks?.some(
+        (t) => t.taskKey === 'LEGAL_REVIEW' && t.status === WorkflowTaskStatus.PENDING,
+      );
+      if (hasReviewTask) {
+        return; // Already synchronized
+      }
+    }
+
+    let resolvedTender = tender;
+    const tenderId = Number(tender?.id || contract.tender_id);
+    if ((!resolvedTender || !resolvedTender.marketing_pic_id) && tenderId) {
+      try {
+        const repo = externalManager ? externalManager.getRepository(Tender) : this.tenderRepo;
+        resolvedTender = await repo.findOne({ where: { id: tenderId } });
+      } catch {
+        // fallback to passed tender
+      }
+    }
+
+    const canonicalMarketingPicId = resolvedTender?.marketing_pic_id
+      ? Number(resolvedTender.marketing_pic_id)
+      : contract?.created_by
+      ? Number(contract.created_by)
+      : resolvedTender?.created_by
+      ? Number(resolvedTender.created_by)
+      : Number(userId);
+
+    const canonicalCreatedBy = resolvedTender?.created_by
+      ? Number(resolvedTender.created_by)
+      : contract?.created_by
+      ? Number(contract.created_by)
+      : Number(userId);
+
+    try {
+      await this.workflowEngineService.startInstance(
+        {
+          workflowKey: 'LEGAL_REVIEW_WORKFLOW',
+          entityType: 'CONTRACT',
+          entityId: Number(contract.id),
+          context: {
+            contractId: Number(contract.id),
+            contractNumber: contract.contract_number,
+            tenderId: Number(resolvedTender?.id || contract.tender_id),
+            marketing_pic_id: canonicalMarketingPicId,
+            created_by: canonicalCreatedBy,
+            marketingPicId: canonicalMarketingPicId,
+            createdBy: canonicalCreatedBy,
+            contract_created_by: contract.created_by ? Number(contract.created_by) : Number(userId),
+            proposal_created_by: contract.proposal?.created_by ? Number(contract.proposal.created_by) : undefined,
+            initiatorUserId: Number(userId),
+          },
+        },
+        userId,
+        externalManager,
+      );
+    } catch (err: any) {
+      if (err instanceof ConflictException) {
+        instance = await this.workflowEngineService.getInstanceByEntity(
+          'CONTRACT',
+          contract.id,
+        );
+        const hasReview = instance?.tasks?.some(
+          (t) => t.taskKey === 'LEGAL_REVIEW' && t.status === WorkflowTaskStatus.PENDING,
+        );
+        if (hasReview) {
+          return;
+        }
+      }
+      throw err;
+    }
+  }
+
+  async handleSpkRevisionWorkflowResubmit(
+    contract: any,
+    tender: any,
+    userId: number,
+    externalManager?: EntityManager,
+  ): Promise<void> {
+    if (!this.workflowEngineService || !contract?.id) return;
+
+    const instance = await this.workflowEngineService.getInstanceByEntity(
+      'CONTRACT',
+      contract.id,
+    );
+
+    if (!instance || instance.status !== WorkflowInstanceStatus.IN_PROGRESS) {
+      await this.reconcileLegalReviewWorkflow(contract, tender, userId, externalManager);
+      return;
+    }
+
+    const revisionTask = instance.tasks?.find(
+      (t) =>
+        (t.taskKey === 'LEGAL_DOCUMENT_REVISION' || t.nodeId === 'node_marketing_revision') &&
+        t.status === WorkflowTaskStatus.PENDING,
+    );
+
+    if (revisionTask) {
+      await this.workflowEngineService.completeTask(
+        revisionTask.id,
+        {
+          action: 'RESUBMIT',
+          reason: 'Dokumen revisi SPK berhasil diunggah',
+        },
+        userId,
+        ['MARKETING', 'SUPER_ADMIN'],
+        externalManager,
+      );
+    }
   }
 }
 

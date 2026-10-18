@@ -43,6 +43,7 @@ import { SaveCostEstimateDto } from './dto/save-cost-estimate.dto';
 import { SaveProjectScheduleDto } from './dto/save-project-schedule.dto';
 import { SaveInitialConditionDto } from './dto/save-initial-condition.dto';
 import { DecideManagementReviewDto } from './dto/decide-management-review.dto';
+import { GetProjectMasterQueryDto } from './dto/get-project-master.dto';
 import {
   CostEstimateValidator,
   CATEGORY_GROUP_MAP,
@@ -60,6 +61,19 @@ import {
   OperationalWorkflowInfo,
   OperationalPlanStage,
 } from './dto/operational-readiness.dto';
+import { computeProgressMonitoringReadModel } from './progress-monitoring.calculator';
+import { computeProjectGantt } from './project-gantt.calculator';
+import { computeProjectControl } from './project-control.calculator';
+
+const normDate = (v: any): string => {
+  if (!v) return '';
+  try {
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? '' : d.toISOString().slice(0, 10);
+  } catch {
+    return '';
+  }
+};
 
 @Injectable()
 export class ProjectService {
@@ -869,28 +883,6 @@ export class ProjectService {
       order: { id: 'DESC' },
     });
 
-    // Ensure assigned approved contracts have a canonical Project in PLANNING state
-    for (const c of approvedContracts) {
-      const projectCode = c.contract_number || `CONT-${c.id}`;
-      let project = projectMapByCode.get(projectCode);
-      if (!project && c.project_manager_id) {
-        const projectName = c.proposal?.tender?.title || `Proyek ${projectCode}`;
-        const locationSiteName = c.proposal?.tender?.title ? `Site ${c.proposal.tender.title}` : `Site ${projectName}`;
-        const locationCity = c.proposal?.tender?.project_location || null;
-
-        const newProject = this.projectRepo.create({
-          code: projectCode,
-          name: projectName,
-          status: 'PLANNING',
-          managerId: Number(c.project_manager_id),
-          siteName: locationSiteName,
-          city: locationCity,
-        });
-        project = await this.projectRepo.save(newProject);
-        projectMapByCode.set(projectCode, project);
-      }
-    }
-
     // Batch calculate readiness for all pending projects in status PLANNING
     const pendingProjects = Array.from(projectMapByCode.values()).filter(
       (p) => p.status === 'PLANNING',
@@ -904,7 +896,7 @@ export class ProjectService {
 
       // Contracts where project is in PLANNING state (or not yet created/unassigned) are pending kickoff
       if (!project || project.status === 'PLANNING') {
-        const hasPm = Boolean(project?.managerId || c.project_manager_id);
+        const isAssigned = Boolean(project?.managerId || c.project_manager_id);
         const pid = project ? Number(project.id) : null;
         const r = pid ? (readinessBatchMap.get(pid) || null) : null;
 
@@ -914,7 +906,7 @@ export class ProjectService {
           r?.gate?.status,
           r?.gate?.currentNodeId,
           r?.completenessCount ?? 0,
-          hasPm,
+          isAssigned,
         );
 
         const hoStatus = this.deriveHandoverStatus(
@@ -926,30 +918,44 @@ export class ProjectService {
           r?.completenessCount ?? 0,
         );
 
+        const contractTotalValue =
+          c.contract_value !== undefined && c.contract_value !== null
+            ? Number(c.contract_value)
+            : (c.proposal?.proposed_amount !== undefined && c.proposal?.proposed_amount !== null
+                ? Number(c.proposal.proposed_amount)
+                : null);
+
+        const tenderTitle = c.proposal?.tender?.title || (c as any).contract_name || `Proyek ${projectCode}`;
+        const marketingPic = resolveMarketingName(c.proposal?.tender, c.customer);
+        const resolvedPm = resolvePmName(project, c);
+        const assignedManagerId = project?.managerId
+          ? Number(project.managerId)
+          : (c.project_manager_id ? Number(c.project_manager_id) : null);
+
         pendingKickoff.push({
           id: c.id,
           contractId: Number(c.id),
+          contractNumber: c.contract_number,
           projectId: pid,
           tender_id: c.proposal?.tender_id || c.proposal_id || null,
           project_code: projectCode,
-          project_name: c.proposal?.tender?.title || project?.name || `Proyek ${projectCode}`,
+          project_name: tenderTitle,
+          projectName: tenderTitle,
           customerName: c.customer?.name ?? null,
-          contract_total_value:
-            c.contract_value !== undefined && c.contract_value !== null
-              ? Number(c.contract_value)
-              : (c.proposal?.proposed_amount !== undefined && c.proposal?.proposed_amount !== null
-                  ? Number(c.proposal.proposed_amount)
-                  : null),
+          customer: c.customer?.name ?? null,
+          contract_total_value: contractTotalValue,
+          contractValue: contractTotalValue,
           project_budget:
             c.proposal?.tender?.estimated_budget !== undefined && c.proposal?.tender?.estimated_budget !== null
               ? Number(c.proposal.tender.estimated_budget)
-              : (c.contract_value !== undefined && c.contract_value !== null
-                  ? Number(c.contract_value)
-                  : null),
-          marketingName: resolveMarketingName(c.proposal?.tender, c.customer),
-          pmName: resolvePmName(project, c),
-          managerId: project?.managerId || (c.project_manager_id ? Number(c.project_manager_id) : null),
+              : contractTotalValue,
+          marketingName: marketingPic,
+          marketingPic: marketingPic,
+          pmName: resolvedPm,
+          managerId: assignedManagerId,
           status: 'PENDING_KICKOFF',
+          assignmentStatus: isAssigned ? 'ASSIGNED' : 'UNASSIGNED',
+          nextAction: isAssigned ? 'PLANNING' : 'ASSIGN_PM',
           projectStatus: project ? project.status : 'PLANNING',
           startDate: project?.startDate ? (typeof project.startDate === 'string' ? project.startDate : (project.startDate as any).toISOString().split('T')[0]) : null,
           endDate: project?.endDate ? (typeof project.endDate === 'string' ? project.endDate : (project.endDate as any).toISOString().split('T')[0]) : null,
@@ -997,6 +1003,7 @@ export class ProjectService {
       .filter((id) => !isNaN(id) && id > 0);
 
     const overallProgressMap = await this.calculateProjectsOverallProgress(activeProjectIds);
+    const projectControlMap = await this.calculateProjectControlBatch(activeProjectIds);
 
     // Resolve actual persisted kickoff dates from audit_logs and active project_baselines
     const kickoffDateMap = new Map<number, string>();
@@ -1078,6 +1085,7 @@ export class ProjectService {
         contract_total_value: realValue,
         marketingName: resolveMarketingName(matchedContract?.proposal?.tender, matchedContract?.customer),
         pmName: resolvePmName(p, matchedContract),
+        managerId: p.managerId ? Number(p.managerId) : null,
         status: p.status || 'IN_PROGRESS',
         projectStatus: p.status,
         startDate: p.startDate ? (typeof p.startDate === 'string' ? p.startDate : (p.startDate as any).toISOString().split('T')[0]) : null,
@@ -1126,6 +1134,17 @@ export class ProjectService {
             currentStage: 'ACTIVE',
             currentNodeId: 'node_end',
           },
+        },
+        control: projectControlMap.get(Number(p.id)) || {
+          planComparisonAvailable: false,
+          planComparisonUnavailableReason: 'NOT_EVALUATED',
+          plannedProgress: null,
+          actualProgress: null,
+          progressVariancePp: null,
+          progressHealth: null,
+          actualStart: null,
+          plannedFinish: null,
+          overdueTaskCount: null,
         },
       };
     });
@@ -1247,6 +1266,112 @@ export class ProjectService {
   async calculateProjectOverallProgress(projectId: number): Promise<number> {
     const map = await this.calculateProjectsOverallProgress([Number(projectId)]);
     return map.get(Number(projectId)) ?? 0;
+  }
+
+  /**
+   * BATCH READ MODEL for Project Control summaries across multiple projects (R1-F3A).
+   * Executes bounded aggregate queries (zero N+1) and calls canonical computeProjectControl.
+   */
+  async calculateProjectControlBatch(
+    projectIds: number[],
+    asOf?: string,
+  ): Promise<
+    Map<
+      number,
+      {
+        planComparisonAvailable: boolean;
+        planComparisonUnavailableReason: string | null;
+        plannedProgress: number | null;
+        actualProgress: number | null;
+        progressVariancePp: number | null;
+        progressHealth: 'AHEAD' | 'ON_PLAN' | 'BEHIND' | null;
+        actualStart: string | null;
+        plannedFinish: string | null;
+        overdueTaskCount: number | null;
+      }
+    >
+  > {
+    const resultMap = new Map<
+      number,
+      {
+        planComparisonAvailable: boolean;
+        planComparisonUnavailableReason: string | null;
+        plannedProgress: number | null;
+        actualProgress: number | null;
+        progressVariancePp: number | null;
+        progressHealth: 'AHEAD' | 'ON_PLAN' | 'BEHIND' | null;
+        actualStart: string | null;
+        plannedFinish: string | null;
+        overdueTaskCount: number | null;
+      }
+    >();
+
+    const validIds = (projectIds || []).map(Number).filter((id) => !isNaN(id) && id > 0);
+    if (validIds.length === 0) {
+      return resultMap;
+    }
+
+    // 1. Single query for active baselines and their wbs_items
+    const activeBaselines = this.baselineRepo
+      ? await this.baselineRepo.find({
+          where: { project_id: In(validIds), status: 'ACTIVE' },
+          relations: ['wbs_items'],
+        })
+      : [];
+
+    const baselineByProjectId = new Map<number, ProjectBaseline>();
+    for (const b of activeBaselines) {
+      baselineByProjectId.set(Number(b.project_id), b);
+    }
+
+    // 2. Single query for tasks across all requested projects
+    const allTasks = this.taskRepo
+      ? await this.taskRepo.find({
+          where: { projectId: In(validIds) },
+        })
+      : [];
+
+    const tasksByProjectId = new Map<number, Task[]>();
+    for (const t of allTasks) {
+      const pid = Number(t.projectId);
+      let list = tasksByProjectId.get(pid);
+      if (!list) {
+        list = [];
+        tasksByProjectId.set(pid, list);
+      }
+      list.push(t);
+    }
+
+    // 3. In-memory execution using canonical computeProjectControl
+    for (const pid of validIds) {
+      const activeBaseline = baselineByProjectId.get(pid);
+      const projectTasks = tasksByProjectId.get(pid) || [];
+
+      const ctrl = computeProjectControl({
+        projectId: pid,
+        baselineItems: (activeBaseline?.wbs_items as any) || null,
+        tasks: projectTasks as any,
+        asOf,
+      });
+
+      const overdueCount = ctrl.planComparisonAvailable
+        ? ctrl.tasks.filter((t) => !t.actualFinish && t.overdueDays > 0).length
+        : null;
+
+      resultMap.set(pid, {
+        planComparisonAvailable: ctrl.planComparisonAvailable,
+        planComparisonUnavailableReason: ctrl.planComparisonUnavailableReason,
+        plannedProgress: ctrl.project.plannedProgress,
+        actualProgress: ctrl.project.actualProgress,
+        progressVariancePp: ctrl.project.progressVariancePp,
+        progressHealth: ctrl.project.progressHealth,
+        actualStart: ctrl.project.actualStart,
+        plannedFinish: ctrl.project.plannedFinish,
+        overdueTaskCount: overdueCount,
+      });
+    }
+
+    return resultMap;
   }
 
   /**
@@ -2183,6 +2308,21 @@ export class ProjectService {
           const isLeaf = !parentWbsIds.has(Number(wbs.id));
           const linkedTask = isLeaf ? taskMapByWbs.get(Number(wbs.id)) : undefined;
 
+          let plannedStart: string | null = null;
+          let plannedEnd: string | null = null;
+          let plannedDuration: number | null = null;
+          const isMilestone = linkedTask ? Boolean(linkedTask.isMilestone) : false;
+
+          if (linkedTask) {
+            const normD = (val: any) =>
+              val ? (val instanceof Date ? val.toISOString().split('T')[0] : String(val).split('T')[0]) : null;
+            plannedStart = normD(linkedTask.startDate);
+            plannedEnd = isMilestone
+              ? plannedStart
+              : (normD(linkedTask.endDate) || plannedStart);
+            plannedDuration = isMilestone ? 0 : Number(linkedTask.duration || 0);
+          }
+
           const wbsItem = manager.create(ProjectBaselineWbsItem, {
             baseline_id: savedBaseline.id,
             wbs_id: Number(wbs.id),
@@ -2194,6 +2334,10 @@ export class ProjectService {
             is_leaf: isLeaf,
             task_id: linkedTask ? Number(linkedTask.id) : null,
             task_name_snapshot: linkedTask ? linkedTask.name : null,
+            planned_start_date: plannedStart,
+            planned_end_date: plannedEnd,
+            planned_duration: plannedDuration,
+            is_milestone: isMilestone,
           });
           await manager.save(ProjectBaselineWbsItem, wbsItem);
         }
@@ -4566,9 +4710,20 @@ export class ProjectService {
       }
 
       const previousStatus = task.status;
+      const previousActualStartAt = task.actualStartAt;
+      const now = new Date();
       task.progress = progress;
       task.status = progress === 100 ? 'COMPLETED' : task.status === 'BLOCKED' ? 'BLOCKED' : 'IN_PROGRESS';
       task.updatedBy = submittedBy;
+
+      // Canonical Execution Dates (R2-22 & R2-23)
+      if (previousProgress === 0 && progress > 0 && !task.actualStartAt) {
+        task.actualStartAt = now;
+      }
+      if (progress === 100 && !task.actualFinishAt) {
+        task.actualFinishAt = now;
+      }
+
       await manager.save(Task, task);
       const log = await manager.save(ProjectProgressLog, manager.create(ProjectProgressLog, {
         project_id: projectId, task_id: taskId, wbs_id: Number(task.wbsId), baseline_id: baseline.id,
@@ -4580,10 +4735,10 @@ export class ProjectService {
       }));
       await manager.save(AuditLog, manager.create(AuditLog, {
         table_name: 'tasks', record_id: taskId, action: 'ROUTINE_PROGRESS_UPDATED', created_by: submittedBy,
-        old_value: { progress: previousProgress, status: previousStatus },
-        new_value: { progress, status: task.status, projectId, baselineId: baseline.id, progressLogId: log.id },
+        old_value: { progress: previousProgress, status: previousStatus, actualStartAt: previousActualStartAt },
+        new_value: { progress, status: task.status, actualStartAt: task.actualStartAt, actualFinishAt: task.actualFinishAt, projectId, baselineId: baseline.id, progressLogId: log.id },
       }));
-      return { projectId, taskId, previousProgress, progress, taskStatus: task.status, changed: true, logId: Number(log.id) };
+      return { projectId, taskId, previousProgress, progress, taskStatus: task.status, changed: true, logId: Number(log.id), actualStartAt: task.actualStartAt, actualFinishAt: task.actualFinishAt };
     });
   }
 
@@ -4664,14 +4819,27 @@ export class ProjectService {
         );
       }
 
+      const existingPending = await manager.findOne(ProjectProgressLog, {
+        where: {
+          task_id: task.id,
+          status: 'PENDING_VERIFICATION',
+        },
+      });
+      if (existingPending) {
+        throw new ConflictException(
+          `Task #${taskId} memiliki klaim progress #${existingPending.id} yang masih menunggu verifikasi. Selesaikan verifikasi terlebih dahulu sebelum mengajukan klaim baru.`,
+        );
+      }
+
       const currentOfficial = Number(task.progress || 0);
       const isDownward = incomingProgress < currentOfficial;
       const isMilestoneCritical = Boolean(task.isMilestone) && incomingProgress === 100;
+      const is100Completion = incomingProgress === 100;
       const isExplicitEvent = Boolean(
         dto.eventType &&
           ['FAT_PASSED', 'SAT_PASSED', 'BAST_SUBMITTED', 'COMMISSIONING'].includes(dto.eventType),
       );
-      const isCritical = isMilestoneCritical || isExplicitEvent;
+      const isCritical = isMilestoneCritical || is100Completion || isExplicitEvent;
 
       if (!isDownward && !isCritical) {
         throw new BadRequestException(
@@ -4694,6 +4862,8 @@ export class ProjectService {
         eventType = dto.eventType;
       } else if (isMilestoneCritical) {
         eventType = 'MILESTONE_COMPLETION';
+      } else if (is100Completion) {
+        eventType = 'TASK_COMPLETION';
       } else {
         eventType = 'CRITICAL_EVENT';
       }
@@ -4763,6 +4933,22 @@ export class ProjectService {
           eventType,
           documentIds: uniqueDocIds,
           reason: dto.reason.trim(),
+        },
+      });
+
+      this.eventEmitter?.emit('notification.send', {
+        title: 'Klaim Progres Kritis — Menunggu Verifikasi',
+        message: `Task "${task.name}" pada Proyek #${projectId} diajukan progres ${currentOfficial}% → ${incomingProgress}%. Menunggu verifikasi.`,
+        type: 'TASK',
+        audience: 'HEAD_OF_OPERATIONS',
+        metaData: {
+          category: 'PROJECT',
+          priority: 'HIGH',
+          reference_type: 'PROJECT_PROGRESS_CLAIM',
+          reference_id: savedLog.id,
+          projectId: Number(projectId),
+          taskId: Number(task.id),
+          actionLink: `/project-delivery?view=workspace&projectId=${projectId}&section=tasks&progressClaimId=${savedLog.id}`,
         },
       });
 
@@ -4872,6 +5058,14 @@ export class ProjectService {
         task.updatedBy = Number(verifierId) as any;
         if (Number(task.progress) === 100) {
           task.status = 'COMPLETED';
+          if (!task.actualFinishAt) {
+            task.actualFinishAt = log.verified_at || new Date();
+          }
+        } else {
+          if (task.status === 'COMPLETED') {
+            task.status = 'IN_PROGRESS';
+          }
+          task.actualFinishAt = null;
         }
         await manager.save(Task, task);
 
@@ -5202,6 +5396,707 @@ export class ProjectService {
     }
 
     return events;
+  }
+
+  /**
+   * Authoritative, read-oriented Project Master directory.
+   * Provides lightweight projection of all projects with Contract, Customer, PM, and Tender references.
+   * Enforces strict canonical PM data-scoping: PROJECT_MANAGER only sees their assigned projects.
+   */
+  async getProjectMaster(
+    query: GetProjectMasterQueryDto,
+    userId?: number,
+    userRoles?: string[],
+  ) {
+    const isPortfolio = (userRoles || []).some((r: string) =>
+      ['DIRECTOR', 'HEAD_OF_OPERATIONS', 'PMO', 'ADMIN', 'SUPER_ADMIN', 'GENERAL_MANAGER'].includes(r),
+    );
+    const isPmOnly = (userRoles || []).includes('PROJECT_MANAGER') && !isPortfolio;
+
+    const whereClauses: string[] = ['p.deleted_at IS NULL'];
+    const params: any[] = [];
+
+    // Enforce canonical PM data scoping
+    if (isPmOnly && userId) {
+      whereClauses.push('p.manager_id = ?');
+      params.push(Number(userId));
+    } else if (query.managerId) {
+      whereClauses.push('p.manager_id = ?');
+      params.push(Number(query.managerId));
+    }
+
+    if (query.status) {
+      whereClauses.push('p.status = ?');
+      params.push(query.status);
+    }
+
+    if (query.customerId) {
+      whereClauses.push('c.customer_id = ?');
+      params.push(Number(query.customerId));
+    }
+
+    if (query.search) {
+      whereClauses.push('(p.code LIKE ? OR p.name LIKE ? OR cust.name LIKE ?)');
+      const s = `%${query.search}%`;
+      params.push(s, s, s);
+    }
+
+    const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+
+    // 1. Calculate portfolio summary stats (scoped if PM)
+    let summaryWhere = 'WHERE deleted_at IS NULL';
+    const summaryParams: any[] = [];
+    if (isPmOnly && userId) {
+      summaryWhere += ' AND manager_id = ?';
+      summaryParams.push(Number(userId));
+    }
+
+    const [summaryRows] = await this.projectRepo.manager.query(`
+      SELECT 
+        COUNT(*) as totalProjects,
+        COUNT(CASE WHEN status = 'PLANNING' THEN 1 END) as planningCount,
+        COUNT(CASE WHEN status = 'IN_PROGRESS' THEN 1 END) as inProgressCount,
+        COUNT(CASE WHEN status = 'COMPLETED' THEN 1 END) as completedCount
+      FROM projects
+      ${summaryWhere}
+    `, summaryParams);
+
+    // 2. Main Project Master items query
+    const items = await this.projectRepo.manager.query(
+      `
+      SELECT 
+        p.id,
+        p.code,
+        p.name,
+        p.status,
+        DATE_FORMAT(p.start_date, '%Y-%m-%d') as startDate,
+        DATE_FORMAT(p.end_date, '%Y-%m-%d') as endDate,
+        p.city,
+        p.province,
+        p.site_name as siteName,
+        p.address,
+        p.postal_code as postalCode,
+        p.latitude,
+        p.longitude,
+        p.manager_id as managerId,
+        u_pm.full_name as managerName,
+        u_pm.email as managerEmail,
+        p.contract_id as contractId,
+        c.contract_number as contractNumber,
+        c.contract_value as contractValue,
+        c.status as contractStatus,
+        c.legal_status as legalStatus,
+        c.spk_file_url as spkFileUrl,
+        cust.id as customerId,
+        cust.name as customerName,
+        t.id as tenderId,
+        t.title as tenderTitle,
+        t.marketing_pic_id as marketingPicId,
+        u_mkt.full_name as marketingPicName
+      FROM projects p
+      LEFT JOIN users u_pm ON p.manager_id = u_pm.id
+      LEFT JOIN contracts c ON p.contract_id = c.id
+      LEFT JOIN customers cust ON c.customer_id = cust.id
+      LEFT JOIN tenders t ON c.tender_id = t.id
+      LEFT JOIN users u_mkt ON t.marketing_pic_id = u_mkt.id
+      ${whereClause}
+      ORDER BY p.id DESC
+      `,
+      params,
+    );
+
+    // 3. Extract verified filter metadata dynamically from existing portfolio (scoped if PM)
+    const filterWhere = isPmOnly && userId ? 'WHERE p.deleted_at IS NULL AND p.manager_id = ?' : 'WHERE p.deleted_at IS NULL';
+    const filterParams = isPmOnly && userId ? [Number(userId)] : [];
+
+    const filterMeta = await this.projectRepo.manager.query(`
+      SELECT 
+        DISTINCT cust.id as customerId, cust.name as customerName,
+        u_pm.id as managerId, u_pm.full_name as managerName
+      FROM projects p
+      LEFT JOIN contracts c ON p.contract_id = c.id
+      LEFT JOIN customers cust ON c.customer_id = cust.id
+      LEFT JOIN users u_pm ON p.manager_id = u_pm.id
+      ${filterWhere}
+    `, filterParams);
+
+    const uniqueCustomers: Array<{ id: number; name: string }> = [];
+    const customerSeen = new Set<number>();
+    const uniquePms: Array<{ id: number; name: string }> = [];
+    const pmSeen = new Set<number>();
+
+    for (const row of filterMeta) {
+      if (row.customerId && !customerSeen.has(Number(row.customerId))) {
+        customerSeen.add(Number(row.customerId));
+        uniqueCustomers.push({ id: Number(row.customerId), name: String(row.customerName) });
+      }
+      if (row.managerId && !pmSeen.has(Number(row.managerId))) {
+        pmSeen.add(Number(row.managerId));
+        uniquePms.push({ id: Number(row.managerId), name: String(row.managerName) });
+      }
+    }
+
+    uniqueCustomers.sort((a, b) => a.name.localeCompare(b.name));
+    uniquePms.sort((a, b) => a.name.localeCompare(b.name));
+
+    const summary = summaryRows && (summaryRows[0] || summaryRows) ? (summaryRows[0] || summaryRows) : {
+      totalProjects: 0,
+      planningCount: 0,
+      inProgressCount: 0,
+      completedCount: 0,
+    };
+
+    return {
+      items: items.map((item: any) => ({
+        ...item,
+        id: Number(item.id),
+        managerId: item.managerId ? Number(item.managerId) : null,
+        contractId: item.contractId ? Number(item.contractId) : null,
+        customerId: item.customerId ? Number(item.customerId) : null,
+        tenderId: item.tenderId ? Number(item.tenderId) : null,
+        marketingPicId: item.marketingPicId ? Number(item.marketingPicId) : null,
+        contractValue: item.contractValue ? Number(item.contractValue) : null,
+      })),
+      total: items.length,
+      summary: {
+        totalProjects: Number(summary.totalProjects || 0),
+        planningCount: Number(summary.planningCount || 0),
+        inProgressCount: Number(summary.inProgressCount || 0),
+        completedCount: Number(summary.completedCount || 0),
+      },
+      filters: {
+        customers: uniqueCustomers,
+        projectManagers: uniquePms,
+        statuses: ['PLANNING', 'IN_PROGRESS'],
+      },
+    };
+  }
+
+  /**
+   * Detailed on-demand Project Master item with authoritative 4-pillar readiness.
+   * Enforces PM data scoping: assigned PM can view, but non-assigned PM is rejected with ForbiddenException.
+   */
+  async getProjectMasterDetail(
+    projectId: number,
+    userId?: number,
+    userRoles?: string[],
+  ) {
+    const pid = Number(projectId);
+    if (!pid || isNaN(pid) || pid <= 0) {
+      throw new BadRequestException('ID project tidak valid');
+    }
+
+    const rows = await this.projectRepo.manager.query(
+      `
+      SELECT 
+        p.id,
+        p.code,
+        p.name,
+        p.status,
+        DATE_FORMAT(p.start_date, '%Y-%m-%d') as startDate,
+        DATE_FORMAT(p.end_date, '%Y-%m-%d') as endDate,
+        p.city,
+        p.province,
+        p.site_name as siteName,
+        p.address,
+        p.postal_code as postalCode,
+        p.latitude,
+        p.longitude,
+        p.manager_id as managerId,
+        u_pm.full_name as managerName,
+        u_pm.email as managerEmail,
+        p.contract_id as contractId,
+        c.contract_number as contractNumber,
+        c.contract_value as contractValue,
+        c.status as contractStatus,
+        c.legal_status as legalStatus,
+        c.spk_file_url as spkFileUrl,
+        c.ops_team_activated_at as actualKickoffDate,
+        cust.id as customerId,
+        cust.name as customerName,
+        t.id as tenderId,
+        t.title as tenderTitle,
+        t.marketing_pic_id as marketingPicId,
+        u_mkt.full_name as marketingPicName,
+        u_mkt.email as marketingPicEmail
+      FROM projects p
+      LEFT JOIN users u_pm ON p.manager_id = u_pm.id
+      LEFT JOIN contracts c ON p.contract_id = c.id
+      LEFT JOIN customers cust ON c.customer_id = cust.id
+      LEFT JOIN tenders t ON c.tender_id = t.id
+      LEFT JOIN users u_mkt ON t.marketing_pic_id = u_mkt.id
+      WHERE p.id = ? AND p.deleted_at IS NULL
+      LIMIT 1
+      `,
+      [pid],
+    );
+
+    if (!rows || rows.length === 0) {
+      throw new NotFoundException(`Project dengan ID ${pid} tidak ditemukan`);
+    }
+
+    const projectData = rows[0];
+
+    // Enforce canonical PM data scoping
+    const isPortfolio = (userRoles || []).some((r: string) =>
+      ['DIRECTOR', 'HEAD_OF_OPERATIONS', 'PMO', 'ADMIN', 'SUPER_ADMIN', 'GENERAL_MANAGER'].includes(r),
+    );
+    const isPmOnly = (userRoles || []).includes('PROJECT_MANAGER') && !isPortfolio;
+
+    if (isPmOnly && userId) {
+      if (Number(projectData.managerId) !== Number(userId)) {
+        throw new ForbiddenException('Akses ditolak: Anda bukan Project Manager yang ditugaskan pada proyek ini.');
+      }
+    }
+
+    // Fetch authoritative readiness state
+    let readiness: any = null;
+    try {
+      readiness = await this.getOperationalReadiness(pid);
+    } catch (err) {
+      // Readiness is optional for legacy projects without complete planning
+    }
+
+    return {
+      ...projectData,
+      id: Number(projectData.id),
+      managerId: projectData.managerId ? Number(projectData.managerId) : null,
+      contractId: projectData.contractId ? Number(projectData.contractId) : null,
+      customerId: projectData.customerId ? Number(projectData.customerId) : null,
+      tenderId: projectData.tenderId ? Number(projectData.tenderId) : null,
+      marketingPicId: projectData.marketingPicId ? Number(projectData.marketingPicId) : null,
+      contractValue: projectData.contractValue ? Number(projectData.contractValue) : null,
+      readiness,
+    };
+  }
+
+  /**
+   * Get authoritative project progress and monitoring read model (F3C: Project Control & S-Curve)
+   */
+  async getProjectProgressMonitoring(
+    projectId: number,
+    userId?: number,
+    userRoles: string[] = [],
+    asOfInput?: string,
+  ) {
+    if (!projectId || isNaN(Number(projectId)) || Number(projectId) <= 0) {
+      throw new BadRequestException('Parameter projectId tidak valid');
+    }
+
+    const project = await this.projectRepo.findOne({
+      where: { id: Number(projectId) },
+    });
+    if (!project) {
+      throw new NotFoundException(`Proyek dengan ID #${projectId} tidak ditemukan`);
+    }
+
+    if (userId) {
+      await this.validateProjectReadAccess(project, userId, userRoles);
+    }
+
+    // 1. Load active baseline with WBS items
+    const activeBaseline = this.baselineRepo
+      ? await this.baselineRepo.findOne({
+          where: { project_id: Number(projectId), status: 'ACTIVE' },
+          relations: ['wbs_items'],
+        })
+      : null;
+
+    // 2. Load active tasks
+    const tasks = await this.taskRepo.find({
+      where: { projectId: Number(projectId) },
+      order: { id: 'ASC' },
+    });
+
+    // 3. Load progress logs with relations and evidence
+    const progressLogs = this.progressLogRepo
+      ? await this.progressLogRepo.find({
+          where: { project_id: Number(projectId) },
+          relations: ['task', 'submitter', 'verifier', 'evidence', 'evidence.document'],
+          order: { id: 'DESC' },
+        })
+      : [];
+
+    // 4. Resolve customer and manager name
+    const pm = project.managerId && this.userRepo
+      ? await this.userRepo.findOne({ where: { id: Number(project.managerId) } })
+      : null;
+    const contract = project.contractId && this.contractRepo
+      ? await this.contractRepo.findOne({
+          where: { id: Number(project.contractId) },
+          relations: ['customer'],
+        })
+      : null;
+
+    return computeProgressMonitoringReadModel({
+      projectId: Number(projectId),
+      projectMeta: {
+        code: project.code,
+        name: project.name,
+        status: project.status,
+        customerName: (project as any).customerName || contract?.customer?.name || null,
+        managerName: pm ? pm.fullName : null,
+        managerId: project.managerId ? Number(project.managerId) : null,
+      },
+      baselineItems: (activeBaseline?.wbs_items as any) || null,
+      tasks,
+      progressLogs,
+      asOf: asOfInput,
+    });
+  }
+
+  /**
+   * Get authoritative project Gantt Baseline vs Actual read model (F3D: Schedule Control workspace)
+   */
+  async getProjectGantt(
+    projectId: number,
+    userId?: number,
+    userRoles: string[] = [],
+    asOfInput?: string,
+  ) {
+    if (!projectId || isNaN(Number(projectId)) || Number(projectId) <= 0) {
+      throw new BadRequestException('Parameter projectId tidak valid');
+    }
+
+    const project = await this.projectRepo.findOne({
+      where: { id: Number(projectId) },
+    });
+    if (!project) {
+      throw new NotFoundException(`Proyek dengan ID #${projectId} tidak ditemukan`);
+    }
+
+    if (userId) {
+      await this.validateProjectReadAccess(project, userId, userRoles);
+    }
+
+    // 1. Load active baseline with WBS items
+    const activeBaseline = this.baselineRepo
+      ? await this.baselineRepo.findOne({
+          where: { project_id: Number(projectId), status: 'ACTIVE' },
+          relations: ['wbs_items'],
+        })
+      : null;
+
+    // 2. Load active tasks
+    const tasks = await this.taskRepo.find({
+      where: { projectId: Number(projectId) },
+      order: { id: 'ASC' },
+    });
+
+    // 3. Resolve customer and manager name
+    const pm = project.managerId && this.userRepo
+      ? await this.userRepo.findOne({ where: { id: Number(project.managerId) } })
+      : null;
+    const contract = project.contractId && this.contractRepo
+      ? await this.contractRepo.findOne({
+          where: { id: Number(project.contractId) },
+          relations: ['customer'],
+        })
+      : null;
+
+    return computeProjectGantt({
+      projectId: Number(projectId),
+      projectMeta: {
+        code: project.code,
+        name: project.name,
+        status: project.status,
+        customerName: (project as any).customerName || contract?.customer?.name || null,
+        managerName: pm ? pm.fullName : null,
+        managerId: project.managerId ? Number(project.managerId) : null,
+      },
+      baselineItems: (activeBaseline?.wbs_items as any) || null,
+      tasks: tasks.map((t) => ({
+        id: Number(t.id),
+        projectId: Number(t.projectId),
+        wbsId: t.wbsId ? Number(t.wbsId) : undefined,
+        name: t.name,
+        isMilestone: Boolean(t.isMilestone),
+        progress: Number(t.progress || 0),
+        status: t.status,
+        actualStartAt: (t as any).actualStartAt,
+        actualFinishAt: (t as any).actualFinishAt,
+      })),
+      asOf: asOfInput,
+    });
+  }
+
+  /**
+   * Get authoritative project task board read model (F3B: Kanban workspace)
+   */
+  async getProjectTaskBoard(
+    projectId: number,
+    userId?: number,
+    userRoles: string[] = [],
+  ) {
+    if (!projectId || isNaN(Number(projectId)) || Number(projectId) <= 0) {
+      throw new BadRequestException('Parameter projectId tidak valid');
+    }
+
+    const project = await this.projectRepo.findOne({
+      where: { id: Number(projectId) },
+    });
+    if (!project) {
+      throw new NotFoundException(`Proyek dengan ID #${projectId} tidak ditemukan`);
+    }
+
+    if (userId) {
+      await this.validateProjectReadAccess(project, userId, userRoles);
+    }
+
+    // 1. Load active baseline with WBS items
+    const activeBaseline = this.baselineRepo
+      ? await this.baselineRepo.findOne({
+          where: { project_id: Number(projectId), status: 'ACTIVE' },
+          relations: ['wbs_items'],
+        })
+      : null;
+
+    // 2. Load active tasks
+    const tasks = await this.taskRepo.find({
+      where: { projectId: Number(projectId) },
+      order: { id: 'ASC' },
+    });
+
+    // 3. Compute canonical Project Control summary
+    const control = computeProjectControl({
+      projectId: Number(projectId),
+      baselineItems: (activeBaseline?.wbs_items as any) || null,
+      tasks: tasks as any,
+    });
+
+    // 4. Map baseline items by task_id
+    const baselineLeafByTaskId = new Map<number, ProjectBaselineWbsItem>();
+    if (activeBaseline && activeBaseline.wbs_items) {
+      for (const item of activeBaseline.wbs_items) {
+        if (item.task_id) {
+          baselineLeafByTaskId.set(Number(item.task_id), item);
+        }
+      }
+    }
+
+    // 5. Load WBS entities for work package info
+    const wbsMap = new Map<number, WorkBreakdownStructure>();
+    const wbsNodes = await this.wbsRepo.find({ where: { projectId: Number(projectId) } });
+    for (const w of wbsNodes) {
+      wbsMap.set(Number(w.id), w);
+    }
+
+    // 6. Load distinct assignees
+    const assigneeIds = Array.from(
+      new Set(tasks.map((t) => Number(t.assigneeId)).filter((id) => id > 0)),
+    );
+    const userMap = new Map<number, { id: number; name: string }>();
+    if (assigneeIds.length > 0 && this.userRepo) {
+      const users = await this.userRepo.find({
+        where: assigneeIds.map((id) => ({ id })),
+        select: ['id', 'fullName'],
+      });
+      for (const u of users) {
+        userMap.set(Number(u.id), { id: Number(u.id), name: u.fullName });
+      }
+    }
+
+    // 7. Load progress logs with evidence
+    const progressLogs = this.progressLogRepo
+      ? await this.progressLogRepo.find({
+          where: { project_id: Number(projectId) },
+          relations: ['submitter'],
+          order: { id: 'DESC' },
+        })
+      : [];
+
+    const evidenceList =
+      this.progressEvidenceRepo && progressLogs.length > 0
+        ? await this.progressEvidenceRepo.find({
+            where: progressLogs.map((l) => ({ progress_log_id: l.id })),
+          })
+        : [];
+
+    const evidenceCountByLogId = new Map<number, number>();
+    for (const ev of evidenceList) {
+      const c = evidenceCountByLogId.get(Number(ev.progress_log_id)) || 0;
+      evidenceCountByLogId.set(Number(ev.progress_log_id), c + 1);
+    }
+
+    // Build pending claim map by task_id
+    const pendingClaimByTaskId = new Map<number, any>();
+    for (const log of progressLogs) {
+      if (log.status === 'PENDING_VERIFICATION') {
+        const taskId = Number(log.task_id);
+        if (!pendingClaimByTaskId.has(taskId)) {
+          pendingClaimByTaskId.set(taskId, {
+            id: Number(log.id),
+            reportedProgress: Number(log.reported_progress),
+            previousProgress: Number(log.previous_progress),
+            eventType: log.event_type,
+            reason: log.reason,
+            submittedBy: Number(log.submitted_by),
+            submitterName: log.submitter?.fullName || null,
+            createdAt: log.created_at,
+            evidenceCount: evidenceCountByLogId.get(Number(log.id)) || 0,
+          });
+        }
+      }
+    }
+
+    // Evidence count by task
+    const evidenceCountByTaskId = new Map<number, number>();
+    for (const log of progressLogs) {
+      const tid = Number(log.task_id);
+      const evCount = evidenceCountByLogId.get(Number(log.id)) || 0;
+      const prev = evidenceCountByTaskId.get(tid) || 0;
+      evidenceCountByTaskId.set(tid, prev + evCount);
+    }
+
+    // 8. Control tasks map (for overdue days and variance)
+    const controlTaskMap = new Map<number, any>();
+    if (control && control.tasks) {
+      for (const ct of control.tasks) {
+        controlTaskMap.set(Number(ct.taskId), ct);
+      }
+    }
+
+    // 9. Build task cards
+    const mappedTasks = tasks.map((t) => {
+      const taskId = Number(t.id);
+      const baselineItem = baselineLeafByTaskId.get(taskId);
+      const wbs = wbsMap.get(Number(t.wbsId));
+      const assignee = t.assigneeId ? userMap.get(Number(t.assigneeId)) || null : null;
+      const pendingClaim = pendingClaimByTaskId.get(taskId) || null;
+      const controlItem = controlTaskMap.get(taskId);
+
+      const progressNum = Number(t.progress || 0);
+      const isCompleted =
+        t.status === 'COMPLETED' || (progressNum === 100 && (t as any).actualFinishAt !== null);
+
+      // Determine board lane
+      let boardLane: 'TO_DO' | 'IN_PROGRESS' | 'REVIEW' | 'DONE';
+      if (pendingClaim) {
+        boardLane = 'REVIEW';
+      } else if (isCompleted) {
+        boardLane = 'DONE';
+      } else if (progressNum > 0 || t.status === 'IN_PROGRESS' || (t as any).actualStartAt !== null) {
+        boardLane = 'IN_PROGRESS';
+      } else {
+        boardLane = 'TO_DO';
+      }
+
+      const overdueDays = controlItem?.overdueDays || 0;
+      const isOverdue = overdueDays > 0;
+      const isMilestone = Boolean(t.isMilestone);
+      const isCritical = Boolean(
+        pendingClaim &&
+          [
+            'CRITICAL_CLAIM',
+            'CRITICAL_EVENT',
+            'MILESTONE_COMPLETION',
+            'FAT_PASSED',
+            'SAT_PASSED',
+            'BAST_SUBMITTED',
+            'COMMISSIONING',
+          ].includes(pendingClaim.eventType),
+      );
+
+      // Determine available actions based on user roles and assignment
+      const isAssignedPm = userId && Number(project.managerId) === Number(userId);
+      const isPmoOrHoo =
+        userRoles.includes('PMO') ||
+        userRoles.includes('HEAD_OF_OPERATIONS') ||
+        userRoles.includes('SUPER_ADMIN');
+      const isProjectActive = project.status === 'IN_PROGRESS';
+
+      const availableActions: string[] = [];
+      if (isProjectActive) {
+        if (boardLane === 'REVIEW') {
+          if (isPmoOrHoo && Number(pendingClaim?.submittedBy) !== Number(userId)) {
+            availableActions.push('REVIEW_CLAIM');
+          } else {
+            availableActions.push('VIEW_CLAIM');
+          }
+        } else if (boardLane === 'DONE') {
+          availableActions.push('VIEW_DETAIL');
+        } else {
+          // TO_DO or IN_PROGRESS
+          if (isAssignedPm) {
+            availableActions.push('UPDATE_PROGRESS');
+            availableActions.push('CLAIM_PROGRESS');
+          } else {
+            availableActions.push('VIEW_DETAIL');
+          }
+        }
+      } else {
+        availableActions.push('VIEW_DETAIL');
+      }
+
+      const plannedStart = (baselineItem as any)?.planned_start_date
+        ? normDate((baselineItem as any).planned_start_date)
+        : t.startDate
+        ? normDate(t.startDate)
+        : null;
+
+      const plannedFinish = (baselineItem as any)?.planned_end_date
+        ? normDate((baselineItem as any).planned_end_date)
+        : t.endDate
+        ? normDate(t.endDate)
+        : null;
+
+      return {
+        id: taskId,
+        code: baselineItem?.code || (wbs ? wbs.code : `TSK-${taskId}`),
+        name: t.name,
+        wbsId: Number(t.wbsId),
+        workPackage: wbs ? { id: Number(wbs.id), code: wbs.code, name: wbs.name } : null,
+        assignee: assignee ? { id: assignee.id, name: assignee.name } : null,
+        progress: progressNum,
+        status: t.status,
+        plannedStart,
+        plannedFinish,
+        actualStart: (t as any).actualStartAt ? new Date((t as any).actualStartAt).toISOString() : null,
+        actualFinish: (t as any).actualFinishAt ? new Date((t as any).actualFinishAt).toISOString() : null,
+        isMilestone,
+        isCritical,
+        weight: baselineItem?.weight_percentage ? Number(baselineItem.weight_percentage) : null,
+        evidenceCount: evidenceCountByTaskId.get(taskId) || 0,
+        reviewState: pendingClaim ? 'PENDING_VERIFICATION' : null,
+        pendingClaim,
+        boardLane,
+        overdueDays,
+        isOverdue,
+        availableActions,
+      };
+    });
+
+    const pm = project.managerId && this.userRepo
+      ? await this.userRepo.findOne({ where: { id: Number(project.managerId) } })
+      : null;
+    const contract = project.contractId && this.contractRepo
+      ? await this.contractRepo.findOne({
+          where: { id: Number(project.contractId) },
+          relations: ['customer'],
+        })
+      : null;
+
+    return {
+      project: {
+        id: Number(project.id),
+        code: project.code,
+        name: project.name,
+        customer: (project as any).customerName || contract?.customer?.name || null,
+        managerId: project.managerId ? Number(project.managerId) : null,
+        manager: pm ? { id: Number(pm.id), name: pm.fullName, email: pm.email } : null,
+        status: project.status,
+      },
+      controlSummary: {
+        plannedProgress: control.project.plannedProgress,
+        actualProgress: control.project.actualProgress,
+        progressVariancePp: control.project.progressVariancePp,
+        progressHealth: control.project.progressHealth,
+        planComparisonAvailable: control.planComparisonAvailable,
+        actualStart: control.project.actualStart,
+        plannedFinish: control.project.plannedFinish,
+      },
+      tasks: mappedTasks,
+    };
   }
 }
 

@@ -1,11 +1,15 @@
 /* Ant Design overrides */
 
+:root {
+  --epms-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
 /* Ant Design resets & Mobile Responsive Enhancements */
 html, body {
   margin: 0;
   padding: 0;
   background-color: #f5f7fa;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: var(--epms-font-family);
   overflow-x: hidden;
 }
 

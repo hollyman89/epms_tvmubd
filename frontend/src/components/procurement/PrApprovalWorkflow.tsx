@@ -495,9 +495,9 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
     return 'GUEST';
   }, [isDirector, isFinance, isProcurement, isSuperAdmin]);
 
-  const canActAsProcurement = effectiveRole === 'PROCUREMENT' || effectiveRole === 'SUPER_ADMIN';
-  const canActAsFinance = effectiveRole === 'FINANCE' || effectiveRole === 'SUPER_ADMIN';
-  const canActAsDirector = effectiveRole === 'DIRECTOR' || effectiveRole === 'SUPER_ADMIN';
+  const canActAsProcurement = effectiveRole === 'PROCUREMENT';
+  const canActAsFinance = effectiveRole === 'FINANCE';
+  const canActAsDirector = effectiveRole === 'DIRECTOR';
 
   // ── Authoritative Engine Handlers ──
   const handleFinancePass = async () => {

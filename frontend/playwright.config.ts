@@ -46,5 +46,22 @@ export default defineConfig({
         trace: 'on',
       },
     },
+    // Mode C — CHROME LIVE (Locally installed Google Chrome, visible desktop headed)
+    {
+      name: 'chrome',
+      use: {
+        channel: 'chrome',
+        headless: false,
+        viewport: null,
+        launchOptions: {
+          executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+          slowMo: 100,
+          args: ['--start-maximized'],
+        },
+        screenshot: 'on',
+        video: 'on',
+        trace: 'on',
+      },
+    },
   ],
 });

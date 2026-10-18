@@ -27,7 +27,7 @@ import {
   InfoCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { FinanceService, InvoiceDto, PaymentDto, CreatePaymentPayload } from '@/services/finance.service';
+import { FinanceService, InvoiceDto, PaymentDto, CreatePaymentPayload, PaymentRequestDto } from '@/services/finance.service';
 
 const { Text } = Typography;
 const { Option } = Select;
@@ -38,6 +38,7 @@ export interface ProcessPaymentModalProps {
   open: boolean;
   onClose: () => void;
   invoice: InvoiceDto | any | null;
+  paymentRequest?: PaymentRequestDto | null;
   onPaymentCreated?: (payment: PaymentDto, updatedInvoice?: any) => void;
   onViewReceipt?: (payment: PaymentDto) => void;
   currentUserName?: string;
@@ -48,6 +49,7 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
   open,
   onClose,
   invoice,
+  paymentRequest,
   onPaymentCreated,
   onViewReceipt,
   currentUserName = 'Finance Team',
@@ -122,16 +124,20 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
   // Synchronize form when modal opens with active invoice
   useEffect(() => {
     if (open && activeInvoice) {
+      const currentRef = form.getFieldValue('referenceNumber');
+      const currentNotes = form.getFieldValue('notes');
       form.setFieldsValue({
-        paymentDate: dayjs(),
-        paymentMethod: 'BANK_TRANSFER',
-        paymentAmount: remainingBalance > 0 ? remainingBalance : totalAmount,
-        bankName: 'Bank Mandiri (Rekening Operasional Proyek)',
-        referenceNumber: '',
-        notes: `Pembayaran tagihan ${invoiceNumber} untuk vendor ${vendorName}.`,
+        paymentDate: form.getFieldValue('paymentDate') || dayjs(),
+        paymentMethod: form.getFieldValue('paymentMethod') || 'BANK_TRANSFER',
+        paymentAmount: form.getFieldValue('paymentAmount') ?? Number(paymentRequest?.approvedAmount || paymentRequest?.requestedAmount || (remainingBalance > 0 ? remainingBalance : totalAmount)),
+        bankName: form.getFieldValue('bankName') || 'Bank Mandiri (Rekening Operasional Proyek)',
+        referenceNumber: currentRef || '',
+        notes: currentNotes || `Pembayaran tagihan ${invoiceNumber} untuk vendor ${vendorName}.`,
       });
+    } else if (!open) {
+      form.resetFields();
     }
-  }, [open, activeInvoice, remainingBalance, totalAmount, invoiceNumber, vendorName, form]);
+  }, [open, activeInvoice, paymentRequest, remainingBalance, totalAmount, invoiceNumber, vendorName, form]);
 
   // Submit Handler: Authoritative Backend Payment Execution
   const handleSubmit = async (values: any) => {
@@ -143,7 +149,8 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
     setIsSubmitting(true);
     try {
       const payload: CreatePaymentPayload = {
-        invoiceId,
+        invoiceId: Number(invoiceId),
+        paymentRequestId: paymentRequest?.id ? Number(paymentRequest.id) : undefined,
         paymentDate: values.paymentDate
           ? values.paymentDate.toISOString()
           : new Date().toISOString(),
@@ -176,7 +183,7 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
       }
       onClose();
     } catch (err: any) {
-      console.error('Payment processing failed:', err);
+      console.error('Payment processing failed detail:', JSON.stringify(err?.response?.data || err?.message));
       const apiError =
         err?.response?.data?.message ||
         err?.message ||
@@ -228,10 +235,19 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
             </Button>
             <Button
               type="primary"
-              onClick={() => form.submit()}
+              onClick={async () => {
+                try {
+                  const values = await form.validateFields();
+                  await handleSubmit(values);
+                } catch (err: any) {
+                  console.error('[ProcessPaymentModal] Form validation failed:', err);
+                  message.error('Harap periksa isian formulir yang belum valid.');
+                }
+              }}
               loading={isSubmitting}
               disabled={!canProcessPayment || isPaid || isSubmitting}
               icon={<SendOutlined />}
+              id="btn-submit-process-payment"
               style={{
                 borderRadius: 6,
                 fontWeight: 600,
@@ -393,7 +409,7 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
                 name="referenceNumber"
                 rules={[{ required: true, message: 'Nomor referensi / bukti transfer wajib diisi' }]}
               >
-                <Input placeholder="Contoh: TRX-20260908-001 / No. Bukti Transfer Bank" style={{ borderRadius: 6 }} />
+                <Input id="input-payment-ref-number" placeholder="Contoh: TRX-20260908-001 / No. Bukti Transfer Bank" style={{ borderRadius: 6 }} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>

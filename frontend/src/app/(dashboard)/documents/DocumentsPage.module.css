@@ -1,0 +1,415 @@
+/* Document Repository Scoped Styles - Canonical EPMS Visual Foundation */
+
+.pageContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
+/* Header Section */
+.pageHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding-bottom: 4px;
+}
+
+.headerLeft {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.breadcrumb {
+  font-size: 12px;
+  color: #64748B;
+  margin-bottom: 2px;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.headerIconSurface {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: #EFF6FF;
+  border: 1px solid #DBEAFE;
+  color: #2563EB;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.pageTitle {
+  margin: 0 !important;
+  color: #0F172A !important;
+  font-size: 22px !important;
+  font-weight: 700 !important;
+  line-height: 28px !important;
+  letter-spacing: -0.01em;
+}
+
+.pageSubtitle {
+  font-size: 13px !important;
+  color: #64748B !important;
+  line-height: 20px !important;
+  margin: 0 !important;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btnRefresh {
+  height: 36px !important;
+  border-radius: 8px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: #334155 !important;
+  border-color: #CBD5E1 !important;
+  background: #FFFFFF !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
+  transition: all 0.15s ease !important;
+}
+
+.btnRefresh:hover {
+  color: #0F172A !important;
+  border-color: #94A3B8 !important;
+  background: #F8FAFC !important;
+}
+
+/* Toolbar Card */
+.toolbarCard {
+  background: #FFFFFF;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  padding: 14px 18px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+.toolbarContent {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.toolbarFilters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  flex: 1 1 auto;
+}
+
+.searchInput {
+  width: 320px;
+  max-width: 100%;
+}
+
+.searchInput :global(.ant-input) {
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.typeSelect {
+  width: 200px;
+}
+
+.btnReset {
+  height: 32px !important;
+  font-size: 12.5px !important;
+  color: #64748B !important;
+  border-radius: 6px !important;
+}
+
+.btnReset:hover {
+  color: #0F172A !important;
+}
+
+.toolbarStats {
+  font-size: 12.5px;
+  color: #64748B;
+  white-space: nowrap;
+}
+
+/* Table Container & Canonical Light Slate Header */
+.tableCard {
+  background: #FFFFFF;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+  overflow: hidden;
+}
+
+.documentTable :global(.ant-table-thead > tr > th) {
+  background-color: #F8FAFC !important;
+  color: #475569 !important;
+  font-weight: 600 !important;
+  font-size: 11.5px !important;
+  letter-spacing: 0.3px;
+  border-bottom: 1px solid #E2E8F0 !important;
+  padding: 11px 14px !important;
+  white-space: nowrap;
+}
+
+.documentTable :global(.ant-table-thead > tr > th::before) {
+  display: none !important;
+}
+
+.documentTable :global(.ant-table-tbody > tr > td) {
+  padding: 12px 14px !important;
+  border-bottom: 1px solid #F1F5F9;
+  font-size: 12.5px;
+  color: #334155;
+  transition: background-color 0.15s ease;
+}
+
+.documentTable :global(.ant-table-tbody > tr:hover > td) {
+  background-color: #F8FAFC !important;
+}
+
+/* Document Item Cell */
+.docNameCell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.docIcon {
+  flex-shrink: 0;
+}
+
+.docNameMeta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.docFileName {
+  font-weight: 600;
+  color: #0F172A;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.docSubId {
+  font-size: 11px;
+  color: #94A3B8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Action Buttons */
+.actionGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btnActionPreview {
+  height: 28px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: #2563EB !important;
+  background: #EFF6FF !important;
+  border-color: #BFDBFE !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  transition: all 0.15s ease !important;
+}
+
+.btnActionPreview:hover {
+  background: #DBEAFE !important;
+  border-color: #93C5FD !important;
+  color: #1D4ED8 !important;
+}
+
+.btnActionDownload {
+  height: 28px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: #475569 !important;
+  background: #F8FAFC !important;
+  border-color: #CBD5E1 !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  transition: all 0.15s ease !important;
+}
+
+.btnActionDownload:hover {
+  background: #F1F5F9 !important;
+  color: #0F172A !important;
+  border-color: #94A3B8 !important;
+}
+
+/* Responsive Switching */
+.desktopTableView {
+  display: block;
+}
+
+.mobileCardsView {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .desktopTableView {
+    display: none;
+  }
+
+  .mobileCardsView {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .pageHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .headerRight {
+    width: 100%;
+  }
+
+  .btnRefresh {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  .toolbarFilters {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .searchInput, .typeSelect {
+    width: 100% !important;
+  }
+}
+
+/* Mobile Document Card */
+.mobileDocCard {
+  background: #FFFFFF;
+  border-radius: 12px;
+  border: 1px solid #E2E8F0;
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobileCardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mobileDocHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mobileDocTitleGroup {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.mobileDocTitle {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #0F172A;
+  word-break: break-word;
+  line-height: 1.35;
+}
+
+.mobileDocId {
+  font-size: 11px;
+  color: #94A3B8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.mobileCardGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  padding: 10px 0;
+  border-top: 1px solid #F1F5F9;
+  border-bottom: 1px solid #F1F5F9;
+}
+
+.mobileGridItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mobileGridItemFull {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mobileLabel {
+  font-size: 10.5px;
+  color: #64748B;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  font-weight: 500;
+}
+
+.mobileValue {
+  font-size: 12px;
+  color: #1E293B;
+  font-weight: 500;
+}
+
+.mobileCardFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 2px;
+}
+
+.mobilePagination {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+}

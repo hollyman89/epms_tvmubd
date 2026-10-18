@@ -32,8 +32,18 @@ import {
   ProcurementPackageStatus,
 } from '@/services/procurement.service';
 import { useAuth } from '@/context/AuthContext';
+import UserIdentityDisplay from '@/components/common/UserIdentityDisplay';
 
 const { Title, Text, Paragraph } = Typography;
+
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatQuantity,
+} from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
+import { resolveStatusPresentation } from '@/lib/statusPresentation';
 
 export interface ProcurementPackageDetailDrawerProps {
   open: boolean;
@@ -45,46 +55,18 @@ export interface ProcurementPackageDetailDrawerProps {
 }
 
 export const getPackageStatusTag = (status: ProcurementPackageStatus | string) => {
-  switch (status) {
-    case 'SUBMITTED':
-      return (
-        <Tag color="gold" icon={<ClockCircleFilled />} style={{ fontWeight: 700, padding: '2px 8px' }}>
-          SUBMITTED
-        </Tag>
-      );
-    case 'PR_CREATED':
-      return (
-        <Tag color="green" icon={<CheckCircleFilled />} style={{ fontWeight: 700, padding: '2px 8px' }}>
-          PR_CREATED
-        </Tag>
-      );
-    case 'RETURNED':
-      return (
-        <Tag color="volcano" icon={<RollbackOutlined />} style={{ fontWeight: 700, padding: '2px 8px' }}>
-          RETURNED
-        </Tag>
-      );
-    case 'DRAFT':
-      return (
-        <Tag color="blue" style={{ fontWeight: 700, padding: '2px 8px' }}>
-          DRAFT
-        </Tag>
-      );
-    case 'CANCELLED':
-      return (
-        <Tag color="default" icon={<StopOutlined />} style={{ fontWeight: 700, padding: '2px 8px' }}>
-          CANCELLED
-        </Tag>
-      );
-    case 'CLOSED':
-      return (
-        <Tag color="purple" style={{ fontWeight: 700, padding: '2px 8px' }}>
-          CLOSED
-        </Tag>
-      );
-    default:
-      return <Tag>{status}</Tag>;
-  }
+  const p = resolveStatusPresentation('package', status);
+  let icon: React.ReactNode = null;
+  if (p.rawStatus === 'SUBMITTED') icon = <ClockCircleFilled />;
+  else if (p.rawStatus === 'PR_CREATED') icon = <CheckCircleFilled />;
+  else if (p.rawStatus === 'RETURNED') icon = <RollbackOutlined />;
+  else if (p.rawStatus === 'CANCELLED') icon = <StopOutlined />;
+
+  return (
+    <Tag color={p.color} icon={icon} style={{ fontWeight: 700, padding: '2px 8px' }}>
+      {p.label}
+    </Tag>
+  );
 };
 
 export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDrawerProps> = ({
@@ -95,9 +77,9 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
   onCreatePrClick,
   onViewLinkedPrClick,
 }) => {
-  const { user, isProcurement, isSuperAdmin } = useAuth();
+  const { user, isProcurement } = useAuth();
   const canPerformProcurementAction =
-    isProcurement || isSuperAdmin || Boolean(user?.roles?.includes('PURCHASING'));
+    isProcurement || Boolean(user?.roles?.includes('PURCHASING'));
 
   const {
     data: pkg,
@@ -157,7 +139,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
       key: 'baselineQty',
       width: 110,
       align: 'right' as const,
-      render: (val: number) => Number(val || 0).toLocaleString('id-ID'),
+      render: (val: number) => formatQuantity(val),
     },
     {
       title: 'Jumlah Diminta',
@@ -167,7 +149,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
       align: 'right' as const,
       render: (val: number) => (
         <span style={{ fontWeight: 700, color: '#1d4ed8' }}>
-          {Number(val || 0).toLocaleString('id-ID')}
+          {formatQuantity(val)}
         </span>
       ),
     },
@@ -177,7 +159,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
       key: 'estimatedUnitPrice',
       width: 140,
       align: 'right' as const,
-      render: (val: number) => `Rp ${Number(val || 0).toLocaleString('id-ID')}`,
+      render: (val: number) => formatCurrency(val),
     },
     {
       title: 'Subtotal',
@@ -187,7 +169,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
       align: 'right' as const,
       render: (val: number) => (
         <span style={{ fontWeight: 700, color: '#059669' }}>
-          Rp {Number(val || 0).toLocaleString('id-ID')}
+          {formatCurrency(val)}
         </span>
       ),
     },
@@ -197,7 +179,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
       key: 'requiredDate',
       width: 120,
       align: 'center' as const,
-      render: (val: string) => (val ? dayjs(val).format('DD/MM/YYYY') : '—'),
+      render: (val: string) => formatDate(val),
     },
   ];
 
@@ -222,7 +204,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
         pkg && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
             <span style={{ fontSize: 12, color: '#64748b' }}>
-              Ref ID Paket: #{pkg.id} | Dibuat: {pkg.createdAt ? dayjs(pkg.createdAt).format('DD MMM YYYY HH:mm') : '—'}
+              Ref ID Paket: #{pkg.id} | Dibuat: {formatDateTime(pkg.createdAt)}
             </span>
             <Space size={8}>
               {pkg.status === 'SUBMITTED' && canPerformProcurementAction && (
@@ -294,7 +276,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
                   </Paragraph>
                   <div style={{ fontSize: 11, color: '#b45309', marginTop: 6 }}>
                     Direview oleh: <strong>{pkg.reviewer?.fullName || 'Tim Procurement'}</strong>
-                    {pkg.reviewedAt && ` (${dayjs(pkg.reviewedAt).format('DD MMM YYYY, HH:mm')})`}
+                    {pkg.reviewedAt && ` (${formatDateTime(pkg.reviewedAt)})`}
                   </div>
                 </div>
               }
@@ -311,8 +293,8 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
               message={<span style={{ fontWeight: 700 }}>Purchase Request Berhasil Diterbitkan</span>}
               description={
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
-                  <div>
-                    Nomor PR: <strong style={{ fontFamily: 'monospace' }}>{pkg.purchaseRequest.prNumber}</strong> | Status Workflow: <Tag color="green" style={{ margin: 0 }}>{pkg.purchaseRequest.status}</Tag>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    Nomor PR: <strong style={{ fontFamily: 'monospace' }}>{pkg.purchaseRequest.prNumber}</strong> | Status Workflow: <StatusBadge domain="pr" status={pkg.purchaseRequest.status} />
                   </div>
                   <Button
                     size="small"
@@ -345,7 +327,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
             </Descriptions.Item>
             <Descriptions.Item label="Total Estimasi">
               <span style={{ fontWeight: 700, color: '#059669', fontSize: 13 }}>
-                Rp {Number(pkg.totalEstimatedAmount || 0).toLocaleString('id-ID')}
+                {formatCurrency(pkg.totalEstimatedAmount)}
               </span>
             </Descriptions.Item>
 
@@ -360,14 +342,19 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
               </div>
             </Descriptions.Item>
             <Descriptions.Item label="Tanggal Dibutuhkan">
-              {pkg.requiredDate ? dayjs(pkg.requiredDate).format('DD MMMM YYYY') : '—'}
+              {formatDate(pkg.requiredDate)}
             </Descriptions.Item>
 
             <Descriptions.Item label="Project Manager (Pemohon)">
-              {pkg.requester?.fullName || `User #${pkg.requestedBy}`}
+              <UserIdentityDisplay
+                user={pkg.requester}
+                userId={pkg.requestedBy}
+                fallbackRole="Project Manager"
+                showEmail
+              />
             </Descriptions.Item>
             <Descriptions.Item label="Tanggal Pengajuan">
-              {pkg.submittedAt ? dayjs(pkg.submittedAt).format('DD MMM YYYY HH:mm') : '—'}
+              {formatDateTime(pkg.submittedAt)}
             </Descriptions.Item>
             <Descriptions.Item label="Jumlah Item">
               <strong>{(pkg.items || []).length}</strong> Item Terdaftar
@@ -413,7 +400,7 @@ export const ProcurementPackageDetailDrawer: React.FC<ProcurementPackageDetailDr
                   </Table.Summary.Cell>
                   <Table.Summary.Cell index={1} align="right">
                     <strong style={{ color: '#059669' }}>
-                      Rp {Number(pkg.totalEstimatedAmount || 0).toLocaleString('id-ID')}
+                      {formatCurrency(pkg.totalEstimatedAmount)}
                     </strong>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell index={2} />

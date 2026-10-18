@@ -19,19 +19,6 @@ export interface LegalContractItem {
   [key: string]: any;
 }
 
-export interface SubmitLegalReviewPayload {
-  contractId: number;
-  action?: string;
-  notes?: string;
-  checklist?: any;
-  proposalId?: number;
-  legalStatus?: string;
-  legalNotes?: string;
-}
-
-export interface LegalServiceOptions {
-  idempotencyKey?: string;
-}
 
 export interface PdfStatusResponse {
   status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
@@ -61,21 +48,6 @@ export class LegalService {
     return res.data?.data || res.data;
   }
 
-  // --- REVIEW & APPROVAL WORKFLOW ---
-  /**
-   * Submits a legal review decision (Approve, Reject, Revise, etc.).
-   */
-  static async submitReview(
-    payload: SubmitLegalReviewPayload,
-    options?: LegalServiceOptions
-  ): Promise<any> {
-    const headers: Record<string, string> = {};
-    if (options?.idempotencyKey) {
-      headers['Idempotency-Key'] = options.idempotencyKey;
-    }
-    const res = await apiClient.post('/legal/contracts/review', payload, { headers });
-    return res.data?.data || res.data;
-  }
 
   // --- PDF GENERATION & BULLMQ ---
   /**

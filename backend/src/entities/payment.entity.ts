@@ -12,6 +12,9 @@ export class Payment {
   @Column({ name: 'invoice_id' })
   invoiceId: number;
 
+  @Column({ name: 'payment_request_id', nullable: true })
+  paymentRequestId?: number | null;
+
   @Column({ name: 'payment_number', unique: true })
   paymentNumber: string;
 

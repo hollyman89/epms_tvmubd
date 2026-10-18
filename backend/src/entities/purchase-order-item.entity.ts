@@ -23,6 +23,9 @@ export class PurchaseOrderItem {
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   quantity: number;
 
+  @Column({ type: 'varchar', length: 50, nullable: true, default: 'Unit' })
+  uom?: string;
+
   @Column({ type: 'decimal', precision: 10, scale: 2, name: 'received_quantity', default: 0 })
   receivedQuantity: number;
 

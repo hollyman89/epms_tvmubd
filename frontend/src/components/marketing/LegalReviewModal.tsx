@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Modal, Form, Select, Input, message } from 'antd';
-import { apiClient } from '@/lib/axios';
+import { WorkflowEngineService } from '@/services/workflowEngine.service';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -24,17 +24,30 @@ export const LegalReviewModal: React.FC<LegalReviewModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleLegalReview = async (values: any) => {
-    if (!contract || !contract.proposal_id) {
-      message.error('Invalid contract or missing proposal ID');
+    const contractId = contract?.id || contract?.contract_id;
+    if (!contract || !contractId) {
+      message.error('Invalid contract or missing contract ID');
       return;
     }
     setIsSubmitting(true);
     try {
-      await apiClient.post('/legal/contracts/review', {
-        proposalId: contract.proposal_id,
-        legalStatus: values.legalStatus,
-        legalNotes: values.legalNotes,
+      const instance = await WorkflowEngineService.getInstanceByEntity('CONTRACT', Number(contractId), 'LEGAL_REVIEW_WORKFLOW');
+      const pendingTask = instance?.tasks?.find(
+        (t: any) => (t.taskKey === 'LEGAL_REVIEW' || t.nodeId === 'node_legal_review') && t.status === 'PENDING'
+      );
+      if (!instance || !pendingTask) {
+        throw new Error('Task Legal Review aktif tidak ditemukan untuk kontrak ini.');
+      }
+
+      let action: 'APPROVE' | 'REJECT' | 'RETURN' = 'APPROVE';
+      if (values.legalStatus === 'REJECTED') action = 'REJECT';
+      else if (values.legalStatus === 'REVISION_REQUESTED') action = 'RETURN';
+
+      await WorkflowEngineService.completeTask(instance.id, pendingTask.id, {
+        action,
+        reason: values.legalNotes || 'Review submitted via modal',
       });
+
       message.success('Legal review submitted successfully');
       form.resetFields();
       if (onSuccess) {
@@ -42,7 +55,7 @@ export const LegalReviewModal: React.FC<LegalReviewModalProps> = ({
       }
       onClose();
     } catch (err: any) {
-      message.error(err.response?.data?.message || 'Error submitting review');
+      message.error(err.response?.data?.message || err.message || 'Error submitting review');
     } finally {
       setIsSubmitting(false);
     }

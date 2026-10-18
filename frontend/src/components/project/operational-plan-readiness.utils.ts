@@ -55,6 +55,8 @@ export interface EvaluateReadinessParams {
   isConditionComplete?: boolean;
   initialConditionId?: number | string | null;
   hasSavedDraftSinceRevision?: boolean;
+  hasPersistedRevisionAfterReturn?: boolean;
+  hasMeaningfulRevisionAfterReturn?: boolean;
   isRevisionMode?: boolean;
 }
 
@@ -76,6 +78,10 @@ export interface OperationalPlanReadinessResult {
   totalPillars: number;
   isOperationalPlanAuthoritativeReady: boolean;
   overallStatus: 'NOT_STARTED' | 'IN_PROGRESS' | 'READY' | 'BLOCKED' | string;
+
+  // Authoritative Revision Persistence State
+  hasPersistedRevisionAfterReturn: boolean;
+  hasMeaningfulRevisionAfterReturn: boolean;
 
   // Management Review Eligibility
   canSubmitManagementReview: boolean;
@@ -105,6 +111,8 @@ export function evaluateOperationalPlanReadiness(
     isConditionComplete = false,
     initialConditionId = null,
     hasSavedDraftSinceRevision = false,
+    hasPersistedRevisionAfterReturn,
+    hasMeaningfulRevisionAfterReturn,
     isRevisionMode = false,
   } = params;
 
@@ -144,12 +152,28 @@ export function evaluateOperationalPlanReadiness(
     overallStatus === 'READY' &&
     completenessScore === totalPillars;
 
-  // 5. Management Review UI Gate Alignment
+  // 5. Authoritative Revision Persistence Evaluation
+  const isRevisionSaved =
+    hasMeaningfulRevisionAfterReturn !== undefined
+      ? hasMeaningfulRevisionAfterReturn
+      : hasPersistedRevisionAfterReturn !== undefined
+        ? hasPersistedRevisionAfterReturn
+        : operationalReadinessData?.hasMeaningfulRevisionAfterReturn !== undefined
+          ? Boolean(operationalReadinessData.hasMeaningfulRevisionAfterReturn)
+          : operationalReadinessData?.hasPersistedRevisionAfterReturn !== undefined
+            ? Boolean(operationalReadinessData.hasPersistedRevisionAfterReturn)
+            : operationalReadinessData?.gate?.hasMeaningfulRevisionAfterReturn !== undefined
+              ? Boolean(operationalReadinessData.gate.hasMeaningfulRevisionAfterReturn)
+              : operationalReadinessData?.gate?.hasPersistedRevisionAfterReturn !== undefined
+                ? Boolean(operationalReadinessData.gate.hasPersistedRevisionAfterReturn)
+                : Boolean(hasSavedDraftSinceRevision);
+
+  // 6. Management Review UI Gate Alignment
   let canSubmitManagementReview = false;
   let reviewSubmissionTooltip = '';
 
   if (isRevisionMode) {
-    if (!hasSavedDraftSinceRevision) {
+    if (!isRevisionSaved) {
       canSubmitManagementReview = false;
       reviewSubmissionTooltip = 'Perbaiki dan simpan Operational Plan terlebih dahulu.';
     } else if (!isOperationalPlanAuthoritativeReady) {
@@ -182,6 +206,8 @@ export function evaluateOperationalPlanReadiness(
     totalPillars,
     isOperationalPlanAuthoritativeReady,
     overallStatus,
+    hasPersistedRevisionAfterReturn: isRevisionSaved,
+    hasMeaningfulRevisionAfterReturn: isRevisionSaved,
     canSubmitManagementReview,
     reviewSubmissionTooltip,
   };

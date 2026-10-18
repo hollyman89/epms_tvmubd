@@ -8,6 +8,8 @@ import { Payment } from '../../entities/payment.entity';
 import { PurchaseOrder } from '../../entities/purchase-order.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
 
+import { AnalyticsModule } from '../analytics/analytics.module';
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([
@@ -16,6 +18,7 @@ import { PurchaseRequest } from '../../entities/purchase-request.entity';
       PurchaseOrder,
       PurchaseRequest
     ]),
+    AnalyticsModule,
     CacheModule.register({
       // We use memory cache by default. For redis, we could use store: redisStore
       ttl: 60000, // 60 seconds TTL

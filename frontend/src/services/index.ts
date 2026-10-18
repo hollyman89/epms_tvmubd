@@ -5,3 +5,5 @@ export * from './procurement.service';
 export * from './finance.service';
 export * from './audit.service';
 export * from './inbox.service';
+export * from './dashboard.service';
+export * from './project-issue-risk.service';

@@ -17,9 +17,10 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:project:migration": "jest src/modules/project/task-schema.spec.ts --runInBand",
-    "test:project:domain": "jest src/modules/project/schedule-planning-persistence.spec.ts src/modules/project/schedule-service.spec.ts src/modules/project/wbs-planning-persistence.spec.ts src/modules/project/schedule-validation.spec.ts src/modules/project/wbs-validation.spec.ts src/modules/project/operational-plan-schema.spec.ts src/modules/project/operational-readiness.spec.ts src/modules/project/project-identity.spec.ts src/modules/project/project-planning-identity.spec.ts",
-    "test:project": "npm run test:project:migration && npm run test:project:domain"
+    "typeorm": "typeorm-ts-node-commonjs",
+    "migration:run": "typeorm-ts-node-commonjs migration:run -d src/data-source.ts",
+    "migration:show": "typeorm-ts-node-commonjs migration:show -d src/data-source.ts",
+    "migration:revert": "typeorm-ts-node-commonjs migration:revert -d src/data-source.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1090.0",
@@ -43,6 +44,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
     "cookie-parser": "^1.4.7",
+    "decimal.js": "^10.6.0",
     "dotenv": "^17.4.2",
     "ioredis": "^5.11.1",
     "mysql2": "^3.6.0",
@@ -92,15 +94,19 @@
       "json",
       "ts"
     ],
-    "rootDir": "src",
+    "rootDir": ".",
+    "roots": [
+      "<rootDir>/src",
+      "<rootDir>/test"
+    ],
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "src/**/*.(t|j)s"
     ],
-    "coverageDirectory": "../coverage",
+    "coverageDirectory": "coverage",
     "testEnvironment": "node"
   }
 }

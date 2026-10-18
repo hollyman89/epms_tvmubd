@@ -1,6 +1,7 @@
-import { Controller, Post, Get, Patch, Put, Body, Param, UseGuards, Req, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { Controller, Post, Get, Patch, Put, Body, Param, Query, UseGuards, Req, UnauthorizedException, ForbiddenException, Optional } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ProjectService } from './project.service';
+import { ProjectClosureService } from './project-closure.service';
 import { CreateWbsDto } from './dto/create-wbs.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { ClaimCharterDto } from './dto/claim-charter.dto';
@@ -13,6 +14,12 @@ import { SaveProjectScheduleDto } from './dto/save-project-schedule.dto';
 import { SaveInitialConditionDto } from './dto/save-initial-condition.dto';
 import { DecideManagementReviewDto } from './dto/decide-management-review.dto';
 import { AssignPmDto } from './dto/assign-pm.dto';
+import { GetProjectMasterQueryDto } from './dto/get-project-master.dto';
+import {
+  SubmitClosureDto,
+  ApproveClosureDto,
+  ReturnClosureDto,
+} from './dto/closure-workflow.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -20,9 +27,76 @@ import { Roles } from '../auth/decorators/roles.decorator';
 @ApiTags('Project')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Controller('project')
+@Controller(['project', 'projects'])
 export class ProjectController {
-  constructor(private readonly projectService: ProjectService) {}
+  constructor(
+    private readonly projectService: ProjectService,
+    @Optional() private readonly projectClosureService?: ProjectClosureService,
+  ) {}
+
+  @Get('master')
+  @Roles(
+    'SUPER_ADMIN',
+    'ADMIN',
+    'DIRECTOR',
+    'GENERAL_MANAGER',
+    'HEAD_OF_OPERATIONS',
+    'PMO',
+    'PROJECT_MANAGER',
+    'PROCUREMENT',
+    'PURCHASING',
+    'FINANCE',
+    'LEGAL',
+    'MARKETING',
+    'MARKETING_MANAGER',
+  )
+  @ApiOperation({ summary: 'Get Project Master authoritative directory projection' })
+  async getProjectMaster(
+    @Query() query: GetProjectMasterQueryDto,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId ?? req.user?.id ?? req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User identity is required');
+    }
+    const rawRoles = req.user?.roles || (req.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectService.getProjectMaster(query, Number(userId), userRoles);
+  }
+
+  @Get('master/:projectId')
+  @Roles(
+    'SUPER_ADMIN',
+    'ADMIN',
+    'DIRECTOR',
+    'GENERAL_MANAGER',
+    'HEAD_OF_OPERATIONS',
+    'PMO',
+    'PROJECT_MANAGER',
+    'PROCUREMENT',
+    'PURCHASING',
+    'FINANCE',
+    'LEGAL',
+    'MARKETING',
+    'MARKETING_MANAGER',
+  )
+  @ApiOperation({ summary: 'Get Project Master single detail projection with authoritative readiness' })
+  async getProjectMasterDetail(
+    @Param('projectId') projectId: string,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.userId ?? req.user?.id ?? req.user?.sub;
+    if (!userId) {
+      throw new UnauthorizedException('User identity is required');
+    }
+    const rawRoles = req.user?.roles || (req.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectService.getProjectMasterDetail(Number(projectId), Number(userId), userRoles);
+  }
 
   @Get('operational-board')
   @Roles(
@@ -185,6 +259,55 @@ export class ProjectController {
       Number(projectId),
       userId,
       userRoles,
+    );
+  }
+
+  @Get(':projectId/task-board')
+  @ApiOperation({ summary: 'Get authoritative project task board read model (Kanban workspace)' })
+  async getProjectTaskBoard(
+    @Param('projectId') projectId: number,
+    @Req() req?: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    const userRoles: string[] = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    return this.projectService.getProjectTaskBoard(
+      Number(projectId),
+      userId ? Number(userId) : undefined,
+      userRoles,
+    );
+  }
+
+  @Get(':projectId/progress-monitoring')
+  @ApiOperation({ summary: 'Get authoritative project progress and monitoring read model (Project Control & S-Curve)' })
+  async getProjectProgressMonitoring(
+    @Param('projectId') projectId: number,
+    @Query('asOf') asOf?: string,
+    @Req() req?: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    const userRoles: string[] = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    return this.projectService.getProjectProgressMonitoring(
+      Number(projectId),
+      userId ? Number(userId) : undefined,
+      userRoles,
+      asOf,
+    );
+  }
+
+  @Get(':projectId/gantt')
+  @ApiOperation({ summary: 'Get authoritative Gantt Baseline vs Actual schedule control workspace read model' })
+  async getProjectGantt(
+    @Param('projectId') projectId: number,
+    @Query('asOf') asOf?: string,
+    @Req() req?: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    const userRoles: string[] = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    return this.projectService.getProjectGantt(
+      Number(projectId),
+      userId ? Number(userId) : undefined,
+      userRoles,
+      asOf,
     );
   }
 
@@ -479,4 +602,198 @@ export class ProjectController {
     const userId = req?.user?.userId || req?.user?.id || req?.user?.sub || 1;
     return this.projectService.repairManagementReviewProjection(Number(projectId), Number(userId));
   }
+
+  // ==============================================================
+  // PROJECT CLOSURE READ-ONLY ENDPOINTS (R1-C2)
+  // ==============================================================
+
+  @Get(':projectId/closure-readiness')
+  @Roles(
+    'PROJECT_MANAGER',
+    'HEAD_OF_OPERATIONS',
+    'DIRECTOR',
+    'PMO',
+    'GENERAL_MANAGER',
+    'SUPER_ADMIN',
+    'PROCUREMENT',
+    'FINANCE',
+  )
+  @ApiOperation({ summary: 'Evaluate project closure readiness (Pure Read-Only)' })
+  async getClosureReadiness(
+    @Param('projectId') projectId: number | string,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    const rawRoles = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectClosureService!.evaluateClosureReadiness(
+      Number(projectId),
+      userId ? Number(userId) : undefined,
+      userRoles,
+    );
+  }
+
+  @Get(':projectId/closure/current')
+  @Roles('PROJECT_MANAGER', 'HEAD_OF_OPERATIONS', 'DIRECTOR', 'PMO', 'GENERAL_MANAGER')
+  @ApiOperation({ summary: 'Get current Project Closure cycle and workflow orchestration status' })
+  async getCurrentClosure(
+    @Param('projectId') projectId: number | string,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    const rawRoles = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectClosureService!.getCurrentClosure(
+      Number(projectId),
+      userId ? Number(userId) : undefined,
+      userRoles,
+    );
+  }
+
+  @Get(':projectId/closure/history')
+  @Roles('PROJECT_MANAGER', 'HEAD_OF_OPERATIONS', 'DIRECTOR', 'PMO', 'GENERAL_MANAGER')
+  @ApiOperation({ summary: 'Get all Project Closure historical cycles' })
+  async getClosureHistory(
+    @Param('projectId') projectId: number | string,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    const rawRoles = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectClosureService!.getClosureHistory(
+      Number(projectId),
+      userId ? Number(userId) : undefined,
+      userRoles,
+    );
+  }
+
+  // ==============================================================
+  // PROJECT CLOSURE WORKFLOW ENDPOINTS (R1-C3)
+  // ==============================================================
+
+  @Post(':projectId/closure/submit')
+  @Roles('PROJECT_MANAGER')
+  @ApiOperation({ summary: 'PM Submit Project Closure (Initiates cycle and workflow)' })
+  async submitClosure(
+    @Param('projectId') projectId: number | string,
+    @Body() dto: SubmitClosureDto,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    if (!userId) throw new UnauthorizedException('Identitas pengguna tidak ditemukan pada token');
+    const rawRoles = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectClosureService!.submitClosure(
+      Number(projectId),
+      dto,
+      Number(userId),
+      userRoles,
+    );
+  }
+
+  @Post(':projectId/closure/:closureId/hoo/approve')
+  @Roles('HEAD_OF_OPERATIONS')
+  @ApiOperation({ summary: 'HOO Approve Project Closure' })
+  async hooApprove(
+    @Param('projectId') projectId: number | string,
+    @Param('closureId') closureId: number | string,
+    @Body() dto: ApproveClosureDto,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    if (!userId) throw new UnauthorizedException('Identitas pengguna tidak ditemukan pada token');
+    const rawRoles = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectClosureService!.hooApprove(
+      Number(projectId),
+      Number(closureId),
+      dto,
+      Number(userId),
+      userRoles,
+    );
+  }
+
+  @Post(':projectId/closure/:closureId/hoo/return')
+  @Roles('HEAD_OF_OPERATIONS')
+  @ApiOperation({ summary: 'HOO Return Project Closure' })
+  async hooReturn(
+    @Param('projectId') projectId: number | string,
+    @Param('closureId') closureId: number | string,
+    @Body() dto: ReturnClosureDto,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    if (!userId) throw new UnauthorizedException('Identitas pengguna tidak ditemukan pada token');
+    const rawRoles = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectClosureService!.hooReturn(
+      Number(projectId),
+      Number(closureId),
+      dto,
+      Number(userId),
+      userRoles,
+    );
+  }
+
+  @Post(':projectId/closure/:closureId/director/approve')
+  @Roles('DIRECTOR')
+  @ApiOperation({ summary: 'Director Final Approve Project Closure' })
+  async directorApprove(
+    @Param('projectId') projectId: number | string,
+    @Param('closureId') closureId: number | string,
+    @Body() dto: ApproveClosureDto,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    if (!userId) throw new UnauthorizedException('Identitas pengguna tidak ditemukan pada token');
+    const rawRoles = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectClosureService!.directorApprove(
+      Number(projectId),
+      Number(closureId),
+      dto,
+      Number(userId),
+      userRoles,
+    );
+  }
+
+  @Post(':projectId/closure/:closureId/director/return')
+  @Roles('DIRECTOR')
+  @ApiOperation({ summary: 'Director Return Project Closure' })
+  async directorReturn(
+    @Param('projectId') projectId: number | string,
+    @Param('closureId') closureId: number | string,
+    @Body() dto: ReturnClosureDto,
+    @Req() req: any,
+  ) {
+    const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
+    if (!userId) throw new UnauthorizedException('Identitas pengguna tidak ditemukan pada token');
+    const rawRoles = req?.user?.roles || (req?.user?.role ? [req.user.role] : []);
+    const userRoles: string[] = (Array.isArray(rawRoles) ? rawRoles : [rawRoles]).map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+    return this.projectClosureService!.directorReturn(
+      Number(projectId),
+      Number(closureId),
+      dto,
+      Number(userId),
+      userRoles,
+    );
+  }
 }
+
+

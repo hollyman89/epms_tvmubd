@@ -1,11 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import { NotificationService } from '../notification/notification.service';
 import { Contract, LegalStatus } from '../../entities/contract.entity';
 import { Tender, TenderStage, GoNoGoStatus } from '../../entities/tender.entity';
-import { TodoReadModelDto, InboxSummaryDto } from './inbox.dto';
+import { PaymentRequest, PaymentRequestStatus } from '../../entities/payment-request.entity';
+import { ProjectProgressLog } from '../../entities/project-progress-log.entity';
+import { ServiceClaim, ServiceClaimStatus } from '../../entities/service-claim.entity';
+import { ProjectClosure, ProjectClosureStatus } from '../../entities/project-closure.entity';
+import { WorkflowTask, WorkflowTaskStatus } from '../../entities/workflow-task.entity';
+import { TodoReadModelDto, InboxSummaryDto, HistoryItemDto } from './inbox.dto';
 
 const LEGAL_REVIEW_ROLES = ['LEGAL', 'SUPER_ADMIN', 'ADMIN'];
 const TENDER_GO_NOGO_ROLES = ['DIRECTOR', 'GENERAL_MANAGER', 'SUPER_ADMIN'];
@@ -35,6 +40,16 @@ export class InboxService {
     private readonly contractRepo: Repository<Contract>,
     @InjectRepository(Tender)
     private readonly tenderRepo: Repository<Tender>,
+    @InjectRepository(PaymentRequest)
+    private readonly paymentRequestRepo: Repository<PaymentRequest>,
+    @InjectRepository(ProjectProgressLog)
+    private readonly progressLogRepo: Repository<ProjectProgressLog>,
+    @InjectRepository(ServiceClaim)
+    private readonly claimRepo: Repository<ServiceClaim>,
+    @InjectRepository(ProjectClosure)
+    private readonly closureRepo: Repository<ProjectClosure>,
+    @InjectRepository(WorkflowTask)
+    private readonly taskRepo: Repository<WorkflowTask>,
   ) {}
 
   /**
@@ -125,6 +140,51 @@ export class InboxService {
             actionType = task.taskKey || 'WORKFLOW_TASK';
             actionTarget = null;
             title = `Tugas Tender: ${task.taskKey || task.id}`;
+          }
+        } else if (entityType === 'CONTRACT') {
+          let resolvedTenderId = task.workflowInstance?.context?.tenderId
+            ? Number(task.workflowInstance.context.tenderId)
+            : undefined;
+          let contractNumber = task.workflowInstance?.context?.contractNumber;
+
+          if (!resolvedTenderId || !contractNumber) {
+            try {
+              const contract = await this.contractRepo.findOne({
+                where: { id: entityId },
+                relations: ['proposal'],
+              });
+              if (contract) {
+                resolvedTenderId = contract.tender_id || contract.proposal?.tender_id;
+                contractNumber = contract.contract_number;
+              }
+            } catch (err: any) {
+              this.logger.warn(`Could not resolve contract context for contract #${entityId}: ${err?.message}`);
+            }
+          }
+
+          if (task.taskKey === 'LEGAL_DOCUMENT_REVISION' || task.nodeId === 'node_marketing_revision') {
+            actionType = 'LEGAL_DOCUMENT_REVISION';
+            actionTarget = resolvedTenderId ? `/sales?tab=1&tenderId=${resolvedTenderId}` : null;
+            title = `Revisi Dokumen SPK / Kontrak #${contractNumber || entityId}`;
+
+            if (resolvedTenderId) {
+              const context = await this.enrichTenderBusinessContext(
+                resolvedTenderId,
+                task.workflowInstance?.id ? Number(task.workflowInstance.id) : undefined,
+              );
+              projectName = context.projectName;
+              customerName = context.customerName;
+              returnedByName = context.returnedByName;
+              returnReason = context.returnReason;
+            }
+          } else if (task.taskKey === 'LEGAL_REVIEW' || task.nodeId === 'node_legal_review') {
+            actionType = 'LEGAL_REVIEW';
+            actionTarget = `/legal/review?contractId=${entityId}`;
+            title = `Review Legal Kontrak #${contractNumber || entityId}`;
+          } else {
+            actionType = task.taskKey || 'WORKFLOW_TASK';
+            actionTarget = null;
+            title = `Tugas Kontrak: ${task.taskKey || task.id}`;
           }
         } else {
           // Generic unmapped workflow task: explicit unresolved state (no /inbox fallback)
@@ -248,7 +308,374 @@ export class InboxService {
       }
     }
 
-    // 4. Deterministic Ordering:
+    // 4. Authoritative Domain Queue: Payment Requests (Finance & Director)
+    const isDirector = normalizedRoles.some((r) => r === 'DIRECTOR' || r === 'SUPER_ADMIN');
+    const isFinance = normalizedRoles.some((r) => r === 'FINANCE' || r === 'SUPER_ADMIN');
+
+    if (isDirector) {
+      try {
+        const pendingApprovalRequests = await this.paymentRequestRepo.find({
+          where: { status: PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL },
+          relations: ['invoice', 'invoice.purchaseOrder', 'invoice.purchaseOrder.vendor', 'requester'],
+          order: { id: 'DESC' },
+        });
+
+        for (const prq of pendingApprovalRequests) {
+          todos.push({
+            todoId: `prq-${prq.id}`,
+            sourceType: 'DOMAIN_PAYMENT_REQUEST',
+            sourceId: String(prq.id),
+            assignedRole: 'DIRECTOR',
+            entityType: 'PEMBAYARAN',
+            entityId: Number(prq.id),
+            actionType: 'PAYMENT_REQUEST_APPROVAL',
+            actionTarget: `/finance/payments?tab=approvals&requestId=${prq.id}`,
+            title: `Persetujuan Pembayaran`,
+            description: `Pengajuan pembayaran ${prq.requestNumber} untuk invoice ${prq.invoice?.invoiceNumber || '#' + prq.invoiceId} menunggu persetujuan Direktur.`,
+            status: prq.status,
+            createdAt: prq.submittedAt ? new Date(prq.submittedAt).toISOString() : new Date().toISOString(),
+            projectName: prq.invoice?.purchaseOrder?.poNumber || undefined,
+            customerName: prq.invoice?.purchaseOrder?.vendor?.name || undefined,
+            submittedByName: prq.requester?.fullName || 'Finance User',
+          });
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch pending approval payment requests: ${err.message}`, err.stack);
+      }
+    }
+
+    if (isFinance) {
+      try {
+        const financeActionableRequests = await this.paymentRequestRepo.find({
+          where: {
+            status: In([
+              PaymentRequestStatus.NEEDS_REVISION,
+              PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+            ]),
+          },
+          relations: ['invoice', 'invoice.purchaseOrder', 'invoice.purchaseOrder.vendor', 'requester', 'approver'],
+          order: { id: 'DESC' },
+        });
+
+        for (const prq of financeActionableRequests) {
+          if (prq.status === PaymentRequestStatus.NEEDS_REVISION) {
+            todos.push({
+              todoId: `prq-rev-${prq.id}`,
+              sourceType: 'DOMAIN_PAYMENT_REQUEST',
+              sourceId: String(prq.id),
+              assignedRole: 'FINANCE',
+              entityType: 'PEMBAYARAN',
+              entityId: Number(prq.id),
+              actionType: 'PAYMENT_REQUEST_REVISION',
+              actionTarget: `/finance/payments?tab=requests&requestId=${prq.id}`,
+              title: `Revisi Pengajuan Pembayaran`,
+              description: prq.revisionNotes ? `${prq.requestNumber}: ${prq.revisionNotes}` : `Revisi pengajuan pembayaran ${prq.requestNumber}`,
+              status: prq.status,
+              createdAt: prq.returnedAt ? new Date(prq.returnedAt).toISOString() : new Date().toISOString(),
+              projectName: prq.invoice?.purchaseOrder?.poNumber || undefined,
+              customerName: prq.invoice?.purchaseOrder?.vendor?.name || undefined,
+              returnedByName: prq.approver?.fullName || 'Direktur',
+              returnReason: prq.revisionNotes || undefined,
+            });
+          } else if (prq.status === PaymentRequestStatus.APPROVED_FOR_PAYMENT) {
+            todos.push({
+              todoId: `prq-pay-${prq.id}`,
+              sourceType: 'DOMAIN_PAYMENT_REQUEST',
+              sourceId: String(prq.id),
+              assignedRole: 'FINANCE',
+              entityType: 'PEMBAYARAN',
+              entityId: Number(prq.id),
+              actionType: 'PROCESS_PAYMENT',
+              actionTarget: `/finance/payments?tab=ready_to_pay&requestId=${prq.id}`,
+              title: `Proses Pembayaran`,
+              description: `Tagihan ${prq.requestNumber} (${prq.invoice?.invoiceNumber || ''}) siap diproses pembayaran setelah disetujui Direktur.`,
+              status: prq.status,
+              createdAt: prq.approvedAt ? new Date(prq.approvedAt).toISOString() : new Date().toISOString(),
+              projectName: prq.invoice?.purchaseOrder?.poNumber || undefined,
+              customerName: prq.invoice?.purchaseOrder?.vendor?.name || undefined,
+            });
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch finance actionable payment requests: ${err.message}`, err.stack);
+      }
+    }
+
+    // 5. Authoritative Domain Queue: Project Progress Claim Verification (HEAD_OF_OPERATIONS & PMO)
+    const isProgressReviewer = normalizedRoles.some((role) =>
+      ['HEAD_OF_OPERATIONS', 'PMO', 'SUPER_ADMIN'].includes(role),
+    );
+    if (isProgressReviewer && this.progressLogRepo) {
+      try {
+        const pendingClaims = await this.progressLogRepo
+          .createQueryBuilder('log')
+          .leftJoinAndSelect('log.task', 'task')
+          .leftJoinAndSelect('log.submitter', 'submitter')
+          .leftJoinAndSelect('log.project', 'project')
+          .where('log.status = :status', { status: 'PENDING_VERIFICATION' })
+          .orderBy('log.id', 'DESC')
+          .getMany();
+
+        for (const claim of pendingClaims) {
+          // Segregation of Duties: Submitter cannot verify their own claim
+          if (Number(claim.submitted_by) === Number(userId)) {
+            continue;
+          }
+
+          const projectName = claim.project?.name || `Proyek #${claim.project_id}`;
+          const taskName = claim.task?.name || `Task #${claim.task_id}`;
+          const prevProg = Number(claim.previous_progress);
+          const repProg = Number(claim.reported_progress);
+
+          todos.push({
+            todoId: `progress-claim-${claim.id}`,
+            sourceType: 'DOMAIN_PROGRESS_CLAIM',
+            sourceId: String(claim.id),
+            taskId: Number(claim.task_id),
+            assignedRole: 'HEAD_OF_OPERATIONS',
+            entityType: 'PROJECT_PROGRESS_CLAIM',
+            entityId: Number(claim.id),
+            projectId: Number(claim.project_id),
+            actionType: 'PROGRESS_CLAIM_VERIFICATION',
+            actionTarget: `/project-delivery?view=workspace&projectId=${claim.project_id}&section=tasks&progressClaimId=${claim.id}`,
+            title: `Verifikasi Klaim Progres: ${taskName} (${prevProg}% → ${repProg}%)`,
+            description: claim.reason || 'Klaim progres kritis menunggu verifikasi',
+            status: claim.status,
+            createdAt: claim.created_at ? new Date(claim.created_at).toISOString() : new Date().toISOString(),
+            updatedAt: claim.updated_at ? new Date(claim.updated_at).toISOString() : undefined,
+            projectName,
+            submittedByName: claim.submitter?.fullName || undefined,
+          });
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch pending progress claims: ${err.message}`, err.stack);
+      }
+    }
+
+    // 6. Authoritative Domain Queue: Service Claims (PM Technical Verification & Procurement Commercial Approval)
+    const isProcurementRole = normalizedRoles.some((role) =>
+      ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'].includes(role),
+    );
+
+    if (this.claimRepo) {
+      try {
+        const actionableClaims = await this.claimRepo.find({
+          where: {
+            status: In([
+              ServiceClaimStatus.SUBMITTED,
+              ServiceClaimStatus.PM_VERIFIED,
+              ServiceClaimStatus.NEEDS_REVISION,
+            ]),
+          },
+          relations: ['project', 'purchaseOrder'],
+          order: { id: 'DESC' },
+        });
+
+        for (const claim of actionableClaims) {
+          // Transitional Deduplication with WORKFLOW_TASK
+          const hasMatchingWfTask = todos.some(
+            (t) =>
+              t.sourceType === 'WORKFLOW_TASK' &&
+              t.entityType === 'SERVICE_CLAIM' &&
+              Number(t.entityId) === Number(claim.id),
+          );
+          if (hasMatchingWfTask) continue;
+
+          const projectName = claim.project?.name || undefined;
+          const poNumber = claim.purchaseOrder?.poNumber || String(claim.poId);
+
+          // 6.1 SUBMITTED -> PM Technical Verification (assigned PM or SUPER_ADMIN)
+          if (claim.status === ServiceClaimStatus.SUBMITTED) {
+            const isAssignedPm =
+              claim.project?.managerId !== undefined &&
+              claim.project?.managerId !== null &&
+              Number(claim.project.managerId) === Number(userId);
+
+            if (isAssignedPm || normalizedRoles.includes('SUPER_ADMIN')) {
+              todos.push({
+                todoId: `service-claim-${claim.id}`,
+                sourceType: 'DOMAIN_SERVICE_CLAIM',
+                sourceId: String(claim.id),
+                assignedUserId: claim.project?.managerId ? Number(claim.project.managerId) : undefined,
+                assignedRole: 'PROJECT_MANAGER',
+                entityType: 'SERVICE_CLAIM',
+                entityId: Number(claim.id),
+                projectId: Number(claim.projectId),
+                actionType: 'SERVICE_CLAIM_VERIFICATION',
+                actionTarget: `/project-delivery?projectId=${claim.projectId}&serviceClaimId=${claim.id}`,
+                title: `Verifikasi Teknis Klaim Jasa #${claim.claimNumber}`,
+                description: `Klaim jasa senilai Rp ${Number(claim.totalClaimAmount || 0).toLocaleString('id-ID')} untuk PO #${poNumber} menunggu verifikasi teknis PM.`,
+                status: claim.status,
+                createdAt: claim.submittedAt ? new Date(claim.submittedAt).toISOString() : (claim.createdAt ? new Date(claim.createdAt).toISOString() : new Date().toISOString()),
+                updatedAt: claim.updatedAt ? new Date(claim.updatedAt).toISOString() : undefined,
+                projectName,
+              });
+            }
+          }
+
+          // 6.2 PM_VERIFIED -> Procurement Commercial Approval (PROCUREMENT / PURCHASING / SUPER_ADMIN)
+          if (claim.status === ServiceClaimStatus.PM_VERIFIED && isProcurementRole) {
+            todos.push({
+              todoId: `service-claim-comm-${claim.id}`,
+              sourceType: 'DOMAIN_SERVICE_CLAIM',
+              sourceId: String(claim.id),
+              assignedRole: 'PROCUREMENT',
+              entityType: 'SERVICE_CLAIM',
+              entityId: Number(claim.id),
+              projectId: Number(claim.projectId),
+              actionType: 'SERVICE_CLAIM_COMMERCIAL_APPROVAL',
+              actionTarget: `/procurement?tab=po&poId=${claim.poId}&action=service-claim`,
+              title: `Persetujuan Komersial Klaim Jasa #${claim.claimNumber}`,
+              description: `Klaim jasa senilai Rp ${Number(claim.totalClaimAmount || 0).toLocaleString('id-ID')} untuk PO #${poNumber} telah diverifikasi PM dan menunggu persetujuan komersial.`,
+              status: claim.status,
+              createdAt: claim.pmVerifiedAt ? new Date(claim.pmVerifiedAt).toISOString() : (claim.updatedAt ? new Date(claim.updatedAt).toISOString() : new Date().toISOString()),
+              updatedAt: claim.updatedAt ? new Date(claim.updatedAt).toISOString() : undefined,
+              projectName,
+            });
+          }
+
+          // 6.3 NEEDS_REVISION -> Submitter revision
+          if (claim.status === ServiceClaimStatus.NEEDS_REVISION) {
+            const isSubmitter = Number(claim.submittedBy) === Number(userId);
+            if (isSubmitter || normalizedRoles.includes('SUPER_ADMIN')) {
+              todos.push({
+                todoId: `service-claim-rev-${claim.id}`,
+                sourceType: 'DOMAIN_SERVICE_CLAIM',
+                sourceId: String(claim.id),
+                assignedUserId: claim.submittedBy ? Number(claim.submittedBy) : undefined,
+                entityType: 'SERVICE_CLAIM',
+                entityId: Number(claim.id),
+                projectId: Number(claim.projectId),
+                actionType: 'SERVICE_CLAIM_REVISION',
+                actionTarget: `/project-delivery?projectId=${claim.projectId}&serviceClaimId=${claim.id}`,
+                title: `Revisi Klaim Jasa #${claim.claimNumber}`,
+                description: claim.notes || 'Klaim jasa memerlukan revisi.',
+                status: claim.status,
+                createdAt: claim.updatedAt ? new Date(claim.updatedAt).toISOString() : new Date().toISOString(),
+                projectName,
+                returnReason: claim.notes || undefined,
+              });
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch pending service claims: ${err.message}`, err.stack);
+      }
+    }
+
+    // 7. Authoritative Domain Queue: Project Closures (HOO Review, Director Approval, PM Revision)
+    const isHooRole = normalizedRoles.some((role) =>
+      ['HEAD_OF_OPERATIONS', 'SUPER_ADMIN'].includes(role),
+    );
+    const isDirectorApprovalRole = normalizedRoles.some((role) =>
+      ['DIRECTOR', 'SUPER_ADMIN'].includes(role),
+    );
+
+    if (this.closureRepo) {
+      try {
+        const actionableClosures = await this.closureRepo.find({
+          where: {
+            status: In([
+              ProjectClosureStatus.PENDING_HOO_REVIEW,
+              ProjectClosureStatus.PENDING_DIRECTOR_APPROVAL,
+              ProjectClosureStatus.RETURNED,
+            ]),
+          },
+          relations: ['project', 'submittedBy', 'returnActor'],
+          order: { id: 'DESC' },
+        });
+
+        for (const closure of actionableClosures) {
+          // Transitional Deduplication with WORKFLOW_TASK
+          const hasMatchingWfTask = todos.some(
+            (t) =>
+              t.sourceType === 'WORKFLOW_TASK' &&
+              t.entityType === 'PROJECT_CLOSURE' &&
+              Number(t.entityId) === Number(closure.id),
+          );
+          if (hasMatchingWfTask) continue;
+
+          const projectName = closure.project?.name || `Proyek #${closure.projectId}`;
+
+          // 7.1 PENDING_HOO_REVIEW -> HEAD_OF_OPERATIONS / SUPER_ADMIN
+          if (closure.status === ProjectClosureStatus.PENDING_HOO_REVIEW && isHooRole) {
+            todos.push({
+              todoId: `closure-hoo-${closure.id}`,
+              sourceType: 'DOMAIN_PROJECT_CLOSURE',
+              sourceId: String(closure.id),
+              assignedRole: 'HEAD_OF_OPERATIONS',
+              entityType: 'PROJECT_CLOSURE',
+              entityId: Number(closure.id),
+              projectId: Number(closure.projectId),
+              actionType: 'PROJECT_CLOSURE_HOO_REVIEW',
+              actionTarget: `/governance/tasks?projectId=${closure.projectId}`,
+              title: `Review Penutupan Proyek: ${projectName}`,
+              description: `Pengajuan penutupan proyek siklus ${closure.cycleNumber} menunggu review Head of Operations.`,
+              status: closure.status,
+              createdAt: closure.submittedAt ? new Date(closure.submittedAt).toISOString() : new Date().toISOString(),
+              projectName,
+              submittedByName: closure.submittedBy?.fullName || undefined,
+            });
+          }
+
+          // 7.2 PENDING_DIRECTOR_APPROVAL -> DIRECTOR / SUPER_ADMIN
+          if (closure.status === ProjectClosureStatus.PENDING_DIRECTOR_APPROVAL && isDirectorApprovalRole) {
+            todos.push({
+              todoId: `closure-dir-${closure.id}`,
+              sourceType: 'DOMAIN_PROJECT_CLOSURE',
+              sourceId: String(closure.id),
+              assignedRole: 'DIRECTOR',
+              entityType: 'PROJECT_CLOSURE',
+              entityId: Number(closure.id),
+              projectId: Number(closure.projectId),
+              actionType: 'PROJECT_CLOSURE_DIRECTOR_APPROVAL',
+              actionTarget: `/governance/tasks?projectId=${closure.projectId}`,
+              title: `Persetujuan Penutupan Proyek: ${projectName}`,
+              description: `Penutupan proyek siklus ${closure.cycleNumber} telah direview HOO dan menunggu persetujuan Direktur.`,
+              status: closure.status,
+              createdAt: closure.hooReviewedAt ? new Date(closure.hooReviewedAt).toISOString() : (closure.submittedAt ? new Date(closure.submittedAt).toISOString() : new Date().toISOString()),
+              projectName,
+              submittedByName: closure.submittedBy?.fullName || undefined,
+            });
+          }
+
+          // 7.3 RETURNED -> PM Revision (assigned PM of project, or submitter, or SUPER_ADMIN)
+          if (closure.status === ProjectClosureStatus.RETURNED) {
+            const isAssignedPm =
+              closure.project?.managerId !== undefined &&
+              closure.project?.managerId !== null &&
+              Number(closure.project.managerId) === Number(userId);
+            const isSubmitter = Number(closure.submittedById) === Number(userId);
+
+            if (isAssignedPm || isSubmitter || normalizedRoles.includes('SUPER_ADMIN')) {
+              todos.push({
+                todoId: `closure-ret-${closure.id}`,
+                sourceType: 'DOMAIN_PROJECT_CLOSURE',
+                sourceId: String(closure.id),
+                assignedUserId: closure.submittedById ? Number(closure.submittedById) : undefined,
+                assignedRole: 'PROJECT_MANAGER',
+                entityType: 'PROJECT_CLOSURE',
+                entityId: Number(closure.id),
+                projectId: Number(closure.projectId),
+                actionType: 'PROJECT_CLOSURE_REVISION',
+                actionTarget: `/project-delivery?view=workspace&projectId=${closure.projectId}&section=closure`,
+                title: `Revisi Penutupan Proyek: ${projectName}`,
+                description: closure.returnReason ? `Catatan: ${closure.returnReason}` : 'Penutupan proyek dikembalikan untuk revisi.',
+                status: closure.status,
+                createdAt: closure.returnTimestamp ? new Date(closure.returnTimestamp).toISOString() : new Date().toISOString(),
+                projectName,
+                returnedByName: closure.returnActor?.fullName || undefined,
+                returnReason: closure.returnReason || undefined,
+              });
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch pending project closures: ${err.message}`, err.stack);
+      }
+    }
+
+    // 8. Deterministic Ordering:
     // 1st: Overdue tasks (dueAt < now, earliest dueAt first)
     // 2nd: Upcoming due dates (dueAt >= now, earliest dueAt first)
     // 3rd: Newest createdAt (newest created first)
@@ -292,6 +719,222 @@ export class InboxService {
       todoCount: todos.length,
       unreadNotificationCount,
     };
+  }
+
+  /**
+   * Retrieves historical completed workflow and domain tasks for current authenticated user.
+   * Strictly read-only projection: respects user role scoping and returns completed, returned,
+   * and rejected decisions newest first.
+   */
+  async getHistory(userId: number, roles: string[] = []): Promise<HistoryItemDto[]> {
+    const history: HistoryItemDto[] = [];
+    const normalizedRoles = roles.map((r) => String(r).toUpperCase());
+    const isSuperAdmin = normalizedRoles.includes('SUPER_ADMIN');
+
+    // 1. Authoritative Decided / Completed Workflow Tasks
+    if (this.taskRepo) {
+      try {
+        const query = this.taskRepo
+          .createQueryBuilder('task')
+          .leftJoinAndSelect('task.workflowInstance', 'instance')
+          .leftJoinAndSelect('instance.workflowDefinition', 'definition')
+          .leftJoinAndSelect('task.assigneeRole', 'role')
+          .leftJoinAndSelect('task.decidedByUser', 'decidedUser')
+          .where('task.status IN (:...statuses)', {
+            statuses: [
+              WorkflowTaskStatus.COMPLETED,
+              WorkflowTaskStatus.RETURNED,
+              WorkflowTaskStatus.REJECTED,
+              WorkflowTaskStatus.CANCELED,
+            ],
+          });
+
+        if (!isSuperAdmin) {
+          query.andWhere(
+            '(task.decided_by = :userId OR task.assignee_user_id = :userId OR role.name IN (:...roles))',
+            { userId, roles: normalizedRoles.length > 0 ? normalizedRoles : ['__NONE__'] },
+          );
+        }
+
+        const tasks = await query.orderBy('task.updatedAt', 'DESC').getMany();
+
+        for (const task of tasks) {
+          // Strict PM Scoping: Project Manager only sees their own assigned project history
+          const isPmOnly =
+            normalizedRoles.includes('PROJECT_MANAGER') &&
+            !isSuperAdmin &&
+            !normalizedRoles.some((r) =>
+              ['DIRECTOR', 'GENERAL_MANAGER', 'PMO', 'HEAD_OF_OPERATIONS'].includes(r),
+            );
+          const instanceAny = task.workflowInstance as any;
+          const projectManagerId = instanceAny?.project?.managerId ?? instanceAny?.context?.managerId;
+          if (isPmOnly && projectManagerId) {
+            const assignedPmId = Number(projectManagerId);
+            const isAssignedPm = assignedPmId === Number(userId);
+            const isActor =
+              Number(task.decidedBy) === Number(userId) ||
+              Number(task.assigneeUserId) === Number(userId);
+            if (!isAssignedPm && !isActor) {
+              continue;
+            }
+          }
+
+          const entityType = task.workflowInstance?.entityType || 'WORKFLOW';
+          const entityId = Number(task.workflowInstance?.entityId || 0);
+          let projectId: number | undefined;
+          let projectName: string | undefined;
+          let customerName: string | undefined;
+
+          if (entityType === 'PROJECT') {
+            projectId = entityId > 0 ? entityId : Number(task.workflowInstance?.context?.projectId || 0) || undefined;
+          } else if (entityType === 'PURCHASE_REQUEST') {
+            projectId = Number(task.workflowInstance?.context?.projectId || 0) || undefined;
+          } else if (entityType === 'TENDER') {
+            const context = await this.enrichTenderBusinessContext(entityId);
+            projectName = context.projectName;
+            customerName = context.customerName;
+          }
+
+          history.push({
+            historyId: `task-history-${task.id}`,
+            taskId: Number(task.id),
+            workflowInstanceId: Number(task.workflowInstanceId),
+            workflowKey: task.workflowInstance?.workflowDefinition?.workflowKey,
+            taskKey: task.taskKey,
+            entityType,
+            entityId,
+            projectId,
+            projectName,
+            customerName,
+            title: task.taskKey || `Tugas #${task.id}`,
+            status: task.status,
+            action: task.action || undefined,
+            decidedBy: task.decidedBy ? Number(task.decidedBy) : undefined,
+            decidedByName: task.decidedByUser?.fullName || undefined,
+            decidedAt: task.decidedAt ? new Date(task.decidedAt).toISOString() : undefined,
+            comments: task.comments || undefined,
+            dueAt: task.dueAt ? new Date(task.dueAt).toISOString() : undefined,
+            createdAt: task.createdAt ? new Date(task.createdAt).toISOString() : new Date().toISOString(),
+            completedAt: task.decidedAt
+              ? new Date(task.decidedAt).toISOString()
+              : task.updatedAt
+              ? new Date(task.updatedAt).toISOString()
+              : undefined,
+          });
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch workflow history: ${err.message}`, err.stack);
+      }
+    }
+
+    // 2. Authoritative Domain Completed Tasks: Payment Requests (for Finance & Director)
+    const isDirector = normalizedRoles.some((r) => r === 'DIRECTOR' || r === 'SUPER_ADMIN');
+    const isFinance = normalizedRoles.some((r) => r === 'FINANCE' || r === 'SUPER_ADMIN');
+    if (this.paymentRequestRepo && (isDirector || isFinance)) {
+      try {
+        const decidedPaymentRequests = await this.paymentRequestRepo.find({
+          where: {
+            status: In([
+              PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+              PaymentRequestStatus.PAID,
+              PaymentRequestStatus.REJECTED,
+            ]),
+          },
+          relations: ['invoice', 'invoice.purchaseOrder', 'invoice.purchaseOrder.vendor', 'approver'],
+          order: { id: 'DESC' },
+          take: 50,
+        });
+
+        for (const prq of decidedPaymentRequests) {
+          history.push({
+            historyId: `prq-history-${prq.id}`,
+            taskId: Number(prq.id),
+            workflowInstanceId: 0,
+            taskKey: 'PAYMENT_REQUEST_DECISION',
+            entityType: 'PEMBAYARAN',
+            entityId: Number(prq.id),
+            projectName: prq.invoice?.purchaseOrder?.poNumber || undefined,
+            customerName: prq.invoice?.purchaseOrder?.vendor?.name || undefined,
+            title: `Pengajuan Pembayaran #${prq.requestNumber}`,
+            status: prq.status,
+            action: prq.status === PaymentRequestStatus.REJECTED ? 'REJECT' : 'APPROVE',
+            decidedBy: prq.approvedBy ? Number(prq.approvedBy) : undefined,
+            decidedByName: prq.approver?.fullName || undefined,
+            decidedAt: prq.approvedAt ? new Date(prq.approvedAt).toISOString() : undefined,
+            createdAt: prq.createdAt ? new Date(prq.createdAt).toISOString() : new Date().toISOString(),
+            completedAt: prq.approvedAt
+              ? new Date(prq.approvedAt).toISOString()
+              : prq.updatedAt
+              ? new Date(prq.updatedAt).toISOString()
+              : undefined,
+          });
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch payment request history: ${err.message}`, err.stack);
+      }
+    }
+
+    // 3. Authoritative Domain Completed Tasks: Project Closures (for HOO, Director, PM)
+    const isHooOrDirector = normalizedRoles.some((r) =>
+      ['HEAD_OF_OPERATIONS', 'DIRECTOR', 'PMO', 'SUPER_ADMIN'].includes(r),
+    );
+    if (this.closureRepo && (isHooOrDirector || normalizedRoles.includes('PROJECT_MANAGER'))) {
+      try {
+        const decidedClosures = await this.closureRepo.find({
+          where: {
+            status: In([ProjectClosureStatus.APPROVED, 'CLOSED']),
+          },
+          relations: ['project', 'directorApprover'],
+          order: { id: 'DESC' },
+          take: 50,
+        });
+
+        for (const cl of decidedClosures) {
+          if (!isSuperAdmin && !isHooOrDirector) {
+            // If PM: only show if assigned PM of this project
+            if (
+              Number(cl.project?.managerId) !== Number(userId) &&
+              Number(cl.submittedById) !== Number(userId)
+            ) {
+              continue;
+            }
+          }
+          history.push({
+            historyId: `closure-history-${cl.id}`,
+            taskId: Number(cl.id),
+            workflowInstanceId: 0,
+            taskKey: 'PROJECT_CLOSURE_APPROVAL',
+            entityType: 'PROJECT_CLOSURE',
+            entityId: Number(cl.id),
+            projectId: Number(cl.projectId),
+            projectName: cl.project?.name || undefined,
+            title: `Penutupan Proyek #${cl.projectId}`,
+            status: cl.status,
+            action: 'APPROVE',
+            decidedBy: cl.directorApproverId ? Number(cl.directorApproverId) : undefined,
+            decidedByName: cl.directorApprover?.fullName || undefined,
+            decidedAt: cl.directorApprovedAt ? new Date(cl.directorApprovedAt).toISOString() : undefined,
+            createdAt: cl.createdAt ? new Date(cl.createdAt).toISOString() : new Date().toISOString(),
+            completedAt: cl.directorApprovedAt
+              ? new Date(cl.directorApprovedAt).toISOString()
+              : cl.updatedAt
+              ? new Date(cl.updatedAt).toISOString()
+              : undefined,
+          });
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch project closure history: ${err.message}`, err.stack);
+      }
+    }
+
+    // Sort history: newest completed/updated first
+    history.sort((a, b) => {
+      const timeA = new Date(a.completedAt || a.createdAt).getTime();
+      const timeB = new Date(b.completedAt || b.createdAt).getTime();
+      return timeB - timeA;
+    });
+
+    return history;
   }
 
   /**

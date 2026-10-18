@@ -13,7 +13,10 @@ export default function ProjectOperationalPage() {
 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-      <Spin size="large" tip="Mengalihkan ke Command Center..." />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <Spin size="large" />
+        <span style={{ color: '#64748b', fontSize: 14 }}>Mengalihkan ke Command Center...</span>
+      </div>
     </div>
   );
 }

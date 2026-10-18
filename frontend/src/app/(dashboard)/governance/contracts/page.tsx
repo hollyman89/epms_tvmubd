@@ -4,6 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Table, Typography, Tag, message, Card } from 'antd';
 import { LegalService } from '@/services';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
+import { formatCurrency } from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
+import { UserIdentityDisplay } from '@/components/common/UserIdentityDisplay';
 
 const { Title, Text } = Typography;
 
@@ -33,35 +36,42 @@ export default function ContractsPage() {
       title: 'Nilai Kontrak',
       dataIndex: 'contract_value',
       key: 'contract_value',
-      render: (val: number) => `Rp ${Number(val || 0).toLocaleString('id-ID')}`
+      render: (val: number) => formatCurrency(val)
     },
     {
       title: 'Status',
       dataIndex: 'legal_status',
       key: 'legal_status',
-      render: (status: string) => {
-        let color = 'default';
-        if (status === 'APPROVED') color = 'success';
-        if (status === 'ON_REVIEW') color = 'processing';
-        if (status === 'REJECTED') color = 'error';
-        return <Tag color={color}>{status || 'DRAFT'}</Tag>;
-      }
+      render: (status: string) => <StatusBadge domain="legal" status={status || 'DRAFT'} />
     },
     {
       title: 'Project Manager',
       key: 'project_manager',
       render: (_: any, record: any) => {
-        const pmName = record.project_manager?.name || '-';
-        return <Text>{pmName}</Text>;
+        if (!record.project_manager && !record.project_manager_id) {
+          return <Text>-</Text>;
+        }
+        return (
+          <UserIdentityDisplay
+            user={record.project_manager}
+            userId={record.project_manager_id}
+            fallbackText="-"
+            showEmail
+          />
+        );
       }
     }
   ], []);
 
   return (
     <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'LEGAL', 'DIRECTOR', 'HEAD_OF_OPERATIONS']}>
-      <div style={{ padding: 24, background: '#f5f7fa', minHeight: '100vh' }}>
-        <Title level={2}>Contracts</Title>
-        <Text type="secondary">Daftar kontrak yang telah sah untuk dieksekusi oleh Operasional.</Text>
+      <div>
+        <Title level={3} style={{ fontSize: '24px', fontWeight: 600, lineHeight: '32px', margin: 0, color: '#0f172a' }}>
+          Contracts
+        </Title>
+        <Text type="secondary" style={{ fontSize: 13, color: '#64748b', display: 'block', marginTop: 4 }}>
+          Daftar kontrak yang telah sah untuk dieksekusi oleh Operasional.
+        </Text>
         
         <Card style={{ marginTop: 24 }} bodyStyle={{ padding: 0 }}>
           <Table

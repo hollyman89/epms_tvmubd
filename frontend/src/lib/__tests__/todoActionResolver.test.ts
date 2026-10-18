@@ -44,6 +44,16 @@ describe('todoActionResolver (N2 Backend SSOT Consumer)', () => {
     expect(target).toBe('/legal/review?contractId=45');
   });
 
+  it('4b. validates and consumes backend authoritative actionTarget for PMO PM Assignment', () => {
+    const target = resolveTodoActionTarget({
+      actionTarget: '/project-delivery?contractId=76&action=assign-pm',
+      actionType: 'PMO_ASSIGN_PM',
+      entityType: 'CONTRACT',
+      entityId: 76,
+    });
+    expect(target).toBe('/project-delivery?contractId=76&action=assign-pm');
+  });
+
   it('5. returns null when actionTarget is explicitly null (e.g. unknown task or Go/No-Go pending UI)', () => {
     const target = resolveTodoActionTarget({
       actionTarget: null,

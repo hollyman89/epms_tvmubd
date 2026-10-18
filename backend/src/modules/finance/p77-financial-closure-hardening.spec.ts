@@ -11,6 +11,7 @@ import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { PoPaymentTerm, PaymentTermStatus, PaymentTermType } from '../../entities/po-payment-term.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { PaymentRequest, PaymentRequestStatus } from '../../entities/payment-request.entity';
 
 describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening', () => {
   let service: FinanceService;
@@ -181,6 +182,15 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
         }
         return null;
       }
+      if (entityClass === PaymentRequest) {
+        return {
+          id: 401,
+          invoiceId: mockInvoice.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: checkerId,
+          deletedAt: null,
+        };
+      }
       if (entityClass === Payment) {
         return null;
       }
@@ -212,6 +222,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -242,6 +253,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
         return { id: 701, table_name: 'purchase_orders', record_id: 101, action: 'FINANCIAL_CLOSE' };
       }
       if (entityClass === Invoice) return { id: 301, poId: 101, paymentTermId: 201, totalAmount: 100, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
+      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, deletedAt: null };
       if (entityClass === PurchaseOrder) return { id: 101, totalAmount: 100, status: 'COMPLETED', purchaseRequestId: 501 };
       if (entityClass === PoPaymentTerm) return { id: 201, poId: 101, amount: 100, status: PaymentTermStatus.VERIFIED };
       return null;
@@ -250,6 +262,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100,
       paymentMethod: 'BANK_TRANSFER',
@@ -270,6 +283,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 60000000, // 60M of 100M
       paymentMethod: 'BANK_TRANSFER',
@@ -298,6 +312,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 40000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -318,6 +333,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -344,6 +360,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 50000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -368,6 +385,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 10000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -385,6 +403,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 10000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -392,7 +411,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     };
 
     await expect(service.createPayment(dto, CHECKER_ID)).rejects.toThrow(
-      'Prinsip Segregation of Duties (SoD) melarang verifikator invoice (Checker) melakukan pembayaran.',
+      'Prinsip Segregation of Duties (SoD) melarang penyetuju Payment Request (Checker/Direktur) mengeksekusi pembayaran.',
     );
   });
 
@@ -402,6 +421,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -413,18 +433,33 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     expect(payment.amount).toBe(100000000);
   });
 
-  // P77-09b: Maker creates, Maker attempts verification (Maker-Checker violation)
-  it('P77-09b: should reject verification if Maker and Verifier are the same person', async () => {
+  // P77-09b: Canonical EPMS Finance: Maker creates invoice, same Finance user can verify own invoice
+  it('P77-09b: should allow verification if Maker and Verifier are the same Finance user', async () => {
     setupDefaultEntities({ makerId: MAKER_ID });
     
     queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any, opts: any) => {
-      if (entityClass === Invoice) return { id: 301, paymentTermId: 201, createdBy: MAKER_ID, matchStatus: 'MATCHED' };
+      if (entityClass === Invoice) return { 
+        id: 301, 
+        poId: 101,
+        paymentTermId: 201, 
+        createdBy: MAKER_ID, 
+        matchStatus: 'PENDING',
+        totalAmount: 100000000,
+        purchaseOrder: { id: 101, totalAmount: 100000000, vendorId: 1, status: 'COMPLETED', items: [] },
+      };
+      if (entityClass === PoPaymentTerm) return { id: 201, poId: 101, percentage: 100, amount: 100000000, status: PaymentTermStatus.INVOICE_SUBMITTED };
       return null;
+    });
+
+    queryRunnerMock.manager.find.mockImplementation(async (entityClass: any) => {
+      if (entityClass === GoodsReceipt) return [{ id: 1, poId: 101, items: [] }];
+      return [];
     });
 
     const dto = { approved: true, notes: 'Self verify' };
 
-    await expect(service.verifyInvoice(301, dto as any, MAKER_ID)).rejects.toThrow();
+    const res = await service.verifyInvoice(301, dto as any, MAKER_ID);
+    expect(res.matchStatus).toBe('VERIFIED');
   });
 
   // P77-09c: Maker creates, No independent verifier exists, Maker attempts payment
@@ -432,6 +467,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     setupDefaultEntities({ makerId: MAKER_ID });
     
     queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any, opts: any) => {
+      if (entityClass === PaymentRequest) return null; // No Payment Request
       if (entityClass === AuditLog) return null; // No VERIFY audit
       if (entityClass === Invoice) return { id: 301, paymentTermId: 201, createdBy: MAKER_ID, updatedBy: null, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID' };
       if (entityClass === PoPaymentTerm) return { id: 201, status: PaymentTermStatus.VERIFIED };
@@ -441,6 +477,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 10000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -448,7 +485,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     };
 
     await expect(service.createPayment(dto, MAKER_ID)).rejects.toThrow(
-      'Prinsip Segregation of Duties (SoD) melarang pembuat invoice (Maker) melakukan pembayaran.',
+      'Payment Request tidak ditemukan.',
     );
   });
 
@@ -458,6 +495,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 10000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -465,7 +503,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     };
 
     await expect(service.createPayment(dto, CHECKER_ID)).rejects.toThrow(
-      'Prinsip Segregation of Duties (SoD) melarang verifikator invoice (Checker) melakukan pembayaran.',
+      'Prinsip Segregation of Duties (SoD) melarang penyetuju Payment Request (Checker/Direktur) mengeksekusi pembayaran.',
     );
   });
 
@@ -475,6 +513,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 40000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -499,6 +538,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 50000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -528,6 +568,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -552,6 +593,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -579,6 +621,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     const dto = {
       invoiceId: 301,
+      paymentRequestId: 401,
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
@@ -597,21 +640,22 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     // 1. Zero amount rejection
     await expect(
-      service.createPayment({ invoiceId: 301, paymentDate: '2026-09-17', paymentAmount: 0, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R1' }, INDEPENDENT_PAYER_ID),
+      service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 0, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R1' }, INDEPENDENT_PAYER_ID),
     ).rejects.toThrow('Payment amount harus lebih besar dari 0');
 
     // 2. Overpayment rejection
     await expect(
-      service.createPayment({ invoiceId: 301, paymentDate: '2026-09-17', paymentAmount: 150000000, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R2' }, INDEPENDENT_PAYER_ID),
+      service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 150000000, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R2' }, INDEPENDENT_PAYER_ID),
     ).rejects.toThrow('melebihi sisa tagihan invoice');
 
     // 3. Already paid rejection
     queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any) => {
       if (entityClass === Invoice) return { id: 301, paymentStatus: 'PAID', matchStatus: 'VERIFIED', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
+      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999 };
       return null;
     });
     await expect(
-      service.createPayment({ invoiceId: 301, paymentDate: '2026-09-17', paymentAmount: 50000, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R3' }, INDEPENDENT_PAYER_ID),
+      service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 50000, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R3' }, INDEPENDENT_PAYER_ID),
     ).rejects.toThrow('Invoice is already PAID');
   });
 });

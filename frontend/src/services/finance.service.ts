@@ -230,6 +230,8 @@ export interface InvoiceDto {
   id: number;
   poId: number;
   paymentTermId?: number;
+  serviceClaimId?: number;
+  serviceClaim?: any;
   invoiceNumber: string;
   invoiceDate: string;
   totalAmount: number;
@@ -237,6 +239,11 @@ export interface InvoiceDto {
   paymentStatus: string;
   status: string;
   createdBy?: number;
+  creator?: {
+    id: number;
+    fullName: string;
+    email: string;
+  } | null;
   createdAt: string;
   updatedAt?: string;
   version?: number;
@@ -257,6 +264,11 @@ export interface PaymentDto {
   bankName?: string;
   notes?: string;
   createdBy?: number;
+  creator?: {
+    id: number;
+    fullName: string;
+    email: string;
+  } | null;
   createdAt: string;
   updatedAt?: string;
   version?: number;
@@ -268,6 +280,7 @@ export interface PaymentDto {
 
 export interface CreatePaymentPayload {
   invoiceId: number;
+  paymentRequestId?: number;
   paymentDate: string;
   paymentAmount: number;
   amount?: number;
@@ -275,6 +288,40 @@ export interface CreatePaymentPayload {
   referenceNumber: string;
   bankName?: string;
   notes?: string;
+}
+
+export interface PaymentRequestDto {
+  id: number;
+  requestNumber: string;
+  invoiceId: number;
+  paymentTermId?: number | null;
+  requestedAmount: number;
+  approvedAmount?: number | null;
+  status: 'PENDING_DIRECTOR_APPROVAL' | 'NEEDS_REVISION' | 'APPROVED_FOR_PAYMENT' | 'REJECTED' | 'PAID';
+  requestedBy: number;
+  submittedAt: string;
+  returnedAt?: string | null;
+  revisionNotes?: string | null;
+  approvedBy?: number | null;
+  approvedAt?: string | null;
+  rejectionReason?: string | null;
+  notes?: string | null;
+  approvalSnapshot?: any;
+  version?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  invoice?: InvoiceDto;
+  paymentTerm?: any;
+  requester?: {
+    id: number;
+    fullName: string;
+    email: string;
+  } | null;
+  approver?: {
+    id: number;
+    fullName: string;
+    email: string;
+  } | null;
 }
 
 export interface CreateInvoiceItemPayload {
@@ -287,6 +334,9 @@ export interface CreateInvoiceItemPayload {
 export interface CreateInvoicePayload {
   purchaseOrderId: number;
   paymentTermId?: number;
+  serviceClaimId?: number;
+  goodsReceiptId?: number;
+  evidenceRef?: string;
   invoiceDate: string;
   items?: CreateInvoiceItemPayload[];
 }
@@ -393,5 +443,78 @@ export class FinanceService {
   }> {
     const res = await apiClient.get(`/finance/purchase-orders/${poId}/payment-summary`);
     return this.unwrapData(res);
+  }
+
+  /**
+   * Submit a new Payment Request for Director Approval
+   * Endpoint: POST /finance/payment-requests
+   */
+  static async submitPaymentRequest(payload: {
+    invoiceId: number;
+    paymentTermId?: number;
+    requestedAmount?: number;
+    bankName?: string;
+    bankAccountNumber?: string;
+    bankAccountHolder?: string;
+    notes?: string;
+  }): Promise<PaymentRequestDto> {
+    const res = await apiClient.post('/finance/payment-requests', payload);
+    return this.unwrapData<PaymentRequestDto>(res);
+  }
+
+  /**
+   * Fetch all Payment Requests from backend
+   * Endpoint: GET /finance/payment-requests
+   */
+  static async getPaymentRequests(status?: string): Promise<PaymentRequestDto[]> {
+    const res = await apiClient.get('/finance/payment-requests', {
+      params: status ? { status } : undefined,
+    });
+    return this.unwrapData<PaymentRequestDto[]>(res) || [];
+  }
+
+  /**
+   * Fetch single Payment Request by ID
+   * Endpoint: GET /finance/payment-requests/:id
+   */
+  static async getPaymentRequestById(id: number): Promise<PaymentRequestDto> {
+    const res = await apiClient.get(`/finance/payment-requests/${id}`);
+    return this.unwrapData<PaymentRequestDto>(res);
+  }
+
+  /**
+   * Director Decision on Payment Request (APPROVE, RETURN, REJECT)
+   * Endpoint: POST /finance/payment-requests/:id/decide
+   */
+  static async decidePaymentRequest(
+    id: number,
+    payload: {
+      action: 'APPROVE' | 'RETURN' | 'REJECT';
+      revisionNotes?: string;
+      rejectionReason?: string;
+      approvedAmount?: number;
+    },
+  ): Promise<PaymentRequestDto> {
+    const res = await apiClient.post(`/finance/payment-requests/${id}/decide`, payload);
+    return this.unwrapData<PaymentRequestDto>(res);
+  }
+
+  /**
+   * Finance Resubmit returned Payment Request
+   * Endpoint: POST /finance/payment-requests/:id/resubmit
+   */
+  static async resubmitPaymentRequest(
+    id: number,
+    payload: {
+      requestedAmount?: number;
+      bankName?: string;
+      bankAccountNumber?: string;
+      bankAccountHolder?: string;
+      revisionNotes?: string;
+      notes?: string;
+    },
+  ): Promise<PaymentRequestDto> {
+    const res = await apiClient.post(`/finance/payment-requests/${id}/resubmit`, payload);
+    return this.unwrapData<PaymentRequestDto>(res);
   }
 }

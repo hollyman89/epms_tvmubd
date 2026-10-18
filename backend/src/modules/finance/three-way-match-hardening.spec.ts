@@ -54,13 +54,28 @@ describe('FinanceService - 3-Way Match Hardening (P7.6 Part 3)', () => {
   });
 
   describe('Maker-Checker SoD', () => {
-    it('MATCH-01: Should reject if creator is the same as verifier', async () => {
-      const invoice = { id: 1, createdBy: 100, matchStatus: 'PENDING' };
-      mockQueryRunner.manager.findOne.mockResolvedValue(invoice);
+    it('MATCH-01: Should allow if creator is the same as verifier (Canonical EPMS Finance single-account rule)', async () => {
+      const invoice = { 
+        id: 1, 
+        poId: 1,
+        createdBy: 100, 
+        matchStatus: 'PENDING',
+        purchaseOrder: { id: 1, totalAmount: 1000, vendorId: 1, status: 'COMPLETED', items: [{ id: 1, unitPrice: 1000, receivedQuantity: 1 }] },
+        totalAmount: 1000
+      };
+      const gr = { id: 1, poId: 1, items: [{ poItemId: 1, receivedQuantity: 1 }] };
+      mockQueryRunner.manager.findOne.mockImplementation(async (entity: any, opts: any) => {
+        if (entity === Invoice) return invoice;
+        return null;
+      });
+      mockQueryRunner.manager.find.mockImplementation(async (entity: any) => {
+        if (entity === GoodsReceipt) return [gr];
+        return [];
+      });
+      mockQueryRunner.manager.save.mockImplementation(async (entity: any, val: any) => val);
 
-      await expect(service.verifyInvoice(1, { approved: true } as any, 100))
-        .rejects
-        .toThrow('Maker-Checker Violation: Anda tidak dapat memverifikasi invoice yang Anda buat sendiri.');
+      const result = await service.verifyInvoice(1, { approved: true } as any, 100);
+      expect(result.matchStatus).toBe('VERIFIED');
     });
 
     it('MATCH-02: Should allow if creator is different from verifier', async () => {

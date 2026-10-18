@@ -941,13 +941,29 @@ export class ProcurementPackageService {
         );
       }
 
-      // Generate PR Number
+      // Generate PR Number (Monotonic & Anti-Reuse: withDeleted + pessimistic lock)
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const countToday = await queryRunner.manager.count(PurchaseRequest, {
-        where: { prNumber: require('typeorm').Like(`PR-${dateStr}-%`) },
-      });
-      const seq = String(countToday + 1).padStart(3, '0');
-      const prNumber = `PR-${dateStr}-${seq}`;
+      const prPrefix = `PR-${dateStr}-`;
+      const latestPr = await queryRunner.manager
+        .createQueryBuilder(PurchaseRequest, 'pr')
+        .withDeleted()
+        .setLock('pessimistic_write')
+        .where('pr.prNumber LIKE :prefix', { prefix: `${prPrefix}%` })
+        .orderBy('LENGTH(pr.prNumber)', 'DESC')
+        .addOrderBy('pr.prNumber', 'DESC')
+        .getOne();
+
+      let nextPrSeq = 1;
+      if (latestPr && latestPr.prNumber) {
+        const parts = latestPr.prNumber.split('-');
+        if (parts.length >= 3) {
+          const parsed = parseInt(parts[2], 10);
+          if (!isNaN(parsed)) {
+            nextPrSeq = parsed + 1;
+          }
+        }
+      }
+      const prNumber = `${prPrefix}${String(nextPrSeq).padStart(3, '0')}`;
 
       // 1. Create PurchaseRequest with origin = 'PACKAGE' and package_id
       const pr = queryRunner.manager.create(PurchaseRequest, {
@@ -1260,8 +1276,11 @@ export class ProcurementPackageService {
     const baselineQty = Number(costItem.quantity || 0);
     const baselineAmount = Number(costItem.subtotal || 0);
 
-    // 1. Reserved Qty: Package status = 'SUBMITTED' (excluding current pkg if provided)
-    const reservedParams: any[] = [costItemId];
+    // 1. Reserved Qty: Package status = 'SUBMITTED' or 'CLOSED' (deduplicated against active orders)
+    const reservedParams: any[] = [
+      costItemId,
+      costItemId, costItemId, costItemId, costItemId,
+    ];
     let excludePkgClause = '';
     if (excludePackageId) {
       excludePkgClause = 'AND pkg.id != ?';
@@ -1275,7 +1294,31 @@ export class ProcurementPackageService {
        FROM procurement_package_items ppi
        JOIN procurement_packages pkg ON ppi.package_id = pkg.id
        WHERE ppi.cost_item_id = ?
-         AND pkg.status = 'SUBMITTED'
+         AND (
+           pkg.status = 'SUBMITTED'
+           OR (
+             pkg.status = 'CLOSED'
+             AND pkg.id NOT IN (
+               SELECT pr.package_id 
+               FROM purchase_requests pr 
+               JOIN purchase_orders po ON po.pr_id = pr.id 
+               JOIN purchase_order_items poi ON poi.purchase_order_id = po.id
+               WHERE pr.package_id IS NOT NULL 
+                 AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
+                 AND po.deleted_at IS NULL 
+                 AND poi.deleted_at IS NULL
+                 AND (
+                   poi.cost_item_id = ? 
+                   OR poi.pr_item_id IN (SELECT id FROM purchase_request_items WHERE cost_item_id = ?)
+                   OR (
+                     poi.cost_item_id IS NULL AND poi.pr_item_id IS NULL
+                     AND po.pr_id IN (SELECT pr_id FROM purchase_request_items WHERE cost_item_id = ?)
+                     AND poi.item_name IN (SELECT item_name FROM purchase_request_items WHERE cost_item_id = ? AND pr_id = po.pr_id)
+                   )
+                 )
+             )
+           )
+         )
          ${excludePkgClause}
          AND pkg.deleted_at IS NULL
          AND ppi.deleted_at IS NULL`,
@@ -1301,20 +1344,28 @@ export class ProcurementPackageService {
     const prCommittedAmount = Number(committedRes[0]?.committed_amount || 0);
 
     // 3. Ordered Qty: PO status in ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
-    // Matched by poi.cost_item_id or linked pri.cost_item_id. PO CANCELLED = 0.
+    // Matched by poi.cost_item_id, linked pri.cost_item_id, or po.pr_id fallback matching. PO CANCELLED = 0.
     const orderedRes = await manager.query(
       `SELECT 
          COALESCE(SUM(poi.quantity), 0) AS ordered_qty,
          COALESCE(SUM(poi.total_price), 0) AS ordered_amount
        FROM purchase_order_items poi
        JOIN purchase_orders po ON poi.purchase_order_id = po.id
-       WHERE (poi.cost_item_id = ? OR poi.pr_item_id IN (
-         SELECT id FROM purchase_request_items WHERE cost_item_id = ?
-       ))
+       WHERE (
+         poi.cost_item_id = ? 
+         OR poi.pr_item_id IN (
+           SELECT id FROM purchase_request_items WHERE cost_item_id = ?
+         )
+         OR (
+           poi.cost_item_id IS NULL AND poi.pr_item_id IS NULL
+           AND po.pr_id IN (SELECT pr_id FROM purchase_request_items WHERE cost_item_id = ?)
+           AND poi.item_name IN (SELECT item_name FROM purchase_request_items WHERE cost_item_id = ? AND pr_id = po.pr_id)
+         )
+       )
          AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
          AND po.deleted_at IS NULL
          AND poi.deleted_at IS NULL`,
-      [costItemId, costItemId],
+      [costItemId, costItemId, costItemId, costItemId],
     );
     const orderedQty = Number(orderedRes[0]?.ordered_qty || 0);
     const orderedAmount = Number(orderedRes[0]?.ordered_amount || 0);
@@ -1326,13 +1377,21 @@ export class ProcurementPackageService {
        FROM goods_receipt_items gri
        JOIN purchase_order_items poi ON gri.po_item_id = poi.id
        JOIN purchase_orders po ON poi.purchase_order_id = po.id
-       WHERE (poi.cost_item_id = ? OR poi.pr_item_id IN (
-         SELECT id FROM purchase_request_items WHERE cost_item_id = ?
-       ))
+       WHERE (
+         poi.cost_item_id = ? 
+         OR poi.pr_item_id IN (
+           SELECT id FROM purchase_request_items WHERE cost_item_id = ?
+         )
+         OR (
+           poi.cost_item_id IS NULL AND poi.pr_item_id IS NULL
+           AND po.pr_id IN (SELECT pr_id FROM purchase_request_items WHERE cost_item_id = ?)
+           AND poi.item_name IN (SELECT item_name FROM purchase_request_items WHERE cost_item_id = ? AND pr_id = po.pr_id)
+         )
+       )
          AND po.deleted_at IS NULL
          AND poi.deleted_at IS NULL
          AND gri.deleted_at IS NULL`,
-      [costItemId, costItemId],
+      [costItemId, costItemId, costItemId, costItemId],
     );
     const receivedQty = Number(receivedRes[0]?.received_qty || 0);
 
@@ -1434,9 +1493,11 @@ export class ProcurementPackageService {
 
     const latest = await manager
       .createQueryBuilder(ProcurementPackage, 'pkg')
+      .withDeleted()
       .setLock('pessimistic_write')
       .where('pkg.packageNumber LIKE :prefix', { prefix: `${prefix}%` })
-      .orderBy('pkg.packageNumber', 'DESC')
+      .orderBy('LENGTH(pkg.packageNumber)', 'DESC')
+      .addOrderBy('pkg.packageNumber', 'DESC')
       .getOne();
 
     let nextSeq = 1;

@@ -27,6 +27,10 @@ import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { ProjectManagementReview } from '../../entities/project-management-review.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { Contract, LegalStatus } from '../../entities/contract.entity';
+import { Tender, TenderStatus, RevisionStatus } from '../../entities/tender.entity';
+import { Proposal } from '../../entities/proposal.entity';
+import { emitLegalQueueUpdated } from '../../shared/helpers/legal-event.helper';
 import {
   StartWorkflowInstanceDto,
   CompleteWorkflowTaskDto,
@@ -103,6 +107,7 @@ export class WorkflowEngineService {
   async startInstance(
     dto: StartWorkflowInstanceDto,
     userId?: number,
+    externalManager?: EntityManager,
   ): Promise<WorkflowInstance> {
     const { workflowKey, entityType, entityId, context = {} } = dto;
 
@@ -162,7 +167,7 @@ export class WorkflowEngineService {
     }
 
     // 5. Execute within a strict Database Transaction
-    return this.dataSource.transaction(async (manager) => {
+    const executeStartInManager = async (manager: EntityManager) => {
       // Find START node
       const startNode = graph.nodes.find(
         (n) => (n.data?.type || n.type) === 'START',
@@ -240,7 +245,26 @@ export class WorkflowEngineService {
       });
 
       return savedInstance;
-    });
+    };
+
+    const result = externalManager
+      ? await executeStartInManager(externalManager)
+      : await this.dataSource.transaction(executeStartInManager);
+
+    if (
+      result.status === WorkflowInstanceStatus.COMPLETED ||
+      result.status === WorkflowInstanceStatus.REJECTED ||
+      result.status === WorkflowInstanceStatus.TERMINATED
+    ) {
+      this.eventEmitter.emit('internal.workflow.instance.completed', {
+        instanceId: result.id,
+        entityType: result.entityType,
+        entityId: result.entityId,
+        finalStatus: result.status,
+      });
+    }
+
+    return result;
   }
 
   // 2. COMPLETE WORKFLOW TASK
@@ -254,10 +278,11 @@ export class WorkflowEngineService {
     dto: CompleteWorkflowTaskDto,
     actorId: number,
     actorRoles: string[] = [],
+    externalManager?: EntityManager,
   ): Promise<{ task: WorkflowTask; instance: WorkflowInstance }> {
     const { action, reason, contextUpdate } = dto;
 
-    const result = await this.dataSource.transaction(async (manager) => {
+    const executeCompleteInManager = async (manager: EntityManager) => {
       // 1. Load Task with Pessimistic Write Lock for strict Concurrency Protection
       const task = await manager
         .createQueryBuilder(WorkflowTask, 'task')
@@ -430,7 +455,11 @@ export class WorkflowEngineService {
       });
 
       return { task, instance, fromNodeId: currentNode.id, toNodeId: nextNode.id };
-    });
+    };
+
+    const result = externalManager
+      ? await executeCompleteInManager(externalManager)
+      : await this.dataSource.transaction(executeCompleteInManager);
 
     // 13. Emit real-time domain event for zero-refresh UI synchronization AFTER COMMIT
     this.eventEmitter.emit('internal.workflow.task.completed', {
@@ -443,6 +472,19 @@ export class WorkflowEngineService {
       entityType: result.instance.entityType,
       entityId: result.instance.entityId,
     });
+
+    if (
+      result.instance.status === WorkflowInstanceStatus.COMPLETED ||
+      result.instance.status === WorkflowInstanceStatus.REJECTED ||
+      result.instance.status === WorkflowInstanceStatus.TERMINATED
+    ) {
+      this.eventEmitter.emit('internal.workflow.instance.completed', {
+        instanceId: result.instance.id,
+        entityType: result.instance.entityType,
+        entityId: result.instance.entityId,
+        finalStatus: result.instance.status,
+      });
+    }
 
     return { task: result.task, instance: result.instance };
   }
@@ -469,6 +511,8 @@ export class WorkflowEngineService {
       instance.status =
         action === 'REJECT'
           ? WorkflowInstanceStatus.REJECTED
+          : action === 'RETURN'
+          ? WorkflowInstanceStatus.TERMINATED
           : WorkflowInstanceStatus.COMPLETED;
       instance.completedAt = new Date();
       instance.updatedBy = actorId;
@@ -794,6 +838,248 @@ export class WorkflowEngineService {
 
           await manager.save(AuditLog, audit);
         }
+      }
+    } else if (instance.entityType === 'CONTRACT' && instance.entityId) {
+      const nodeType = (targetNode.data?.type || targetNode.type || '').toUpperCase();
+      const contractId = Number(instance.entityId);
+
+      const contract = await manager.findOne(Contract, {
+        where: { id: contractId },
+        relations: ['proposal'],
+      });
+
+      if (!contract) {
+        this.logger.warn(`Contract #${contractId} not found during workflow syncBusinessEntity.`);
+        return;
+      }
+
+      const oldContractStatus = contract.status;
+      const oldLegalStatus = contract.legal_status;
+
+      let targetTender: Tender | null = null;
+      const tenderId = contract.tender_id || contract.proposal?.tender_id;
+      if (tenderId) {
+        targetTender = await manager.findOne(Tender, { where: { id: tenderId } });
+      }
+
+      const upperAction = (action || '').toUpperCase();
+
+      if (targetNode.id === 'node_marketing_revision' || upperAction === 'RETURN') {
+        contract.status = 'REVISION_NEEDED';
+        contract.legal_status = LegalStatus.REVISION_REQUESTED;
+        contract.legal_notes = reason || null;
+        if (actorId) {
+          contract.legal_reviewer_id = Number(actorId);
+          contract.updated_by = Number(actorId);
+          contract.grace_extended_by = Number(actorId);
+        }
+
+        const now = new Date();
+        const currentCount = Number(contract.grace_extension_count || 0);
+        contract.grace_deadline = new Date(now.getTime() + 72 * 60 * 60 * 1000); // NOW + 72h
+        contract.grace_extended_at = now;
+        contract.grace_extension_count = currentCount + 1;
+
+        await manager.save(Contract, contract);
+
+        if (targetTender) {
+          targetTender.revision_status = RevisionStatus.REQUIRED;
+          await manager.save(Tender, targetTender);
+        }
+
+        const audit = manager.create(AuditLog, {
+          table_name: 'contracts',
+          record_id: contract.id,
+          action: 'LEGAL_REVIEW_REVISION_REQUESTED',
+          old_value: { status: oldContractStatus, legal_status: oldLegalStatus },
+          new_value: {
+            status: contract.status,
+            legal_status: contract.legal_status,
+            notes: reason || null,
+            decidedBy: actorId || null,
+            workflowInstanceId: instance.id,
+            targetNodeId: targetNode.id,
+          },
+          created_by: actorId ? Number(actorId) : null,
+        });
+        await manager.save(AuditLog, audit);
+
+        const resolvedTenderId = targetTender?.id || contract.tender_id;
+        const tenderTitle = targetTender?.title || `Tender #${resolvedTenderId || contract.id}`;
+        const marketingPicId = targetTender?.marketing_pic_id
+          ? Number(targetTender.marketing_pic_id)
+          : targetTender?.created_by
+          ? Number(targetTender.created_by)
+          : undefined;
+
+        await this.saveOutboxEvent(manager, {
+          eventId: crypto.randomUUID(),
+          eventName: 'legal.contract.revision_requested',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Contract',
+          aggregateId: contract.id,
+          actor: actorId ? { userId: Number(actorId) } : undefined,
+          routing: {
+            userIds: marketingPicId ? [marketingPicId] : undefined,
+          },
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+          payload: {
+            contractId: contract.id,
+            contractNumber: contract.contract_number,
+            tenderId: resolvedTenderId,
+            tenderTitle,
+            marketingPicId,
+            legalStatus: LegalStatus.REVISION_REQUESTED,
+            status: contract.status,
+            reviewerId: actorId,
+            reason: reason || null,
+            timestamp: new Date().toISOString(),
+          },
+        });
+
+        emitLegalQueueUpdated(this.eventEmitter, {
+          contractId: contract.id,
+          action: 'REVIEWED',
+        });
+      } else if (nodeType === 'END' && upperAction === 'APPROVE') {
+        contract.status = 'ACTIVE';
+        contract.legal_status = LegalStatus.APPROVED;
+        if (actorId) {
+          contract.legal_reviewer_id = Number(actorId);
+          contract.updated_by = Number(actorId);
+        }
+        await manager.save(Contract, contract);
+
+        if (contract.proposal) {
+          contract.proposal.status = 'APPROVED';
+          await manager.save(Proposal, contract.proposal);
+        }
+
+        if (targetTender) {
+          targetTender.stage = 'WON';
+          targetTender.status = TenderStatus.WON;
+          targetTender.spk_verification_status = 'VERIFIED';
+          await manager.save(Tender, targetTender);
+        }
+
+        const audit = manager.create(AuditLog, {
+          table_name: 'contracts',
+          record_id: contract.id,
+          action: 'LEGAL_REVIEW_APPROVED',
+          old_value: { status: oldContractStatus, legal_status: oldLegalStatus },
+          new_value: {
+            status: contract.status,
+            legal_status: contract.legal_status,
+            decidedBy: actorId || null,
+            workflowInstanceId: instance.id,
+            targetNodeId: targetNode.id,
+          },
+          created_by: actorId ? Number(actorId) : null,
+        });
+        await manager.save(AuditLog, audit);
+
+        const resolvedTenderId = targetTender?.id || contract.tender_id;
+        const tenderTitle = targetTender?.title || `Tender #${resolvedTenderId || contract.id}`;
+        const marketingPicId = targetTender?.marketing_pic_id
+          ? Number(targetTender.marketing_pic_id)
+          : targetTender?.created_by
+          ? Number(targetTender.created_by)
+          : undefined;
+
+        await this.saveOutboxEvent(manager, {
+          eventId: crypto.randomUUID(),
+          eventName: 'legal.contract.approved',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Contract',
+          aggregateId: contract.id,
+          actor: actorId ? { userId: Number(actorId) } : undefined,
+          routing: {
+            userIds: marketingPicId ? [marketingPicId] : undefined,
+            roles: ['PMO'],
+          },
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+          payload: {
+            contractId: contract.id,
+            contractNumber: contract.contract_number,
+            tenderId: resolvedTenderId,
+            tenderTitle,
+            marketingPicId,
+            legalStatus: LegalStatus.APPROVED,
+            status: contract.status,
+            reviewerId: actorId,
+            timestamp: new Date().toISOString(),
+          },
+        });
+
+        emitLegalQueueUpdated(this.eventEmitter, {
+          contractId: contract.id,
+          action: 'REVIEWED',
+        });
+      } else if (nodeType === 'END' && upperAction === 'REJECT') {
+        contract.status = 'REJECTED';
+        contract.legal_status = LegalStatus.REJECTED;
+        contract.legal_notes = reason || null;
+        if (actorId) {
+          contract.legal_reviewer_id = Number(actorId);
+          contract.updated_by = Number(actorId);
+        }
+        await manager.save(Contract, contract);
+
+        const audit = manager.create(AuditLog, {
+          table_name: 'contracts',
+          record_id: contract.id,
+          action: 'LEGAL_REVIEW_REJECTED',
+          old_value: { status: oldContractStatus, legal_status: oldLegalStatus },
+          new_value: {
+            status: contract.status,
+            legal_status: contract.legal_status,
+            notes: reason || null,
+            decidedBy: actorId || null,
+            workflowInstanceId: instance.id,
+            targetNodeId: targetNode.id,
+          },
+          created_by: actorId ? Number(actorId) : null,
+        });
+        await manager.save(AuditLog, audit);
+
+        emitLegalQueueUpdated(this.eventEmitter, {
+          contractId: contract.id,
+          action: 'REVIEWED',
+        });
+      } else if (targetNode.id === 'node_legal_review' && upperAction === 'RESUBMIT') {
+        contract.status = 'PENDING_LEGAL_REVIEW';
+        contract.legal_status = LegalStatus.DRAFT;
+        if (actorId) {
+          contract.updated_by = Number(actorId);
+        }
+        await manager.save(Contract, contract);
+
+        if (targetTender) {
+          targetTender.revision_status = RevisionStatus.NOT_REQUIRED;
+          await manager.save(Tender, targetTender);
+        }
+
+        const audit = manager.create(AuditLog, {
+          table_name: 'contracts',
+          record_id: contract.id,
+          action: 'LEGAL_REVIEW_RESUBMITTED',
+          old_value: { status: oldContractStatus, legal_status: oldLegalStatus },
+          new_value: {
+            status: contract.status,
+            legal_status: contract.legal_status,
+            workflowInstanceId: instance.id,
+            targetNodeId: targetNode.id,
+          },
+          created_by: actorId ? Number(actorId) : null,
+        });
+        await manager.save(AuditLog, audit);
+
+        emitLegalQueueUpdated(this.eventEmitter, {
+          contractId: contract.id,
+          action: 'REVIEWED',
+        });
       }
     }
   }
@@ -1187,10 +1473,10 @@ export class WorkflowEngineService {
     entityType: string,
     entityId: string | number,
   ): Promise<WorkflowInstance | null> {
-    const allowedEntityTypes = ['PURCHASE_REQUEST', 'PROJECT', 'TENDER', 'CONTRACT'];
+    const allowedEntityTypes = ['PURCHASE_REQUEST', 'PROJECT', 'TENDER', 'CONTRACT', 'PROJECT_CLOSURE'];
     if (!allowedEntityTypes.includes(entityType)) {
       throw new BadRequestException(
-        `Unsupported entityType: '${entityType}'. Supported types are 'PURCHASE_REQUEST', 'PROJECT', 'TENDER', and 'CONTRACT'.`,
+        `Unsupported entityType: '${entityType}'. Supported types are 'PURCHASE_REQUEST', 'PROJECT', 'TENDER', 'CONTRACT', and 'PROJECT_CLOSURE'.`,
       );
     }
 
@@ -1237,10 +1523,10 @@ export class WorkflowEngineService {
     const numericIds = entityIds.map(Number).filter((id) => !isNaN(id) && id > 0);
     if (numericIds.length === 0) return result;
 
-    const allowedEntityTypes = ['PURCHASE_REQUEST', 'PROJECT', 'TENDER', 'CONTRACT'];
+    const allowedEntityTypes = ['PURCHASE_REQUEST', 'PROJECT', 'TENDER', 'CONTRACT', 'PROJECT_CLOSURE'];
     if (!allowedEntityTypes.includes(entityType)) {
       throw new BadRequestException(
-        `Unsupported entityType: '${entityType}'. Supported types are 'PURCHASE_REQUEST', 'PROJECT', 'TENDER', and 'CONTRACT'.`,
+        `Unsupported entityType: '${entityType}'. Supported types are 'PURCHASE_REQUEST', 'PROJECT', 'TENDER', 'CONTRACT', and 'PROJECT_CLOSURE'.`,
       );
     }
 

@@ -143,7 +143,7 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
   // Responsive screen detection
   useEffect(() => {
     const handleResize = () => {
-      const mobile = window.innerWidth < 768;
+      const mobile = window.innerWidth <= 768;
       setIsMobile(mobile);
       if (mobile) {
         setCollapsed(true);
@@ -164,11 +164,12 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
         icon: item.iconName ? ICON_MAP[item.iconName] : undefined,
         label: item.label,
         allowedRoles: item.allowedRoles,
+        visibilityRule: item.visibilityRule,
       })),
     }));
   }, []);
 
-  const handleMenuClick = useCallback((key: string) => {
+  const handleMenuClick = useCallback((key: string, domEvent?: React.SyntheticEvent) => {
     if (key.startsWith('dev-')) {
       message.info('Fitur ini masih dalam tahap pengembangan');
       return;
@@ -176,7 +177,21 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
     if (isMobile) {
       setDrawerOpen(false);
     }
-    router.push(key);
+
+    // Check if click was originated from an anchor tag (<Link>) or used modifier keys (Ctrl/Cmd/middle-click)
+    const target = domEvent?.target as HTMLElement | null;
+    const isFromAnchor = target ? Boolean(target.tagName === 'A' || target.closest('a')) : false;
+    const mouseEvent = domEvent as React.MouseEvent | undefined;
+    const isModified = mouseEvent && (mouseEvent.ctrlKey || mouseEvent.metaKey || mouseEvent.shiftKey || mouseEvent.button === 1);
+
+    if (isModified || isFromAnchor) {
+      // Handled natively by browser or Next.js Link
+      return;
+    }
+
+    if (typeof key === 'string' && key.startsWith('/')) {
+      router.push(key);
+    }
   }, [isMobile, router]);
 
   // Filter menu items based on user role — memoized using rolesKey to prevent re-computation
@@ -187,9 +202,12 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
       !userRolesUpper.some(r => ['SUPER_ADMIN', 'GENERAL_MANAGER', 'DIRECTOR', 'ADMIN'].includes(r));
 
     return menuConfig.map(group => {
-      let groupChildren = group.children.filter(item => 
-        !item.allowedRoles || item.allowedRoles.some(role => userRolesUpper.includes(String(role).toUpperCase()))
-      );
+      let groupChildren = group.children.filter(item => {
+        const hasRole = !item.allowedRoles || item.allowedRoles.some(role => userRolesUpper.includes(String(role).toUpperCase()));
+        if (!hasRole) return false;
+        if (item.visibilityRule && !item.visibilityRule(userRolesUpper)) return false;
+        return true;
+      });
 
       // Special layout transformation for pure MARKETING role:
       // Move Customer (/customers) under MODULES right above Marketing (/sales), and remove Customer from DATA MASTER
@@ -206,30 +224,33 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
 
       return {
         ...group,
-        children: groupChildren.map(({ key, icon, label }) => ({
-          key,
-          icon,
-          label: (
-            <span 
-              onMouseEnter={() => {
-                if (typeof key === 'string' && key.startsWith('/')) {
-                  try { router.prefetch(key); } catch (e) {}
-                }
-              }}
-              onFocus={() => {
-                if (typeof key === 'string' && key.startsWith('/')) {
-                  try { router.prefetch(key); } catch (e) {}
-                }
-              }}
-              style={{ display: 'inline-block', width: '100%' }}
-            >
-              {label}
-            </span>
-          )
-        }))
+        children: groupChildren.map(({ key, icon, label }) => {
+          const isInternalRoute = typeof key === 'string' && key.startsWith('/');
+          return {
+            key,
+            icon,
+            label: isInternalRoute ? (
+              <Link 
+                href={key}
+                style={{ 
+                  display: 'inline-block', 
+                  width: '100%',
+                  color: 'inherit',
+                  textDecoration: 'none'
+                }}
+              >
+                {label}
+              </Link>
+            ) : (
+              <span style={{ display: 'inline-block', width: '100%' }}>
+                {label}
+              </span>
+            )
+          };
+        })
       };
     }).filter(group => group.children.length > 0);
-  }, [rolesKey, menuConfig, router]);
+  }, [rolesKey, menuConfig]);
 
   const userMenu = useMemo(() => ({
     items: [
@@ -253,9 +274,9 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
     <Menu 
       theme="dark"
       mode="inline" 
-      selectedKeys={[currentKey]} 
+      selectedKeys={[currentKey === '/' ? '/dashboard' : currentKey]} 
       items={filteredMenuItems as any} 
-      onClick={({ key }) => handleMenuClick(key)}
+      onClick={({ key, domEvent }) => handleMenuClick(key, domEvent)}
       className="epms-sidebar-menu"
       style={{ background: 'transparent' }}
     />
@@ -337,13 +358,7 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
                 type="text"
                 icon={<MenuOutlined style={{ fontSize: '18px' }} />}
                 onClick={() => setDrawerOpen(true)}
-              />
-            )}
-            {isMobile && (
-              <img 
-                src="/epms-logo.png" 
-                alt="EPMS Logo" 
-                style={{ height: '28px', width: 'auto', maxWidth: '140px', objectFit: 'contain' }}
+                aria-label="Menu"
               />
             )}
           </div>
@@ -359,8 +374,9 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
           </div>
         </Header>
         <Content style={{ 
-          margin: isMobile ? '12px 8px' : '24px 16px', 
-          minHeight: 280 
+          margin: isMobile ? '12px 8px' : (pathname === '/' || pathname === '/dashboard' ? '0' : '24px 16px'), 
+          minHeight: 280,
+          background: pathname === '/' || pathname === '/dashboard' ? '#F0F4F8' : undefined,
         }}>
           {children}
         </Content>

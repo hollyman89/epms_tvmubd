@@ -29,6 +29,7 @@ interface AuthContextType {
   isProjectManager: boolean;
   isGeneralManager: boolean;
   isHeadOfOperations: boolean;
+  isPmo: boolean;
   isProcurement: boolean;
   isFinance: boolean;
   isDirector: boolean;
@@ -373,13 +374,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const roles = useMemo(() => user?.roles || [], [user]);
   const isSuperAdmin = useMemo(() => roles.includes('SUPER_ADMIN'), [roles]);
-  const isGeneralManager = useMemo(() => roles.includes('GENERAL_MANAGER') || isSuperAdmin, [roles, isSuperAdmin]);
-  const isHeadOfOperations = useMemo(() => roles.includes('HEAD_OF_OPERATIONS') || roles.includes('GENERAL_MANAGER') || isSuperAdmin, [roles, isSuperAdmin]);
-  const isDirector = useMemo(() => roles.includes('DIRECTOR') || isSuperAdmin, [roles, isSuperAdmin]);
-  const isProjectManager = useMemo(() => roles.includes('PROJECT_MANAGER') || isSuperAdmin, [roles, isSuperAdmin]);
-  const isProcurement = useMemo(() => roles.includes('PROCUREMENT') || roles.includes('PURCHASING') || isSuperAdmin, [roles, isSuperAdmin]);
-  const isFinance = useMemo(() => roles.includes('FINANCE') || isSuperAdmin, [roles, isSuperAdmin]);
-  const canMakeManagementDecision = useMemo(() => roles.includes('HEAD_OF_OPERATIONS') || roles.includes('GENERAL_MANAGER') || roles.includes('DIRECTOR') || isSuperAdmin, [roles, isSuperAdmin]);
+  const isGeneralManager = useMemo(() => roles.includes('GENERAL_MANAGER'), [roles]);
+  const isHeadOfOperations = useMemo(() => roles.includes('HEAD_OF_OPERATIONS') || roles.includes('GENERAL_MANAGER'), [roles]);
+  const isDirector = useMemo(() => roles.includes('DIRECTOR'), [roles]);
+  const isProjectManager = useMemo(() => roles.includes('PROJECT_MANAGER'), [roles]);
+  const isPmo = useMemo(() => roles.includes('PMO'), [roles]);
+  const isProcurement = useMemo(() => roles.includes('PROCUREMENT') || roles.includes('PURCHASING'), [roles]);
+  const isFinance = useMemo(() => roles.includes('FINANCE'), [roles]);
+  const canMakeManagementDecision = useMemo(() => roles.includes('HEAD_OF_OPERATIONS') || roles.includes('GENERAL_MANAGER') || roles.includes('DIRECTOR'), [roles]);
   const isPmOnly = useMemo(() => roles.includes('PROJECT_MANAGER') && !canMakeManagementDecision, [roles, canMakeManagementDecision]);
 
   const authContextValue = useMemo(
@@ -393,6 +395,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isProjectManager,
       isGeneralManager,
       isHeadOfOperations,
+      isPmo,
       isProcurement,
       isFinance,
       isDirector,
@@ -409,6 +412,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       isProjectManager,
       isGeneralManager,
       isHeadOfOperations,
+      isPmo,
       isProcurement,
       isFinance,
       isDirector,

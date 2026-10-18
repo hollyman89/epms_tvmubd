@@ -1,0 +1,534 @@
+/* DashboardPage.module.css — Targeted Responsive Layout for Executive Dashboard */
+
+/* Outer Dashboard Container */
+.dashboardContainer {
+  container-type: inline-size;
+  container-name: dashboard;
+  background-color: #F0F4F8;
+  min-height: 100vh;
+  padding: 24px 28px 40px 28px;
+  color: #1e293b;
+  font-family: inherit;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1023px) {
+  .dashboardContainer {
+    padding: 20px 20px 32px 20px;
+  }
+}
+
+@media (max-width: 767px) {
+  .dashboardContainer {
+    padding: 16px 16px 24px 16px;
+  }
+}
+
+@media (max-width: 479px) {
+  .dashboardContainer {
+    padding: 14px 12px 20px 12px;
+  }
+}
+
+/* Header & Controls */
+.headerArea {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+  gap: 16px;
+  width: 100%;
+}
+
+.headerTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.headerControls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 767px) {
+  .headerArea {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+
+  .headerControls {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 10px;
+  }
+
+  .headerControlItem {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
+/* ROW 1: KPI Grid */
+.kpiGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 14px;
+  margin-bottom: 18px;
+  width: 100%;
+}
+
+@media (max-width: 1440px) {
+  .kpiGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1023px) {
+  .kpiGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .kpiGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
+
+.kpiCard {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* ROW 2: Management Highlights & Key Focus */
+.managementRow {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+.managementHighlightsCol {
+  grid-column: span 8;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.keyFocusCol {
+  grid-column: span 4;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1023px) {
+  .managementRow {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .managementHighlightsCol {
+    grid-column: span 1;
+  }
+
+  .keyFocusCol {
+    grid-column: span 1;
+  }
+}
+
+/* Management Highlights Internal Grid */
+.highlightsTileGrid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  width: 100%;
+}
+
+@media (max-width: 1440px) {
+  .highlightsTileGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1023px) {
+  .highlightsTileGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 479px) {
+  .highlightsTileGrid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+}
+
+.highlightTile {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+
+/* ROW 3: Domain Cards */
+.domainGrid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  margin-bottom: 20px;
+  width: 100%;
+}
+
+@media (max-width: 1440px) {
+  .domainGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1023px) {
+  .domainGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .domainGrid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}
+
+.domainCard {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ROW 4: Operational Pulse */
+.operationalPulseGrid {
+  display: grid;
+  grid-template-columns: 5fr 3fr 4fr;
+  gap: 16px;
+  width: 100%;
+}
+
+.pulseTrendCol {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.pulseDonutCol {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.pulseWorkstationCol {
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1440px) and (min-width: 1024px) {
+  .operationalPulseGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .pulseTrendCol {
+    grid-column: span 2;
+  }
+
+  .pulseDonutCol {
+    grid-column: span 1;
+  }
+
+  .pulseWorkstationCol {
+    grid-column: span 1;
+  }
+}
+
+@media (max-width: 1023px) {
+  .operationalPulseGrid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .pulseTrendCol {
+    grid-column: span 1;
+    width: 100%;
+  }
+
+  .pulseDonutCol {
+    grid-column: span 1;
+    width: 100%;
+  }
+
+  .pulseWorkstationCol {
+    grid-column: span 1;
+    width: 100%;
+  }
+}
+
+/* Donut Chart Content inside Row 4 Col 2 */
+.donutContent {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 8px 0;
+  width: 100%;
+}
+
+.donutLegend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-width: 125px;
+}
+
+@media (max-width: 640px) {
+  .donutContent {
+    flex-direction: column;
+    gap: 16px;
+    align-items: center;
+  }
+
+  .donutLegend {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* Action Workstation Tabs Navigation */
+.actionTabsNav {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 16px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* Container Queries for container-aware precision */
+@container dashboard (max-width: 1420px) {
+  .kpiGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .highlightsTileGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .domainGrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .operationalPulseGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .pulseTrendCol {
+    grid-column: span 2;
+  }
+
+  .pulseDonutCol {
+    grid-column: span 1;
+  }
+
+  .pulseWorkstationCol {
+    grid-column: span 1;
+  }
+}
+
+@container dashboard (max-width: 960px) {
+  .managementRow {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .managementHighlightsCol {
+    grid-column: span 1;
+  }
+
+  .keyFocusCol {
+    grid-column: span 1;
+  }
+
+  .highlightsTileGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .kpiGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .domainGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .operationalPulseGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .pulseTrendCol {
+    grid-column: span 1;
+  }
+
+  .pulseDonutCol {
+    grid-column: span 1;
+  }
+
+  .pulseWorkstationCol {
+    grid-column: span 1;
+  }
+}
+
+@container dashboard (max-width: 720px) {
+  .kpiGrid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .domainGrid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+}
+
+@container dashboard (max-width: 460px) {
+  .highlightsTileGrid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+}
+
+/* ============================================================ */
+/* MOBILE HERO & RINGKASAN HARI INI (EPMS — MOBILE-UX-R1)       */
+/* Clean white card presentation, zero background image         */
+/* ============================================================ */
+.mobileHeroSection {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .mobileHeroSection {
+    display: block;
+    margin-bottom: 20px;
+  }
+
+  .mobileGreeting {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 16px;
+  }
+
+  .mobileGreetingPrefix {
+    font-size: 13.5px;
+    color: #64748b;
+    font-weight: 500;
+  }
+
+  .mobileUserName {
+    margin: 2px 0;
+    font-size: 23px;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+  }
+
+  .mobileUserRole {
+    font-size: 13.5px;
+    color: #64748b;
+    font-weight: 500;
+  }
+
+  .mobileSummaryCard {
+    background-color: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  }
+
+  .mobileSummaryCardHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    cursor: pointer;
+  }
+
+  .mobileSummaryCardTitle {
+    font-size: 15.5px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  .mobileSummaryGrid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .mobileSummaryTile {
+    background-color: #ffffff;
+    border: 1px solid #f1f5f9;
+    border-radius: 12px;
+    padding: 12px 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .mobileSummaryTileIcon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .mobileSummaryTileInfo {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .mobileSummaryTileLabel {
+    font-size: 11px;
+    color: #64748b;
+    font-weight: 500;
+    line-height: 1.25;
+    margin-bottom: 4px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .mobileSummaryTileValue {
+    font-size: 18px;
+    font-weight: 700;
+    color: #0f172a;
+    line-height: 1.1;
+  }
+}
+

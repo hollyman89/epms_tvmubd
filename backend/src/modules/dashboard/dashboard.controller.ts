@@ -1,10 +1,11 @@
-import { Controller, Get, UseGuards, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Query, Request, HttpStatus, UseGuards, UseInterceptors } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { CacheInterceptor, CacheKey, CacheTTL } from '@nestjs/cache-manager';
+import { GetExecutiveSummaryDto } from './dto/get-executive-summary.dto';
 
 @ApiTags('Dashboard')
 @ApiBearerAuth()
@@ -12,6 +13,26 @@ import { CacheInterceptor, CacheKey, CacheTTL } from '@nestjs/cache-manager';
 @Controller('dashboard')
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
+
+  @Get('executive-summary')
+  @Roles('ADMIN', 'SUPER_ADMIN', 'DIRECTOR', 'GENERAL_MANAGER', 'MANAGER', 'GM_MARKETING')
+  @ApiOperation({ summary: 'Get Executive Management Summary (Aggregated Cross-Module Real KPI)' })
+  @ApiResponse({ status: 200, description: 'Executive summary retrieved successfully.' })
+  @ApiResponse({ status: 403, description: 'Forbidden. Accessible only by authorized management roles.' })
+  async getExecutiveSummary(@Query() query: GetExecutiveSummaryDto, @Request() req: any) {
+    const userId = Number(req.user?.userId ?? req.user?.id ?? req.user?.sub);
+    const rawRoles = req.user?.roles || (req.user?.role ? [req.user.role] : []);
+    const roles: string[] = rawRoles.map((r: any) =>
+      typeof r === 'string' ? r : r?.name || String(r),
+    );
+
+    const data = await this.dashboardService.getExecutiveSummary(query, userId, roles);
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Executive summary retrieved successfully',
+      data,
+    };
+  }
 
   @Get('summary')
   @Roles('SUPER_ADMIN', 'GENERAL_MANAGER', 'ADMIN') // Admin included for testing

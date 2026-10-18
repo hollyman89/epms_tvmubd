@@ -211,4 +211,83 @@ describe('InboxService (Frontend API Client)', () => {
       expect(result).toEqual({ todoCount: 0, unreadNotificationCount: 0 });
     });
   });
+
+  describe('getHistory', () => {
+    const mockHistory = [
+      {
+        historyId: 'task-history-1',
+        taskId: 1,
+        workflowInstanceId: 100,
+        taskKey: 'GO_NOGO_APPROVAL',
+        entityType: 'TENDER',
+        entityId: 10,
+        title: 'Tender #10: Go/No-Go Approval',
+        status: 'COMPLETED',
+        action: 'APPROVE',
+        decidedBy: 501,
+        decidedByName: 'Director User',
+        createdAt: '2026-09-30T00:00:00Z',
+        completedAt: '2026-09-30T01:00:00Z',
+      },
+      {
+        historyId: 'task-history-2',
+        taskId: 2,
+        workflowInstanceId: 101,
+        taskKey: 'HOPS_REVIEW',
+        entityType: 'PROJECT',
+        entityId: 20,
+        title: 'Project #20: HOPS Review',
+        status: 'RETURNED',
+        action: 'RETURN',
+        comments: 'Perbaiki RAB',
+        decidedBy: 601,
+        decidedByName: 'HOPS User',
+        createdAt: '2026-09-30T00:00:00Z',
+        completedAt: '2026-09-30T01:30:00Z',
+      },
+    ];
+
+    it('1. Calls GET /inbox/history and returns array of historical items', async () => {
+      (apiClient.get as jest.Mock).mockResolvedValue({
+        data: { data: mockHistory },
+      });
+
+      const result = await InboxService.getHistory();
+
+      expect(apiClient.get).toHaveBeenCalledWith('/inbox/history');
+      expect(result).toHaveLength(2);
+      expect(result[0].status).toBe('COMPLETED');
+      expect(result[0].action).toBe('APPROVE');
+      expect(result[1].status).toBe('RETURNED');
+      expect((result[0] as any).actionTarget).toBeUndefined(); // Strictly read-only
+    });
+
+    it('2. Double-wrapped TransformInterceptor response correctly unwrapped', async () => {
+      (apiClient.get as jest.Mock).mockResolvedValue({
+        data: {
+          meta: { code: 200, status: 'success' },
+          data: {
+            statusCode: 200,
+            message: 'Historical workflow tasks retrieved successfully',
+            data: mockHistory,
+          },
+        },
+      });
+
+      const result = await InboxService.getHistory();
+      expect(apiClient.get).toHaveBeenCalledWith('/inbox/history');
+      expect(result).toHaveLength(2);
+      expect(result[0].taskId).toBe(1);
+    });
+
+    it('3. Returns empty array when data is missing or not an array', async () => {
+      (apiClient.get as jest.Mock).mockResolvedValue({
+        data: { data: null },
+      });
+
+      const result = await InboxService.getHistory();
+      expect(result).toEqual([]);
+    });
+  });
 });
+

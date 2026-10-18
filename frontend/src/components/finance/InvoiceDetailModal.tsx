@@ -44,6 +44,16 @@ import {
   MismatchCode,
   MISMATCH_DEFINITIONS,
 } from '@/services/finance.service';
+import UserIdentityDisplay from '@/components/common/UserIdentityDisplay';
+import { normalizeInvoiceItem } from './invoiceItemProjection';
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatQuantityWithUom,
+  formatPercentage,
+} from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -55,10 +65,7 @@ export interface InvoiceDetailModalProps {
   onVerified?: () => void;
 }
 
-const formatRp = (val: number | undefined | null) => {
-  if (val === undefined || val === null || isNaN(Number(val))) return '—';
-  return `Rp ${Number(val).toLocaleString('id-ID')}`;
-};
+const formatRp = (val: number | undefined | null) => formatCurrency(val);
 
 export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   open,
@@ -66,9 +73,8 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   invoice,
   onVerified,
 }) => {
-  const { user, isFinance, isSuperAdmin } = useAuth();
-  const userRoles = user?.roles || [];
-  const canVerify = isFinance || isSuperAdmin || userRoles.includes('ADMIN') || userRoles.includes('DIRECTOR');
+  const { user, isFinance } = useAuth();
+  const canVerify = isFinance;
 
   // Authoritative data states from backend
   const [matchingResult, setMatchingResult] = useState<MatchingResult | null>(null);
@@ -149,9 +155,17 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
     0
   );
 
-  // Load PO Goods Receipts from backend
+  // Load PO Goods Receipts from backend (Only for MATERIAL PO)
   useEffect(() => {
-    if (open && poIdForGr > 0) {
+    const isService = Boolean(
+      (freshInvoice as any)?.purchaseOrder?.orderType === 'SERVICE' ||
+      (freshInvoice as any)?.orderType === 'SERVICE' ||
+      (invoice as any)?.purchaseOrder?.orderType === 'SERVICE' ||
+      (invoice as any)?.orderType === 'SERVICE' ||
+      freshInvoice?.serviceClaimId ||
+      invoice?.serviceClaimId
+    );
+    if (open && poIdForGr > 0 && !isService) {
       setLoadingPoGrs(true);
       ProcurementService.getGoodsReceipts()
         .then((allGrs) => {
@@ -187,7 +201,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
       setPoGoodsReceipts([]);
       setSelectedVerifyGrId(undefined);
     }
-  }, [open, poIdForGr]);
+  }, [open, poIdForGr, freshInvoice, invoice]);
 
   const selectedVerifyGr = useMemo(() => {
     if (!selectedVerifyGrId) return null;
@@ -198,6 +212,15 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   // Effective Display Fields (Prefer fresh backend invoice if available)
   const activeInvoice = freshInvoice || invoice;
+  const isServicePo = Boolean(
+    (activeInvoice as any)?.purchaseOrder?.orderType === 'SERVICE' ||
+    (activeInvoice as any)?.orderType === 'SERVICE' ||
+    (invoice as any)?.purchaseOrder?.orderType === 'SERVICE' ||
+    (invoice as any)?.orderType === 'SERVICE' ||
+    activeInvoice?.serviceClaimId ||
+    (activeInvoice as any)?.serviceClaim ||
+    (invoice as any)?.serviceClaimId
+  );
   const invoiceNumber = activeInvoice.invoiceNumber;
   const poNumber =
     (activeInvoice as any).purchaseOrder?.poNumber ||
@@ -249,7 +272,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   // Verification Handler
   const handleVerifySubmit = async () => {
     if (!invoiceId) return;
-    if (isProgressInvoice && !selectedVerifyGrId) {
+    if (!isServicePo && isProgressInvoice && !selectedVerifyGrId) {
       message.error('Harap pilih dokumen Goods Receipt (GR) valid terlebih dahulu.');
       return;
     }
@@ -260,15 +283,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         notes: verifyNotes.trim() || undefined,
       };
 
-      if (isProgressInvoice) {
+      if (!isServicePo && isProgressInvoice) {
         payload.goodsReceiptId = selectedVerifyGrId ? Number(selectedVerifyGrId) : undefined;
         payload.evidenceRef = selectedVerifyGr?.grNumber || evidenceRef.trim() || undefined;
+      } else if (isServicePo) {
+        const scNumber = (activeInvoice as any)?.serviceClaim?.claimNumber;
+        payload.evidenceRef = scNumber || evidenceRef.trim() || undefined;
       } else {
         payload.evidenceRef = evidenceRef.trim() || undefined;
       }
 
       await FinanceService.verifyInvoice(invoiceId, payload);
-      message.success('Invoice berhasil diverifikasi secara sah oleh Finance!');
+      message.success(isServicePo ? 'Invoice jasa berhasil diverifikasi (Rekonsiliasi Jasa lolos)!' : 'Invoice berhasil diverifikasi secara sah oleh Finance!');
       setIsVerifyModalOpen(false);
       setEvidenceRef('');
       setVerifyNotes('');
@@ -324,42 +350,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   // Status Badge Helper
   const renderStatusBadge = () => {
-    if (isVerified) {
-      return (
-        <Tag color="green" style={{ fontWeight: 700, fontSize: 12, padding: '2px 8px', margin: 0 }}>
-          <SafetyCertificateOutlined style={{ marginRight: 4 }} />
-          VERIFIED (TERVERIFIKASI)
-        </Tag>
-      );
-    }
-    if (isMatched) {
-      return (
-        <Tag color="cyan" style={{ fontWeight: 700, fontSize: 12, padding: '2px 8px', margin: 0 }}>
-          <CheckCircleOutlined style={{ marginRight: 4 }} />
-          MATCHED (SIAP DIVERIFIKASI)
-        </Tag>
-      );
-    }
-    if (isMismatch) {
-      return (
-        <Tag color="red" style={{ fontWeight: 700, fontSize: 12, padding: '2px 8px', margin: 0 }}>
-          <CloseCircleOutlined style={{ marginRight: 4 }} />
-          MISMATCH (TERDAPAT DISKREPANSI)
-        </Tag>
-      );
-    }
-    if (isRejected) {
-      return (
-        <Tag color="magenta" style={{ fontWeight: 700, fontSize: 12, padding: '2px 8px', margin: 0 }}>
-          <CloseOutlined style={{ marginRight: 4 }} />
-          REJECTED (VERIFIKASI DITOLAK)
-        </Tag>
-      );
-    }
     return (
-      <Tag color="gold" style={{ fontWeight: 700, fontSize: 12, padding: '2px 8px', margin: 0 }}>
-        PENDING EVALUATION
-      </Tag>
+      <StatusBadge
+        domain="reconciliation"
+        status={currentMatchStatus}
+        style={{ fontSize: 12, padding: '2px 8px', margin: 0 }}
+      />
     );
   };
 
@@ -391,9 +387,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               />
               <Text style={{ fontSize: 12 }}>
                 Nomor Faktur: <strong>{invoiceNumber}</strong> — Status Rekonsiliasi: {renderStatusBadge()} — Pembayaran:{' '}
-                <Tag color={isPaid ? 'green' : 'orange'} style={{ margin: '0 4px', fontWeight: 700 }}>
-                  ● {(activeInvoice as any).paymentStatus || 'UNPAID'}
-                </Tag>
+                <StatusBadge
+                  domain="payment"
+                  status={(activeInvoice as any).paymentStatus || 'UNPAID'}
+                  showDot
+                  style={{ margin: '0 4px', fontWeight: 700 }}
+                />
               </Text>
             </div>
 
@@ -413,7 +412,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     type="primary"
                     icon={<CheckOutlined />}
                     onClick={() => setIsVerifyModalOpen(true)}
-                    disabled={isProgressInvoice && (!selectedVerifyGrId || poGoodsReceipts.length === 0)}
+                    disabled={!isServicePo && isProgressInvoice && (!selectedVerifyGrId || poGoodsReceipts.length === 0)}
                     style={{
                       backgroundColor: '#059669',
                       borderColor: '#059669',
@@ -421,7 +420,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       fontWeight: 600,
                     }}
                   >
-                    Verifikasi Invoice
+                    {isServicePo ? 'Verifikasi Invoice Jasa' : 'Verifikasi Invoice'}
                   </Button>
                 </>
               )}
@@ -471,9 +470,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div style={{ fontWeight: 700, fontSize: 12.5, color: '#1d4ed8', fontFamily: 'monospace' }}>
                   {poNumber}
                 </div>
-                <Tag color="blue" style={{ fontSize: 9.5, margin: 0, marginTop: 2, fontWeight: 700 }}>
-                  ● {(activeInvoice as any).purchaseOrder?.status || 'AKTIF'}
-                </Tag>
+                <StatusBadge
+                  domain="po"
+                  status={(activeInvoice as any).purchaseOrder?.status || 'ISSUED'}
+                  showDot
+                  style={{ fontSize: 9.5, margin: 0, marginTop: 2 }}
+                />
               </Col>
               <Col xs={24} sm={6}>
                 <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>VENDOR PENYEDIA:</Text>
@@ -488,9 +490,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 <div style={{ fontWeight: 800, fontSize: 14, color: '#059669', fontFamily: 'monospace' }}>
                   {formatRp(totalAmount)}
                 </div>
-                <Tag color="orange" style={{ fontSize: 9.5, margin: 0, marginTop: 2, fontWeight: 700 }}>
-                  ● {(activeInvoice as any).paymentStatus || 'UNPAID'}
-                </Tag>
+                <StatusBadge
+                  domain="invoice"
+                  status={(activeInvoice as any).paymentStatus || 'UNPAID'}
+                  showDot
+                  style={{ fontSize: 9.5, margin: 0, marginTop: 2 }}
+                />
               </Col>
             </Row>
           </div>
@@ -529,7 +534,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     }}
                   />
                   <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
-                    Authoritative Finance Matching Engine (SSOT API)
+                    {isServicePo
+                      ? 'Authoritative Service Reconciliation Engine (Rekonsiliasi Jasa)'
+                      : 'Authoritative Finance Matching Engine (SSOT API)'}
                   </span>
                 </Space>
                 <div>{renderStatusBadge()}</div>
@@ -721,15 +728,58 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               {paymentTerm ? `${paymentTerm.termName} (${paymentTerm.percentage}%)` : (activeInvoice as any).paymentTerms || 'Net 30 Days'}
             </Descriptions.Item>
             <Descriptions.Item label="Diterbitkan Oleh">
-              {(activeInvoice as any).createdBy ? `User #${(activeInvoice as any).createdBy}` : 'Finance Team'}
+              <UserIdentityDisplay
+                user={(activeInvoice as any).creator}
+                userId={(activeInvoice as any).createdBy}
+                fallbackRole="Finance Team"
+                showEmail
+              />
             </Descriptions.Item>
             <Descriptions.Item label="Waktu Terbit" span={2}>
               {activeInvoice.createdAt ? dayjs(activeInvoice.createdAt).format('DD/MM/YYYY HH:mm') : '—'}
             </Descriptions.Item>
           </Descriptions>
 
-          {/* CANONICAL GOODS RECEIPT EVIDENCE CARD (Phase GR-6 for Progress Invoices) */}
-          {isProgressInvoice && (
+          {/* EVIDENCE SECTION: SERVICE CLAIM FOR SERVICE PO, CANONICAL GR FOR MATERIAL PO */}
+          {isServicePo ? (
+            <div
+              style={{
+                background: '#f0fdf4',
+                padding: '14px 16px',
+                borderRadius: 8,
+                border: '1px solid #bbf7d0',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <div style={{ padding: '6px 10px', background: '#dcfce7', borderRadius: 8, color: '#16a34a' }}>
+                    <SafetyCertificateOutlined style={{ fontSize: 20 }} />
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: '#166534' }}>
+                      Bukti Pelaksanaan: Service Claim Disetujui ({(activeInvoice as any).serviceClaim?.claimNumber || ((activeInvoice as any).serviceClaimId ? `SCL #${(activeInvoice as any).serviceClaimId}` : 'Klaim Jasa')})
+                    </div>
+                    <div style={{ fontSize: 11, color: '#15803d', marginTop: 2 }}>
+                      Status: <Tag color="green" style={{ fontWeight: 700, margin: '0 4px' }}>{(activeInvoice as any).serviceClaim?.status || 'APPROVED_FOR_INVOICE'}</Tag>
+                      — Nilai Disetujui: <strong>Rp {Number((activeInvoice as any).serviceClaim?.approvedClaimAmount || activeInvoice.totalAmount || 0).toLocaleString('id-ID')}</strong>
+                      {(activeInvoice as any).serviceClaim?.serviceOrder?.soNumber && (
+                        <span style={{ marginLeft: 8 }}>
+                          — SPK/WO: <strong>{(activeInvoice as any).serviceClaim.serviceOrder.soNumber}</strong>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <Tag color="green" style={{ fontWeight: 700, fontSize: 11, padding: '2px 8px', margin: 0 }}>
+                  <CheckCircleOutlined style={{ marginRight: 4 }} />
+                  KLAIM JASA DISETUJUI
+                </Tag>
+              </div>
+            </div>
+          ) : isProgressInvoice ? (
             <div
               style={{
                 background: selectedVerifyGr ? '#f0fdf4' : '#fffbeb',
@@ -789,7 +839,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </div>
               )}
             </div>
-          )}
+          ) : null}
 
           {/* Items Breakdown Table (If Items Exist) */}
           {activeInvoice.items && activeInvoice.items.length > 0 ? (
@@ -831,26 +881,41 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                   {
                     title: 'Nama Item & Spesifikasi',
                     key: 'name',
-                    render: (_: any, it: any) => (
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>
-                          {it.poItem?.itemName || it.itemName || `Item #${it.poItemId}`}
+                    render: (_: any, it: any) => {
+                      const { itemName, specification } = normalizeInvoiceItem(it);
+                      return (
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>
+                            {itemName}
+                          </div>
+                          {specification && (
+                            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
+                              {specification}
+                            </div>
+                          )}
+                          {it.categoryName && (
+                            <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 4px', marginTop: 2 }}>
+                              {it.categoryName}
+                            </Tag>
+                          )}
                         </div>
-                        {it.categoryName && (
-                          <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 4px', marginTop: 2 }}>
-                            {it.categoryName}
-                          </Tag>
-                        )}
-                      </div>
-                    ),
+                      );
+                    },
                   },
                   {
                     title: 'Qty Ditagih',
                     dataIndex: 'quantity',
                     key: 'quantity',
-                    width: 90,
+                    width: 120,
                     align: 'center' as const,
-                    render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
+                    render: (qty: number, it: any) => {
+                      const { uom } = normalizeInvoiceItem(it);
+                      return (
+                        <span style={{ fontWeight: 600 }}>
+                          {formatQuantityWithUom(qty, uom)}
+                        </span>
+                      );
+                    },
                   },
                   {
                     title: 'Harga Satuan',
@@ -967,18 +1032,18 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
         title={
           <Space>
             <CheckCircleOutlined style={{ color: '#059669', fontSize: 18 }} />
-            <span>Verifikasi Faktur Invoice — {invoiceNumber}</span>
+            <span>{isServicePo ? `Verifikasi Invoice Jasa — ${invoiceNumber}` : `Verifikasi Faktur Invoice — ${invoiceNumber}`}</span>
           </Space>
         }
         confirmLoading={submittingAction}
         onOk={handleVerifySubmit}
-        okText="Konfirmasi & Setujui Verifikasi"
+        okText={isServicePo ? 'Konfirmasi Rekonsiliasi Jasa' : 'Konfirmasi & Setujui Verifikasi'}
         cancelText="Batal"
         okButtonProps={{
           style: { backgroundColor: '#059669', borderColor: '#059669', fontWeight: 600 },
           disabled:
-            (isProgressInvoice && (!selectedVerifyGrId || poGoodsReceipts.length === 0)) ||
-            (isRetentionInvoice && !evidenceRef.trim()),
+            (!isServicePo && isProgressInvoice && (!selectedVerifyGrId || poGoodsReceipts.length === 0)) ||
+            (!isServicePo && isRetentionInvoice && !evidenceRef.trim()),
         }}
         destroyOnClose
       >
@@ -986,16 +1051,62 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
           <Alert
             type="info"
             showIcon
-            message="Validasi Finance Authoritative (Backend SSOT)"
+            message={isServicePo ? 'Validasi Rekonsiliasi Jasa (Backend SSOT)' : 'Validasi Finance Authoritative (Backend SSOT)'}
             description={
-              isProgressInvoice
+              isServicePo
+                ? 'Invoice jasa diverifikasi terhadap Service Claim yang telah disetujui (APPROVED_FOR_INVOICE). Tidak memerlukan Goods Receipt (GR).'
+                : isProgressInvoice
                 ? 'Invoice termin Progress wajib divalidasi terhadap Goods Receipt (GR) fisik yang tercatat di database.'
                 : 'Tindakan ini akan mengunci status invoice menjadi VERIFIED di database. Pastikan seluruh dokumen pendukung fisik/elektronik telah sesuai.'
             }
             style={{ borderRadius: 6 }}
           />
 
-          {isProgressInvoice ? (
+          {isServicePo ? (
+            <div
+              style={{
+                background: '#f0fdf4',
+                padding: '12px 14px',
+                borderRadius: 6,
+                border: '1px solid #bbf7d0',
+                fontSize: 11.5,
+              }}
+            >
+              <div style={{ fontWeight: 700, fontSize: 12, color: '#166534', marginBottom: 6 }}>
+                Dokumen Bukti Pelaksanaan: Service Claim Disetujui
+              </div>
+              <Row gutter={[8, 6]}>
+                <Col span={12}>
+                  <Text type="secondary" style={{ fontSize: 10 }}>NOMOR KLAIM JASA:</Text>
+                  <div style={{ fontWeight: 700, color: '#166534', fontFamily: 'monospace' }}>
+                    {(activeInvoice as any).serviceClaim?.claimNumber || `Claim #${(activeInvoice as any).serviceClaimId || '—'}`}
+                  </div>
+                </Col>
+                <Col span={12}>
+                  <Text type="secondary" style={{ fontSize: 10 }}>STATUS KLAIM:</Text>
+                  <div>
+                    <Tag color="green" style={{ fontWeight: 700, margin: 0 }}>
+                      {(activeInvoice as any).serviceClaim?.status || 'APPROVED_FOR_INVOICE'}
+                    </Tag>
+                  </div>
+                </Col>
+                <Col span={12} style={{ marginTop: 4 }}>
+                  <Text type="secondary" style={{ fontSize: 10 }}>NILAI KLAIM DISETUJUI:</Text>
+                  <div style={{ fontWeight: 700, color: '#15803d', fontFamily: 'monospace' }}>
+                    Rp {Number((activeInvoice as any).serviceClaim?.approvedClaimAmount || activeInvoice.totalAmount || 0).toLocaleString('id-ID')}
+                  </div>
+                </Col>
+                {(activeInvoice as any).serviceClaim?.serviceOrder?.soNumber && (
+                  <Col span={12} style={{ marginTop: 4 }}>
+                    <Text type="secondary" style={{ fontSize: 10 }}>NOMOR SPK/WO:</Text>
+                    <div style={{ fontWeight: 600, color: '#334155' }}>
+                      {(activeInvoice as any).serviceClaim.serviceOrder.soNumber}
+                    </div>
+                  </Col>
+                )}
+              </Row>
+            </div>
+          ) : isProgressInvoice ? (
             <div>
               <div style={{ marginBottom: 6 }}>
                 <Text strong style={{ fontSize: 12, color: '#1e3a8a' }}>

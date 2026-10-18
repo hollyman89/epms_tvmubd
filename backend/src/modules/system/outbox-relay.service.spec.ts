@@ -391,5 +391,44 @@ describe('OutboxRelayService', () => {
       expect(queryRunner.rollbackTransaction).toHaveBeenCalled();
       expect(queryRunner.commitTransaction).not.toHaveBeenCalled();
     });
+
+    it('16. CLM-01: canonical service claim events are successfully published when listeners exist', async () => {
+      const claimEvents = [
+        'procurement.service_claim.submitted',
+        'procurement.service_claim.pm_verified',
+        'procurement.service_claim.approved_for_invoice',
+      ];
+
+      for (let i = 0; i < claimEvents.length; i++) {
+        const outbox = new OutboxEvent();
+        outbox.id = 50 + i;
+        outbox.event_id = `claim-event-uuid-${i + 1}`;
+        outbox.event_name = claimEvents[i];
+        outbox.event_version = '1';
+        outbox.aggregate_type = 'ServiceClaim';
+        outbox.aggregate_id = 200 + i;
+        outbox.status = OutboxStatus.PENDING;
+        outbox.published_at = null as any;
+        outbox.retry_count = 0;
+        outbox.payload = { businessPayload: { claimNumber: `SC-00${i + 1}` } };
+
+        queryRunner.manager.findOne.mockResolvedValue(outbox);
+        eventEmitter.emit.mockReturnValue(true); // Listener accepted the event
+
+        const result = await service.relaySingleEvent(50 + i);
+
+        expect(result).toBe('SUCCESS');
+        expect(outbox.status).toBe(OutboxStatus.PUBLISHED);
+        expect(outbox.published_at).toBeInstanceOf(Date);
+        expect(eventEmitter.emit).toHaveBeenCalledWith(
+          claimEvents[i],
+          expect.objectContaining({
+            eventName: claimEvents[i],
+            aggregateType: 'ServiceClaim',
+            aggregateId: 200 + i,
+          }),
+        );
+      }
+    });
   });
 });

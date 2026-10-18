@@ -5,7 +5,11 @@ import { WorkflowEngineService } from '../workflow-engine/workflow-engine.servic
 import { NotificationService } from '../notification/notification.service';
 import { Contract, LegalStatus } from '../../entities/contract.entity';
 import { Tender, TenderStage, GoNoGoStatus } from '../../entities/tender.entity';
+import { PaymentRequest } from '../../entities/payment-request.entity';
+import { ProjectProgressLog } from '../../entities/project-progress-log.entity';
 import { WorkflowTask, WorkflowTaskStatus } from '../../entities/workflow-task.entity';
+import { ServiceClaim, ServiceClaimStatus } from '../../entities/service-claim.entity';
+import { ProjectClosure, ProjectClosureStatus } from '../../entities/project-closure.entity';
 
 describe('InboxService (Unified Inbox Foundation - N1)', () => {
   let service: InboxService;
@@ -13,6 +17,11 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
   let notificationService: jest.Mocked<Partial<NotificationService>>;
   let mockContractRepo: any;
   let mockTenderRepo: any;
+  let mockPaymentRequestRepo: any;
+  let mockProgressLogRepo: any;
+  let mockClaimRepo: any;
+  let mockClosureRepo: any;
+  let mockTaskRepo: any;
 
   beforeEach(async () => {
     workflowEngineService = {
@@ -41,6 +50,38 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       }),
     };
 
+    mockPaymentRequestRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+
+    mockProgressLogRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      }),
+    };
+
+    mockClaimRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+
+    mockClosureRepo = {
+      find: jest.fn().mockResolvedValue([]),
+    };
+
+    mockTaskRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InboxService,
@@ -48,6 +89,11 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
         { provide: NotificationService, useValue: notificationService },
         { provide: getRepositoryToken(Contract), useValue: mockContractRepo },
         { provide: getRepositoryToken(Tender), useValue: mockTenderRepo },
+        { provide: getRepositoryToken(PaymentRequest), useValue: mockPaymentRequestRepo },
+        { provide: getRepositoryToken(ProjectProgressLog), useValue: mockProgressLogRepo },
+        { provide: getRepositoryToken(ServiceClaim), useValue: mockClaimRepo },
+        { provide: getRepositoryToken(ProjectClosure), useValue: mockClosureRepo },
+        { provide: getRepositoryToken(WorkflowTask), useValue: mockTaskRepo },
       ],
     }).compile();
 
@@ -663,6 +709,475 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       expect(todos[0].returnedByName).toBe('Budi Director');
       expect(todos[0].returnReason).toBe('masih salah nominalnya');
     });
+
+    it('maps CONTRACT LEGAL_DOCUMENT_REVISION task to Sales drawer actionTarget and enriches context', async () => {
+      const contractRevTask: Partial<WorkflowTask> = {
+        id: 28,
+        taskKey: 'LEGAL_DOCUMENT_REVISION',
+        nodeId: 'node_marketing_revision',
+        status: WorkflowTaskStatus.PENDING,
+        assigneeUserId: 7,
+        createdAt: new Date('2026-10-14T20:00:00Z'),
+        workflowInstance: {
+          id: 17,
+          entityType: 'CONTRACT',
+          entityId: 4,
+          context: {
+            contractId: 4,
+            tenderId: 4,
+            contractNumber: 'CONT-20261014-0004',
+            marketing_pic_id: 7,
+          },
+        } as any,
+      };
+
+      (workflowEngineService.getMyTasks as jest.Mock).mockResolvedValue([contractRevTask]);
+
+      mockTenderRepo.findOne = jest.fn().mockResolvedValue({
+        id: 4,
+        title: 'Pengadaan Network Hardware J&T Express',
+        customer: { name: 'J&T Express' },
+      });
+
+      const qbMock = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getRawOne: jest.fn().mockResolvedValue({
+          actorId: 10,
+          fullName: 'Legal Officer',
+          reason: 'salah upload SPK kamu ya ',
+        }),
+      };
+
+      mockTenderRepo.manager = {
+        createQueryBuilder: jest.fn().mockReturnValue(qbMock),
+      };
+
+      const todos = await service.getTodos(7, ['MARKETING']);
+
+      expect(todos).toHaveLength(1);
+      expect(todos[0].sourceType).toBe('WORKFLOW_TASK');
+      expect(todos[0].actionType).toBe('LEGAL_DOCUMENT_REVISION');
+      expect(todos[0].actionTarget).toBe('/sales?tab=1&tenderId=4');
+      expect(todos[0].title).toBe('Revisi Dokumen SPK / Kontrak #CONT-20261014-0004');
+      expect(todos[0].projectName).toBe('Pengadaan Network Hardware J&T Express');
+      expect(todos[0].customerName).toBe('J&T Express');
+      expect(todos[0].returnedByName).toBe('Legal Officer');
+      expect(todos[0].returnReason).toBe('salah upload SPK kamu ya ');
+    });
+  });
+
+  describe('11. Progress Claim Verification Domain Queue (HEAD_OF_OPERATIONS & PMO)', () => {
+    it('should surface pending progress claim as actionable To-Do for HEAD_OF_OPERATIONS', async () => {
+      const mockClaim = {
+        id: 267,
+        project_id: 1,
+        task_id: 1,
+        submitted_by: 2,
+        reported_progress: '100.00',
+        previous_progress: '99.99',
+        status: 'PENDING_VERIFICATION',
+        reason: 'Pekerjaan perizinan selesai 100%',
+        created_at: new Date('2026-10-16T03:00:00Z'),
+        updated_at: new Date('2026-10-16T03:00:00Z'),
+        project: { id: 1, name: 'Project Fiber Optic' },
+        task: { id: 1, name: 'PERIZINAN' },
+        submitter: { id: 2, fullName: 'Project Manager' },
+      };
+
+      mockProgressLogRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockClaim]),
+      });
+
+      const todos = await service.getTodos(58, ['HEAD_OF_OPERATIONS']);
+
+      expect(todos).toHaveLength(1);
+      expect(todos[0]).toEqual(
+        expect.objectContaining({
+          todoId: 'progress-claim-267',
+          sourceType: 'DOMAIN_PROGRESS_CLAIM',
+          sourceId: '267',
+          taskId: 1,
+          assignedRole: 'HEAD_OF_OPERATIONS',
+          entityType: 'PROJECT_PROGRESS_CLAIM',
+          entityId: 267,
+          projectId: 1,
+          actionType: 'PROGRESS_CLAIM_VERIFICATION',
+          actionTarget: '/project-delivery?view=workspace&projectId=1&section=tasks&progressClaimId=267',
+          title: 'Verifikasi Klaim Progres: PERIZINAN (99.99% → 100%)',
+          description: 'Pekerjaan perizinan selesai 100%',
+          status: 'PENDING_VERIFICATION',
+          projectName: 'Project Fiber Optic',
+          submittedByName: 'Project Manager',
+        }),
+      );
+    });
+
+    it('should enforce Segregation of Duties: Submitter PM cannot see own claim in To-Do', async () => {
+      const mockClaim = {
+        id: 267,
+        project_id: 1,
+        task_id: 1,
+        submitted_by: 2,
+        reported_progress: '100.00',
+        previous_progress: '99.99',
+        status: 'PENDING_VERIFICATION',
+        project: { id: 1, name: 'Project Fiber Optic' },
+        task: { id: 1, name: 'PERIZINAN' },
+        submitter: { id: 2, fullName: 'Project Manager' },
+      };
+
+      mockProgressLogRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([mockClaim]),
+      });
+
+      const todos = await service.getTodos(2, ['PMO']);
+      expect(todos).toHaveLength(0);
+    });
+
+    it('should NOT surface progress claims for unrelated roles (e.g. MARKETING, LEGAL)', async () => {
+      const todos = await service.getTodos(15, ['MARKETING', 'LEGAL']);
+      expect(mockProgressLogRepo.createQueryBuilder).not.toHaveBeenCalled();
+      expect(todos).toHaveLength(0);
+    });
+  });
+
+  describe('12. Service Claim Domain Queue (SUBMITTED, PM_VERIFIED, NEEDS_REVISION)', () => {
+    const claimSubmitted = {
+      id: 101,
+      claimNumber: 'CLM-2026-001',
+      status: ServiceClaimStatus.SUBMITTED,
+      poId: 50,
+      projectId: 1,
+      totalClaimAmount: 5000000,
+      submittedAt: new Date('2026-10-15T10:00:00Z'),
+      project: { id: 1, name: 'Project Fiber Surabaya', managerId: 4 },
+      purchaseOrder: { id: 50, poNumber: 'PO-2026-050' },
+    };
+
+    const claimVerified = {
+      id: 102,
+      claimNumber: 'CLM-2026-002',
+      status: ServiceClaimStatus.PM_VERIFIED,
+      poId: 51,
+      projectId: 1,
+      totalClaimAmount: 7500000,
+      pmVerifiedAt: new Date('2026-10-15T11:00:00Z'),
+      project: { id: 1, name: 'Project Fiber Surabaya', managerId: 4 },
+      purchaseOrder: { id: 51, poNumber: 'PO-2026-051' },
+    };
+
+    const claimRevision = {
+      id: 103,
+      claimNumber: 'CLM-2026-003',
+      status: ServiceClaimStatus.NEEDS_REVISION,
+      poId: 52,
+      projectId: 1,
+      totalClaimAmount: 2000000,
+      submittedBy: 41,
+      notes: 'Klaim melebihi batas progres fisik.',
+      updatedAt: new Date('2026-10-15T12:00:00Z'),
+      project: { id: 1, name: 'Project Fiber Surabaya', managerId: 4 },
+      purchaseOrder: { id: 52, poNumber: 'PO-2026-052' },
+    };
+
+    it('SUBMITTED projects to assigned PM only (not unrelated PM or roles)', async () => {
+      mockClaimRepo.find.mockResolvedValue([claimSubmitted]);
+
+      // Assigned PM (id=4)
+      const pmTodos = await service.getTodos(4, ['PROJECT_MANAGER']);
+      expect(pmTodos.some((t) => t.sourceType === 'DOMAIN_SERVICE_CLAIM' && t.entityId === 101)).toBe(true);
+      expect(pmTodos.find((t) => t.entityId === 101)?.actionTarget).toBe('/project-delivery?projectId=1&serviceClaimId=101');
+
+      // Unrelated PM (id=99)
+      const otherPmTodos = await service.getTodos(99, ['PROJECT_MANAGER']);
+      expect(otherPmTodos.some((t) => t.sourceType === 'DOMAIN_SERVICE_CLAIM' && t.entityId === 101)).toBe(false);
+
+      // Unrelated role (LEGAL)
+      const legalTodos = await service.getTodos(10, ['LEGAL']);
+      expect(legalTodos.some((t) => t.sourceType === 'DOMAIN_SERVICE_CLAIM' && t.entityId === 101)).toBe(false);
+    });
+
+    it('PM_VERIFIED projects to PROCUREMENT role only', async () => {
+      mockClaimRepo.find.mockResolvedValue([claimVerified]);
+
+      // PROCUREMENT user
+      const procTodos = await service.getTodos(41, ['PROCUREMENT']);
+      expect(procTodos.some((t) => t.sourceType === 'DOMAIN_SERVICE_CLAIM' && t.entityId === 102)).toBe(true);
+      expect(procTodos.find((t) => t.entityId === 102)?.actionTarget).toBe('/procurement?tab=po&poId=51&action=service-claim');
+
+      // PM user (not procurement)
+      const pmTodos = await service.getTodos(4, ['PROJECT_MANAGER']);
+      expect(pmTodos.some((t) => t.sourceType === 'DOMAIN_SERVICE_CLAIM' && t.entityId === 102)).toBe(false);
+    });
+
+    it('NEEDS_REVISION projects to submitter only', async () => {
+      mockClaimRepo.find.mockResolvedValue([claimRevision]);
+
+      // Submitter (id=41)
+      const submitterTodos = await service.getTodos(41, ['PROCUREMENT']);
+      expect(submitterTodos.some((t) => t.sourceType === 'DOMAIN_SERVICE_CLAIM' && t.entityId === 103)).toBe(true);
+
+      // Other user (id=42)
+      const otherTodos = await service.getTodos(42, ['PROCUREMENT']);
+      expect(otherTodos.some((t) => t.sourceType === 'DOMAIN_SERVICE_CLAIM' && t.entityId === 103)).toBe(false);
+    });
+
+    it('deduplicates DOMAIN_SERVICE_CLAIM if matching WORKFLOW_TASK exists', async () => {
+      mockClaimRepo.find.mockResolvedValue([claimSubmitted]);
+      workflowEngineService.getMyTasks.mockResolvedValue([
+        {
+          id: 501,
+          workflowInstance: {
+            entityType: 'SERVICE_CLAIM',
+            entityId: 101,
+            project: { id: 1, name: 'Project Fiber Surabaya' },
+          },
+          nodeId: 'node_pm_verification',
+          taskKey: 'SERVICE_CLAIM_VERIFICATION',
+          title: 'Verifikasi Teknis Klaim Jasa',
+          status: WorkflowTaskStatus.PENDING,
+          assignedRole: 'PROJECT_MANAGER',
+          createdAt: new Date(),
+        } as any,
+      ]);
+
+      const todos = await service.getTodos(4, ['PROJECT_MANAGER']);
+      const matchingClaims = todos.filter((t) => t.entityType === 'SERVICE_CLAIM' && Number(t.entityId) === 101);
+      expect(matchingClaims).toHaveLength(1);
+      expect(matchingClaims[0].sourceType).toBe('WORKFLOW_TASK');
+    });
+  });
+
+  describe('13. Project Closure Domain Queue (PENDING_HOO_REVIEW, PENDING_DIRECTOR_APPROVAL, RETURNED)', () => {
+    const closureHoo = {
+      id: 201,
+      projectId: 1,
+      cycleNumber: 1,
+      status: ProjectClosureStatus.PENDING_HOO_REVIEW,
+      submittedById: 4,
+      submittedAt: new Date('2026-10-15T09:00:00Z'),
+      project: { id: 1, name: 'Project Fiber Surabaya', managerId: 4 },
+      submittedBy: { fullName: 'Project Manager' },
+    };
+
+    const closureDirector = {
+      id: 202,
+      projectId: 1,
+      cycleNumber: 1,
+      status: ProjectClosureStatus.PENDING_DIRECTOR_APPROVAL,
+      submittedById: 4,
+      hooReviewedAt: new Date('2026-10-15T11:00:00Z'),
+      project: { id: 1, name: 'Project Fiber Surabaya', managerId: 4 },
+      submittedBy: { fullName: 'Project Manager' },
+    };
+
+    const closureReturned = {
+      id: 203,
+      projectId: 1,
+      cycleNumber: 1,
+      status: ProjectClosureStatus.RETURNED,
+      submittedById: 4,
+      returnTimestamp: new Date('2026-10-15T13:00:00Z'),
+      returnReason: 'Dokumen BAST belum lengkap.',
+      project: { id: 1, name: 'Project Fiber Surabaya', managerId: 4 },
+      returnActor: { fullName: 'Head of Operations' },
+    };
+
+    it('PENDING_HOO_REVIEW projects to HEAD_OF_OPERATIONS only', async () => {
+      mockClosureRepo.find.mockResolvedValue([closureHoo]);
+
+      const hooTodos = await service.getTodos(58, ['HEAD_OF_OPERATIONS']);
+      expect(hooTodos.some((t) => t.sourceType === 'DOMAIN_PROJECT_CLOSURE' && t.entityId === 201)).toBe(true);
+      expect(hooTodos.find((t) => t.entityId === 201)?.actionTarget).toBe('/governance/tasks?projectId=1');
+
+      const directorTodos = await service.getTodos(3, ['DIRECTOR']);
+      expect(directorTodos.some((t) => t.sourceType === 'DOMAIN_PROJECT_CLOSURE' && t.entityId === 201)).toBe(false);
+    });
+
+    it('PENDING_DIRECTOR_APPROVAL projects to DIRECTOR only', async () => {
+      mockClosureRepo.find.mockResolvedValue([closureDirector]);
+
+      const dirTodos = await service.getTodos(3, ['DIRECTOR']);
+      expect(dirTodos.some((t) => t.sourceType === 'DOMAIN_PROJECT_CLOSURE' && t.entityId === 202)).toBe(true);
+
+      const hooTodos = await service.getTodos(58, ['HEAD_OF_OPERATIONS']);
+      expect(hooTodos.some((t) => t.sourceType === 'DOMAIN_PROJECT_CLOSURE' && t.entityId === 202)).toBe(false);
+    });
+
+    it('RETURNED projects to assigned PM only', async () => {
+      mockClosureRepo.find.mockResolvedValue([closureReturned]);
+
+      // Assigned PM
+      const pmTodos = await service.getTodos(4, ['PROJECT_MANAGER']);
+      expect(pmTodos.some((t) => t.sourceType === 'DOMAIN_PROJECT_CLOSURE' && t.entityId === 203)).toBe(true);
+      expect(pmTodos.find((t) => t.entityId === 203)?.actionTarget).toBe('/project-delivery?view=workspace&projectId=1&section=closure');
+
+      // Unrelated PM
+      const otherPmTodos = await service.getTodos(99, ['PROJECT_MANAGER']);
+      expect(otherPmTodos.some((t) => t.sourceType === 'DOMAIN_PROJECT_CLOSURE' && t.entityId === 203)).toBe(false);
+    });
+
+    it('deduplicates DOMAIN_PROJECT_CLOSURE if matching WORKFLOW_TASK exists', async () => {
+      mockClosureRepo.find.mockResolvedValue([closureHoo]);
+      workflowEngineService.getMyTasks.mockResolvedValue([
+        {
+          id: 601,
+          workflowInstance: {
+            entityType: 'PROJECT_CLOSURE',
+            entityId: 201,
+            project: { id: 1, name: 'Project Fiber Surabaya' },
+          },
+          nodeId: 'node_hoo_review',
+          taskKey: 'PROJECT_CLOSURE_HOO_REVIEW',
+          title: 'Review Penutupan Proyek',
+          status: WorkflowTaskStatus.PENDING,
+          assignedRole: 'HEAD_OF_OPERATIONS',
+          createdAt: new Date(),
+        } as any,
+      ]);
+
+      const todos = await service.getTodos(58, ['HEAD_OF_OPERATIONS']);
+      const matching = todos.filter((t) => t.entityType === 'PROJECT_CLOSURE' && Number(t.entityId) === 201);
+      expect(matching).toHaveLength(1);
+      expect(matching[0].sourceType).toBe('WORKFLOW_TASK');
+    });
+  });
+
+  describe('14. Riwayat / Completed History (GET /inbox/history)', () => {
+    it('returns completed, returned, and rejected historical tasks and excludes pending tasks', async () => {
+      const completedTask = {
+        id: 701,
+        status: WorkflowTaskStatus.COMPLETED,
+        action: 'APPROVE',
+        decidedBy: 4,
+        decidedByName: 'Budi Santoso',
+        decidedAt: new Date('2026-10-16T10:00:00Z'),
+        createdAt: new Date('2026-10-15T08:00:00Z'),
+        title: 'Review Rencana Operasional',
+        taskKey: 'MANAGEMENT_REVIEW',
+        workflowInstance: {
+          entityType: 'PROJECT',
+          entityId: 1,
+          project: { id: 1, name: 'Project Fiber Surabaya', managerId: 4 },
+        },
+      };
+
+      const returnedTask = {
+        id: 702,
+        status: WorkflowTaskStatus.RETURNED,
+        action: 'RETURN',
+        decidedBy: 58,
+        decidedByName: 'Head of Operations',
+        decidedAt: new Date('2026-10-16T12:00:00Z'),
+        createdAt: new Date('2026-10-15T09:00:00Z'),
+        title: 'Review Rencana Operasional',
+        taskKey: 'MANAGEMENT_REVIEW',
+        workflowInstance: {
+          entityType: 'PROJECT',
+          entityId: 1,
+          project: { id: 1, name: 'Project Fiber Surabaya', managerId: 4 },
+        },
+      };
+
+      mockTaskRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([returnedTask, completedTask]),
+      });
+
+      const history = await service.getHistory(4, ['PROJECT_MANAGER']);
+      expect(history).toHaveLength(2);
+      expect(history[0].taskId).toBe(702);
+      expect(history[0].status).toBe('RETURNED');
+      expect(history[1].taskId).toBe(701);
+      expect(history[1].status).toBe('COMPLETED');
+    });
+
+    it('scopes history to authenticated role: PROJECT_MANAGER only sees assigned project tasks', async () => {
+      const pmTask = {
+        id: 703,
+        status: WorkflowTaskStatus.COMPLETED,
+        action: 'APPROVE',
+        decidedBy: 4,
+        workflowInstance: {
+          entityType: 'PROJECT',
+          entityId: 1,
+          project: { id: 1, name: 'Project Fiber Surabaya', managerId: 4 },
+        },
+      };
+
+      const otherPmTask = {
+        id: 704,
+        status: WorkflowTaskStatus.COMPLETED,
+        action: 'APPROVE',
+        decidedBy: 99,
+        workflowInstance: {
+          entityType: 'PROJECT',
+          entityId: 2,
+          project: { id: 2, name: 'Project Other', managerId: 99 },
+        },
+      };
+
+      mockTaskRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([pmTask, otherPmTask]),
+      });
+
+      const history = await service.getHistory(4, ['PROJECT_MANAGER']);
+      expect(history.every((h) => h.projectId === 1 || h.decidedBy === 4)).toBe(true);
+      expect(history.some((h) => h.taskId === 704)).toBe(false);
+    });
+
+    it('deterministic ordering: sorted newest completedAt / decidedAt first', async () => {
+      const olderTask = {
+        id: 705,
+        status: WorkflowTaskStatus.COMPLETED,
+        action: 'APPROVE',
+        decidedBy: 3,
+        decidedAt: new Date('2026-10-14T10:00:00Z'),
+        createdAt: new Date('2026-10-14T08:00:00Z'),
+        workflowInstance: { entityType: 'PROJECT', entityId: 1, project: { id: 1, name: 'P1' } },
+      };
+
+      const newerTask = {
+        id: 706,
+        status: WorkflowTaskStatus.COMPLETED,
+        action: 'APPROVE',
+        decidedBy: 3,
+        decidedAt: new Date('2026-10-16T15:00:00Z'),
+        createdAt: new Date('2026-10-16T12:00:00Z'),
+        workflowInstance: { entityType: 'PROJECT', entityId: 1, project: { id: 1, name: 'P1' } },
+      };
+
+      mockTaskRepo.createQueryBuilder.mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([olderTask, newerTask]),
+      });
+
+      const history = await service.getHistory(3, ['DIRECTOR']);
+      expect(history[0].taskId).toBe(706);
+      expect(history[1].taskId).toBe(705);
+    });
   });
 });
+
+
 

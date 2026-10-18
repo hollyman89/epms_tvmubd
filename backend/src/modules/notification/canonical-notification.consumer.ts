@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import { BusinessEvent, NotificationPolicy } from '../../shared/contracts/business-event.contract';
 import { CanonicalNotificationWriter } from './canonical-notification.writer';
+import { NotificationService } from './notification.service';
 import {
   CanonicalNotificationError,
   CanonicalNotificationInput,
@@ -17,6 +18,7 @@ export class CanonicalNotificationConsumer {
   constructor(
     private readonly writer: CanonicalNotificationWriter,
     @Optional() private readonly dataSource?: DataSource,
+    @Optional() private readonly notificationService?: NotificationService,
   ) {}
 
   /**
@@ -146,8 +148,8 @@ export class CanonicalNotificationConsumer {
       const pmoResults = await this.projectEventToNotifications(event, {
         purpose: 'LEGAL_CONTRACT_APPROVED_PMO',
         type: 'ALERT',
-        title: 'Project Siap Kick Off',
-        message: `Proyek "${tenderTitle}" telah disetujui oleh tim Legal dan siap dijadwalkan untuk Kick Off.`,
+        title: 'Kontrak Disetujui Legal — Siap Penugasan PM',
+        message: `Kontrak "${tenderTitle}" telah disetujui oleh tim Legal dan siap untuk penugasan Project Manager oleh PMO.`,
         actionTarget: '/project-delivery',
         recipientIds: pmoRecipientIds,
         metaData: {
@@ -183,6 +185,11 @@ export class CanonicalNotificationConsumer {
         },
       });
       results.push(...mktResults);
+    }
+
+    const approvingActorId = (event as any).actor?.userId || event.payload?.actor?.userId || event.payload?.actorId;
+    if (approvingActorId && this.notificationService) {
+      await this.notificationService.markRelatedNotificationsRead(approvingActorId, 'CONTRACT', contractId);
     }
 
     return results;
@@ -324,7 +331,7 @@ export class CanonicalNotificationConsumer {
         type: 'ALERT',
         title: 'Pembayaran Diterima',
         message: `Pembayaran ${paymentNumber} senilai Rp ${amount.toLocaleString('id-ID')} untuk PO #${poId} telah diproses`,
-        actionTarget: `/projects/pos/${poId}`,
+        actionTarget: `/procurement?tab=po&poId=${poId}`,
         recipientIds: [pmId],
         metaData: {
           category: 'FINANCE',
@@ -348,7 +355,7 @@ export class CanonicalNotificationConsumer {
         type: 'SYSTEM',
         title: 'Transaksi Berhasil',
         message: `Pembayaran senilai Rp ${amount.toLocaleString('id-ID')} berhasil dicatat`,
-        actionTarget: `/finance/payments/${paymentId}`,
+        actionTarget: `/finance/payments`,
         recipientIds: [recordedBy],
         metaData: {
           category: 'FINANCE',
@@ -761,6 +768,182 @@ export class CanonicalNotificationConsumer {
         actionType: 'PROJECT_STARTED',
       },
     });
+  }
+
+  @OnEvent('project.closure.submitted')
+  async handleProjectClosureSubmitted(event: any): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object') return [];
+    const eventId = event.eventId || event.event_id;
+    if (!eventId) return [];
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const projectId = payload.projectId;
+    const projectCode = payload.projectCode || `PRJ-${projectId}`;
+    const closureId = payload.closureId || event.aggregate_id || event.aggregateId;
+
+    const hooUserIds = await this.resolveRoleUserIds(['HEAD_OF_OPERATIONS', 'SUPER_ADMIN']);
+    const recipientIds = hooUserIds.length > 0 ? hooUserIds : (event.routing?.userIds || []);
+
+    return this.projectEventToNotifications(
+      { ...event, eventId },
+      {
+        purpose: 'PROJECT_CLOSURE_SUBMITTED',
+        type: 'ALERT',
+        title: 'Pengajuan Penutupan Proyek',
+        message: `Penutupan proyek "${projectCode}" diajukan oleh PM dan membutuhkan review Head of Operations.`,
+        actionTarget: `/governance/tasks?projectId=${projectId}`,
+        recipientIds,
+        metaData: {
+          category: 'PROJECT_CLOSURE',
+          priority: 'HIGH',
+          reference_type: 'PROJECT_CLOSURE',
+          reference_id: closureId,
+          projectId,
+          closureId,
+          actionType: 'CLOSURE_SUBMITTED',
+        },
+      },
+    );
+  }
+
+  @OnEvent('project.closure.hoo.approved')
+  @OnEvent('project.closure.hoo_reviewed')
+  async handleProjectClosureHooReviewed(event: any): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object') return [];
+    const eventId = event.eventId || event.event_id;
+    if (!eventId) return [];
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const projectId = payload.projectId;
+    const projectCode = payload.projectCode || `PRJ-${projectId}`;
+    const closureId = payload.closureId || event.aggregate_id || event.aggregateId;
+
+    const directorUserIds = await this.resolveRoleUserIds(['DIRECTOR', 'SUPER_ADMIN']);
+    const recipientIds = directorUserIds.length > 0 ? directorUserIds : (event.routing?.userIds || []);
+
+    const actorId = (event as any).actor?.userId || payload.actorId || payload.actor?.userId;
+    if (actorId && this.notificationService) {
+      await this.notificationService.markRelatedNotificationsRead(actorId, 'PROJECT_CLOSURE', closureId);
+    }
+
+    return this.projectEventToNotifications(
+      { ...event, eventId },
+      {
+        purpose: 'PROJECT_CLOSURE_HOO_APPROVED',
+        type: 'ALERT',
+        title: 'Persetujuan Penutupan Proyek Direktur',
+        message: `Penutupan proyek "${projectCode}" telah disetujui HOO dan menunggu persetujuan Direktur.`,
+        actionTarget: `/governance/tasks?projectId=${projectId}`,
+        recipientIds,
+        metaData: {
+          category: 'PROJECT_CLOSURE',
+          priority: 'HIGH',
+          reference_type: 'PROJECT_CLOSURE',
+          reference_id: closureId,
+          projectId,
+          closureId,
+          actionType: 'CLOSURE_HOO_APPROVED',
+        },
+      },
+    );
+  }
+
+  @OnEvent('project.closure.director.approved')
+  @OnEvent('project.closure.approved')
+  async handleProjectClosureApproved(event: any): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object') return [];
+    const eventId = event.eventId || event.event_id;
+    if (!eventId) return [];
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const projectId = payload.projectId;
+    const projectCode = payload.projectCode || `PRJ-${projectId}`;
+    const closureId = payload.closureId || event.aggregate_id || event.aggregateId;
+
+    let pmId: number | null = payload.actorId ? Number(payload.actorId) : null;
+    if (!pmId && projectId && this.dataSource) {
+      try {
+        const rows = await this.dataSource.query(`SELECT manager_id FROM projects WHERE id = ?`, [projectId]);
+        if (rows && rows.length > 0 && rows[0].manager_id) pmId = Number(rows[0].manager_id);
+      } catch {}
+    }
+    const recipientIds = pmId ? [pmId] : (event.routing?.userIds || []);
+
+    const actorId = (event as any).actor?.userId || payload.actorId || payload.actor?.userId;
+    if (actorId && this.notificationService) {
+      await this.notificationService.markRelatedNotificationsRead(actorId, 'PROJECT_CLOSURE', closureId);
+    }
+
+    return this.projectEventToNotifications(
+      { ...event, eventId },
+      {
+        purpose: 'PROJECT_CLOSURE_APPROVED',
+        type: 'SYSTEM',
+        title: 'Penutupan Proyek Disetujui',
+        message: `Penutupan proyek "${projectCode}" telah disetujui Direktur. Proyek resmi ditutup.`,
+        actionTarget: `/project-delivery?view=workspace&projectId=${projectId}&section=closure`,
+        recipientIds,
+        metaData: {
+          category: 'PROJECT_CLOSURE',
+          priority: 'NORMAL',
+          reference_type: 'PROJECT_CLOSURE',
+          reference_id: closureId,
+          projectId,
+          closureId,
+          actionType: 'CLOSURE_APPROVED',
+        },
+      },
+    );
+  }
+
+  @OnEvent('project.closure.hoo.returned')
+  @OnEvent('project.closure.director.returned')
+  @OnEvent('project.closure.returned')
+  async handleProjectClosureReturned(event: any): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object') return [];
+    const eventId = event.eventId || event.event_id;
+    if (!eventId) return [];
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const projectId = payload.projectId;
+    const projectCode = payload.projectCode || `PRJ-${projectId}`;
+    const closureId = payload.closureId || event.aggregate_id || event.aggregateId;
+    const returnReason = payload.returnReason || 'Penutupan proyek dikembalikan untuk revisi.';
+
+    let pmId: number | null = payload.actorId ? Number(payload.actorId) : null;
+    if (!pmId && projectId && this.dataSource) {
+      try {
+        const rows = await this.dataSource.query(`SELECT manager_id FROM projects WHERE id = ?`, [projectId]);
+        if (rows && rows.length > 0 && rows[0].manager_id) pmId = Number(rows[0].manager_id);
+      } catch {}
+    }
+    const recipientIds = pmId ? [pmId] : (event.routing?.userIds || []);
+
+    const actorId = (event as any).actor?.userId || payload.actorId || payload.actor?.userId;
+    if (actorId && this.notificationService) {
+      await this.notificationService.markRelatedNotificationsRead(actorId, 'PROJECT_CLOSURE', closureId);
+    }
+
+    return this.projectEventToNotifications(
+      { ...event, eventId },
+      {
+        purpose: 'PROJECT_CLOSURE_RETURNED',
+        type: 'ALERT',
+        title: 'Penutupan Proyek Dikembalikan',
+        message: `Pengajuan penutupan proyek "${projectCode}" dikembalikan. Catatan: ${returnReason}`,
+        actionTarget: `/project-delivery?view=workspace&projectId=${projectId}&section=closure`,
+        recipientIds,
+        metaData: {
+          category: 'PROJECT_CLOSURE',
+          priority: 'HIGH',
+          reference_type: 'PROJECT_CLOSURE',
+          reference_id: closureId,
+          projectId,
+          closureId,
+          actionType: 'CLOSURE_RETURNED',
+        },
+      },
+    );
   }
 
   private async resolvePmUserIdFromPo(poId: number): Promise<number | null> {

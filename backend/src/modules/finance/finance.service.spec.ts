@@ -11,6 +11,7 @@ import { DataSource } from 'typeorm';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { MismatchCode } from './finance.types';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { PaymentRequest, PaymentRequestStatus } from '../../entities/payment-request.entity';
 
 describe('FinanceService', () => {
   let service: FinanceService;
@@ -622,6 +623,7 @@ describe('FinanceService', () => {
       count = 0,
       existingPaymentNumber = null as string | null,
       verifyAuditLog = null as any,
+      paymentRequest = null as any,
     } = {}) => {
       const resolvedPo = po !== null ? po : {
         id: invoice.poId || 1,
@@ -630,8 +632,18 @@ describe('FinanceService', () => {
         deletedAt: null,
       };
 
+      const resolvedPrq = paymentRequest !== null ? paymentRequest : {
+        id: 100,
+        invoiceId: invoice.id || 1,
+        status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+        approvedBy: 999, // Checker is different from maker (10)
+        requestedAmount: 50,
+        deletedAt: null,
+      };
+
       mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any, options: any) => {
         if (entityClass === Invoice) return invoice;
+        if (entityClass === PaymentRequest) return resolvedPrq;
         if (entityClass === AuditLog) return verifyAuditLog;
         if (entityClass === PurchaseOrder) return resolvedPo;
         if (entityClass === PoPaymentTerm) return paymentTerm;
@@ -667,6 +679,7 @@ describe('FinanceService', () => {
 
     const makeDto = (overrides: any = {}): any => ({
       invoiceId: 1,
+      paymentRequestId: 100,
       paymentAmount: 50,
       paymentDate: '2026-09-08',
       paymentMethod: 'BANK_TRANSFER',
@@ -686,7 +699,7 @@ describe('FinanceService', () => {
 
     it('should create payment and update invoice successfully', async () => {
       const mockInvoice = { id: 1, poId: 1, matchStatus: 'MATCHED', paymentStatus: 'UNPAID', totalAmount: 100, version: 1 };
-      mockQueryRunner.manager.findOne.mockResolvedValueOnce(mockInvoice);
+      setupPaymentMocks({ invoice: mockInvoice });
       mockQueryRunner.manager.count.mockResolvedValueOnce(0);
       mockQueryRunner.manager.save.mockResolvedValue({});
 
@@ -700,7 +713,7 @@ describe('FinanceService', () => {
 
     it('should handle OptimisticLockVersionMismatchError gracefully', async () => {
       const mockInvoice = { id: 1, poId: 1, matchStatus: 'MATCHED', paymentStatus: 'UNPAID', totalAmount: 100, version: 1 };
-      mockQueryRunner.manager.findOne.mockResolvedValueOnce(mockInvoice);
+      setupPaymentMocks({ invoice: mockInvoice });
       mockQueryRunner.manager.count.mockResolvedValueOnce(0);
 
       const error = new Error('OptimisticLockVersionMismatchError');
@@ -711,6 +724,145 @@ describe('FinanceService', () => {
       await expect(service.createPayment(dto, 1)).rejects.toThrow(
         'Data invoice telah berubah atau sedang diproses oleh pengguna lain. Silakan refresh halaman.'
       );
+    });
+
+    describe('BYP-01 Finance Payment Approval Bypass Prevention', () => {
+      it('should reject payment execution without PaymentRequest (missing paymentRequestId)', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID' };
+        setupPaymentMocks({ invoice: inv });
+        const dto = makeDto();
+        delete dto.paymentRequestId;
+        await expect(service.createPayment(dto, 10)).rejects.toThrow(
+          'Payment Request ID wajib disertakan untuk eksekusi pembayaran.'
+        );
+      });
+
+      it('should reject payment if PaymentRequest does not exist', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID' };
+        setupPaymentMocks({ invoice: inv });
+        mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
+          if (entityClass === Invoice) return inv;
+          if (entityClass === PaymentRequest) return null;
+          return null;
+        });
+        await expect(service.createPayment(makeDto({ paymentRequestId: 999 }), 10)).rejects.toThrow(
+          'Payment Request tidak ditemukan.'
+        );
+      });
+
+      it('should reject payment if PaymentRequest belongs to different invoice', async () => {
+        const inv = { ...defaultInvoice, id: 1, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID' };
+        const prqMismatch = {
+          id: 100,
+          invoiceId: 999,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqMismatch });
+        await expect(service.createPayment(makeDto({ invoiceId: 1, paymentRequestId: 100 }), 10)).rejects.toThrow(
+          'Payment Request tidak sesuai dengan invoice yang dituju.'
+        );
+      });
+
+      it('should reject payment if PaymentRequest is DRAFT', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID' };
+        const prqDraft = {
+          id: 100,
+          invoiceId: inv.id,
+          status: 'DRAFT' as any,
+          approvedBy: null,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqDraft });
+        await expect(service.createPayment(makeDto({ paymentRequestId: 100 }), 10)).rejects.toThrow(
+          'Pembayaran ditolak: Payment Request belum disetujui oleh Direktur (APPROVED_FOR_PAYMENT).'
+        );
+      });
+
+      it('should reject payment if PaymentRequest is REJECTED', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID' };
+        const prqRejected = {
+          id: 100,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.REJECTED,
+          approvedBy: null,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqRejected });
+        await expect(service.createPayment(makeDto({ paymentRequestId: 100 }), 10)).rejects.toThrow(
+          'Pembayaran ditolak: Payment Request belum disetujui oleh Direktur (APPROVED_FOR_PAYMENT).'
+        );
+      });
+
+      it('should reject payment if PaymentRequest is PENDING_DIRECTOR_APPROVAL', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID' };
+        const prqPending = {
+          id: 100,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL,
+          approvedBy: null,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqPending });
+        await expect(service.createPayment(makeDto({ paymentRequestId: 100 }), 10)).rejects.toThrow(
+          'Pembayaran ditolak: Payment Request belum disetujui oleh Direktur (APPROVED_FOR_PAYMENT).'
+        );
+      });
+
+      it('should reject payment if PaymentRequest is NEEDS_REVISION', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID' };
+        const prqRevision = {
+          id: 100,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.NEEDS_REVISION,
+          approvedBy: null,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqRevision });
+        await expect(service.createPayment(makeDto({ paymentRequestId: 100 }), 10)).rejects.toThrow(
+          'Pembayaran ditolak: Payment Request belum disetujui oleh Direktur (APPROVED_FOR_PAYMENT).'
+        );
+      });
+
+      it('should reject payment if PaymentRequest is already PAID (duplicate payment protection)', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'PARTIALLY_PAID', totalAmount: 100 };
+        const prqPaid = {
+          id: 100,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.PAID,
+          approvedBy: 2,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqPaid });
+        await expect(service.createPayment(makeDto({ paymentRequestId: 100 }), 10)).rejects.toThrow(
+          'Pembayaran ditolak: Payment Request sudah dibayar (PAID).'
+        );
+      });
+
+      it('should reject payment if executor is the same as the Director checker who approved (SoD)', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID' };
+        const prqApproved = {
+          id: 100,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqApproved });
+        await expect(service.createPayment(makeDto({ paymentRequestId: 100 }), 2)).rejects.toThrow(
+          'Prinsip Segregation of Duties (SoD) melarang penyetuju Payment Request (Checker/Direktur) mengeksekusi pembayaran.'
+        );
+      });
+
+      it('should allow payment execution when PaymentRequest is APPROVED_FOR_PAYMENT and executor is independent', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 100 };
+        const prqApproved = {
+          id: 100,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqApproved });
+        const result = await service.createPayment(makeDto({ paymentAmount: 100 }), 3);
+        expect(result.paymentNumber).toBeDefined();
+        expect(prqApproved.status).toBe(PaymentRequestStatus.PAID);
+        expect(inv.paymentStatus).toBe('PAID');
+        expect(mockQueryRunner.commitTransaction).toHaveBeenCalled();
+      });
     });
 
     // Test A: MATCHED invoice can pay
@@ -953,6 +1105,15 @@ describe('FinanceService', () => {
       let callCount = 0;
       mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any, options: any) => {
         if (entityClass === Invoice) return defaultInvoice;
+        if (entityClass === PaymentRequest) {
+          return {
+            id: 100,
+            invoiceId: defaultInvoice.id,
+            status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+            approvedBy: 999,
+            deletedAt: null,
+          };
+        }
         if (entityClass === PurchaseOrder) return defaultPo;
         if (entityClass === Payment) {
           callCount++;
@@ -1078,6 +1239,15 @@ describe('FinanceService', () => {
       const mockInvoice = { id: 1, poId: 1, matchStatus: 'MATCHED', paymentStatus: 'UNPAID', totalAmount: 30000000, version: 1 };
       mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
         if (entityClass === Invoice) return mockInvoice;
+        if (entityClass === PaymentRequest) {
+          return {
+            id: 100,
+            invoiceId: mockInvoice.id,
+            status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+            approvedBy: 999,
+            deletedAt: null,
+          };
+        }
         if (entityClass === PurchaseOrder) return { id: 1, totalAmount: 30000000 };
         return null;
       });
@@ -1111,6 +1281,15 @@ describe('FinanceService', () => {
       const numbers: string[] = [];
       mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any, options: any) => {
         if (entityClass === Invoice) return { ...defaultInvoice, totalAmount: 1000 };
+        if (entityClass === PaymentRequest) {
+          return {
+            id: 100,
+            invoiceId: defaultInvoice.id,
+            status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+            approvedBy: 999,
+            deletedAt: null,
+          };
+        }
         if (entityClass === PurchaseOrder) return { id: 1, totalAmount: 1000 };
         if (entityClass === Payment) {
           if (numbers.includes(options?.where?.paymentNumber)) {

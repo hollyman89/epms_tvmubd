@@ -42,6 +42,11 @@ const APPROVED_ROLE_SYNC_POLICIES: Record<string, string[]> = {
   'procurement.rfq.created': ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'],
   'procurement.po.issued': ['PROCUREMENT', 'PURCHASING', 'FINANCE', 'SUPER_ADMIN'],
   'procurement.gr.received': ['PROCUREMENT', 'PURCHASING', 'FINANCE', 'SUPER_ADMIN'],
+  'procurement.service_claim.submitted': ['PROJECT_MANAGER', 'PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'],
+  'procurement.service_claim.pm_verified': ['PROCUREMENT', 'PURCHASING', 'FINANCE', 'SUPER_ADMIN'],
+  'procurement.service_claim.approved_for_invoice': ['FINANCE', 'PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'],
+  'procurement.service_claim.returned': ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'],
+  'procurement.service_claim.rejected': ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'],
   'finance.invoice.created': ['FINANCE', 'SUPER_ADMIN', 'ADMIN'],
   'finance.invoice.verified': ['FINANCE', 'DIRECTOR', 'SUPER_ADMIN', 'ADMIN'],
   'finance.invoice.rejected': ['FINANCE', 'SUPER_ADMIN'], // In addition to direct user:${invoice.createdBy}
@@ -127,6 +132,31 @@ export class BusinessSyncConsumer {
   @OnEvent('finance.payment.recorded')
   handleFinancePaymentRecorded(event: BusinessEvent): void {
     this.processCanonicalSync(event, 'finance.payment.recorded');
+  }
+
+  @OnEvent('procurement.service_claim.submitted')
+  handleProcurementServiceClaimSubmitted(event: BusinessEvent): void {
+    this.processCanonicalSync(event, 'procurement.service_claim.submitted');
+  }
+
+  @OnEvent('procurement.service_claim.pm_verified')
+  handleProcurementServiceClaimPmVerified(event: BusinessEvent): void {
+    this.processCanonicalSync(event, 'procurement.service_claim.pm_verified');
+  }
+
+  @OnEvent('procurement.service_claim.approved_for_invoice')
+  handleProcurementServiceClaimApprovedForInvoice(event: BusinessEvent): void {
+    this.processCanonicalSync(event, 'procurement.service_claim.approved_for_invoice');
+  }
+
+  @OnEvent('procurement.service_claim.returned')
+  handleProcurementServiceClaimReturned(event: BusinessEvent): void {
+    this.processCanonicalSync(event, 'procurement.service_claim.returned');
+  }
+
+  @OnEvent('procurement.service_claim.rejected')
+  handleProcurementServiceClaimRejected(event: BusinessEvent): void {
+    this.processCanonicalSync(event, 'procurement.service_claim.rejected');
   }
 
   /**

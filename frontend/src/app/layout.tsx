@@ -1,10 +1,8 @@
 import React from 'react';
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import { ConfigProvider } from 'antd';
+import { CANONICAL_FONT_FAMILY } from '@/constants/theme';
 import './globals.css';
-
-const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'EPMS UBD & TVM',
@@ -27,10 +25,17 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body>
         <Providers>
           <AuthProvider>
-            <ConfigProvider theme={{ token: { colorPrimary: '#1677ff' } }}>
+            <ConfigProvider
+              theme={{
+                token: {
+                  colorPrimary: '#1677ff',
+                  fontFamily: CANONICAL_FONT_FAMILY,
+                },
+              }}
+            >
               {children}
             </ConfigProvider>
           </AuthProvider>

@@ -7,6 +7,11 @@ export class CreatePaymentDto {
   @IsNotEmpty()
   invoiceId: number;
 
+  @ApiProperty({ example: 1, description: 'ID of the approved PaymentRequest' })
+  @IsNumber()
+  @IsNotEmpty()
+  paymentRequestId: number;
+
   @ApiProperty({ example: '2026-07-15T10:00:00Z', description: 'Date of the payment' })
   @IsDateString()
   @IsNotEmpty()

@@ -17,6 +17,11 @@ export function resolveTodoActionTarget(item: TodoActionContext | null | undefin
   }
 
   const trimmed = target.trim();
+  // Normalize historical /project? to /project-delivery?
+  if (trimmed.startsWith('/project?')) {
+    return trimmed.replace('/project?', '/project-delivery?');
+  }
+
   // Valid relative path, rejecting artificial '/inbox' fallback
   if (trimmed.startsWith('/') && trimmed !== '/inbox') {
     return trimmed;

@@ -431,4 +431,209 @@ describe('R9.1B-OP-FIX PHASE 3: OP-03 Operational Plan Modal Readiness SSOT Alig
       expect(reopenedResult.canSubmitManagementReview).toBe(true);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // TEST 8 — AUTHORITATIVE REVISION PERSISTENCE (A & E)
+  // Given: isRevisionMode = true, 4/4 = READY
+  // When no post-return persisted revision -> canSubmitManagementReview = false
+  // When post-return persisted revision = true -> canSubmitManagementReview = true
+  // -------------------------------------------------------------------------
+  describe('TEST 8 — AUTHORITATIVE REVISION PERSISTENCE (A & E)', () => {
+    const backendReadyInRevision: BackendOperationalReadinessData = {
+      projectId: 1409,
+      projectCode: 'CONT-20261001-0103',
+      projectName: 'PROJECT ASIANET JAKARTA',
+      overallStatus: 'READY',
+      completenessCount: 4,
+      totalPillars: 4,
+      canSubmitForReview: true,
+      canCreatePr: false,
+      pillars: {
+        cost: { status: 'READY' },
+        wbs: { status: 'READY' },
+        schedule: { status: 'READY' },
+        initialCondition: { status: 'READY' },
+      },
+      gate: {
+        status: 'NEEDS_REVISION',
+        decidedAt: '2026-10-01T07:45:25.000Z',
+      },
+    };
+
+    it('Scenario E (No-Edit): blocks resubmit when 4/4 is READY but no revision was saved after return', () => {
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        hasPersistedRevisionAfterReturn: false,
+        operationalReadinessData: {
+          ...backendReadyInRevision,
+          hasPersistedRevisionAfterReturn: false,
+        },
+      });
+
+      expect(result.isOperationalPlanAuthoritativeReady).toBe(true);
+      expect(result.hasPersistedRevisionAfterReturn).toBe(false);
+      expect(result.canSubmitManagementReview).toBe(false);
+      expect(result.reviewSubmissionTooltip).toBe(
+        'Perbaiki dan simpan Operational Plan terlebih dahulu.'
+      );
+    });
+
+    it('Scenario A: enables resubmit when 4/4 is READY and post-return revision is saved', () => {
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        hasPersistedRevisionAfterReturn: true,
+        operationalReadinessData: {
+          ...backendReadyInRevision,
+          hasPersistedRevisionAfterReturn: true,
+        },
+      });
+
+      expect(result.isOperationalPlanAuthoritativeReady).toBe(true);
+      expect(result.hasPersistedRevisionAfterReturn).toBe(true);
+      expect(result.canSubmitManagementReview).toBe(true);
+      expect(result.reviewSubmissionTooltip).toBe(
+        'Ajukan kembali Operational Plan yang telah direvisi kepada Head of Operations untuk ditinjau.'
+      );
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 9 — REOPEN & REFRESH CONSISTENCY (C & D)
+  // Reopening modal or refreshing page preserves eligibility purely from
+  // authoritative server SSOT (without local React state / localStorage).
+  // -------------------------------------------------------------------------
+  describe('TEST 9 — REOPEN & REFRESH CONSISTENCY (C & D)', () => {
+    it('survives modal close/reopen and page refresh via server-backed data', () => {
+      const freshServerDataAfterSave: BackendOperationalReadinessData = {
+        projectId: 1409,
+        projectCode: 'CONT-20261001-0103',
+        projectName: 'PROJECT ASIANET JAKARTA',
+        overallStatus: 'READY',
+        completenessCount: 4,
+        totalPillars: 4,
+        canSubmitForReview: true,
+        canCreatePr: false,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'READY' },
+          schedule: { status: 'READY' },
+          initialCondition: { status: 'READY' },
+        },
+        gate: {
+          status: 'NEEDS_REVISION',
+          decidedAt: '2026-10-01T07:45:25.000Z',
+          hasPersistedRevisionAfterReturn: true,
+          lastReturnedAt: '2026-10-01T07:45:25.000Z',
+          lastRevisionSavedAt: '2026-10-01T07:50:17.000Z',
+        },
+        hasPersistedRevisionAfterReturn: true,
+        lastReturnedAt: '2026-10-01T07:45:25.000Z',
+        lastRevisionSavedAt: '2026-10-01T07:50:17.000Z',
+      };
+
+      // Simulated fresh mount after page reload: all client draft state is false/default
+      const freshMountResult = evaluateOperationalPlanReadiness({
+        operationalReadinessData: freshServerDataAfterSave,
+        isReadinessLoading: false,
+        hasCostInput: false,
+        totalPmEstimate: 0,
+        isCostMappingValid: false,
+        isCostServerSynced: true,
+        isWbsComplete: false,
+        isWbsServerSynced: true,
+        isScheduleComplete: false,
+        isScheduleServerSynced: true,
+        isConditionComplete: false,
+        initialConditionId: null,
+        hasSavedDraftSinceRevision: false, // In-memory state was reset!
+        hasPersistedRevisionAfterReturn: undefined, // Let it read from server data!
+        isRevisionMode: true,
+      });
+
+      expect(freshMountResult.hasPersistedRevisionAfterReturn).toBe(true);
+      expect(freshMountResult.isOperationalPlanAuthoritativeReady).toBe(true);
+      expect(freshMountResult.canSubmitManagementReview).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 10 — SECOND RETURN CYCLE INVALIDATION (F)
+  // Edits made during Cycle 1 do NOT automatically satisfy Cycle 2.
+  // When a second return occurs, hasPersistedRevisionAfterReturn must become false.
+  // -------------------------------------------------------------------------
+  describe('TEST 10 — SECOND RETURN CYCLE INVALIDATION (F)', () => {
+    it('invalidates previous revision saves when a newer RETURN cycle occurs', () => {
+      // Cycle 1: Return at 10:00, saved at 10:05 -> Eligible
+      const cycle1Readiness: BackendOperationalReadinessData = {
+        projectId: 1409,
+        overallStatus: 'READY',
+        completenessCount: 4,
+        totalPillars: 4,
+        canSubmitForReview: true,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'READY' },
+          schedule: { status: 'READY' },
+          initialCondition: { status: 'READY' },
+        },
+        hasPersistedRevisionAfterReturn: true,
+        lastReturnedAt: '2026-10-01T10:00:00.000Z',
+        lastRevisionSavedAt: '2026-10-01T10:05:00.000Z',
+      };
+
+      const resultCycle1 = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        operationalReadinessData: cycle1Readiness,
+      });
+      expect(resultCycle1.canSubmitManagementReview).toBe(true);
+
+      // Resubmit occurs, later Reviewer #2 (Finance) returns at 11:00.
+      // Last save remains 10:05.
+      // Server determines: lastRevisionSavedAt (10:05) < lastReturnedAt (11:00) -> hasPersistedRevisionAfterReturn = false.
+      const cycle2ReadinessBeforeEdit: BackendOperationalReadinessData = {
+        projectId: 1409,
+        overallStatus: 'READY',
+        completenessCount: 4,
+        totalPillars: 4,
+        canSubmitForReview: false,
+        pillars: {
+          cost: { status: 'READY' },
+          wbs: { status: 'READY' },
+          schedule: { status: 'READY' },
+          initialCondition: { status: 'READY' },
+        },
+        hasPersistedRevisionAfterReturn: false,
+        lastReturnedAt: '2026-10-01T11:00:00.000Z',
+        lastRevisionSavedAt: '2026-10-01T10:05:00.000Z',
+      };
+
+      const resultCycle2BeforeEdit = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        operationalReadinessData: cycle2ReadinessBeforeEdit,
+      });
+      expect(resultCycle2BeforeEdit.canSubmitManagementReview).toBe(false);
+      expect(resultCycle2BeforeEdit.reviewSubmissionTooltip).toBe(
+        'Perbaiki dan simpan Operational Plan terlebih dahulu.'
+      );
+
+      // Now PM edits and saves during Cycle 2 at 11:15.
+      const cycle2ReadinessAfterEdit: BackendOperationalReadinessData = {
+        ...cycle2ReadinessBeforeEdit,
+        canSubmitForReview: true,
+        hasPersistedRevisionAfterReturn: true,
+        lastRevisionSavedAt: '2026-10-01T11:15:00.000Z',
+      };
+
+      const resultCycle2AfterEdit = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        operationalReadinessData: cycle2ReadinessAfterEdit,
+      });
+      expect(resultCycle2AfterEdit.canSubmitManagementReview).toBe(true);
+    });
+  });
 });

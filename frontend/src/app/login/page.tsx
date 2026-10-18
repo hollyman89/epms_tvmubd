@@ -6,6 +6,7 @@ import { UserOutlined, LockOutlined, SafetyCertificateOutlined, BarChartOutlined
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/axios';
 import { useAuth } from '@/context/AuthContext';
+import { getCanonicalRoleLandingRoute } from '@/constants/menuConfig';
 
 export default function LoginPage() {
   const [form] = Form.useForm();
@@ -14,26 +15,7 @@ export default function LoginPage() {
   const { login, isAuthenticated, user, isLoading } = useAuth();
 
   const getTargetRouteForUser = (userObj: any) => {
-    const roles: string[] = userObj?.roles || [];
-    if (roles.includes('SUPER_ADMIN') || roles.includes('DIRECTOR') || roles.includes('GENERAL_MANAGER')) {
-      return '/';
-    }
-    if (roles.includes('PROJECT_MANAGER') || roles.includes('PMO') || roles.includes('HEAD_OF_OPERATIONS')) {
-      return '/project-delivery';
-    }
-    if (roles.includes('PROCUREMENT') || roles.includes('PURCHASING') || roles.includes('MANAGER')) {
-      return '/procurement';
-    }
-    if (roles.includes('FINANCE')) {
-      return '/finance/invoices';
-    }
-    if (roles.includes('MARKETING')) {
-      return '/sales';
-    }
-    if (roles.includes('LEGAL')) {
-      return '/legal/review';
-    }
-    return '/';
+    return getCanonicalRoleLandingRoute(userObj?.roles || []);
   };
 
   // Redirect only if user arrived at /login while already authenticated (initial mount)

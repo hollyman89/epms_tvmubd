@@ -131,7 +131,7 @@ describe('Project Planning Lifecycle Activation — Phase 1A Identity Tests', ()
         },
         {
           provide: getRepositoryToken(Task),
-          useValue: { find: jest.fn(), findOne: jest.fn() },
+          useValue: { find: jest.fn().mockResolvedValue([]), findOne: jest.fn() },
         },
         {
           provide: getRepositoryToken(ProjectCostEstimate),

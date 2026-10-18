@@ -31,6 +31,7 @@ import {
   DollarCircleOutlined,
   SlidersOutlined,
   TrophyOutlined,
+  CloseCircleOutlined,
 } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import { ProcurementService, RfqRecord, MasterVendor } from '@/services/procurement.service';
@@ -49,6 +50,55 @@ import {
 
 const { Text, Title } = Typography;
 
+/**
+ * Canonical check: can the current user cancel an RFQ?
+ * Strictly limited to PURCHASING and PROCUREMENT roles.
+ * Explicitly barred for PROJECT_MANAGER, DIRECTOR, HEAD_OF_OPERATIONS, ADMIN, SUPER_ADMIN.
+ */
+export const canUserCancelRfq = (roles: string[] = []): boolean => {
+  const normalized = (roles || []).map((r) => String(r).toUpperCase());
+  const isProcurementActor = normalized.includes('PURCHASING') || normalized.includes('PROCUREMENT');
+  const isBlockedRole = normalized.some((r) =>
+    ['PROJECT_MANAGER', 'DIRECTOR', 'HEAD_OF_OPERATIONS', 'ADMIN', 'SUPER_ADMIN'].includes(r)
+  );
+  return isProcurementActor && !isBlockedRole;
+};
+
+/**
+ * Visibility predicate for "Batalkan RFQ" button:
+ * Must be OPEN and user must have permitted Procurement role.
+ */
+export const isRfqCancelActionVisible = (rfqStatus?: string, roles: string[] = []): boolean => {
+  return rfqStatus === 'OPEN' && canUserCancelRfq(roles);
+};
+
+/**
+ * Direct Service PO unlock predicate:
+ * Sourcing strategy switch from competitive RFQ to direct PO for SERVICE PR.
+ * Enabled only if PR is Service and RFQ is either non-existent or CANCELLED.
+ */
+export const isDirectServicePoUnlocked = (
+  isServicePr: boolean,
+  rfqStatus?: string,
+): boolean => {
+  if (!isServicePr) return false;
+  return !rfqStatus || rfqStatus === 'CANCELLED';
+};
+
+/**
+ * Helper to determine the number of rendered "Batalkan RFQ" buttons
+ * Guarantees exactly 1 when OPEN and authorized (in footer), exactly 0 when CANCELLED or unauthorized.
+ */
+export const countRfqCancelButtons = (
+  isViewMode: boolean,
+  rfqStatus?: string,
+  roles: string[] = [],
+): number => {
+  if (!isViewMode) return 0;
+  if (!isRfqCancelActionVisible(rfqStatus, roles)) return 0;
+  return 1;
+};
+
 export interface RfqPrototypeRecord {
   rfqId: string;
   rfqNumber: string;
@@ -59,7 +109,7 @@ export interface RfqPrototypeRecord {
   projectName: string;
   totalAmount: number;
   closingDate: string;
-  status: 'OPEN' | 'CLOSED' | 'AWARDED' | string;
+  status: 'OPEN' | 'CLOSED' | 'AWARDED' | 'CANCELLED' | string;
   items: any[];
   createdAt: string;
   createdBy: string;
@@ -73,6 +123,7 @@ export interface CreateRfqModalProps {
   existingRfq?: RfqRecord | RfqPrototypeRecord | any | null;
   existingPo?: PurchaseOrderPrototypeRecord | any | null;
   onRfqCreated?: (rfq: RfqRecord | RfqPrototypeRecord | any) => void;
+  onRfqCancelled?: (rfq: RfqRecord | RfqPrototypeRecord | any) => void;
   onPoCreated?: (po: PurchaseOrderPrototypeRecord | any) => void;
   currentUserName?: string;
   viewOnly?: boolean;
@@ -136,6 +187,7 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
   existingRfq,
   existingPo = null,
   onRfqCreated,
+  onRfqCancelled,
   onPoCreated,
   currentUserName = 'Procurement Team',
   viewOnly = false,
@@ -148,6 +200,13 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
   const [quoteVersion, setQuoteVersion] = useState(0);
   const [isComparisonModalOpen, setIsComparisonModalOpen] = useState(false);
   const [comparisonVersion, setComparisonVersion] = useState(0);
+
+  // Cancellation state
+  const [localRfq, setLocalRfq] = useState<any>(null);
+  const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [isCancelling, setIsCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState<string | null>(null);
 
   const [masterVendors, setMasterVendors] = useState<MasterVendor[]>([]);
 
@@ -167,10 +226,70 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
     };
   }, []);
 
+  useEffect(() => {
+    setLocalRfq(null);
+    setCancelReason('');
+    setCancelError(null);
+    setIsCancelModalOpen(false);
+  }, [open, existingRfq]);
+
   const activeRfq = useMemo(() => {
+    if (localRfq) return localRfq;
     if (existingRfq) return existingRfq;
     return null;
-  }, [existingRfq, open]);
+  }, [localRfq, existingRfq, open]);
+
+  const canCancelRfq = useMemo(() => {
+    return canUserCancelRfq(user?.roles || []);
+  }, [user]);
+
+  const handleOpenCancelModal = () => {
+    setCancelReason('');
+    setCancelError(null);
+    setIsCancelModalOpen(true);
+  };
+
+  const handleConfirmCancelRfq = async () => {
+    const trimmedReason = cancelReason.trim();
+    if (!trimmedReason) {
+      message.error('Alasan pembatalan wajib diisi.');
+      return;
+    }
+
+    const rfqIdNum = Number(activeRfq?.id || (activeRfq as any)?.rfqId);
+    if (!rfqIdNum) {
+      message.error('ID RFQ tidak valid.');
+      return;
+    }
+
+    setIsCancelling(true);
+    setCancelError(null);
+    try {
+      const res = await ProcurementService.cancelRfq(rfqIdNum, trimmedReason);
+      message.success(`RFQ #${activeRfq?.rfqNumber || rfqIdNum} berhasil dibatalkan.`);
+      setIsCancelModalOpen(false);
+      setCancelReason('');
+
+      const updatedRfq = {
+        ...activeRfq,
+        ...(res || {}),
+        status: 'CANCELLED',
+      };
+      setLocalRfq(updatedRfq);
+
+      onRfqCancelled?.(updatedRfq);
+    } catch (err: any) {
+      const errorMsg =
+        err?.response?.data?.message ||
+        err?.response?.data?.error ||
+        err?.message ||
+        'Gagal membatalkan RFQ. Terjadi kesalahan pada server.';
+      setCancelError(errorMsg);
+      message.error(errorMsg);
+    } finally {
+      setIsCancelling(false);
+    }
+  };
 
   const isViewMode = viewOnly || Boolean(activeRfq);
 
@@ -421,6 +540,16 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
             <Button onClick={onClose} style={{ borderRadius: 6 }}>
               {isViewMode ? 'Tutup' : 'Batal'}
             </Button>
+            {isViewMode && isRfqOpen && canCancelRfq && (
+              <Button
+                danger
+                onClick={handleOpenCancelModal}
+                icon={<CloseCircleOutlined />}
+                style={{ borderRadius: 6, fontWeight: 500 }}
+              >
+                Batalkan RFQ
+              </Button>
+            )}
             {!isViewMode && (
               <Button
                 type="primary"
@@ -969,6 +1098,91 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
           currentUserName={currentUserName}
         />
       )}
+
+      {/* CONFIRMATION MODAL: BATALKAN RFQ */}
+      <Modal
+        open={isCancelModalOpen}
+        title="Batalkan RFQ"
+        onCancel={() => {
+          if (!isCancelling) {
+            setIsCancelModalOpen(false);
+            setCancelReason('');
+            setCancelError(null);
+          }
+        }}
+        centered
+        destroyOnClose
+        zIndex={1100}
+        footer={[
+          <Button
+            key="back"
+            onClick={() => {
+              setIsCancelModalOpen(false);
+              setCancelReason('');
+              setCancelError(null);
+            }}
+            disabled={isCancelling}
+            style={{ borderRadius: 6 }}
+          >
+            Kembali
+          </Button>,
+          <Button
+            key="submit"
+            type="primary"
+            danger
+            loading={isCancelling}
+            disabled={!cancelReason.trim()}
+            onClick={handleConfirmCancelRfq}
+            style={{ borderRadius: 6, fontWeight: 600 }}
+          >
+            Ya, Batalkan RFQ
+          </Button>,
+        ]}
+      >
+        <div style={{ padding: '8px 0' }}>
+          <Alert
+            type="warning"
+            showIcon
+            message="Perhatian Pembatalan RFQ"
+            description={
+              <div>
+                Anda akan membatalkan RFQ <strong>{activeRfq?.rfqNumber || `RFQ #${activeRfq?.id}`}</strong>. 
+                Tindakan ini tidak dapat dibatalkan. Riwayat RFQ akan tetap tersimpan dan Purchase Request terkait akan tetap dalam status APPROVED.
+              </div>
+            }
+            style={{ marginBottom: 16 }}
+          />
+
+          {cancelError && (
+            <Alert
+              type="error"
+              showIcon
+              message="Gagal Membatalkan RFQ"
+              description={cancelError}
+              style={{ marginBottom: 16 }}
+            />
+          )}
+
+          <Form layout="vertical">
+            <Form.Item
+              label={<span style={{ fontWeight: 600 }}>Alasan Pembatalan <span style={{ color: '#ef4444' }}>*</span></span>}
+              required
+              help={!cancelReason.trim() ? 'Alasan pembatalan wajib diisi.' : undefined}
+              validateStatus={!cancelReason.trim() ? 'warning' : 'success'}
+            >
+              <Input.TextArea
+                rows={4}
+                placeholder="Masukkan alasan pembatalan RFQ (misal: beralih ke Direct Service PO, perubahan spesifikasi teknis, dll)..."
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                disabled={isCancelling}
+                maxLength={500}
+                showCount
+              />
+            </Form.Item>
+          </Form>
+        </div>
+      </Modal>
     </Modal>
   );
 };

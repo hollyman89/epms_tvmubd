@@ -141,6 +141,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         queryClient.invalidateQueries({ queryKey: ['dashboard-procurement-pending'], type: 'active' });
         queryClient.invalidateQueries({ queryKey: ['rfq'], type: 'active' });
         queryClient.invalidateQueries({ queryKey: ['pr-workflow-instance-review-modal'], type: 'active' });
+        queryClient.invalidateQueries({ queryKey: ['legal-contracts'], type: 'active' });
+        queryClient.invalidateQueries({ queryKey: ['tenders'], type: 'active' });
 
         // Trigger authoritative fetch for active manual-state screens
         if (typeof window !== 'undefined') {
@@ -175,14 +177,20 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'], type: 'active' });
         } else if (eventName === 'procurement.rfq.created') {
           queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['procurement', 'rfqs'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['procurement', 'prs'], type: 'active' });
           queryClient.invalidateQueries({ queryKey: ['rfq'], type: 'active' });
         } else if (eventName === 'procurement.po.issued') {
           queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['procurement', 'rfqs'], type: 'active' });
           queryClient.invalidateQueries({ queryKey: ['procurement', 'packages'], type: 'active' });
           queryClient.invalidateQueries({ queryKey: ['dashboard-summary'], type: 'active' });
           queryClient.invalidateQueries({ queryKey: ['dashboard-procurement-pending'], type: 'active' });
         } else if (eventName === 'procurement.gr.received') {
           queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['procurement', 'goods-receipts'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'], type: 'active' });
           queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'], type: 'active' });
         } else if (eventName.startsWith('project.')) {
           queryClient.invalidateQueries({ queryKey: ['dashboard-summary'], type: 'active' });
@@ -191,9 +199,15 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           queryClient.invalidateQueries({ queryKey: ['dashboard-procurement-pending'], type: 'active' });
         } else if (eventName.startsWith('finance.invoice.')) {
           queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'], type: 'active' });
         } else if (eventName === 'finance.payment.recorded') {
           queryClient.invalidateQueries({ queryKey: ['procurement', 'reconciliations'], type: 'active' });
           queryClient.invalidateQueries({ queryKey: ['dashboard-summary'], type: 'active' });
+        } else if (eventName.startsWith('legal.') || eventName === 'marketing.spk.uploaded') {
+          queryClient.invalidateQueries({ queryKey: ['legal-review'], type: 'active' });
+          queryClient.invalidateQueries({ queryKey: ['legal-contracts'], type: 'active' });
+        } else if (eventName.startsWith('marketing.')) {
+          queryClient.invalidateQueries({ queryKey: ['tenders'], type: 'active' });
         }
 
         // Notify active manual-state screens via browser event with canonical envelope

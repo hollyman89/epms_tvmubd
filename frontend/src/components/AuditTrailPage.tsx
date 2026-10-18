@@ -266,21 +266,21 @@ export const AuditTrailPage: React.FC = () => {
   ];
 
   return (
-    <div style={{ padding: '24px', background: '#f8fafc', minHeight: '100vh' }}>
+    <div>
       {/* Page Header */}
       <Row justify="space-between" align="middle" style={{ marginBottom: 20 }}>
         <Col>
           <Space direction="vertical" size={2}>
             <Space align="center">
               <HistoryOutlined style={{ fontSize: 24, color: '#1677ff' }} />
-              <Title level={3} style={{ margin: 0, fontWeight: 700 }}>
+              <Title level={3} style={{ margin: 0, fontSize: '24px', fontWeight: 600, lineHeight: '32px', color: '#0f172a' }}>
                 Audit Trail
               </Title>
               <Tag color="blue" style={{ marginLeft: 8 }}>
                 SUPER_ADMIN ONLY
               </Tag>
             </Space>
-            <Text type="secondary">
+            <Text type="secondary" style={{ fontSize: 13, color: '#64748b' }}>
               Riwayat aktivitas sistem yang tercatat secara permanen dan append-only.
             </Text>
           </Space>

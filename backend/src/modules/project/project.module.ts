@@ -30,9 +30,19 @@ import { WorkflowTransition } from '../../entities/workflow-transition.entity';
 import { ProjectEventListener } from './project-event.listener';
 import { ManagementReviewSyncService } from './management-review-sync.service';
 import { ProjectWorkflowProjectionService } from './project-workflow-projection.service';
+import { ProjectIssueRiskController } from './project-issue-risk.controller';
+import { ProjectIssueService } from './project-issue.service';
+import { ProjectRiskService } from './project-risk.service';
+import { ProjectIssue } from '../../entities/project-issue.entity';
+import { ProjectRisk } from '../../entities/project-risk.entity';
+import { ProjectClosure } from '../../entities/project-closure.entity';
+import { ProjectClosureService } from './project-closure.service';
+import { WorkflowModule } from '../workflow-engine/workflow.module';
+import { OutboxEvent } from '../../entities/outbox-event.entity';
 
 @Module({
   imports: [
+    WorkflowModule,
     TypeOrmModule.forFeature([
       WorkBreakdownStructure,
       Task,
@@ -53,9 +63,13 @@ import { ProjectWorkflowProjectionService } from './project-workflow-projection.
       WorkflowInstance,
       WorkflowTask,
       WorkflowTransition,
+      ProjectIssue,
+      ProjectRisk,
+      ProjectClosure,
+      OutboxEvent,
     ]),
   ],
-  controllers: [ProjectController],
+  controllers: [ProjectController, ProjectIssueRiskController],
   providers: [
     ProjectService,
     CostEstimateValidator,
@@ -66,6 +80,9 @@ import { ProjectWorkflowProjectionService } from './project-workflow-projection.
     ProjectEventListener,
     ManagementReviewSyncService,
     ProjectWorkflowProjectionService,
+    ProjectIssueService,
+    ProjectRiskService,
+    ProjectClosureService,
   ],
   exports: [
     ProjectService,
@@ -76,6 +93,9 @@ import { ProjectWorkflowProjectionService } from './project-workflow-projection.
     ManagementReviewValidator,
     ManagementReviewSyncService,
     ProjectWorkflowProjectionService,
+    ProjectIssueService,
+    ProjectRiskService,
+    ProjectClosureService,
   ],
 })
 export class ProjectModule {}

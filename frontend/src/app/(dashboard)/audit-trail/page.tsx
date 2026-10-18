@@ -11,7 +11,7 @@ const AuditTrailPage = dynamic(
     loading: () => (
       <div 
         style={{ 
-          display: 'flex', 
+          display: 'flex', flexDirection: 'column', gap: 12, 
           justifyContent: 'center', 
           alignItems: 'center', 
           minHeight: '60vh',
@@ -19,8 +19,9 @@ const AuditTrailPage = dynamic(
           borderRadius: '12px'
         }}
       >
-        <Spin size="large" tip="Memuat Jejak Audit..." />
-      </div>
+            <Spin size="large" />
+            <span style={{ color: '#64748b', fontSize: 14 }}>Memuat Jejak Audit...</span>
+          </div>
     ),
     ssr: false,
   }

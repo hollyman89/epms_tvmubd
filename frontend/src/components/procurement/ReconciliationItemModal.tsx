@@ -51,14 +51,12 @@ export const ReconciliationItemModal: React.FC<ReconciliationItemModalProps> = (
   onSuccess,
 }) => {
   const queryClient = useQueryClient();
-  const { user, isProcurement, isSuperAdmin } = useAuth();
-  // Mutation roles following actual backend controller: PROCUREMENT, PURCHASING, SUPER_ADMIN, ADMIN
+  const { user, isProcurement } = useAuth();
+  // Mutation roles following actual backend controller: PROCUREMENT, PURCHASING
   const userRoles = (user?.roles || []).map((r: any) => String(r.name || r).toUpperCase());
   const canMutate =
     isProcurement ||
-    isSuperAdmin ||
-    userRoles.includes('PURCHASING') ||
-    userRoles.includes('ADMIN');
+    userRoles.includes('PURCHASING');
 
   const [activeTab, setActiveTab] = useState<'reconcile' | 'exclude'>('reconcile');
   const [selectedCostItemId, setSelectedCostItemId] = useState<number | null>(null);

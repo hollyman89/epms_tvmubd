@@ -66,4 +66,53 @@ export class NotificationService {
     await this.notificationRepo.softDelete(notif.id);
     return { success: true };
   }
+
+  /**
+   * Reconciles related notifications to read state when the associated business task is completed.
+   */
+  async markRelatedNotificationsRead(
+    userId: number,
+    referenceType: string,
+    referenceId: string | number,
+  ): Promise<number> {
+    const unreadNotifs = await this.notificationRepo.find({
+      where: { userId, isRead: false },
+    });
+    const toUpdate: number[] = [];
+    const refTypeStr = String(referenceType).toUpperCase();
+    const refIdStr = String(referenceId);
+
+    for (const n of unreadNotifs) {
+      const meta = n.metaData;
+      if (!meta || typeof meta !== 'object') continue;
+      const nRefType = String(
+        meta.reference_type || meta.referenceType || meta.category || '',
+      ).toUpperCase();
+      const nRefId = String(
+        meta.reference_id ??
+          meta.referenceId ??
+          meta.claimId ??
+          meta.contractId ??
+          meta.tenderId ??
+          meta.projectId ??
+          meta.paymentId ??
+          '',
+      );
+
+      if (nRefType === refTypeStr && nRefId === refIdStr) {
+        toUpdate.push(n.id);
+      }
+    }
+
+    if (toUpdate.length > 0) {
+      for (const id of toUpdate) {
+        await this.notificationRepo.update({ id }, { isRead: true });
+      }
+      this.logger.log(
+        `Marked ${toUpdate.length} related notification(s) read for user ${userId} (${refTypeStr} #${refIdStr})`,
+      );
+    }
+
+    return toUpdate.length;
+  }
 }

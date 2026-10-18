@@ -251,4 +251,100 @@ describe('BusinessSyncConsumer (Phase G Canonical Sync)', () => {
     expect((envelope as any).sensitiveContractPrice).toBeUndefined();
     expect(envelope.aggregateId).toBe(801); // Canonical type preserved
   });
+
+  describe('Service Claim Canonical Sync (CLM-01)', () => {
+    it('11. handleProcurementServiceClaimSubmitted dispatches to PM, PROCUREMENT, PURCHASING, SUPER_ADMIN', () => {
+      const canonicalEvent: BusinessEvent = {
+        eventId: 'evt-sc-submit-1',
+        eventName: 'procurement.service_claim.submitted',
+        eventVersion: 1,
+        occurredAt: '2026-10-18T05:00:00.000Z',
+        aggregateType: 'ServiceClaim',
+        aggregateId: 101,
+        projectId: 42,
+        payload: { claimNumber: 'SC-001' },
+      };
+
+      consumer.handleProcurementServiceClaimSubmitted(canonicalEvent);
+
+      expect(capturedEnvelopes[0].eventName).toBe('procurement.service_claim.submitted');
+      expect(capturedEnvelopes[0].aggregateType).toBe('ServiceClaim');
+      expect(capturedEnvelopes[0].aggregateId).toBe(101);
+      expect(capturedEnvelopes[0].projectId).toBe(42);
+      expect(capturedRooms[0]).toContain('role:PROJECT_MANAGER');
+      expect(capturedRooms[0]).toContain('role:PROCUREMENT');
+      expect(capturedRooms[0]).toContain('role:PURCHASING');
+      expect(capturedRooms[0]).toContain('role:SUPER_ADMIN');
+    });
+
+    it('12. handleProcurementServiceClaimPmVerified dispatches to PROCUREMENT, PURCHASING, FINANCE, SUPER_ADMIN', () => {
+      const canonicalEvent: BusinessEvent = {
+        eventId: 'evt-sc-verify-1',
+        eventName: 'procurement.service_claim.pm_verified',
+        eventVersion: 1,
+        occurredAt: '2026-10-18T05:00:00.000Z',
+        aggregateType: 'ServiceClaim',
+        aggregateId: 102,
+        projectId: 42,
+        payload: { claimNumber: 'SC-002' },
+      };
+
+      consumer.handleProcurementServiceClaimPmVerified(canonicalEvent);
+
+      expect(capturedEnvelopes[0].eventName).toBe('procurement.service_claim.pm_verified');
+      expect(capturedRooms[0]).toContain('role:PROCUREMENT');
+      expect(capturedRooms[0]).toContain('role:PURCHASING');
+      expect(capturedRooms[0]).toContain('role:FINANCE');
+      expect(capturedRooms[0]).toContain('role:SUPER_ADMIN');
+    });
+
+    it('13. handleProcurementServiceClaimApprovedForInvoice dispatches to FINANCE, PROCUREMENT, PURCHASING, SUPER_ADMIN', () => {
+      const canonicalEvent: BusinessEvent = {
+        eventId: 'evt-sc-appr-1',
+        eventName: 'procurement.service_claim.approved_for_invoice',
+        eventVersion: 1,
+        occurredAt: '2026-10-18T05:00:00.000Z',
+        aggregateType: 'ServiceClaim',
+        aggregateId: 103,
+        projectId: 42,
+        payload: { claimNumber: 'SC-003' },
+      };
+
+      consumer.handleProcurementServiceClaimApprovedForInvoice(canonicalEvent);
+
+      expect(capturedEnvelopes[0].eventName).toBe('procurement.service_claim.approved_for_invoice');
+      expect(capturedRooms[0]).toContain('role:FINANCE');
+      expect(capturedRooms[0]).toContain('role:PROCUREMENT');
+      expect(capturedRooms[0]).toContain('role:PURCHASING');
+      expect(capturedRooms[0]).toContain('role:SUPER_ADMIN');
+    });
+
+    it('14. handleProcurementServiceClaimReturned and Rejected dispatch to PROCUREMENT, PURCHASING, SUPER_ADMIN', () => {
+      const retEvent: BusinessEvent = {
+        eventId: 'evt-sc-ret-1',
+        eventName: 'procurement.service_claim.returned',
+        eventVersion: 1,
+        occurredAt: '2026-10-18T05:00:00.000Z',
+        aggregateType: 'ServiceClaim',
+        aggregateId: 104,
+        payload: { claimNumber: 'SC-004' },
+      };
+      consumer.handleProcurementServiceClaimReturned(retEvent);
+      expect(capturedEnvelopes[0].eventName).toBe('procurement.service_claim.returned');
+      expect(capturedRooms[0]).toContain('role:PROCUREMENT');
+
+      const rejEvent: BusinessEvent = {
+        eventId: 'evt-sc-rej-1',
+        eventName: 'procurement.service_claim.rejected',
+        eventVersion: 1,
+        occurredAt: '2026-10-18T05:00:00.000Z',
+        aggregateType: 'ServiceClaim',
+        aggregateId: 105,
+        payload: { claimNumber: 'SC-005' },
+      };
+      consumer.handleProcurementServiceClaimRejected(rejEvent);
+      expect(capturedEnvelopes[1].eventName).toBe('procurement.service_claim.rejected');
+      expect(capturedRooms[1]).toContain('role:PROCUREMENT');
+    });
+  });
 });

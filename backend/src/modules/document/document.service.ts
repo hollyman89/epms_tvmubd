@@ -1,7 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Document } from '../../entities/document.entity';
+import { Document, DocumentCategory } from '../../entities/document.entity';
 import { Project } from '../../entities/project.entity';
 import { Contract } from '../../entities/contract.entity';
 import { Tender } from '../../entities/tender.entity';
@@ -140,6 +140,7 @@ export class DocumentService {
     key: string;
     userId?: number;
     userRoles?: string[];
+    category?: string;
   }) {
     if (!data.userId) {
       throw new UnauthorizedException('User ID is required for document metadata operations');
@@ -203,6 +204,11 @@ export class DocumentService {
     const region = process.env.AWS_REGION || 'ap-southeast-1';
     const finalUrl = `https://${bucket}.s3.${region}.amazonaws.com/${trimmedKey}`;
 
+    let docCategory = DocumentCategory.OTHER;
+    if (data.category && Object.values(DocumentCategory).includes(data.category as DocumentCategory)) {
+      docCategory = data.category as DocumentCategory;
+    }
+
     const document = this.documentRepository.create({
       entityType: data.entityType,
       entityId: Number(data.entityId),
@@ -210,6 +216,7 @@ export class DocumentService {
       filePath: finalUrl,
       mimeType: data.mimeType || 'application/octet-stream',
       fileSize: data.fileSize,
+      category: docCategory,
       createdBy: Number(data.userId),
     });
 
@@ -222,6 +229,7 @@ export class DocumentService {
     file: Express.Multer.File,
     userId?: number,
     userRoles: string[] = [],
+    category?: DocumentCategory | string,
   ) {
     if (!userId) {
       throw new UnauthorizedException('User ID is required for document operations');
@@ -232,23 +240,83 @@ export class DocumentService {
     if (!entityType || typeof entityType !== 'string') {
       throw new BadRequestException('Parameter entityType tidak valid');
     }
+    if (!file || !file.buffer || file.size === 0) {
+      throw new BadRequestException('Berkas tidak boleh kosong (zero-byte file).');
+    }
+
+    const safeFileName = this.sanitizeFileName(file.originalname);
+    const ext = path.extname(safeFileName).toLowerCase();
+
+    const disallowedExts = ['.exe', '.bat', '.cmd', '.sh', '.bin', '.js', '.ts', '.php', '.py', '.html', '.htm'];
+    if (disallowedExts.includes(ext)) {
+      throw new BadRequestException(`Tipe berkas dengan ekstensi '${ext}' tidak diizinkan demi keamanan.`);
+    }
+
+    const allowedExts = [
+      '.pdf', '.jpg', '.jpeg', '.png', '.webp',
+      '.doc', '.docx', '.xls', '.xlsx', '.csv',
+      '.zip', '.kmz', '.dwg',
+    ];
+    if (!allowedExts.includes(ext)) {
+      throw new BadRequestException(`Ekstensi berkas '${ext}' tidak didukung sebagai dokumen bukti.`);
+    }
 
     await this.validateDocumentEntityAccess(entityType, Number(entityId), Number(userId), userRoles);
 
-    const safeFileName = this.sanitizeFileName(file.originalname);
-    const fileUrl = await this.uploadToS3(file, entityType.toLowerCase());
+    const folder = entityType.toLowerCase();
+    let filePath: string;
+    let savedLocalPath: string | null = null;
 
-    const document = this.documentRepository.create({
-      entityType,
-      entityId: Number(entityId),
-      fileName: safeFileName,
-      filePath: fileUrl, // Store URL in DB
-      mimeType: file.mimetype,
-      fileSize: file.size,
-      createdBy: Number(userId),
-    });
+    const isLocalDriver =
+      process.env.STORAGE_DRIVER === 'local' ||
+      !process.env.AWS_ACCESS_KEY_ID ||
+      process.env.AWS_ACCESS_KEY_ID === 'dummy';
 
-    return await this.documentRepository.save(document);
+    if (isLocalDriver) {
+      const uploadDir = path.join(process.cwd(), 'uploads', folder);
+      try {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      } catch {
+        // ignore if exists
+      }
+      const uniqueName = `${Date.now()}-${safeFileName}`;
+      const relativePath = path.join('uploads', folder, uniqueName).replace(/\\/g, '/');
+      const absolutePath = path.join(process.cwd(), relativePath);
+      await fs.promises.writeFile(absolutePath, file.buffer);
+      savedLocalPath = absolutePath;
+      filePath = relativePath;
+    } else {
+      filePath = await this.uploadToS3(file, folder);
+    }
+
+    let docCategory = DocumentCategory.OTHER;
+    if (category && Object.values(DocumentCategory).includes(category as DocumentCategory)) {
+      docCategory = category as DocumentCategory;
+    }
+
+    try {
+      const document = this.documentRepository.create({
+        entityType,
+        entityId: Number(entityId),
+        fileName: safeFileName,
+        filePath: filePath,
+        mimeType: file.mimetype || 'application/octet-stream',
+        fileSize: file.size,
+        category: docCategory,
+        createdBy: Number(userId),
+      });
+
+      return await this.documentRepository.save(document);
+    } catch (dbErr) {
+      if (savedLocalPath && fs.existsSync(savedLocalPath)) {
+        try {
+          fs.unlinkSync(savedLocalPath);
+        } catch {
+          // ignore
+        }
+      }
+      throw dbErr;
+    }
   }
 
   async validateDocumentEntityAccess(
@@ -389,6 +457,7 @@ export class DocumentService {
       throw new BadRequestException('Parameter entityType tidak valid');
     }
 
+    const normalizedType = String(entityType || '').trim().toUpperCase();
     await this.validateDocumentEntityAccess(entityType, Number(entityId), Number(userId), userRoles);
 
     const documents = await this.documentRepository.find({
@@ -400,11 +469,28 @@ export class DocumentService {
       order: { createdAt: 'DESC' },
     });
 
+    let progressEvidenceDocIds = new Set<number>();
+    if (normalizedType === 'PROJECT') {
+      try {
+        const evidenceRows = await this.documentRepository.manager.query(
+          `SELECT DISTINCT pe.document_id
+           FROM project_progress_evidence pe
+           JOIN project_progress_logs pl ON pe.progress_log_id = pl.id
+           WHERE pl.project_id = ?`,
+          [Number(entityId)],
+        );
+        progressEvidenceDocIds = new Set(evidenceRows.map((r: any) => Number(r.document_id)));
+      } catch (err) {
+        // non-blocking fallback
+      }
+    }
+
     return documents.map(doc => {
       const streamUrl = `/api/v1/documents/${doc.id}/stream`;
       const downloadUrl = `/api/v1/documents/${doc.id}/download`;
       return {
         ...doc,
+        isProgressEvidence: progressEvidenceDocIds.has(Number(doc.id)),
         filePath: streamUrl,
         fileUrl: streamUrl,
         streamUrl,

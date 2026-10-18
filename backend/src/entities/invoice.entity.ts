@@ -3,6 +3,7 @@ import { PurchaseOrder } from './purchase-order.entity';
 import { InvoiceItem } from './invoice-item.entity';
 import { Payment } from './payment.entity';
 import { PoPaymentTerm } from './po-payment-term.entity';
+import { ServiceClaim } from './service-claim.entity';
 
 @Entity('invoices')
 export class Invoice {
@@ -14,6 +15,9 @@ export class Invoice {
 
   @Column({ name: 'payment_term_id', type: 'bigint', nullable: true })
   paymentTermId?: number;
+
+  @Column({ name: 'service_claim_id', type: 'bigint', unsigned: true, nullable: true })
+  serviceClaimId?: number;
 
   @Column({ name: 'invoice_number', unique: true })
   invoiceNumber: string;
@@ -61,6 +65,10 @@ export class Invoice {
   @ManyToOne(() => PoPaymentTerm, term => term.invoices, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'payment_term_id' })
   paymentTerm?: PoPaymentTerm;
+
+  @ManyToOne(() => ServiceClaim, sc => sc.invoices, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'service_claim_id' })
+  serviceClaim?: ServiceClaim;
 
   @OneToMany(() => InvoiceItem, item => item.invoice, { cascade: true })
   items: InvoiceItem[];

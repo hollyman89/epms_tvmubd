@@ -9,6 +9,8 @@ import { PurchaseOrder } from '../../entities/purchase-order.entity';
 import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { PoPaymentTerm } from '../../entities/po-payment-term.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { PaymentRequest } from '../../entities/payment-request.entity';
+import { Notification } from '../../entities/notification.entity';
 
 @Module({
   imports: [
@@ -20,6 +22,8 @@ import { AuditLog } from '../../entities/audit-log.entity';
       GoodsReceipt,
       PoPaymentTerm,
       AuditLog,
+      PaymentRequest,
+      Notification,
     ])
   ],
   controllers: [FinanceController],

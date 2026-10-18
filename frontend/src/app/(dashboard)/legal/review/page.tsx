@@ -7,20 +7,25 @@ import { FilePdfOutlined, AuditOutlined, CheckCircleOutlined, FileSyncOutlined, 
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { LegalService } from '@/services';
+import { WorkflowEngineService } from '@/services/workflowEngine.service';
 import { streamSecureContractSpk } from '@/lib/fileDelivery';
 import { ProtectedRoute } from '@/components/ProtectedRoute';
-import { useSocket } from '@/context/SocketProvider';
+import { setupLegalReviewSync } from '@/lib/legalSync';
 import { LegalTaskQueue, TaskQueueItem } from '@/components/legal/LegalTaskQueue';
 import { LegalWorkstationHeader } from '@/components/legal/LegalWorkstationHeader';
 import { GroupedLegalChecklist, ChecklistState } from '@/components/legal/GroupedLegalChecklist';
 import { LegalActivityCommentThread } from '@/components/legal/LegalActivityCommentThread';
 import { LegalVersionHistoryAttachments } from '@/components/legal/LegalVersionHistoryAttachments';
+import { useAuth } from '@/context/AuthContext';
 
 const { Title, Text } = Typography;
 
 function LegalReviewContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user } = useAuth();
+  const userRoles = (user?.roles || []).map((r: any) => String(r.name || r).toUpperCase());
+  const canReview = userRoles.includes('LEGAL');
   const queryContractId = searchParams.get('contractId');
   const [activeTab, setActiveTab] = useState<string>(searchParams.get('tab') || 'WAITING');
 
@@ -72,28 +77,18 @@ function LegalReviewContent() {
 
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const { notificationSocket } = useSocket();
-
+  // Canonical Realtime BusinessSync & Reconnect Recovery (Phase W8-CP3)
   useEffect(() => {
     message.config({ maxCount: 1, duration: 3 });
     fetchPendingContracts();
 
-    if (!notificationSocket) return;
-
-    notificationSocket.emit('join-legal-room');
-
-    const handleQueueUpdated = (payload: any) => {
-      console.log('[LEGAL] Real-time update diterima:', payload);
-      const ac = new AbortController();
-      fetchPendingContracts(true, ac.signal);
-    };
-
-    notificationSocket.on('legal.queue.updated', handleQueueUpdated);
-
-    return () => {
-      notificationSocket.off('legal.queue.updated', handleQueueUpdated);
-    };
-  }, [notificationSocket]);
+    return setupLegalReviewSync({
+      onRefresh: () => {
+        const ac = new AbortController();
+        fetchPendingContracts(true, ac.signal);
+      },
+    });
+  }, []);
 
   useEffect(() => {
     if (selectedContractId) {
@@ -148,6 +143,7 @@ function LegalReviewContent() {
 
   // Keyboard Shortcuts Global (Ctrl+S, Ctrl+Enter)
   useEffect(() => {
+    if (!canReview) return;
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
@@ -161,7 +157,7 @@ function LegalReviewContent() {
 
     window.addEventListener('keydown', handleGlobalKeyDown);
     return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-  }, [checklist]);
+  }, [checklist, canReview]);
 
   const fetchPendingContracts = async (isSoftRefresh = false, signal?: AbortSignal) => {
     if (!isSoftRefresh) setLoadingContracts(true);
@@ -358,15 +354,20 @@ function LegalReviewContent() {
         // localStorage.setItem dihapus.
 
         const uuid = crypto.randomUUID();
-        const idempotencyKey = `idempotency:contract:${selectedContractId}:${uuid}`;
-
         try {
-          // 1. Panggil API secara Asinkron via LegalService terlebih dahulu
-          await LegalService.submitReview({
-            contractId: selectedContractId!,
-            legalStatus: 'APPROVED',
-            legalNotes: 'Legal Clearance Approved & Released to PMO'
-          } as any, { idempotencyKey });
+          // 1. Canonical Workflow Completion: strictly routed through WorkflowEngineService
+          const instance = await WorkflowEngineService.getInstanceByEntity('CONTRACT', selectedContractId!, 'LEGAL_REVIEW_WORKFLOW');
+          const pendingTask = instance?.tasks?.find(
+            (t) => (t.taskKey === 'LEGAL_REVIEW' || t.nodeId === 'node_legal_review') && t.status === 'PENDING',
+          );
+          if (!instance || !pendingTask) {
+            throw new Error('Task Legal Review aktif tidak ditemukan untuk kontrak ini.');
+          }
+
+          await WorkflowEngineService.completeTask(instance.id, pendingTask.id, {
+            action: 'APPROVE',
+            reason: 'Legal Clearance Approved & Released to PMO',
+          });
 
           // 2. Update UI State HANYA SETELAH API BERHASIL (HTTP 201 Success)
           setPendingContracts((prev) =>
@@ -421,18 +422,62 @@ function LegalReviewContent() {
     message.success('Catatan revisi berhasil dikirim ke tim Marketing!');
     setIsRevisionModalVisible(false);
 
-    // 2. Lakukan request ke server via LegalService tanpa memblokir UI
-    LegalService.submitReview({
-      contractId: selectedContractId!,
-      legalStatus: 'REVISION_REQUESTED',
-      legalNotes: revisionNotes
-    }, { idempotencyKey }).then(() => {
-      const ac = new AbortController();
-      fetchPendingContracts(true, ac.signal);
-    }).catch((err) => {
-      message.error('Gagal memproses permintaan revisi. Server mengembalikan pesan error (Data Mock Staging dipertahankan).');
-    }).finally(() => {
-      setIsSubmittingRevision(false);
+    // 2. Lakukan request ke workflow / server
+    (async () => {
+      try {
+        const instance = await WorkflowEngineService.getInstanceByEntity('CONTRACT', selectedContractId!, 'LEGAL_REVIEW_WORKFLOW');
+        const pendingTask = instance?.tasks?.find(
+          (t) => (t.taskKey === 'LEGAL_REVIEW' || t.nodeId === 'node_legal_review') && t.status === 'PENDING',
+        );
+        if (!instance || !pendingTask) {
+          throw new Error('Task Legal Review aktif tidak ditemukan untuk kontrak ini.');
+        }
+
+        await WorkflowEngineService.completeTask(instance.id, pendingTask.id, {
+          action: 'RETURN',
+          reason: revisionNotes,
+        });
+
+        const ac = new AbortController();
+        fetchPendingContracts(true, ac.signal);
+      } catch (err) {
+        message.error('Gagal memproses permintaan revisi.');
+      } finally {
+        setIsSubmittingRevision(false);
+      }
+    })();
+  };
+
+  const handleReject = () => {
+    Modal.confirm({
+      title: 'Konfirmasi Penolakan Kontrak',
+      content: `Apakah Anda yakin ingin menolak kontrak "${selectedContractObj?.contractNumber}"? Kontrak akan ditolak secara permanen.`,
+      okText: 'Tolak Kontrak',
+      okType: 'danger',
+      cancelText: 'Batal',
+      onOk: async () => {
+        try {
+          const instance = await WorkflowEngineService.getInstanceByEntity('CONTRACT', selectedContractId!, 'LEGAL_REVIEW_WORKFLOW');
+          const pendingTask = instance?.tasks?.find(
+            (t) => (t.taskKey === 'LEGAL_REVIEW' || t.nodeId === 'node_legal_review') && t.status === 'PENDING',
+          );
+          if (!instance || !pendingTask) {
+            throw new Error('Task Legal Review aktif tidak ditemukan untuk kontrak ini.');
+          }
+
+          await WorkflowEngineService.completeTask(instance.id, pendingTask.id, {
+            action: 'REJECT',
+            reason: 'Kontrak ditolak oleh Legal',
+          });
+
+          message.success('Kontrak berhasil ditolak.');
+          const ac = new AbortController();
+          fetchPendingContracts(true, ac.signal);
+        } catch (err: any) {
+          const errMsg = err?.response?.data?.message || err?.message || 'Gagal menolak kontrak.';
+          message.error(`Gagal menolak kontrak: ${Array.isArray(errMsg) ? errMsg.join(', ') : errMsg}`);
+        }
+      },
     });
   };
 
@@ -457,7 +502,7 @@ function LegalReviewContent() {
         {/* Clean Modern Header with Live KPI Summary */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
           <div>
-            <Title level={4} style={{ margin: 0, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
+            <Title level={4} style={{ margin: 0, fontSize: '20px', fontWeight: 600, lineHeight: '28px', color: '#0f172a' }}>
               Legal Review
             </Title>
             <Text style={{ fontSize: 13, color: '#64748b', marginTop: 1, display: 'block' }}>
@@ -694,6 +739,8 @@ function LegalReviewContent() {
                   onEscalate={handleEscalate}
                   onForward={handleForward}
                   onCancel={handleCancel}
+                  onReject={handleReject}
+                  canReview={canReview}
                 />
 
                 {/* 3. CHECKLIST REVIEW */}

@@ -137,12 +137,12 @@ export const COST_GROUP_CONFIGS: CostGroupConfig[] = [
 
 export const DEFAULT_CATEGORIES: { key: string; label: string; groupKey: CostGroupKey }[] = [
   { key: 'MATERIAL', label: 'Material & Consumables', groupKey: 'DIRECT' },
-  { key: 'LABOR', label: 'Direct Labor & Technicians', groupKey: 'DIRECT' },
-  { key: 'SUBCONTRACTOR', label: 'Subcontractor Packages', groupKey: 'DIRECT' },
-  { key: 'EQUIPMENT', label: 'Equipment Rental & Fleet', groupKey: 'INDIRECT' },
-  { key: 'PERMIT', label: 'Permits, ROW & Local Coordination', groupKey: 'INDIRECT' },
-  { key: 'OPERATIONAL', label: 'Site Facilities & Project Overhead', groupKey: 'INDIRECT' },
-  { key: 'CONTINGENCY', label: 'Contingency / Risk Allowance', groupKey: 'RISK' },
+  { key: 'LABOR', label: 'Tenaga Kerja Internal / In-House (Non-Procurement)', groupKey: 'DIRECT' },
+  { key: 'SUBCONTRACTOR', label: 'Jasa Subkontraktor / Vendor Pihak Ketiga (Procurement-Eligible)', groupKey: 'DIRECT' },
+  { key: 'EQUIPMENT', label: 'Sewa Alat & Perlengkapan (Procurement-Eligible)', groupKey: 'INDIRECT' },
+  { key: 'PERMIT', label: 'Perizinan, Koordinasi & Retribusi', groupKey: 'INDIRECT' },
+  { key: 'OPERATIONAL', label: 'Operasional, Logistik & Direksi Keet (Procurement-Eligible)', groupKey: 'INDIRECT' },
+  { key: 'CONTINGENCY', label: 'Contingency / Dana Cadangan Risiko', groupKey: 'RISK' },
 ];
 
 export const COMMON_UOMS = [
@@ -152,10 +152,10 @@ export const COMMON_UOMS = [
 
 export const RESOURCE_TYPE_OPTIONS: { label: string; value: ResourceType }[] = [
   { label: 'Material', value: 'MATERIAL' },
-  { label: 'Tenaga Kerja (Labor)', value: 'LABOR' },
-  { label: 'Peralatan (Equipment)', value: 'EQUIPMENT' },
+  { label: 'Tenaga Kerja Internal / In-House (Non-Procurement)', value: 'LABOR' },
+  { label: 'Peralatan / Sewa Alat (Procurement-Eligible)', value: 'EQUIPMENT' },
   { label: 'Jasa (Service)', value: 'SERVICE' },
-  { label: 'Subkontraktor (Subcon)', value: 'SUBCONTRACTOR' },
+  { label: 'Jasa Subkontraktor / Vendor (Procurement-Eligible)', value: 'SUBCONTRACTOR' },
   { label: 'Allowance / Cadangan', value: 'ALLOWANCE' },
 ];
 
@@ -1398,20 +1398,39 @@ export const PmCostEstimationModal: React.FC<PmCostEstimationModalProps> = ({
                   }
                 >
                   {cat.mode === 'DIRECT' ? (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '2px 0' }}>
-                      <Text type="secondary" style={{ fontSize: 11.5 }}>
-                        Estimasi Nominal:
-                      </Text>
-                      <InputNumber
-                        size="small"
-                        style={{ width: 220 }}
-                        prefix="Rp"
-                        formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}
-                        parser={(value) => (value ? Number(value.replace(/\./g, '')) : 0)}
-                        value={cat.directSubtotal}
-                        onChange={(val) => handleDirectSubtotalChange(cat.categoryKey, val)}
-                        placeholder="0"
-                      />
+                    <div style={{ padding: '2px 0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <Text type="secondary" style={{ fontSize: 11.5 }}>
+                          Estimasi Nominal:
+                        </Text>
+                        <InputNumber
+                          size="small"
+                          style={{ width: 220 }}
+                          prefix="Rp"
+                          formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}
+                          parser={(value) => (value ? Number(value.replace(/\./g, '')) : 0)}
+                          value={cat.directSubtotal}
+                          onChange={(val) => handleDirectSubtotalChange(cat.categoryKey, val)}
+                          placeholder="0"
+                        />
+                      </div>
+                      {cat.categoryKey === 'MATERIAL' && (
+                        <div
+                          style={{
+                            marginTop: 6,
+                            fontSize: 11,
+                            color: '#d97706',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4,
+                          }}
+                        >
+                          <InfoCircleOutlined />
+                          <span>
+                            Material belum dirinci (wajib berstatus Rincian Item / ITEMIZED untuk kesiapan pengadaan).
+                          </span>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div>

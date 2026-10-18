@@ -56,6 +56,7 @@ export class DocumentController {
     @Body('entityType') entityType: string,
     @Body('entityId') entityId: number,
     @Req() req: any,
+    @Body('category') category?: string,
   ) {
     if (!file) {
       throw new BadRequestException('File is required');
@@ -67,13 +68,18 @@ export class DocumentController {
     }
     const userRoles: string[] = req.user?.roles || (req.user?.role ? [req.user.role] : []);
 
-    const document = await this.documentService.uploadFile(
+    const uploadArgs: any[] = [
       entityType,
       Number(entityId),
       file,
       Number(userId),
       userRoles,
-    );
+    ];
+    if (category !== undefined) {
+      uploadArgs.push(category);
+    }
+
+    const document = await (this.documentService as any).uploadFile(...uploadArgs);
     
     return {
       message: 'Document uploaded successfully',

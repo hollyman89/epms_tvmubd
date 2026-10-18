@@ -6,7 +6,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute';
 
 export default function AdminUsersRoute() {
   return (
-    <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+    <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN']}>
       <AdminUserComponent />
     </ProtectedRoute>
   );

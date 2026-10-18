@@ -1136,4 +1136,117 @@ describe('P6.5-B2 — Critical Progress & Independent Verification Test Suite', 
       jest.restoreAllMocks();
     }
   });
+
+  // Case 25: Duplicate pending claim on same task rejected with ConflictException
+  it('25. Duplicate pending claim on same task rejected with ConflictException', async () => {
+    const pm = await createUser('pm');
+    const project = await createProject(pm.id);
+    const wbs = await createWbs(project.id);
+    const task = await createTask(project.id, wbs.id, 99.99, false);
+    await createBaseline(project.id, pm.id);
+    const doc1 = await createDocument(project.id, pm.id);
+    const doc2 = await createDocument(project.id, pm.id);
+
+    // 1st claim -> 100% PENDING_VERIFICATION
+    const res1 = await service.createProgressClaim(
+      project.id,
+      task.id,
+      {
+        reportedProgress: 100,
+        reason: 'Initial 100% claim',
+        documentIds: [doc1.id],
+      },
+      pm.id,
+      ['PROJECT_MANAGER'],
+    );
+    createdProgressLogIds.push(res1.id);
+    expect(res1.status).toBe('PENDING_VERIFICATION');
+
+    // 2nd claim while 1st is still PENDING_VERIFICATION -> ConflictException
+    await expect(
+      service.createProgressClaim(
+        project.id,
+        task.id,
+        {
+          reportedProgress: 100,
+          reason: 'Duplicate retry submission',
+          documentIds: [doc2.id],
+        },
+        pm.id,
+        ['PROJECT_MANAGER'],
+      ),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  // Case 26: Non-milestone 100% completion requires evidence, approval sets status=COMPLETED and actualFinishAt
+  it('26. Non-milestone 100% completion requires evidence, approval sets status=COMPLETED and actualFinishAt', async () => {
+    const pm = await createUser('pm');
+    const pmo = await createUser('pmo');
+    const project = await createProject(pm.id);
+    const wbs = await createWbs(project.id);
+    const task = await createTask(project.id, wbs.id, 99.99, false); // non-milestone
+    // Ensure actualStartAt is set
+    const initialStart = new Date('2026-10-15T10:00:00Z');
+    await dataSource.getRepository(Task).update(task.id, {
+      actualStartAt: initialStart,
+      status: 'IN_PROGRESS',
+    });
+    await createBaseline(project.id, pm.id);
+    const doc = await createDocument(project.id, pm.id);
+
+    // 100% without evidence -> rejected
+    await expect(
+      service.createProgressClaim(
+        project.id,
+        task.id,
+        {
+          reportedProgress: 100,
+          reason: 'Attempt 100% without evidence',
+          documentIds: [],
+        },
+        pm.id,
+        ['PROJECT_MANAGER'],
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    // 100% with evidence -> PENDING_VERIFICATION
+    const claim = await service.createProgressClaim(
+      project.id,
+      task.id,
+      {
+        reportedProgress: 100,
+        reason: 'Task finished completely',
+        documentIds: [doc.id],
+      },
+      pm.id,
+      ['PROJECT_MANAGER'],
+    );
+    createdProgressLogIds.push(claim.id);
+    expect(claim.status).toBe('PENDING_VERIFICATION');
+    expect(claim.eventType).toBe('TASK_COMPLETION');
+
+    // Official progress still 99.99
+    let inDb = await dataSource.getRepository(Task).findOneBy({ id: task.id });
+    expect(Number(inDb!.progress)).toBe(99.99);
+    expect(inDb!.status).toBe('IN_PROGRESS');
+    expect(inDb!.actualFinishAt).toBeNull();
+
+    // PMO approves
+    const approved = await service.verifyProgressLog(
+      project.id,
+      claim.id,
+      'APPROVE',
+      null,
+      pmo.id,
+      ['PMO'],
+    );
+    expect(approved.status).toBe('OFFICIAL');
+
+    // Verify task state in DB:
+    inDb = await dataSource.getRepository(Task).findOneBy({ id: task.id });
+    expect(Number(inDb!.progress)).toBe(100);
+    expect(inDb!.status).toBe('COMPLETED');
+    expect(inDb!.actualStartAt).toEqual(initialStart);
+    expect(inDb!.actualFinishAt).not.toBeNull();
+  });
 });

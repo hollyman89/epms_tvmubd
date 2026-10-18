@@ -19,6 +19,8 @@ import {
   Row,
   Col,
   message,
+  Select,
+  Upload,
 } from 'antd';
 import {
   streamSecureDocument,
@@ -50,15 +52,20 @@ import {
   ApartmentOutlined,
   ArrowRightOutlined,
   CheckCircleOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import UserIdentityDisplay from '@/components/common/UserIdentityDisplay';
 import { apiClient } from '@/lib/axios';
+import { useAuth } from '@/context/AuthContext';
 import { TenderActivityStream } from '@/components/TenderActivityStream';
 import { ProjectService } from '@/services';
 import { ProgressClaimModal } from './ProgressClaimModal';
+import { RoutineProgressModal } from './RoutineProgressModal';
 import { ProgressVerificationDrawer } from './ProgressVerificationDrawer';
 import { ProgressLedgerDrawer } from './ProgressLedgerDrawer';
 import { ProjectProgressDashboard } from './ProjectProgressDashboard';
+import { ProjectDetailIssueRiskSummary } from './issue-risk/ProjectDetailIssueRiskSummary';
 
 const { Title, Text } = Typography;
 
@@ -72,6 +79,8 @@ export interface ProjectDetailItem {
   contract_total_value: number;
   marketingName?: string;
   pmName?: string;
+  managerId?: number | null;
+  manager?: { id: number; fullName: string; email: string } | null;
   status: string;
   startDate?: string | null;
   endDate?: string | null;
@@ -92,7 +101,10 @@ interface ProjectDetailDrawerProps {
   open: boolean;
   onClose: () => void;
   project: ProjectDetailItem | null;
+  initialTabKey?: string;
   onOpenOperationalPlan?: (project: any) => void;
+  onOpenWorkspaceSection?: (project: any, section: string) => void;
+  onRefresh?: () => void;
 }
 
 interface DocumentItem {
@@ -102,11 +114,14 @@ interface DocumentItem {
   isContractSpk?: boolean;
   fileName: string;
   fileType: string;
-  category: 'LEGAL_REVIEW' | 'LEGAL_APPROVED' | 'CONTRACT' | 'SUPPORTING';
+  category: 'LEGAL_REVIEW' | 'LEGAL_APPROVED' | 'CONTRACT' | 'SUPPORTING' | 'CUSTOMER_BAST' | 'FINAL_REPORT' | 'INTERNAL_HANDOVER' | 'TECHNICAL' | 'OTHER' | string;
+  categoryLabel?: string;
+  uploader?: string;
   statusTag?: string;
   statusColor?: string;
   version?: string;
   reviewer?: string;
+  isProgressEvidence?: boolean;
   fileSize?: number;
   createdAt?: string;
 }
@@ -127,10 +142,19 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
   open,
   onClose,
   project,
+  initialTabKey,
   onOpenOperationalPlan,
+  onOpenWorkspaceSection,
+  onRefresh,
 }) => {
-  // CRITICAL: Documents tab MUST be first and DEFAULT ACTIVE
-  const [activeTabKey, setActiveTabKey] = useState<string>('documents');
+  // CRITICAL: Documents tab MUST be default unless an explicit initialTabKey is passed
+  const [activeTabKey, setActiveTabKey] = useState<string>(initialTabKey || 'documents');
+
+  useEffect(() => {
+    if (open) {
+      setActiveTabKey(initialTabKey || 'documents');
+    }
+  }, [open, initialTabKey]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
@@ -139,11 +163,48 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [isRevisionModalOpen, setIsRevisionModalOpen] = useState(false);
+  // Project Document Upload State
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [uploadFileObj, setUploadFileObj] = useState<File | null>(null);
+  const [uploadCategory, setUploadCategory] = useState<string>('CUSTOMER_BAST');
+  const [uploading, setUploading] = useState(false);
+
+  const handleUploadProjectDoc = async () => {
+    if (!uploadFileObj) {
+      message.error('Silakan pilih berkas dokumen terlebih dahulu.');
+      return;
+    }
+    const targetProjectId = Number(project?.id || (project as any)?.projectId);
+    if (!targetProjectId) {
+      message.error('ID Proyek tidak valid.');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      await ProjectService.uploadEvidence(targetProjectId, uploadFileObj, uploadCategory);
+      message.success('Dokumen proyek berhasil diunggah.');
+      setIsUploadModalOpen(false);
+      setUploadFileObj(null);
+      setUploadCategory('CUSTOMER_BAST');
+      if (project) {
+        await fetchProjectDocuments(project);
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('epms:refetch_all'));
+      }
+    } catch (err: any) {
+      const errMsg = err?.response?.data?.message || err?.message || 'Gagal mengunggah dokumen.';
+      message.error(errMsg);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   // Canonical Schedule, Operational Readiness & Procurement SSOT State
   const [scheduleData, setScheduleData] = useState<any | null>(null);
   const [readinessData, setReadinessData] = useState<any | null>(null);
-  const [procurementPr, setProcurementPr] = useState<any | null>(null);
+  const [procurementSummary, setProcurementSummary] = useState<any | null>(null);
   const [loadingSchedule, setLoadingSchedule] = useState<boolean>(false);
   const [loadingProcurement, setLoadingProcurement] = useState<boolean>(false);
 
@@ -155,9 +216,22 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
   const [loadingLogs, setLoadingLogs] = useState<boolean>(false);
   const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
   const [claimTask, setClaimTask] = useState<{ id: number; name: string; progress: number } | null>(null);
+  const [isUpdateModalOpen, setIsUpdateModalOpen] = useState(false);
+  const [updateTask, setUpdateTask] = useState<{ id: number; name: string; progress: number } | null>(null);
+  const [progressRefreshKey, setProgressRefreshKey] = useState(0);
   const [isLedgerOpen, setIsLedgerOpen] = useState(false);
   const [isVerificationOpen, setIsVerificationOpen] = useState(false);
-  const { user, isProjectManager, isPmo, isHeadOfOperations, isSuperAdmin } = require('@/context/AuthContext').useAuth();
+  const { user, isProjectManager, isPmo, isHeadOfOperations, isSuperAdmin } = useAuth();
+
+  const currentUserId = user?.sub || (user as any)?.id;
+  const projectManagerId = project?.managerId ?? (project as any)?.manager_id ?? project?.manager?.id;
+  const isAssignedPm = Boolean(
+    !isSuperAdmin &&
+    isProjectManager &&
+    currentUserId &&
+    projectManagerId &&
+    Number(currentUserId) === Number(projectManagerId)
+  );
 
   // Fetch Progress Logs
   const fetchProgressLogs = async (projectId: number) => {
@@ -213,7 +287,7 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
       setDocuments([]);
       setScheduleData(null);
       setReadinessData(null);
-      setProcurementPr(null);
+      setProcurementSummary(null);
       setProgressLogs([]);
     }
   }, [open, project]);
@@ -226,10 +300,10 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
     setLoadingSchedule(true);
     setLoadingProcurement(true);
     try {
-      const [schedRes, readyRes, prRes] = await Promise.allSettled([
+      const [schedRes, readyRes, procSummaryRes] = await Promise.allSettled([
         apiClient.get(`/project/${pid}/schedule`),
         apiClient.get(`/project/${pid}/operational-readiness`),
-        apiClient.get(`/procurement/pr`),
+        ProjectService.getProjectProcurementSummary(pid),
       ]);
 
       if (schedRes.status === 'fulfilled') {
@@ -240,14 +314,8 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
         const r = readyRes.value?.data?.data || readyRes.value?.data;
         setReadinessData(r);
       }
-      if (prRes.status === 'fulfilled') {
-        const rawPrs = prRes.value?.data?.data || prRes.value?.data;
-        if (Array.isArray(rawPrs)) {
-          const matched = rawPrs.find(
-            (p: any) => Number(p.projectId || p.project_id || p.project?.id) === pid,
-          );
-          setProcurementPr(matched || null);
-        }
+      if (procSummaryRes.status === 'fulfilled') {
+        setProcurementSummary(procSummaryRes.value);
       }
     } catch (err) {
       console.error('Failed to load project schedule/readiness/procurement SSOT:', err);
@@ -386,21 +454,48 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
 
       // 2. Fetch Supporting Project Entity Documents from canonical endpoint
       try {
-        const entityDocsRes = await apiClient.get(`/documents/entity/PROJECT/${item.id}`);
-        const entityDocs = entityDocsRes.data?.data || entityDocsRes.data;
+        const targetPid = Number(item.projectId || item.id);
+        const entityDocsRes = await apiClient.get(`/documents/entity/PROJECT/${targetPid}`);
+        const entityDocs = unwrapData(entityDocsRes);
         if (Array.isArray(entityDocs)) {
+          const seenIds = new Set(results.map((r) => r.id));
           entityDocs.forEach((d: any) => {
+            if (seenIds.has(d.id)) return;
+            seenIds.add(d.id);
+
+            const isProgressEv = Boolean(d.isProgressEvidence);
+            const docCat = d.category || 'OTHER';
+            const categoryLabel =
+              docCat === 'CUSTOMER_BAST' ? 'Berita Acara Serah Terima Pelanggan' :
+              docCat === 'FINAL_REPORT' ? 'Laporan Akhir Proyek' :
+              docCat === 'INTERNAL_HANDOVER' ? 'Serah Terima Internal' :
+              docCat === 'TECHNICAL' ? 'Dokumen Teknis Proyek' :
+              isProgressEv ? 'Bukti Progres Lapangan' :
+              'Dokumen Pendukung';
+
+            const categoryColor =
+              docCat === 'CUSTOMER_BAST' ? 'green' :
+              docCat === 'FINAL_REPORT' ? 'geekblue' :
+              docCat === 'INTERNAL_HANDOVER' ? 'cyan' :
+              docCat === 'TECHNICAL' ? 'purple' :
+              isProgressEv ? 'blue' : 'default';
+
+            const uploaderName = d.creator?.fullName || d.creator?.name || (d.createdBy ? `User #${d.createdBy}` : undefined);
+
             results.push({
               id: d.id,
               documentId: d.id,
               fileName: d.fileName || d.name || `Dokumen-${d.id}.pdf`,
               fileType: d.mimeType || 'application/pdf',
-              category: 'SUPPORTING',
-              statusTag: 'UPLOADED',
-              statusColor: 'blue',
+              category: docCat,
+              isProgressEvidence: isProgressEv,
+              categoryLabel,
+              statusTag: categoryLabel,
+              statusColor: categoryColor,
               version: 'v1.0',
-              reviewer: 'PMO / Project Team',
-              fileSize: d.fileSize || 1024 * 1024,
+              reviewer: uploaderName || 'Project Team',
+              uploader: uploaderName,
+              fileSize: d.fileSize || 0,
               createdAt: d.createdAt,
             });
           });
@@ -475,18 +570,61 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
   };
 
   const formatFileSize = (bytes?: number): string => {
-    if (!bytes) return '—';
+    if (!bytes || bytes <= 0) return '—';
+    if (bytes < 1024) return `${bytes} B`;
     const mb = bytes / (1024 * 1024);
     if (mb >= 1) return `${mb.toFixed(1)} MB`;
     const kb = bytes / 1024;
     return `${kb.toFixed(0)} KB`;
   };
 
-  // Group documents by category
+  // Group documents by category with strict mutual exclusivity
   const legalApprovedDocs = documents.filter((d) => d.category === 'LEGAL_APPROVED');
   const legalReviewDocs = documents.filter((d) => d.category === 'LEGAL_REVIEW');
-  const contractDocs = documents.filter((d) => d.category === 'CONTRACT');
-  const supportingDocs = documents.filter((d) => d.category === 'SUPPORTING');
+  // Read-model projection: SPK/Contract projected into contractDocs for dual visibility without duplicate DB rows
+  const contractDocs = documents.filter((d) => d.category === 'CONTRACT' || d.isContractSpk);
+  const closureDocs = documents.filter((d) =>
+    ['CUSTOMER_BAST', 'FINAL_REPORT'].includes(d.category)
+  );
+
+  // Dedicated Read-Model Grouping: BUKTI PROGRES / PROGRESS EVIDENCE
+  const progressEvidenceDocIds = useMemo(() => {
+    const ids = new Set<number>();
+    progressLogs.forEach((log) => {
+      log.evidence?.forEach((ev: any) => {
+        if (ev.documentId) ids.add(Number(ev.documentId));
+      });
+    });
+    return ids;
+  }, [progressLogs]);
+
+  const progressEvidenceDocs = documents.filter(
+    (d) => Boolean((d as any).isProgressEvidence) || progressEvidenceDocIds.has(Number(d.id || d.documentId))
+  );
+
+  // Set of document IDs already claimed by higher-precedence canonical groups
+  const claimedDocIds = new Set<number>();
+  legalApprovedDocs.forEach((d) => claimedDocIds.add(d.id));
+  legalReviewDocs.forEach((d) => claimedDocIds.add(d.id));
+  contractDocs.forEach((d) => claimedDocIds.add(d.id));
+  closureDocs.forEach((d) => claimedDocIds.add(d.id));
+  progressEvidenceDocs.forEach((d) => claimedDocIds.add(d.id));
+
+  // Closure document filenames (case-insensitive) to prevent superseded/shadow uploads from leaking into supporting docs
+  const closureDocFileNames = new Set(closureDocs.map((c) => c.fileName.toLowerCase()));
+
+  const supportingDocs = documents.filter(
+    (d) =>
+      ![
+        'LEGAL_APPROVED',
+        'LEGAL_REVIEW',
+        'CONTRACT',
+        'CUSTOMER_BAST',
+        'FINAL_REPORT',
+      ].includes(d.category) &&
+      !claimedDocIds.has(d.id) &&
+      !closureDocFileNames.has(d.fileName.toLowerCase())
+  );
 
   // Semantic Baseline Project Period (FIX 1)
   const displayProjectPeriod = useMemo(() => {
@@ -732,9 +870,8 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                               fontSize: 10,
                               borderRadius: 4,
                               fontWeight: 700,
-                              padding: '0 4px',
+                              padding: '0 6px',
                               margin: 0,
-                              textTransform: 'uppercase',
                             }}
                           >
                             {item.statusTag}
@@ -756,7 +893,7 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                         {item.reviewer && (
                           <>
                             <span>•</span>
-                            <span>Reviewer: {item.reviewer}</span>
+                            <span>{item.reviewer.startsWith('Reviewer:') || item.reviewer.startsWith('Pengunggah:') ? item.reviewer : `Pengunggah: ${item.reviewer}`}</span>
                           </>
                         )}
                       </div>
@@ -859,21 +996,19 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                   </Text>
                 </div>
 
-                {/* Project Manager Display (FIX 3) */}
+                {/* Project Manager Display */}
                 <div>
                   <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 600, color: '#64748b', display: 'block' }}>
                     Project Manager
                   </Text>
-                  <Tooltip title="Akun resmi penugasan PM: pm@epms.com">
-                    <div>
-                      <Text style={{ fontSize: 12.5, fontWeight: 600, color: '#1e293b' }}>
-                        {project.pmName || 'Project Manager'}
-                      </Text>
-                      <div style={{ fontSize: 11, color: '#64748b' }}>
-                        pm@epms.com
-                      </div>
-                    </div>
-                  </Tooltip>
+                  <UserIdentityDisplay
+                    user={(project as any).manager}
+                    userId={project.managerId || (project as any).project_manager_id}
+                    fallbackText={project.pmName || undefined}
+                    fallbackRole={project.pmName ? undefined : 'Belum Ditugaskan'}
+                    showEmail
+                    showIcon
+                  />
                 </div>
 
                 {/* Project Baseline Period Header (FIX 1) */}
@@ -1025,6 +1160,37 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                 {/* TAB 1: DOCUMENTS (LOCKED ORDER & POLISHED UX) */}
                 {activeTabKey === 'documents' && (
                   <div style={{ paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    {/* ACTION HEADER: UPLOAD DOKUMEN PROYEK */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        background: '#ffffff',
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        border: '1px solid #e2e8f0',
+                      }}
+                    >
+                      <div>
+                        <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
+                          Repositori Dokumen Proyek
+                        </Text>
+                        <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+                          Unggah BAST, Laporan Akhir, atau berkas resmi serah terima proyek
+                        </Text>
+                      </div>
+                      <Button
+                        type="primary"
+                        icon={<UploadOutlined />}
+                        onClick={() => setIsUploadModalOpen(true)}
+                        data-testid="btn-upload-project-doc"
+                        style={{ backgroundColor: '#2563eb', borderRadius: 6, fontWeight: 600 }}
+                      >
+                        Unggah Dokumen
+                      </Button>
+                    </div>
+
                     {loadingDocs ? (
                       <div style={{ textAlign: 'center', padding: '32px 0' }}>
                         <Spin tip="Memuat dokumen legal proyek..." />
@@ -1066,7 +1232,23 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                           { cardBg: '#f5f3ff', border: '#ddd6fe', headBg: '#ede9fe', titleColor: '#5b21b6' }
                         )}
 
-                        {/* 4. DOKUMEN PENDUKUNG */}
+                        {/* 4. BUKTI PROGRES (PROGRESS EVIDENCE) */}
+                        {renderDocumentCard(
+                          'BUKTI PROGRES (PROGRESS EVIDENCE)',
+                          <CheckCircleOutlined style={{ color: '#059669', fontSize: 15 }} />,
+                          progressEvidenceDocs,
+                          { cardBg: '#f0fdf4', border: '#bbf7d0', headBg: '#dcfce7', titleColor: '#166534' }
+                        )}
+
+                        {/* 5. DOKUMEN PENUTUPAN PROYEK */}
+                        {renderDocumentCard(
+                          'DOKUMEN PENUTUPAN PROYEK',
+                          <AuditOutlined style={{ color: '#0284c7', fontSize: 15 }} />,
+                          closureDocs,
+                          { cardBg: '#f0f9ff', border: '#bae6fd', headBg: '#e0f2fe', titleColor: '#0369a1' }
+                        )}
+
+                        {/* 6. DOKUMEN PENDUKUNG */}
                         {renderDocumentCard(
                           'DOKUMEN PENDUKUNG',
                           <PaperClipOutlined style={{ color: '#475569', fontSize: 15 }} />,
@@ -1140,15 +1322,17 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                           </Text>
                         </div>
 
-                        {/* Project Manager Overview (FIX 3) */}
+                        {/* Project Manager Overview */}
                         <div>
                           <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Project Manager (PM)</Text>
-                          <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
-                            {project.pmName || 'Project Manager'}
-                          </Text>
-                          <div style={{ fontSize: 11.5, color: '#64748b' }}>
-                            pm@epms.com
-                          </div>
+                          <UserIdentityDisplay
+                            user={(project as any).manager}
+                            userId={project.managerId || (project as any).project_manager_id}
+                            fallbackText={project.pmName || undefined}
+                            fallbackRole={project.pmName ? undefined : 'Belum Ditugaskan'}
+                            showEmail
+                            showIcon
+                          />
                         </div>
 
                         <div>
@@ -1590,34 +1774,74 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                                       </div>
                                     }
                                     description={
-                                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                                        <span>Durasi: {task.duration || 0} hari</span>
-                                        {task.startDate && task.endDate && (
-                                          <>
-                                            <span> • </span>
-                                            <span>{dayjs(task.startDate).format('DD/MM')} - {dayjs(task.endDate).format('DD/MM/YYYY')}</span>
-                                          </>
-                                        )}
-                                        {isMilestone && (
-                                          <>
-                                            <span> • </span>
-                                            <span style={{ color: '#2563eb', fontWeight: 600 }}>Milestone</span>
-                                          </>
-                                        )}
-                                        <div style={{ marginTop: 6 }}>
-                                          <Text style={{ fontSize: 11, marginRight: 8 }}>Progress: <Text strong>{task.progress || 0}%</Text></Text>
-                                          {(isProjectManager || isSuperAdmin) && (
-                                            <Button 
-                                              size="small" 
-                                              type="dashed" 
-                                              onClick={() => {
-                                                setClaimTask({ id: task.id, name: task.name, progress: Number(task.progress || 0) });
-                                                setIsClaimModalOpen(true);
-                                              }}
-                                              style={{ fontSize: 10, height: 22 }}
-                                            >
-                                              Claim Progress
-                                            </Button>
+                                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '4px 8px', background: '#f8fafc', padding: '6px 10px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                                          <div>
+                                            <span style={{ color: '#94a3b8' }}>Plan Start: </span>
+                                            <Text strong style={{ fontSize: 11 }}>{task.plannedStart || task.startDate ? dayjs(task.plannedStart || task.startDate).format('DD MMM YYYY') : 'N/A'}</Text>
+                                          </div>
+                                          <div>
+                                            <span style={{ color: '#94a3b8' }}>Actual Start: </span>
+                                            <Text strong={Boolean(task.actualStart)} style={{ fontSize: 11, color: task.actualStart ? '#0f172a' : '#94a3b8' }}>{task.actualStart ? dayjs(task.actualStart).format('DD MMM YYYY') : 'N/A'}</Text>
+                                          </div>
+                                          <div>
+                                            <span style={{ color: '#94a3b8' }}>Plan Finish: </span>
+                                            <Text strong style={{ fontSize: 11 }}>{isMilestone ? 'N/A' : (task.plannedFinish || task.endDate ? dayjs(task.plannedFinish || task.endDate).format('DD MMM YYYY') : 'N/A')}</Text>
+                                          </div>
+                                          <div>
+                                            <span style={{ color: '#94a3b8' }}>Actual Finish: </span>
+                                            <Text strong={Boolean(task.actualFinish)} style={{ fontSize: 11, color: task.actualFinish ? '#10b981' : '#94a3b8' }}>{task.actualFinish ? dayjs(task.actualFinish).format('DD MMM YYYY') : 'N/A'}</Text>
+                                          </div>
+                                          <div>
+                                            <span style={{ color: '#94a3b8' }}>Durasi Rencana: </span>
+                                            <Text strong style={{ fontSize: 11 }}>{isMilestone ? 0 : (task.plannedDuration ?? task.duration ?? 0)} hari</Text>
+                                          </div>
+                                          <div>
+                                            <span style={{ color: '#94a3b8' }}>Actual Duration: </span>
+                                            <Text strong style={{ fontSize: 11, color: task.actualDurationDays !== null && task.actualDurationDays !== undefined ? '#0f172a' : '#94a3b8' }}>
+                                              {isMilestone ? (task.actualFinish ? '0 hari' : 'N/A') : (task.actualDurationDays !== null && task.actualDurationDays !== undefined ? `${task.actualDurationDays} hari` : 'N/A')}
+                                            </Text>
+                                          </div>
+                                        </div>
+                                        <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                                          <Text style={{ fontSize: 11 }}>Progress Resmi: <Text strong>{task.progress || 0}%</Text></Text>
+                                          {(() => {
+                                            const pendingClaim = progressLogs.find((l: any) => l.taskId === task.id && l.status === 'PENDING_VERIFICATION');
+                                            if (pendingClaim) {
+                                              return (
+                                                <Tag color="warning" style={{ fontSize: 10, margin: 0, borderRadius: 4 }}>
+                                                  Pending: {pendingClaim.reportedProgress}% ({pendingClaim.eventType === 'CRITICAL_CLAIM' ? 'Critical 100%' : 'Koreksi'})
+                                                </Tag>
+                                              );
+                                            }
+                                            return null;
+                                          })()}
+                                          {isAssignedPm && project?.status === 'IN_PROGRESS' && (
+                                            <Space size={4}>
+                                              <Button 
+                                                size="small" 
+                                                type="primary" 
+                                                ghost
+                                                onClick={() => {
+                                                  setUpdateTask({ id: task.id, name: task.name, progress: Number(task.progress || 0) });
+                                                  setIsUpdateModalOpen(true);
+                                                }}
+                                                style={{ fontSize: 10, height: 22 }}
+                                              >
+                                                Update Progress
+                                              </Button>
+                                              <Button 
+                                                size="small" 
+                                                type="dashed" 
+                                                onClick={() => {
+                                                  setClaimTask({ id: task.id, name: task.name, progress: Number(task.progress || 0) });
+                                                  setIsClaimModalOpen(true);
+                                                }}
+                                                style={{ fontSize: 10, height: 22 }}
+                                              >
+                                                Claim Progress
+                                              </Button>
+                                            </Space>
                                           )}
                                         </div>
                                       </div>
@@ -1659,6 +1883,7 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                 {activeTabKey === 'progress' && (
                   <div style={{ paddingTop: 4 }}>
                     <ProjectProgressDashboard
+                      key={progressRefreshKey}
                       project={project as any}
                       onOpenLedger={() => setIsLedgerOpen(true)}
                       onOpenVerification={() => setIsVerificationOpen(true)}
@@ -1673,7 +1898,7 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                       <div style={{ textAlign: 'center', padding: '32px 0' }}>
                         <Spin tip="Memuat ringkasan pengadaan &amp; PR..." />
                       </div>
-                    ) : procurementPr ? (
+                    ) : procurementSummary && (procurementSummary.packageCount > 0 || procurementSummary.prCount > 0) ? (
                       <>
                         {/* PROCUREMENT HEADER CARD */}
                         <div
@@ -1688,37 +1913,37 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                             <Space size={6}>
                               <InboxOutlined style={{ color: '#7c3aed', fontSize: 16 }} />
                               <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
-                                Purchase Request (PR)
+                                Status Pengadaan Proyek (Procurement SSOT)
                               </Text>
                             </Space>
-                            <Tag color="success" style={{ fontWeight: 700, borderRadius: 6, fontSize: 11, margin: 0 }}>
-                              {procurementPr.status || 'APPROVED'}
+                            <Tag color="processing" style={{ fontWeight: 700, borderRadius: 6, fontSize: 11, margin: 0 }}>
+                              {procurementSummary.stageLabel || 'Dalam Proses'}
                             </Tag>
                           </div>
 
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px 14px', marginBottom: 12 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px 14px', marginBottom: 12 }}>
                             <div>
-                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Nomor PR Resmi</Text>
-                              <Text strong style={{ fontSize: 13, color: '#1d4ed8' }}>
-                                {procurementPr.prNumber || procurementPr.pr_number || 'PR-20260901-001'}
-                              </Text>
-                            </div>
-                            <div>
-                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Total Nilai Anggaran PR</Text>
-                              <Text strong style={{ fontSize: 13, color: '#059669' }}>
-                                Rp {Number(procurementPr.totalEstimatedAmount || procurementPr.total_estimated_amount || 0).toLocaleString('id-ID')}
-                              </Text>
-                            </div>
-                            <div>
-                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Total Item Paket</Text>
+                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Paket Pengadaan</Text>
                               <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
-                                {procurementPr.items?.length || 0} Items (Material &amp; Jasa)
+                                {procurementSummary.packageCount > 0 ? `${procurementSummary.packageCount} Paket` : 'Belum ada'}
                               </Text>
                             </div>
                             <div>
-                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Tahap Pengadaan Saat Ini</Text>
-                              <Tag color="processing" style={{ fontSize: 11, fontWeight: 700, borderRadius: 4, margin: '2px 0 0 0' }}>
-                                READY FOR RFQ
+                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Purchase Request (PR)</Text>
+                              <Text strong style={{ fontSize: 13, color: '#1d4ed8' }}>
+                                {procurementSummary.prCount > 0 ? `${procurementSummary.prCount} PR Diterbitkan` : 'Belum ada'}
+                              </Text>
+                            </div>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Total Anggaran PR</Text>
+                              <Text strong style={{ fontSize: 13, color: '#059669' }}>
+                                Rp {Number(procurementSummary.purchaseRequests?.reduce((acc: number, pr: any) => acc + Number(pr.totalEstimatedAmount || 0), 0) || 0).toLocaleString('id-ID')}
+                              </Text>
+                            </div>
+                            <div>
+                              <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>Tahap Pengadaan</Text>
+                              <Tag color="blue" style={{ fontSize: 10.5, fontWeight: 600, margin: '2px 0 0 0' }}>
+                                {procurementSummary.stageLabel || 'Aktif'}
                               </Tag>
                             </div>
                           </div>
@@ -1729,74 +1954,259 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                               Pipeline Pengadaan Proyek
                             </div>
                             <Row gutter={[8, 8]} style={{ textAlign: 'center' }}>
-                              <Col span={6}>
+                              <Col xs={12} sm={5}>
                                 <div style={{ fontSize: 10, color: '#64748b' }}>RFQ</div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Belum dimulai (0)</div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: procurementSummary.rfqCount > 0 ? '#1d4ed8' : '#64748b' }}>
+                                  {procurementSummary.rfqCount > 0 ? `${procurementSummary.rfqCount} RFQ` : 'Belum dimulai (0)'}
+                                </div>
                               </Col>
-                              <Col span={6}>
+                              <Col xs={12} sm={5}>
                                 <div style={{ fontSize: 10, color: '#64748b' }}>Quotation</div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Belum dimulai (0)</div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: procurementSummary.quotationCount > 0 ? '#1d4ed8' : '#64748b' }}>
+                                  {procurementSummary.quotationCount > 0 ? `${procurementSummary.quotationCount} Penawaran` : 'Belum dimulai (0)'}
+                                </div>
                               </Col>
-                              <Col span={6}>
+                              <Col xs={12} sm={4}>
                                 <div style={{ fontSize: 10, color: '#64748b' }}>PO</div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Belum dimulai (0)</div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: procurementSummary.poCount > 0 ? '#10b981' : '#64748b' }}>
+                                  {procurementSummary.poCount > 0 ? `${procurementSummary.poCount} PO` : 'Belum dimulai (0)'}
+                                </div>
                               </Col>
-                              <Col span={6}>
+                              <Col xs={12} sm={5}>
                                 <div style={{ fontSize: 10, color: '#64748b' }}>Goods Receipt</div>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: '#64748b' }}>Belum dimulai (0)</div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: procurementSummary.grCount > 0 ? '#10b981' : '#64748b' }}>
+                                  {procurementSummary.grCount > 0 ? `${procurementSummary.grCount} GR` : 'Belum dimulai (0)'}
+                                </div>
+                              </Col>
+                              <Col xs={12} sm={5}>
+                                <div style={{ fontSize: 10, color: '#64748b' }}>SPK / WO Jasa</div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: procurementSummary.serviceOrderCount > 0 ? '#0284c7' : '#64748b' }}>
+                                  {procurementSummary.serviceOrderCount > 0 ? `${procurementSummary.serviceOrderCount} SPK` : 'Belum ada (0)'}
+                                </div>
                               </Col>
                             </Row>
                           </div>
                         </div>
 
-                        {/* MATERIAL & SERVICE ITEMS LIST */}
-                        <div
-                          style={{
-                            background: '#ffffff',
-                            borderRadius: 10,
-                            padding: '14px 16px',
-                            border: '1px solid #e2e8f0',
-                          }}
-                        >
-                          <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 10 }}>
-                            Rincian Item Material &amp; Jasa (PR SSOT)
-                          </Text>
+                        {/* PAKET PENGADAAN LIST (IF ANY) */}
+                        {procurementSummary.packages?.length > 0 && (
+                          <div
+                            style={{
+                              background: '#ffffff',
+                              borderRadius: 10,
+                              padding: '14px 16px',
+                              border: '1px solid #e2e8f0',
+                            }}
+                          >
+                            <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 10 }}>
+                              Paket Pengadaan Terdaftar ({procurementSummary.packageCount})
+                            </Text>
+                            <List
+                              size="small"
+                              dataSource={procurementSummary.packages}
+                              renderItem={(pkg: any) => (
+                                <List.Item style={{ padding: '8px 0', borderBottom: '1px solid #f1f5f9' }}>
+                                  <List.Item.Meta
+                                    avatar={<ApartmentOutlined style={{ fontSize: 18, color: '#0284c7', marginTop: 2 }} />}
+                                    title={
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Space size={6}>
+                                          <Tag color="geekblue" style={{ fontSize: 10, margin: 0 }}>{pkg.packageNumber}</Tag>
+                                          <Text strong style={{ fontSize: 12.5, color: '#0f172a' }}>{pkg.title}</Text>
+                                        </Space>
+                                        <Tag color={pkg.status === 'SUBMITTED' ? 'processing' : 'default'} style={{ fontSize: 10, margin: 0 }}>
+                                          {pkg.status}
+                                        </Tag>
+                                      </div>
+                                    }
+                                    description={
+                                      <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                                        Anggaran: Rp {Number(pkg.totalEstimatedBudget || 0).toLocaleString('id-ID')} · {pkg.itemCount || 0} Item
+                                      </div>
+                                    }
+                                  />
+                                </List.Item>
+                              )}
+                            />
+                          </div>
+                        )}
 
-                          <List
-                            size="small"
-                            dataSource={procurementPr.items || []}
-                            renderItem={(item: any) => (
-                              <List.Item style={{ padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
-                                <List.Item.Meta
-                                  avatar={<InboxOutlined style={{ fontSize: 20, color: '#2563eb', marginTop: 2 }} />}
-                                  title={
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <Text strong style={{ fontSize: 12.5, color: '#0f172a' }}>
-                                        {item.itemName || item.item_name}
-                                      </Text>
+                        {/* PURCHASE REQUEST (PR) LIST (IF ANY) */}
+                        {procurementSummary.purchaseRequests?.length > 0 && (
+                          <div
+                            style={{
+                              background: '#ffffff',
+                              borderRadius: 10,
+                              padding: '14px 16px',
+                              border: '1px solid #e2e8f0',
+                            }}
+                          >
+                            <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 10 }}>
+                              Purchase Request (PR) Resmi ({procurementSummary.prCount})
+                            </Text>
+                            <List
+                              size="small"
+                              dataSource={procurementSummary.purchaseRequests}
+                              renderItem={(pr: any) => (
+                                <div style={{ marginBottom: 12, borderBottom: '1px solid #f1f5f9', paddingBottom: 8 }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                                    <Space size={6}>
+                                      <Tag color="purple" style={{ fontSize: 10.5, fontWeight: 700, margin: 0 }}>
+                                        {pr.prNumber}
+                                      </Tag>
                                       <Text strong style={{ fontSize: 12.5, color: '#059669' }}>
-                                        Rp {Number(item.totalPrice || item.total_price || 0).toLocaleString('id-ID')}
+                                        Rp {Number(pr.totalEstimatedAmount || 0).toLocaleString('id-ID')}
                                       </Text>
+                                    </Space>
+                                    <Tag color={pr.status === 'APPROVED' ? 'success' : 'processing'} style={{ fontSize: 10.5, fontWeight: 600, margin: 0 }}>
+                                      {pr.status}
+                                    </Tag>
+                                  </div>
+                                  {pr.items && pr.items.length > 0 && (
+                                    <div style={{ background: '#f8fafc', padding: '6px 10px', borderRadius: 6, marginTop: 4 }}>
+                                      {pr.items.map((it: any, idx: number) => (
+                                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#475569', padding: '2px 0' }}>
+                                          <span>{it.itemName} ({it.quantity} {it.uom})</span>
+                                          <span>Rp {Number(it.totalPrice || 0).toLocaleString('id-ID')}</span>
+                                        </div>
+                                      ))}
                                     </div>
-                                  }
-                                  description={
-                                    <div style={{ fontSize: 11.5, color: '#64748b', marginTop: 2 }}>
-                                      Jumlah: {Number(item.quantity || 0).toLocaleString('id-ID')} {item.uom || 'PCS'} @ Rp {Number(item.estimatedUnitPrice || item.estimated_unit_price || 0).toLocaleString('id-ID')}
-                                    </div>
-                                  }
-                                />
-                              </List.Item>
-                            )}
-                          />
-                        </div>
+                                  )}
+                                </div>
+                              )}
+                            />
+                          </div>
+                        )}
 
-                        {/* NOTICE BANNER */}
-                        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px', display: 'flex', gap: 10, alignItems: 'center' }}>
-                          <InfoCircleOutlined style={{ color: '#2563eb', fontSize: 16, flexShrink: 0 }} />
-                          <Text style={{ fontSize: 11.5, color: '#1e40af', lineHeight: 1.45 }}>
-                            Purchase Request telah disetujui penuh oleh Direksi. Tahap pengadaan selanjutnya adalah penerbitan RFQ (Request for Quotation) oleh tim Procurement ke vendor rekanan.
-                          </Text>
-                        </div>
+                        {/* PURCHASE ORDERS (IF ANY) */}
+                        {procurementSummary.purchaseOrders?.length > 0 && (
+                          <div
+                            style={{
+                              background: '#ffffff',
+                              borderRadius: 10,
+                              padding: '14px 16px',
+                              border: '1px solid #e2e8f0',
+                            }}
+                          >
+                            <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 10 }}>
+                              Purchase Order (PO) ({procurementSummary.poCount})
+                            </Text>
+                            <List
+                              size="small"
+                              dataSource={procurementSummary.purchaseOrders}
+                              renderItem={(po: any) => (
+                                <List.Item style={{ padding: '6px 0' }}>
+                                  <List.Item.Meta
+                                    title={
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Space size={6}>
+                                          <Tag color="cyan" style={{ fontSize: 10 }}>{po.poNumber}</Tag>
+                                          {po.orderType === 'SERVICE' && (
+                                            <Tag color="cyan" style={{ fontSize: 9.5, fontWeight: 600 }}>Jasa / Subcon</Tag>
+                                          )}
+                                          {po.orderType === 'LEGACY_MIXED' && (
+                                            <Tag color="orange" style={{ fontSize: 9.5, fontWeight: 600 }}>Legacy Campuran</Tag>
+                                          )}
+                                          {po.orderType === 'MATERIAL' && (
+                                            <Tag color="blue" style={{ fontSize: 9.5, fontWeight: 600 }}>Material</Tag>
+                                          )}
+                                          <span style={{ fontSize: 12 }}>{po.vendorName}</span>
+                                        </Space>
+                                        <Text strong style={{ fontSize: 12, color: '#0f172a' }}>
+                                          Rp {Number(po.totalAmount || 0).toLocaleString('id-ID')}
+                                        </Text>
+                                      </div>
+                                    }
+                                  />
+                                </List.Item>
+                              )}
+                            />
+                          </div>
+                        )}
+
+                        {/* GOODS RECEIPTS (IF ANY) */}
+                        {procurementSummary.goodsReceipts?.length > 0 && (
+                          <div
+                            style={{
+                              background: '#ffffff',
+                              borderRadius: 10,
+                              padding: '14px 16px',
+                              border: '1px solid #e2e8f0',
+                            }}
+                          >
+                            <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 10 }}>
+                              Penerimaan Barang / Goods Receipt ({procurementSummary.grCount})
+                            </Text>
+                            <List
+                              size="small"
+                              dataSource={procurementSummary.goodsReceipts}
+                              renderItem={(gr: any) => (
+                                <List.Item style={{ padding: '6px 0' }}>
+                                  <List.Item.Meta
+                                    title={
+                                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                        <Space size={6}>
+                                          <Tag color="green" style={{ fontSize: 10 }}>{gr.grNumber}</Tag>
+                                          <span style={{ fontSize: 11.5, color: '#64748b' }}>
+                                            {gr.receiptDate ? dayjs(gr.receiptDate).format('DD MMM YYYY') : '—'}
+                                          </span>
+                                        </Space>
+                                        <Text strong style={{ fontSize: 12, color: '#059669' }}>
+                                          Rp {Number(gr.totalReceivedAmount || 0).toLocaleString('id-ID')}
+                                        </Text>
+                                      </div>
+                                    }
+                                  />
+                                </List.Item>
+                              )}
+                            />
+                          </div>
+                        )}
+
+                        {/* SERVICE ORDERS (SPK / WORK ORDER) (IF ANY) */}
+                        {procurementSummary.serviceOrders?.length > 0 && (
+                          <div
+                            style={{
+                              background: '#ffffff',
+                              borderRadius: 10,
+                              padding: '14px 16px',
+                              border: '1px solid #e2e8f0',
+                            }}
+                          >
+                            <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 10 }}>
+                              SPK / Work Order Jasa ({procurementSummary.serviceOrderCount})
+                            </Text>
+                            <List
+                              size="small"
+                              dataSource={procurementSummary.serviceOrders}
+                              renderItem={(so: any) => (
+                                <List.Item style={{ padding: '6px 0' }}>
+                                  <List.Item.Meta
+                                    title={
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <Space size={6}>
+                                          <Tag color="purple" style={{ fontSize: 10 }}>{so.serviceOrderNumber}</Tag>
+                                          <Tag
+                                            color={so.status === 'ISSUED' ? 'blue' : so.status === 'CANCELLED' ? 'red' : 'gold'}
+                                            style={{ fontSize: 9.5, fontWeight: 600 }}
+                                          >
+                                            ● {so.status}
+                                          </Tag>
+                                          <span style={{ fontSize: 12, fontWeight: 500, color: '#0f172a' }}>
+                                            {so.scopeOfWork}
+                                          </span>
+                                        </Space>
+                                        <span style={{ fontSize: 11, color: '#64748b' }}>
+                                          {so.targetCompletionDate ? `Target: ${dayjs(so.targetCompletionDate).format('DD MMM YYYY')}` : ''}
+                                        </span>
+                                      </div>
+                                    }
+                                  />
+                                </List.Item>
+                              )}
+                            />
+                          </div>
+                        )}
                       </>
                     ) : (
                       <div style={{ textAlign: 'center', padding: '36px 16px', background: '#ffffff', borderRadius: 10, border: '1px solid #e2e8f0' }}>
@@ -1805,108 +2215,41 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
                           Belum Ada Data Pengadaan
                         </Title>
                         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 6 }}>
-                          Purchase Request belum diterbitkan untuk proyek ini.
+                          Belum ada Paket Pengadaan atau Purchase Request resmi yang diterbitkan untuk proyek ini.
                         </Text>
+                        <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, maxWidth: 360, margin: '16px auto 0' }}>
+                          <div style={{ background: '#f8fafc', padding: '8px 4px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                            <div style={{ fontSize: 10, color: '#64748b' }}>Paket</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8' }}>0</div>
+                          </div>
+                          <div style={{ background: '#f8fafc', padding: '8px 4px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                            <div style={{ fontSize: 10, color: '#64748b' }}>PR</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8' }}>0</div>
+                          </div>
+                          <div style={{ background: '#f8fafc', padding: '8px 4px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                            <div style={{ fontSize: 10, color: '#64748b' }}>PO</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8' }}>0</div>
+                          </div>
+                          <div style={{ background: '#f8fafc', padding: '8px 4px', borderRadius: 6, border: '1px solid #f1f5f9' }}>
+                            <div style={{ fontSize: 10, color: '#64748b' }}>GR</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#94a3b8' }}>0</div>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* TAB 8: ISSUE & RISK (SEMANTIC STATE: NO_DATA / NOT_AVAILABLE) */}
+                {/* TAB 8: ISSUE & RISK (LIVE SUMMARY SSOT) */}
                 {activeTabKey === 'issues' && (
-                  <div style={{ paddingTop: 4, display: 'flex', flexDirection: 'column', gap: 14 }}>
-                    <div
-                      style={{
-                        background: '#ffffff',
-                        borderRadius: 10,
-                        padding: '20px 18px',
-                        border: '1px solid #e2e8f0',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                        <Space size={6}>
-                          <WarningOutlined style={{ color: '#d97706', fontSize: 16 }} />
-                          <Text strong style={{ fontSize: 14, color: '#0f172a' }}>
-                            Issue &amp; Risk
-                          </Text>
-                        </Space>
-                        <Tag color="default" style={{ borderRadius: 4, fontSize: 11, fontWeight: 600, color: '#64748b', background: '#f1f5f9' }}>
-                          BELUM TERCATAT
-                        </Tag>
-                      </div>
-
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        {/* 1. ISSUE SECTION */}
-                        <div
-                          style={{
-                            background: '#f8fafc',
-                            borderRadius: 8,
-                            padding: '12px 14px',
-                            border: '1px solid #e2e8f0',
-                          }}
-                        >
-                          <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                            Issue
-                          </Text>
-                          <Text style={{ fontSize: 12.5, color: '#475569' }}>
-                            Belum ada data issue yang tercatat dalam sistem.
-                          </Text>
-                        </div>
-
-                        {/* 2. RISK SECTION */}
-                        <div
-                          style={{
-                            background: '#f8fafc',
-                            borderRadius: 8,
-                            padding: '12px 14px',
-                            border: '1px solid #e2e8f0',
-                          }}
-                        >
-                          <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                            Risk
-                          </Text>
-                          <Text style={{ fontSize: 12.5, color: '#475569' }}>
-                            Belum ada data risk yang tercatat dalam sistem.
-                          </Text>
-                        </div>
-
-                        {/* 3. STATUS SECTION */}
-                        <div
-                          style={{
-                            background: '#f8fafc',
-                            borderRadius: 8,
-                            padding: '12px 14px',
-                            border: '1px solid #e2e8f0',
-                          }}
-                        >
-                          <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase', fontWeight: 700, color: '#64748b', display: 'block', marginBottom: 4 }}>
-                            Status
-                          </Text>
-                          <Text style={{ fontSize: 12.5, fontWeight: 600, color: '#64748b' }}>
-                            Belum tercatat dalam sistem.
-                          </Text>
-                        </div>
-                      </div>
-
-                      <div
-                        style={{
-                          marginTop: 14,
-                          padding: '10px 12px',
-                          background: '#eff6ff',
-                          borderRadius: 8,
-                          border: '1px solid #bfdbfe',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                        }}
-                      >
-                        <InfoCircleOutlined style={{ color: '#2563eb', fontSize: 15, flexShrink: 0 }} />
-                        <Text style={{ fontSize: 11.5, color: '#1e40af', lineHeight: 1.45 }}>
-                          Pencatatan kendala operasional (Issues) dan analisis mitigasi risiko (Risks) dapat didaftarkan oleh Project Manager saat pelaksanaan proyek di lapangan.
-                        </Text>
-                      </div>
-                    </div>
-                  </div>
+                  <ProjectDetailIssueRiskSummary
+                    projectId={Number(project?.id || project?.projectId || 0)}
+                    onOpenWorkspace={() => {
+                      if (onOpenWorkspaceSection && project) {
+                        onOpenWorkspaceSection(project, 'issue-risk');
+                      }
+                    }}
+                  />
                 )}
               </div>
             </div>
@@ -2013,6 +2356,86 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
         )}
       </Modal>
 
+      {/* MODAL UNGGAH DOKUMEN PROYEK */}
+      <Modal
+        title={
+          <Space size={8}>
+            <UploadOutlined style={{ color: '#2563eb', fontSize: 18 }} />
+            <span style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
+              Unggah Dokumen Proyek
+            </span>
+          </Space>
+        }
+        open={isUploadModalOpen}
+        onCancel={() => {
+          if (!uploading) {
+            setIsUploadModalOpen(false);
+            setUploadFileObj(null);
+          }
+        }}
+        onOk={handleUploadProjectDoc}
+        confirmLoading={uploading}
+        okText="Unggah Berkas"
+        cancelText="Batal"
+        destroyOnClose
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 600, color: '#334155' }}>
+              Kategori Dokumen <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <Select
+              data-testid="select-doc-category"
+              value={uploadCategory}
+              onChange={setUploadCategory}
+              style={{ width: '100%' }}
+            >
+              <Select.Option value="CUSTOMER_BAST">
+                Berita Acara Serah Terima Pelanggan (CUSTOMER_BAST)
+              </Select.Option>
+              <Select.Option value="FINAL_REPORT">
+                Laporan Akhir Proyek (FINAL_REPORT)
+              </Select.Option>
+              <Select.Option value="INTERNAL_HANDOVER">
+                Serah Terima Internal (INTERNAL_HANDOVER)
+              </Select.Option>
+              <Select.Option value="TECHNICAL">
+                Dokumen Teknis Proyek (TECHNICAL)
+              </Select.Option>
+              <Select.Option value="OTHER">
+                Dokumen Pendukung Lainnya (OTHER)
+              </Select.Option>
+            </Select>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', marginBottom: 6, fontSize: 12, fontWeight: 600, color: '#334155' }}>
+              Berkas Dokumen <span style={{ color: '#ef4444' }}>*</span>
+            </label>
+            <Upload.Dragger
+              beforeUpload={(file) => {
+                setUploadFileObj(file);
+                return false;
+              }}
+              onRemove={() => setUploadFileObj(null)}
+              fileList={uploadFileObj ? [uploadFileObj as any] : []}
+              maxCount={1}
+              accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg"
+            >
+              <p className="ant-upload-drag-icon">
+                <InboxOutlined style={{ fontSize: 32, color: '#2563eb' }} />
+              </p>
+              <p className="ant-upload-text" style={{ fontSize: 13, fontWeight: 500 }}>
+                Klik atau seret berkas ke area ini untuk mengunggah
+              </p>
+              <p className="ant-upload-hint" style={{ fontSize: 11, color: '#64748b' }}>
+                Format yang didukung: PDF, Word, Excel, Gambar (Maks. 20MB)
+              </p>
+            </Upload.Dragger>
+          </div>
+        </div>
+      </Modal>
+
       {/* MODAL RIWAYAT REVISI DOKUMEN LEGAL */}
       <Modal
         title={
@@ -2085,6 +2508,24 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
         />
       </Modal>
 
+      {/* Routine Progress Modal (CP3/CP4) */}
+      {isUpdateModalOpen && updateTask && project && (
+        <RoutineProgressModal
+          isOpen={isUpdateModalOpen}
+          onClose={() => setIsUpdateModalOpen(false)}
+          onSuccess={() => {
+            setIsUpdateModalOpen(false);
+            setProgressRefreshKey((prev) => prev + 1);
+            fetchProjectScheduleAndReadiness(project);
+            onRefresh?.();
+          }}
+          projectId={Number(project.projectId || project.id)}
+          taskId={updateTask.id}
+          taskName={updateTask.name}
+          currentProgress={updateTask.progress}
+        />
+      )}
+
       {/* Progress UI Modals / Drawers (P6.6-2) */}
       {isClaimModalOpen && claimTask && project && (
         <ProgressClaimModal
@@ -2092,7 +2533,9 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
           onClose={() => setIsClaimModalOpen(false)}
           onSuccess={() => {
             setIsClaimModalOpen(false);
+            setProgressRefreshKey((prev) => prev + 1);
             fetchProjectScheduleAndReadiness(project);
+            onRefresh?.();
           }}
           projectId={Number(project.projectId || project.id)}
           taskId={claimTask.id}
@@ -2106,13 +2549,15 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
           isOpen={isVerificationOpen}
           onClose={() => setIsVerificationOpen(false)}
           onSuccess={() => {
+            setProgressRefreshKey((prev) => prev + 1);
             fetchProjectScheduleAndReadiness(project);
             setIsVerificationOpen(false);
+            onRefresh?.();
           }}
           projectId={Number(project.projectId || project.id)}
           pendingLogs={progressLogs.filter((l) => l.status === 'PENDING_VERIFICATION')}
-          currentUserId={user?.id || 0}
-          canVerify={isPmo || isHeadOfOperations || isSuperAdmin}
+          currentUserId={user?.sub || 0}
+          canVerify={isPmo || isHeadOfOperations}
         />
       )}
 

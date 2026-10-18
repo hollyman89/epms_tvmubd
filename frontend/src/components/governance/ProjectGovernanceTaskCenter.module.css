@@ -1,0 +1,309 @@
+/* Scoped styles for Project Governance Task Center */
+
+.pageContainer {
+  padding: 24px;
+}
+
+@media (max-width: 576px) {
+  .pageContainer {
+    padding: 16px;
+  }
+}
+
+.tableCard {
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.tableCard :global(.ant-card-head) {
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
+  min-height: 48px;
+  padding: 0 16px;
+}
+
+.tableCard :global(.ant-table-thead > tr > th) {
+  background: #f8fafc !important;
+  color: #475569 !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  font-weight: 600 !important;
+  font-size: 12.5px !important;
+  padding: 12px 16px !important;
+}
+
+.tableCard :global(.ant-table-tbody > tr > td) {
+  padding: 12px 16px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+}
+
+.tableCard :global(.ant-table-tbody > tr:hover > td) {
+  background: #f8fafc !important;
+}
+
+/* Visibility toggles for Desktop Table vs Mobile Cards */
+.desktopView {
+  display: block;
+}
+
+.mobileView {
+  display: none;
+}
+
+@media (max-width: 820px) {
+  .desktopView {
+    display: none;
+  }
+  .mobileView {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+  }
+}
+
+/* Mobile Task Card */
+.mobileCard {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+}
+
+.mobileCard:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.mobileCardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobileProjectName {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: #0f172a;
+  line-height: 1.3;
+}
+
+.mobileBadgeRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mobileMetaRow {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11.5px;
+  color: #64748b;
+  border-top: 1px solid #f1f5f9;
+  padding-top: 8px;
+}
+
+.mobileActionRow {
+  margin-top: 4px;
+}
+
+/* ── Management Review Final Benchmark Styles ───────────────────────────────── */
+.managementReviewModal :global(.ant-modal-content) {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  padding: 0;
+}
+
+.managementReviewModal :global(.ant-modal-header) {
+  padding: 14px 24px 10px 24px;
+  margin: 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.managementReviewModal :global(.ant-modal-body) {
+  padding: 14px 24px 16px 24px;
+}
+
+.managementReviewModal :global(.ant-modal-footer) {
+  padding: 12px 24px;
+  margin: 0;
+  border-top: 1px solid #f1f5f9;
+  background: #ffffff;
+}
+
+/* Executive Summary Split (approx 42% / 58%) */
+.executiveSummaryGrid {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.workflowSummaryCol {
+  flex: 0 0 calc(42% - 8px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.financialSummaryCol {
+  flex: 0 0 calc(58% - 8px);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.workflowSummaryCol :global(.ant-timeline-item) {
+  padding-bottom: 10px !important;
+}
+
+.workflowSummaryCol :global(.ant-timeline-item-last) {
+  padding-bottom: 0 !important;
+}
+
+.workflowSummaryCol :global(.ant-timeline-item-tail) {
+  border-left: 1.5px solid #e2e8f0 !important;
+}
+
+@media (max-width: 992px) {
+  .executiveSummaryGrid {
+    flex-direction: column;
+  }
+  .workflowSummaryCol,
+  .financialSummaryCol {
+    flex: 1 1 100%;
+  }
+}
+
+/* Horizontal 4-Pillar Readiness Strip */
+.readinessStrip {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+.readinessSegment {
+  flex: 1;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.readinessDivider {
+  width: 1px;
+  height: 32px;
+  background: #e2e8f0;
+  flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+  .readinessStrip {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px;
+  }
+  .readinessSegment {
+    flex: 0 0 calc(50% - 5px);
+    padding: 4px 6px;
+  }
+  .readinessDivider {
+    display: none;
+  }
+}
+
+/* Detail Tabs Polish */
+.managementReviewModal :global(.ant-tabs-nav) {
+  margin-bottom: 8px !important;
+}
+
+.managementReviewModal :global(.ant-tabs-nav::before) {
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.managementReviewModal :global(.ant-tabs-tab) {
+  padding: 6px 12px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  color: #64748b !important;
+}
+
+.managementReviewModal :global(.ant-tabs-tab-active .ant-tabs-tab-btn) {
+  color: #0284c7 !important;
+  font-weight: 600 !important;
+}
+
+.managementReviewModal :global(.ant-tabs-ink-bar) {
+  background: #0284c7 !important;
+  height: 2px !important;
+}
+
+/* Dark Navy Header for Management Review Detail Tables (RAB, WBS, Schedule) */
+.rabDetailTable :global(.ant-table-thead > tr > th),
+.managementReviewModal :global(.ant-tabs-content .ant-table-thead > tr > th) {
+  background: #0f233a !important;
+  color: #ffffff !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  border-bottom: none !important;
+  padding: 8px 16px !important;
+}
+
+.rabDetailTable :global(.ant-table-thead > tr > th::before),
+.managementReviewModal :global(.ant-tabs-content .ant-table-thead > tr > th::before) {
+  background-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+.rabDetailTable :global(.ant-table-tbody > tr > td),
+.managementReviewModal :global(.ant-tabs-content .ant-table-tbody > tr > td) {
+  padding: 6.5px 16px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  font-size: 12.5px !important;
+}
+
+.rabDetailTable :global(.ant-table-tbody > tr:hover > td),
+.managementReviewModal :global(.ant-tabs-content .ant-table-tbody > tr:hover > td) {
+  background: #f8fafc !important;
+}
+
+/* Compact Styling for Sub-tables nested inside expandable rows */
+.managementReviewModal :global(.ant-table-expanded-row .ant-table-thead > tr > th) {
+  padding: 6px 12px !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  background: #1e293b !important;
+  color: #ffffff !important;
+}
+
+.managementReviewModal :global(.ant-table-expanded-row .ant-table-tbody > tr > td) {
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.managementReviewModal :global(.ant-descriptions-small .ant-descriptions-item-label) {
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+  background: #f8fafc !important;
+}
+
+.managementReviewModal :global(.ant-descriptions-small .ant-descriptions-item-content) {
+  padding: 6px 12px !important;
+  font-size: 12px !important;
+}
+

@@ -5,6 +5,15 @@ import { PurchaseOrderItem } from './purchase-order-item.entity';
 import { GoodsReceipt } from './goods-receipt.entity';
 import { Invoice } from './invoice.entity';
 import { PoPaymentTerm } from './po-payment-term.entity';
+import { User } from './user.entity';
+import { ServiceOrder } from './service-order.entity';
+import { ServiceClaim } from './service-claim.entity';
+
+export enum PurchaseOrderType {
+  MATERIAL = 'MATERIAL',
+  SERVICE = 'SERVICE',
+  LEGACY_MIXED = 'LEGACY_MIXED',
+}
 
 @Entity('purchase_orders')
 export class PurchaseOrder {
@@ -23,6 +32,14 @@ export class PurchaseOrder {
   @Column({ name: 'po_number', unique: true })
   poNumber: string;
 
+  @Column({
+    name: 'order_type',
+    type: 'varchar',
+    length: 30,
+    default: PurchaseOrderType.MATERIAL,
+  })
+  orderType: PurchaseOrderType;
+
   @Column({ type: 'decimal', precision: 19, scale: 2, name: 'total_amount', default: 0 })
   totalAmount: number;
 
@@ -37,6 +54,18 @@ export class PurchaseOrder {
 
   @Column({ type: 'text', nullable: true })
   notes: string;
+
+  @Column({ name: 'service_scope_reconciled_at', type: 'datetime', nullable: true })
+  serviceScopeReconciledAt?: Date | null;
+
+  @Column({ name: 'service_scope_reconciled_by', type: 'bigint', unsigned: true, nullable: true })
+  serviceScopeReconciledBy?: number | null;
+
+  @Column({ name: 'service_scope_released_amount', type: 'decimal', precision: 19, scale: 2, nullable: true })
+  serviceScopeReleasedAmount?: number | null;
+
+  @Column({ name: 'service_scope_reconciliation_reason', type: 'text', nullable: true })
+  serviceScopeReconciliationReason?: string | null;
 
   @Column({ name: 'created_by', type: 'bigint', nullable: true })
   createdBy: number;
@@ -64,6 +93,10 @@ export class PurchaseOrder {
   @JoinColumn({ name: 'vendor_id' })
   vendor: Vendor;
 
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'service_scope_reconciled_by' })
+  serviceScopeReconciler?: User | null;
+
   @OneToMany(() => PurchaseOrderItem, item => item.purchaseOrder, { cascade: true })
   items: PurchaseOrderItem[];
 
@@ -75,4 +108,10 @@ export class PurchaseOrder {
 
   @OneToMany(() => Invoice, inv => inv.purchaseOrder)
   invoices: Invoice[];
+
+  @OneToMany(() => ServiceOrder, so => so.purchaseOrder)
+  serviceOrders: ServiceOrder[];
+
+  @OneToMany(() => ServiceClaim, sc => sc.purchaseOrder)
+  serviceClaims: ServiceClaim[];
 }

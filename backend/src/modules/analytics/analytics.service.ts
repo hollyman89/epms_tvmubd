@@ -56,7 +56,7 @@ export class AnalyticsService {
     };
   }
 
-  private calculateDateRange(period: DashboardPeriod, startDate?: string, endDate?: string) {
+  public calculateDateRange(period: DashboardPeriod, startDate?: string, endDate?: string) {
     const now = new Date();
     let start = new Date();
     let end = new Date();

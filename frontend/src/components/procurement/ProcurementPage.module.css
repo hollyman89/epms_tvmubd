@@ -1,0 +1,601 @@
+/* Procurement Scoped Styles - Canonical EPMS Visual Foundation */
+
+.pageContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/* Header Section */
+.pageHeader {
+  display: flex;
+  justifyContent: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.headerTitle {
+  margin: 0 !important;
+  color: #0F172A !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  line-height: 32px !important;
+  letter-spacing: -0.02em;
+}
+
+.headerSubtitle {
+  font-size: 13px !important;
+  color: #64748B !important;
+  line-height: 20px !important;
+  max-width: 860px;
+  margin-top: 4px;
+}
+
+/* Summary KPI Cards */
+.metricsRow {
+  margin-bottom: 4px;
+}
+
+.summaryCard {
+  background: #FFFFFF;
+  border-radius: 14px;
+  border: 1px solid #E2E8F0;
+  padding: 16px 18px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 1px 2px rgba(15, 23, 42, 0.02);
+  display: flex;
+  flex-direction: column;
+  justifyContent: space-between;
+  min-height: 114px;
+  height: 100%;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-sizing: border-box;
+}
+
+.summaryCard:hover {
+  border-color: #CBD5E1;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.cardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.iconSurface {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.cardLabel {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #64748B;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cardValueRow {
+  margin-top: 10px;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: nowrap;
+}
+
+.cardValue {
+  font-size: 22px;
+  font-weight: 700;
+  color: #0F172A;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.cardUnit {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: #64748B;
+  margin-left: 6px;
+}
+
+.cardSubtext {
+  font-size: 11.5px;
+  color: #94A3B8;
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Tabs Card Container */
+.tabsCard {
+  background: #FFFFFF;
+  border-radius: 14px;
+  border: 1px solid #E2E8F0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  padding: 16px 20px;
+  overflow: hidden;
+}
+
+@media (max-width: 768px) {
+  .tabsCard {
+    padding: 12px 14px;
+    border-radius: 12px;
+  }
+}
+
+/* Tab Navigation Styling */
+.procurementTabs :global(.ant-tabs-nav) {
+  margin-bottom: 16px !important;
+}
+
+.procurementTabs :global(.ant-tabs-nav::before) {
+  border-bottom: 1px solid #E2E8F0 !important;
+}
+
+.procurementTabs :global(.ant-tabs-tab) {
+  padding: 10px 16px !important;
+  margin: 0 12px 0 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  transition: color 0.2s ease !important;
+  color: #64748B !important;
+  font-weight: 500 !important;
+  font-size: 13.5px !important;
+}
+
+.procurementTabs :global(.ant-tabs-tab:hover) {
+  color: #2563EB !important;
+}
+
+.procurementTabs :global(.ant-tabs-tab-active) {
+  background: transparent !important;
+}
+
+.procurementTabs :global(.ant-tabs-tab-active .ant-tabs-tab-btn) {
+  color: #2563EB !important;
+  font-weight: 600 !important;
+}
+
+.procurementTabs :global(.ant-tabs-ink-bar) {
+  height: 2.5px !important;
+  background: #2563EB !important;
+  border-radius: 2px !important;
+}
+
+/* Tab Badge */
+.tabBadge {
+  margin-left: 6px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabBadgeActive {
+  background: #EFF6FF;
+  color: #2563EB;
+  border: 1px solid #BFDBFE;
+}
+
+.tabBadgeInactive {
+  background: #F1F5F9;
+  color: #64748B;
+  border: 1px solid #E2E8F0;
+}
+
+/* Tab Description / Toolbar Bar */
+.tabToolbar {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: #F8FAFC;
+  border-radius: 8px;
+  border: 1px solid #E2E8F0;
+  display: flex;
+  justifyContent: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.tabDescBar {
+  margin-bottom: 14px;
+  padding: 8px 12px;
+  background: #F8FAFC;
+  border-radius: 8px;
+  border: 1px solid #F1F5F9;
+  font-size: 12.5px;
+  color: #475569;
+  line-height: 1.5;
+  display: flex;
+  justifyContent: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Table Container & Light Slate Headers */
+.tableContainer {
+  background: #FFFFFF;
+  border-radius: 10px;
+  border: 1px solid #E2E8F0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.procurementTable :global(.ant-table-thead > tr > th) {
+  background-color: #F8FAFC !important;
+  color: #475569 !important;
+  font-weight: 600 !important;
+  font-size: 11.5px !important;
+  letter-spacing: 0.3px;
+  border-bottom: 1px solid #E2E8F0 !important;
+  padding: 11px 14px !important;
+  white-space: nowrap;
+}
+
+.procurementTable :global(.ant-table-thead > tr > th::before) {
+  display: none !important;
+}
+
+.procurementTable :global(.ant-table-tbody > tr > td) {
+  padding: 11px 14px;
+  border-bottom: 1px solid #F1F5F9;
+  font-size: 12.5px;
+  color: #334155;
+  transition: background-color 0.15s ease;
+}
+
+.procurementTable :global(.ant-table-tbody > tr:hover > td) {
+  background-color: #F8FAFC !important;
+}
+
+.procurementTable :global(.ant-table-placeholder .ant-table-cell) {
+  border-bottom: none !important;
+}
+
+/* Buttons in Table */
+.btnActionPrimary {
+  background-color: #059669 !important;
+  border-color: #059669 !important;
+  color: #FFFFFF !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  font-size: 11.5px !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+}
+
+.btnActionPrimary:hover {
+  background-color: #047857 !important;
+  border-color: #047857 !important;
+}
+
+.btnActionSecondary {
+  border-color: #CBD5E1 !important;
+  color: #334155 !important;
+  background-color: #F8FAFC !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  font-size: 11.5px !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+  transition: all 0.15s ease !important;
+}
+
+.btnActionSecondary:hover {
+  border-color: #94A3B8 !important;
+  color: #0F172A !important;
+  background-color: #F1F5F9 !important;
+}
+
+.btnActionBlue {
+  border-color: #93C5FD !important;
+  color: #1D4ED8 !important;
+  background-color: #EFF6FF !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  font-size: 11.5px !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+}
+
+.btnActionBlue:hover {
+  border-color: #60A5FA !important;
+  color: #1E40AF !important;
+  background-color: #DBEAFE !important;
+}
+
+.btnActionTeal {
+  border-color: #99F6E4 !important;
+  color: #0F766E !important;
+  background-color: #F0FDFA !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  font-size: 11.5px !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+}
+
+.btnActionTeal:hover {
+  border-color: #5EEAD4 !important;
+  color: #115E59 !important;
+  background-color: #CCFBF1 !important;
+}
+
+.btnActionAmber {
+  border-color: #FDE68A !important;
+  color: #B45309 !important;
+  background-color: #FFFBEB !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  font-size: 11.5px !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+}
+
+.btnActionAmber:hover {
+  border-color: #FCD34D !important;
+  color: #92400E !important;
+  background-color: #FEF3C7 !important;
+}
+
+.btnActionDanger {
+  border-color: #FECACA !important;
+  color: #DC2626 !important;
+  background-color: #FEF2F2 !important;
+  border-radius: 6px !important;
+  font-weight: 600 !important;
+  font-size: 11.5px !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+}
+
+.btnActionDanger:hover {
+  border-color: #FCA5A5 !important;
+  color: #B91C1C !important;
+  background-color: #FEE2E2 !important;
+}
+
+/* Tabular Currency & Identifiers */
+.currencyText {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.idMonospace {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.subtleCodeTag {
+  font-size: 10px;
+  margin: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Restrained Status Badges */
+.statusBadgeBase {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Compact Safety Gate Banner */
+.safetyGateBanner {
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid;
+}
+
+.safetyGateSuccess {
+  composes: safetyGateBanner;
+  background-color: #F0FDF4;
+  border-color: #BBF7D0;
+}
+
+.safetyGateWarning {
+  composes: safetyGateBanner;
+  background-color: #FFFBEB;
+  border-color: #FDE68A;
+}
+
+.safetyGateIcon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.safetyGateTitle {
+  font-weight: 700;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.safetyGateDesc {
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+/* Purchase Request Domain Sub-Tabs */
+.subTabSegmentWrapper {
+  display: flex;
+  align-items: center;
+}
+
+.subTabSegment {
+  display: inline-flex;
+  background: #F1F5F9;
+  border-radius: 8px;
+  padding: 3px;
+  gap: 3px;
+  border: 1px solid #E2E8F0;
+}
+
+.subTabBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748B;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  line-height: 1.4;
+}
+
+.subTabBtn:hover {
+  color: #0F172A;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.subTabBtnActive {
+  background: #FFFFFF !important;
+  color: #0F172A !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+
+.subTabCount {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 10px;
+  background: #E2E8F0;
+  color: #475569;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.subTabBtnActive .subTabCount {
+  background: #EFF6FF;
+  color: #2563EB;
+}
+
+/* Duplicate Badge */
+.duplicateTag {
+  font-size: 9.5px !important;
+  font-weight: 700 !important;
+  margin: 0 !important;
+  padding: 0 4px !important;
+  border-radius: 4px !important;
+  background: #F8FAFC !important;
+  border: 1px solid #CBD5E1 !important;
+  color: #64748B !important;
+  letter-spacing: 0.2px;
+  line-height: 16px !important;
+}
+
+/* Action Cell - strictly 1 primary + 1 overflow button */
+.actionCell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* Responsive Table vs Mobile Cards */
+.desktopTableView {
+  display: block;
+}
+
+.mobileCardView {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .desktopTableView {
+    display: none;
+  }
+
+  .mobileCardView {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 10px 0;
+  }
+
+  .prMobileCard {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    padding: 14px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+
+  .prMobileCardHeader {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #F1F5F9;
+  }
+
+  .prMobileCardRow {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-size: 12px;
+  }
+
+  .prMobileCardLabel {
+    color: #64748B;
+    font-weight: 500;
+  }
+
+  .prMobileCardActions {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid #F1F5F9;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+}
+

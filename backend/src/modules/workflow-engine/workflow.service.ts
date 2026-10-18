@@ -1,9 +1,13 @@
-import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { OnEvent, EventEmitter2 } from '@nestjs/event-emitter';
+import { DataSource } from 'typeorm';
 import { NotificationGateway } from '../notification/notification.gateway';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import * as crypto from 'crypto';
+import { WorkflowTask, WorkflowTaskStatus } from '../../entities/workflow-task.entity';
+import { WorkflowInstance } from '../../entities/workflow-instance.entity';
+import { AuditLog } from '../../entities/audit-log.entity';
 
 @Injectable()
 export class WorkflowService {
@@ -11,6 +15,7 @@ export class WorkflowService {
   private bpmnXmlCache: Map<string, string> = new Map();
 
   constructor(
+    private readonly dataSource: DataSource,
     private readonly eventEmitter: EventEmitter2,
     private readonly notificationGateway: NotificationGateway,
     @InjectQueue('email-send') private emailQueue: Queue,
@@ -162,6 +167,67 @@ export class WorkflowService {
   async reassignTask(instanceId: number, newApproverId: number, adminId: number, reason: string) {
     this.logger.log(`Reassigning Task for Instance #${instanceId} to User #${newApproverId} by Admin #${adminId}`);
 
+    let assignedTaskId: number | undefined;
+
+    if (this.dataSource && typeof this.dataSource.createQueryRunner === 'function') {
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      try {
+        const pendingTask = await queryRunner.manager.findOne(WorkflowTask, {
+          where: { workflowInstanceId: instanceId, status: WorkflowTaskStatus.PENDING },
+        });
+
+        if (!pendingTask) {
+          throw new NotFoundException(`No pending workflow task found for instance #${instanceId}.`);
+        }
+
+        assignedTaskId = pendingTask.id;
+        const oldAssigneeUserId = pendingTask.assigneeUserId;
+        pendingTask.assigneeUserId = Number(newApproverId);
+        pendingTask.updatedBy = Number(adminId);
+        await queryRunner.manager.save(WorkflowTask, pendingTask);
+
+        const instance = await queryRunner.manager.findOne(WorkflowInstance, {
+          where: { id: instanceId },
+        });
+
+        if (instance) {
+          const currentContext = instance.context || {};
+          instance.context = {
+            ...currentContext,
+            marketing_pic_id: Number(newApproverId),
+            marketingPicId: Number(newApproverId),
+          };
+          instance.updatedBy = Number(adminId);
+          await queryRunner.manager.save(WorkflowInstance, instance);
+        }
+
+        const audit = queryRunner.manager.create(AuditLog, {
+          table_name: 'workflow_tasks',
+          record_id: pendingTask.id,
+          action: 'WORKFLOW_TASK_REASSIGNED',
+          old_value: { assignee_user_id: oldAssigneeUserId },
+          new_value: {
+            assignee_user_id: Number(newApproverId),
+            workflowInstanceId: instanceId,
+            reason,
+            reassignedBy: adminId,
+          },
+          created_by: adminId ? Number(adminId) : null,
+        });
+        await queryRunner.manager.save(AuditLog, audit);
+
+        await queryRunner.commitTransaction();
+      } catch (err) {
+        await queryRunner.rollbackTransaction();
+        throw err;
+      } finally {
+        await queryRunner.release();
+      }
+    }
+
     this.eventEmitter.emit('audit.log', {
       action: 'WORKFLOW_TASK_REASSIGNED',
       entityId: instanceId,
@@ -178,6 +244,7 @@ export class WorkflowService {
     return {
       statusCode: 200,
       instanceId,
+      taskId: assignedTaskId,
       reassignedToUser: newApproverId,
       message: `Workflow task successfully reassigned to User #${newApproverId}.`,
     };

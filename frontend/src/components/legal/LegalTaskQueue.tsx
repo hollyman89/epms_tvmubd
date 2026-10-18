@@ -3,6 +3,8 @@
 import React, { useState } from 'react';
 import { Card, Input, Tabs, Tag, Space, Typography, Badge, Select, Empty, Tooltip } from 'antd';
 import { SearchOutlined, ClockCircleOutlined, FilterOutlined, FileTextOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import { formatCurrency } from '@/lib/formatters';
+import { StatusBadge } from '@/components/common/StatusBadge';
 
 const { Text } = Typography;
 
@@ -100,21 +102,11 @@ export const LegalTaskQueue: React.FC<LegalTaskQueueProps> = ({
   ];
 
   const formatRupiah = (val?: number) => {
-    if (!val) return 'Rp 50.000.000';
-    return `Rp ${val.toLocaleString('id-ID')}`;
+    return formatCurrency(val);
   };
 
   const renderStatusTag = (status: string) => {
-    switch (status) {
-      case 'WAITING':
-        return <Tag style={{ borderRadius: 10, fontSize: 10, color: '#1677ff', backgroundColor: '#e8f3ff', border: 'none', fontWeight: 600 }}>Menunggu</Tag>;
-      case 'REVISION':
-        return <Tag style={{ borderRadius: 10, fontSize: 10, color: '#ff8800', backgroundColor: '#fff7e6', border: 'none', fontWeight: 600 }}>Revisi</Tag>;
-      case 'APPROVED':
-        return <Tag style={{ borderRadius: 10, fontSize: 10, color: '#00b578', backgroundColor: '#e6f8f1', border: 'none', fontWeight: 600 }}>Disetujui</Tag>;
-      default:
-        return <Tag style={{ borderRadius: 10, fontSize: 10 }}>{status}</Tag>;
-    }
+    return <StatusBadge domain="legal" status={status} style={{ borderRadius: 10, fontSize: 10 }} />;
   };
 
   return (

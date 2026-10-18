@@ -380,6 +380,7 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
       };
 
       await queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
+      await queryClient.invalidateQueries({ queryKey: ['procurement', 'rfqs'] });
       message.success(`Evaluasi Vendor berhasil disimpan melalui Server SSOT. Pemenang terpilih: ${winnerQuote.vendorName}`);
       onComparisonSaved?.(result);
       onClose();
@@ -926,6 +927,8 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
             setCurrentPo(newPo);
             setPoVersion((v) => v + 1);
             queryClient.invalidateQueries({ queryKey: ['procurement', 'prs-pos'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-orders'] });
+            queryClient.invalidateQueries({ queryKey: ['procurement', 'rfqs'] });
             onPoCreated?.(newPo);
           }}
           currentUserName={currentUserName}

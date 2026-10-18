@@ -145,7 +145,7 @@ describe('Project Location Schema & API Specification', () => {
       };
 
       mockWbsRepo = {};
-      mockTaskRepo = {};
+      mockTaskRepo = { find: jest.fn().mockResolvedValue([]) };
       mockEventEmitter = { emit: jest.fn() };
 
       service = new ProjectService(

@@ -1,4 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, VersionColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, VersionColumn, OneToMany } from 'typeorm';
+import { ProjectClosure } from './project-closure.entity';
 
 @Entity('projects')
 export class Project {
@@ -25,6 +26,15 @@ export class Project {
 
   @Column({ type: 'date', name: 'end_date', nullable: true })
   endDate: string;
+
+  @Column({ name: 'actual_finish_at', type: 'datetime', nullable: true })
+  actualFinishAt?: Date | null;
+
+  @Column({ name: 'closed_at', type: 'datetime', nullable: true })
+  closedAt?: Date | null;
+
+  @Column({ name: 'closed_by', type: 'bigint', unsigned: true, nullable: true })
+  closedBy?: number | null;
 
   @Column({ name: 'site_name', type: 'varchar', length: 200, nullable: true })
   siteName: string;
@@ -67,4 +77,7 @@ export class Project {
 
   @DeleteDateColumn({ name: 'deleted_at' })
   deletedAt: Date;
+
+  @OneToMany(() => ProjectClosure, (closure) => closure.project)
+  closures: ProjectClosure[];
 }
