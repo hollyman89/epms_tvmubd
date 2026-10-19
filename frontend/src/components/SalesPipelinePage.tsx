@@ -4,7 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import dynamic from 'next/dynamic';
 import { Tabs, Table, Typography, Button, Modal, Form, Input, InputNumber, DatePicker, Select, Tag, message, Row, Col, Card, Spin, Skeleton, Space, Tooltip, Radio, Steps, Avatar, Empty } from 'antd';
 import type { MenuProps } from 'antd';
-import { PlusOutlined, EyeOutlined, RocketOutlined, AuditOutlined, ExclamationCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, CalendarOutlined, FolderOpenOutlined, PieChartOutlined, ClockCircleOutlined, ArrowRightOutlined, InfoCircleOutlined, PlayCircleOutlined, AppstoreOutlined, BarsOutlined } from '@ant-design/icons';
+import { PlusOutlined, EyeOutlined, RocketOutlined, AuditOutlined, ExclamationCircleOutlined, ArrowUpOutlined, ArrowDownOutlined, CalendarOutlined, FolderOpenOutlined, PieChartOutlined, ClockCircleOutlined, ArrowRightOutlined, InfoCircleOutlined, PlayCircleOutlined, AppstoreOutlined, BarsOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons';
 import CountUp from 'react-countup';
 import { io } from 'socket.io-client';
 import dayjs from 'dayjs';
@@ -59,6 +59,7 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { PipelineAnalyticsView } from './marketing/PipelineAnalyticsView';
 import { CreateTenderModal } from './marketing/CreateTenderModal';
 import { LegalReviewModal } from './marketing/LegalReviewModal';
+import { TenderDetailDrawer } from './TenderDetailDrawer';
 import {
   useDashboardSummaryQuery,
   useAnalyticsDashboardQuery,
@@ -197,6 +198,8 @@ export const SalesPipelinePage = () => {
 
   // Modals state
   const [isTenderModalVisible, setIsTenderModalVisible] = useState(false);
+  const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
+  const [selectedTenderForDetail, setSelectedTenderForDetail] = useState<any>(null);
   const [isLegalModalVisible, setIsLegalModalVisible] = useState(false);
   const [selectedContract, setSelectedContract] = useState<any>(null);
   
@@ -641,13 +644,106 @@ export const SalesPipelinePage = () => {
     );
   };
 
+  // Table View Local Filters & Search State
+  const [tableSearchQuery, setTableSearchQuery] = useState('');
+  const [tableSelectedStage, setTableSelectedStage] = useState('ALL');
+  const [tableSelectedCustomer, setTableSelectedCustomer] = useState('ALL');
+  const [tableSelectedPic, setTableSelectedPic] = useState('ALL');
+
+  const handleResetTableFilters = () => {
+    setTableSearchQuery('');
+    setTableSelectedStage('ALL');
+    setTableSelectedCustomer('ALL');
+    setTableSelectedPic('ALL');
+  };
+
+  // Helper to extract canonical PIC display name from opportunity record
+  const getTenderPicDisplayName = useCallback((record: any) => {
+    return record.marketing_pic_name || record.marketing_pic?.name || record.marketing_pic?.email || (record.marketing_pic_id ? `User ${record.marketing_pic_id}` : 'Unassigned');
+  }, []);
+
+  // Extract unique customer options from current authorized activeTendersData
+  const tableCustomerOptions = useMemo(() => {
+    const set = new Set<string>();
+    activeTendersData.forEach((t: any) => {
+      const name = t.customer?.name || (t.customer_id ? `Customer ID: ${t.customer_id}` : null);
+      if (name && name.trim()) set.add(name.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [activeTendersData]);
+
+  // Extract unique PIC options from current authorized activeTendersData
+  const tablePicOptions = useMemo(() => {
+    const set = new Set<string>();
+    activeTendersData.forEach((t: any) => {
+      const pic = getTenderPicDisplayName(t);
+      if (pic && pic !== 'Unassigned' && pic.trim()) set.add(pic.trim());
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [activeTendersData, getTenderPicDisplayName]);
+
+  // Derived filtered dataset for Table View
+  const filteredTableTenders = useMemo(() => {
+    return activeTendersData.filter((tender: any) => {
+      // 1. Search Query
+      if (tableSearchQuery.trim()) {
+        const q = tableSearchQuery.trim().toLowerCase();
+        const rawId = String(tender.id || '').toLowerCase();
+        const paddedId = `tnd-${String(tender.id || '').padStart(4, '0')}`.toLowerCase();
+        const code = String(tender.tender_code || tender.code || '').toLowerCase();
+        const title = String(tender.title || tender.project_name || tender.name || '').toLowerCase();
+        const custName = String(tender.customer?.name || (tender.customer_id ? `customer id: ${tender.customer_id}` : '')).toLowerCase();
+        const picName = String(tender.marketing_pic_name || tender.marketing_pic?.name || '').toLowerCase();
+        const picEmail = String(tender.marketing_pic?.email || '').toLowerCase();
+
+        const matches =
+          rawId.includes(q) ||
+          paddedId.includes(q) ||
+          code.includes(q) ||
+          title.includes(q) ||
+          custName.includes(q) ||
+          picName.includes(q) ||
+          picEmail.includes(q);
+
+        if (!matches) return false;
+      }
+
+      // 2. Stage Filter
+      if (tableSelectedStage !== 'ALL') {
+        const s = (tender.stage || '').toUpperCase();
+        if (tableSelectedStage === 'PROPOSAL') {
+          if (s !== 'PROPOSAL' && s !== 'PROPOSAL_SUBMITTED' && s !== 'PROPOSAL SUBMITTED') return false;
+        } else if (tableSelectedStage === 'WAITING_GO_NO_GO') {
+          if (s !== 'WAITING_GO_NO_GO' && s !== 'WAITING GO/NO-GO' && s !== 'WAITING GO NO GO') return false;
+        } else {
+          if (s !== tableSelectedStage) return false;
+        }
+      }
+
+      // 3. Customer Filter
+      if (tableSelectedCustomer !== 'ALL') {
+        const custName = tender.customer?.name || (tender.customer_id ? `Customer ID: ${tender.customer_id}` : '');
+        if (custName.trim() !== tableSelectedCustomer) return false;
+      }
+
+      // 4. PIC Filter
+      if (tableSelectedPic !== 'ALL') {
+        const pic = getTenderPicDisplayName(tender);
+        if (pic.trim() !== tableSelectedPic) return false;
+      }
+
+      return true;
+    });
+  }, [activeTendersData, tableSearchQuery, tableSelectedStage, tableSelectedCustomer, tableSelectedPic, getTenderPicDisplayName]);
+
   const tenderColumns = [
     { 
-      title: 'Code / Tender ID', 
+      title: 'Tender ID', 
       key: 'code', 
-      width: 130,
+      width: 110,
+      sorter: (a: any, b: any) => (Number(a.id) || 0) - (Number(b.id) || 0),
       render: (_: any, record: any) => (
-        <Text code style={{ fontWeight: 600, color: '#1e40af', backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 11, padding: '2px 8px' }}>
+        <Text code style={{ fontWeight: 600, color: '#1e40af', backgroundColor: '#eff6ff', borderRadius: 6, fontSize: 11, padding: '2px 8px', border: '1px solid #dbeafe', whiteSpace: 'nowrap' }}>
           TND-{String(record.id).padStart(4, '0')}
         </Text>
       )
@@ -655,32 +751,52 @@ export const SalesPipelinePage = () => {
     { 
       title: 'Project Name', 
       key: 'project', 
-      render: (_: any, record: any) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <Avatar size={32} icon={<FolderOpenOutlined />} style={{ background: '#e0e7ff', color: '#4f46e5', flexShrink: 0 }} />
-          <div>
-            <Text strong style={{ color: '#0f172a', fontSize: 13 }}>{record.title}</Text>
+      width: 360,
+      sorter: (a: any, b: any) => (a.title || '').localeCompare(b.title || ''),
+      render: (_: any, record: any) => {
+        const title = record.title || record.project_name || '—';
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+            <Avatar size={30} icon={<FolderOpenOutlined style={{ fontSize: 14 }} />} style={{ background: '#EFF6FF', color: '#2563EB', flexShrink: 0, borderRadius: 8 }} />
+            <Tooltip title={title} placement="topLeft">
+              <Text strong style={{ color: '#0F172A', fontSize: 13, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300, cursor: 'pointer' }}>
+                {title}
+              </Text>
+            </Tooltip>
           </div>
-        </div>
-      )
+        );
+      }
     },
     { 
       title: 'Customer', 
       key: 'customer', 
+      width: 200,
+      sorter: (a: any, b: any) => {
+        const aCust = a.customer?.name || '';
+        const bCust = b.customer?.name || '';
+        return aCust.localeCompare(bCust);
+      },
       render: (_: any, record: any) => {
-        const customerName = record.customer?.name || `Customer ID: ${record.customer_id}`;
+        const customerName = record.customer?.name || (record.customer_id ? `Customer ID: ${record.customer_id}` : '—');
         return (
-          <Text style={{ color: '#64748b', fontSize: 12 }}>{customerName}</Text>
+          <Tooltip title={customerName} placement="topLeft">
+            <Text style={{ color: '#475569', fontSize: 13, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 185 }}>
+              {customerName}
+            </Text>
+          </Tooltip>
         );
       }
     },
     { 
       title: 'Budget Awal', 
       key: 'estimated_budget', 
+      width: 140,
+      align: 'right' as const,
+      sorter: (a: any, b: any) => (Number(a.estimated_budget) || 0) - (Number(b.estimated_budget) || 0),
       render: (_: any, record: any) => {
         const val = record.estimated_budget != null && !isNaN(Number(record.estimated_budget)) ? Number(record.estimated_budget) : null;
         return (
-          <Text style={{ fontWeight: 600, color: '#475569', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
+          <Text style={{ fontWeight: 600, color: '#334155', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
             {formatCurrency(val)}
           </Text>
         );
@@ -689,33 +805,60 @@ export const SalesPipelinePage = () => {
     { 
       title: 'Harga Negosiasi', 
       key: 'negotiated_price', 
+      width: 140,
+      align: 'right' as const,
+      sorter: (a: any, b: any) => (Number(a.negotiated_price) || 0) - (Number(b.negotiated_price) || 0),
       render: (_: any, record: any) => {
         if (record.negotiated_price != null && !isNaN(Number(record.negotiated_price))) {
           return (
-            <Text style={{ fontWeight: 700, color: '#10b981', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
+            <Text style={{ fontWeight: 600, color: '#059669', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>
               {formatCurrency(record.negotiated_price)}
             </Text>
           );
         }
-        return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
+        return <Text type="secondary" style={{ fontSize: 13 }}>—</Text>;
       }
     },
     { 
-      title: 'Tahap (Stage)', 
+      title: 'Stage', 
       dataIndex: 'stage', 
       key: 'stage', 
+      width: 130,
+      sorter: (a: any, b: any) => (a.stage || '').localeCompare(b.stage || ''),
       render: (stage: string) => renderStageBadge(stage)
     },
     { 
       title: 'PIC', 
       key: 'pic', 
+      width: 155,
+      sorter: (a: any, b: any) => {
+        const aPic = getTenderPicDisplayName(a);
+        const bPic = getTenderPicDisplayName(b);
+        return aPic.localeCompare(bPic);
+      },
       render: (_: any, record: any) => {
-        const picName = record.marketing_pic_name || 'Unassigned';
+        const picName = getTenderPicDisplayName(record);
         const initial = picName !== 'Unassigned' ? picName.charAt(0).toUpperCase() : '?';
         return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Avatar size={26} style={{ background: '#3b82f6', fontSize: '12px', fontWeight: 600 }}>{initial}</Avatar>
-            <Text style={{ color: '#475569', fontSize: 12, fontWeight: 500 }}>{picName}</Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', whiteSpace: 'nowrap' }}>
+            <Avatar size={24} style={{ background: '#2563EB', color: '#FFFFFF', fontSize: '11px', fontWeight: 700, flexShrink: 0 }}>
+              {initial}
+            </Avatar>
+            <span 
+              style={{ 
+                color: '#334155', 
+                fontSize: 13, 
+                fontWeight: 500, 
+                whiteSpace: 'nowrap', 
+                overflow: 'hidden', 
+                textOverflow: 'ellipsis', 
+                maxWidth: 115,
+                display: 'inline-block' 
+              }}
+              title={picName}
+            >
+              {picName}
+            </span>
           </div>
         );
       }
@@ -724,16 +867,18 @@ export const SalesPipelinePage = () => {
       title: 'Expected Close', 
       dataIndex: 'expected_closing_date', 
       key: 'closeDate', 
+      width: 135,
+      sorter: (a: any, b: any) => new Date(a.expected_closing_date || 0).getTime() - new Date(b.expected_closing_date || 0).getTime(),
       render: (date: string) => {
-        if (!date) return <Text type="secondary" style={{ fontSize: 12 }}>-</Text>;
+        if (!date) return <Text type="secondary" style={{ fontSize: 13 }}>—</Text>;
         const dateObj = new Date(date);
         const isOverdue = dateObj < new Date();
         const formattedDate = formatDate(date);
         
         return (
-          <Space size={4} style={{ color: isOverdue ? '#ef4444' : '#64748b' }}>
+          <Space size={4} style={{ color: isOverdue ? '#ef4444' : '#64748b', whiteSpace: 'nowrap' }}>
             <CalendarOutlined style={{ fontSize: 12 }} />
-            <Text style={{ fontSize: 12, color: isOverdue ? '#ef4444' : '#475569', fontWeight: isOverdue ? 600 : 400 }}>{formattedDate}</Text>
+            <Text style={{ fontSize: 13, color: isOverdue ? '#ef4444' : '#475569', fontWeight: isOverdue ? 600 : 400 }}>{formattedDate}</Text>
           </Space>
         );
       }
@@ -744,12 +889,15 @@ export const SalesPipelinePage = () => {
       width: 80,
       align: 'center' as const,
       render: (_: any, record: any) => (
-        <Tooltip title="Lihat Detail Proyek">
+        <Tooltip title="Lihat Detail Proyek" placement="top">
           <Button 
             type="default" 
             size="small"
             icon={<EyeOutlined style={{ color: '#2563EB', fontSize: 12 }} />} 
-            onClick={() => router.push(`/sales/tenders/${record.id}`)}
+            onClick={() => {
+              setSelectedTenderForDetail(record);
+              setDetailDrawerOpen(true);
+            }}
             style={{ borderRadius: 6, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF' }}
           />
         </Tooltip>
@@ -1054,15 +1202,125 @@ export const SalesPipelinePage = () => {
                   boxShadow: '0 1px 3px rgba(15, 23, 42, 0.03)',
                   border: '1px solid #E2E8F0' 
                 }}>
+                  {/* Table View Toolbar: Search & Local Filters */}
+                  {/* Table View Toolbar: Search & Local Filters */}
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'flex-end', 
+                    gap: '12px', 
+                    marginBottom: '14px', 
+                    flexWrap: 'wrap',
+                    width: '100%',
+                  }}>
+                    {/* Search Input (Dominant: ~35%) */}
+                    <div style={{ flex: '3.5 1 260px', minWidth: '220px' }}>
+                      <Input
+                        prefix={<SearchOutlined style={{ color: '#94A3B8', fontSize: 14 }} />}
+                        placeholder="Cari Tender ID, Project, Customer, atau PIC..."
+                        value={tableSearchQuery}
+                        onChange={(e) => setTableSearchQuery(e.target.value)}
+                        allowClear
+                        style={{
+                          borderRadius: 8,
+                          height: 38,
+                          borderColor: '#CBD5E1',
+                          fontSize: 13,
+                          width: '100%',
+                        }}
+                      />
+                    </div>
+
+                    {/* Filter Stage (~15%) */}
+                    <div style={{ flex: '1.4 1 130px', minWidth: '120px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>Filter Stage</span>
+                      <Select
+                        value={tableSelectedStage}
+                        onChange={setTableSelectedStage}
+                        style={{ width: '100%', height: 38 }}
+                        options={[
+                          { value: 'ALL', label: 'Semua Stage' },
+                          { value: 'LEAD', label: 'LEAD' },
+                          { value: 'WAITING_GO_NO_GO', label: 'WAITING GO/NO-GO' },
+                          { value: 'QUALIFICATION', label: 'QUALIFICATION' },
+                          { value: 'PROPOSAL', label: 'PROPOSAL' },
+                          { value: 'NEGOTIATION', label: 'NEGOTIATION' },
+                          { value: 'WON', label: 'WON' },
+                          { value: 'LOST', label: 'LOST' },
+                        ]}
+                      />
+                    </div>
+
+                    {/* Filter Customer (~17%) */}
+                    <div style={{ flex: '1.7 1 150px', minWidth: '135px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>Filter Customer</span>
+                      <Select
+                        value={tableSelectedCustomer}
+                        onChange={setTableSelectedCustomer}
+                        style={{ width: '100%', height: 38 }}
+                        options={[
+                          { value: 'ALL', label: 'Semua Customer' },
+                          ...tableCustomerOptions.map((cust) => ({ value: cust, label: cust })),
+                        ]}
+                        showSearch
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                    </div>
+
+                    {/* Filter PIC (~15%) */}
+                    <div style={{ flex: '1.4 1 130px', minWidth: '120px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#475569', whiteSpace: 'nowrap' }}>Filter PIC</span>
+                      <Select
+                        value={tableSelectedPic}
+                        onChange={setTableSelectedPic}
+                        style={{ width: '100%', height: 38 }}
+                        options={[
+                          { value: 'ALL', label: 'Semua PIC' },
+                          ...tablePicOptions.map((pic) => ({ value: pic, label: pic })),
+                        ]}
+                        showSearch
+                        filterOption={(input, option) =>
+                          (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                    </div>
+
+                    {/* Reset Filter Button (~11%) */}
+                    <div style={{ flex: '1.1 1 105px', minWidth: '100px' }}>
+                      <Button
+                        icon={<ReloadOutlined style={{ fontSize: 13 }} />}
+                        onClick={handleResetTableFilters}
+                        style={{
+                          width: '100%',
+                          borderRadius: 8,
+                          height: 38,
+                          borderColor: '#CBD5E1',
+                          color: '#334155',
+                          fontWeight: 500,
+                          fontSize: 13,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Reset Filter
+                      </Button>
+                    </div>
+                  </div>
+
                   <Table 
-                    dataSource={activeTendersData} 
+                    dataSource={filteredTableTenders} 
                     columns={tenderColumns} 
                     rowKey="id" 
-                    scroll={{ x: 1050 }}
+                    scroll={{ x: 1420 }}
                     pagination={{ 
                       pageSize: 10, 
                       position: ['bottomRight'],
                       showSizeChanger: true,
+                      pageSizeOptions: ['10', '25', '50', '100'],
                       showTotal: (total, range) => `Menampilkan ${range[0]}-${range[1]} dari ${total} tender`
                     }} 
                     loading={isLoadingQuery} 
@@ -1073,8 +1331,21 @@ export const SalesPipelinePage = () => {
                           image={Empty.PRESENTED_IMAGE_SIMPLE}
                           description={
                             <Space direction="vertical" size={4}>
-                              <Text strong style={{ color: '#475569' }}>Belum Ada Data Tender</Text>
-                              <Text type="secondary" style={{ fontSize: 12 }}>Gunakan tombol "+ Input Tender" untuk menambahkan tender baru.</Text>
+                              <Text strong style={{ color: '#475569' }}>
+                                {tableSearchQuery || tableSelectedStage !== 'ALL' || tableSelectedCustomer !== 'ALL' || tableSelectedPic !== 'ALL'
+                                  ? 'Tidak Ada Hasil yang Cocok'
+                                  : 'Belum Ada Data Tender'}
+                              </Text>
+                              <Text type="secondary" style={{ fontSize: 12 }}>
+                                {tableSearchQuery || tableSelectedStage !== 'ALL' || tableSelectedCustomer !== 'ALL' || tableSelectedPic !== 'ALL'
+                                  ? 'Tidak ditemukan tender yang cocok dengan kriteria pencarian dan filter Anda.'
+                                  : 'Gunakan tombol "+ Input Tender" untuk menambahkan tender baru.'}
+                              </Text>
+                              {(tableSearchQuery || tableSelectedStage !== 'ALL' || tableSelectedCustomer !== 'ALL' || tableSelectedPic !== 'ALL') && (
+                                <Button size="small" onClick={handleResetTableFilters} style={{ marginTop: 8 }}>
+                                  Reset Filter
+                                </Button>
+                              )}
                             </Space>
                           }
                           style={{ margin: '32px 0' }}
@@ -1089,17 +1360,18 @@ export const SalesPipelinePage = () => {
                     }
                     .modern-table-row > td {
                       border-bottom: 1px solid #F1F5F9;
-                      padding: 12px 16px !important;
-                      font-size: 12.5px;
+                      padding: 13px 16px !important;
+                      font-size: 13px;
+                      vertical-align: middle !important;
                     }
                     .ant-table-thead > tr > th {
                       background-color: #F8FAFC !important;
                       color: #475569 !important;
                       font-weight: 600 !important;
-                      font-size: 11.5px;
-                      letter-spacing: 0.5px;
+                      font-size: 12px;
+                      letter-spacing: 0.3px;
                       border-bottom: 1px solid #E2E8F0 !important;
-                      padding: 12px 16px !important;
+                      padding: 13px 16px !important;
                       white-space: nowrap;
                     }
                     .ant-table-thead > tr > th::before {
@@ -1165,6 +1437,16 @@ export const SalesPipelinePage = () => {
         customers={customers}
         users={users}
         currentUser={user}
+      />
+
+      {/* TENDER DETAIL DRAWER (Shared Canonical Implementation) */}
+      <TenderDetailDrawer
+        open={detailDrawerOpen}
+        onClose={() => {
+          setDetailDrawerOpen(false);
+          setSelectedTenderForDetail(null);
+        }}
+        tender={selectedTenderForDetail}
       />
 
       {/* LEGAL REVIEW MODAL */}

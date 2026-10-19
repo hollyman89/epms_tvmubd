@@ -1066,7 +1066,10 @@ export class ProcurementService {
   async getGoodsReceiptById(grId: number) {
     const gr = await this.grRepo.findOne({
       where: { id: grId },
-      relations: ['items'],
+      relations: [
+        'items',
+        'items.purchaseOrderItem',
+      ],
     });
 
     if (!gr) {
@@ -1079,6 +1082,7 @@ export class ProcurementService {
     return this.grRepo.find({
       relations: [
         'items',
+        'items.purchaseOrderItem',
         'purchaseOrder',
         'purchaseOrder.vendor',
         'purchaseOrder.purchaseRequest',

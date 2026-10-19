@@ -8,6 +8,7 @@ import { PurchaseOrder } from '../../entities/purchase-order.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { PoPaymentTerm, PaymentTermStatus, PaymentTermType } from '../../entities/po-payment-term.entity';
+import { ServiceClaim, ServiceClaimStatus } from '../../entities/service-claim.entity';
 import { randomUUID } from 'crypto';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
@@ -51,7 +52,7 @@ export class FinanceService {
       const po = await queryRunner.manager.findOne(PurchaseOrder, {
         where: { id: dto.purchaseOrderId },
         lock: { mode: 'pessimistic_write' },
-        relations: ['items', 'paymentTerms'],
+        relations: ['items', 'paymentTerms', 'purchaseRequest'],
       });
 
       if (!po || po.deletedAt) {
@@ -147,7 +148,7 @@ export class FinanceService {
 
         // A5.b PROGRESS Term: Canonical Goods Receipt Validation
         let referencedGr: GoodsReceipt | null = null;
-        if (paymentTerm.termType === PaymentTermType.PROGRESS) {
+        if (po.orderType !== 'SERVICE' && paymentTerm.termType === PaymentTermType.PROGRESS) {
           const grRefId = dto.goodsReceiptId;
           const grRefStr = dto.evidenceRef?.trim();
 
@@ -282,6 +283,72 @@ export class FinanceService {
         // A7. Authoritative Amount from paymentTerm.amount (Server SSOT)
         const totalInvoiceAmount = Number(paymentTerm.amount);
 
+        // A7.b Canonical Service Claim Validation (for Service PO / Service Invoices)
+        let referencedClaim: ServiceClaim | null = null;
+        if (po.orderType === 'SERVICE' || dto.serviceClaimId) {
+          if (po.orderType === 'SERVICE' && !dto.serviceClaimId) {
+            throw new BadRequestException(
+              'Invoice penagihan Service PO wajib menyertakan referensi Klaim Jasa yang telah disetujui (APPROVED_FOR_INVOICE).'
+            );
+          }
+
+          if (dto.serviceClaimId) {
+            referencedClaim = await queryRunner.manager.findOne(ServiceClaim, {
+              where: { id: dto.serviceClaimId },
+            });
+
+            if (!referencedClaim) {
+              throw new BadRequestException(`Service Claim dengan ID ${dto.serviceClaimId} tidak ditemukan.`);
+            }
+
+            if (referencedClaim.deletedAt) {
+              throw new BadRequestException('Service Claim telah dihapus atau tidak aktif.');
+            }
+
+            if (referencedClaim.status !== ServiceClaimStatus.APPROVED_FOR_INVOICE) {
+              throw new BadRequestException(
+                `Status Service Claim tidak valid (${referencedClaim.status}). Hanya Service Claim dengan status APPROVED_FOR_INVOICE yang dapat ditagihkan.`
+              );
+            }
+
+            if (Number(referencedClaim.poId) !== Number(po.id)) {
+              throw new BadRequestException('Service Claim bukan milik Purchase Order ini.');
+            }
+
+            const expectedProjectId = po.purchaseRequest?.projectId;
+            if (expectedProjectId && Number(referencedClaim.projectId) !== Number(expectedProjectId)) {
+              throw new BadRequestException('Service Claim tidak sesuai dengan project pada Purchase Order ini.');
+            }
+
+            if (Number(referencedClaim.vendorId) !== Number(po.vendorId)) {
+              throw new BadRequestException('Service Claim bukan milik Vendor pada Purchase Order ini.');
+            }
+
+            // Duplicate Claim Invoice Protection (Active / Non-Cancelled)
+            const existingActiveInvoiceForClaim = await queryRunner.manager.findOne(Invoice, {
+              where: { serviceClaimId: referencedClaim.id },
+            });
+            if (
+              existingActiveInvoiceForClaim &&
+              !existingActiveInvoiceForClaim.deletedAt &&
+              existingActiveInvoiceForClaim.status !== 'CANCELLED' &&
+              existingActiveInvoiceForClaim.matchStatus !== 'REJECTED'
+            ) {
+              throw new BadRequestException(
+                `Service Claim '${referencedClaim.claimNumber || referencedClaim.id}' sudah ditagihkan pada invoice aktif (${existingActiveInvoiceForClaim.invoiceNumber}).`
+              );
+            }
+
+            // Claim Value / Invoice Value Safety
+            const approvedClaimValue = Number(referencedClaim.approvedClaimAmount || 0);
+            if (totalInvoiceAmount > approvedClaimValue + 0.01) {
+              throw new BadRequestException(
+                `Nilai invoice (Rp${totalInvoiceAmount.toLocaleString('id-ID')}) melebihi nilai klaim jasa yang disetujui (Rp${approvedClaimValue.toLocaleString('id-ID')}).`
+              );
+            }
+          }
+        }
+
         // A8. Cumulative Active Invoices Cap vs PO Total Amount
         const hasItemsToBill = paymentTerm.termType === PaymentTermType.PROGRESS || Boolean(dto.items && dto.items.length > 0);
         const activeInvoices = (await queryRunner.manager.find(
@@ -409,6 +476,9 @@ export class FinanceService {
         const invoice = new Invoice();
         invoice.poId = po.id;
         invoice.paymentTermId = paymentTerm.id;
+        if (referencedClaim) {
+          invoice.serviceClaimId = referencedClaim.id;
+        }
         invoice.invoiceNumber = invoiceNumber;
         invoice.invoiceDate = dto.invoiceDate ? new Date(dto.invoiceDate) : new Date();
         invoice.totalAmount = totalInvoiceAmount;
@@ -507,6 +577,11 @@ export class FinanceService {
       }
 
       // BRANCH B: LEGACY / FULL PO INVOICE
+      if (po.orderType === 'SERVICE') {
+        throw new BadRequestException(
+          'Invoice penagihan Service PO wajib menggunakan Payment Term dan Service Claim yang valid.'
+        );
+      }
       if (po.status !== 'COMPLETED') {
         throw new BadRequestException('Invoice can only be created for COMPLETED Purchase Orders');
       }

@@ -61,7 +61,9 @@ export class CustomersService {
 
   async findAll(query: CustomerQueryDto) {
     const { search, sector, status, page = 1, limit = 10 } = query;
-    const qb = this.customerRepo.createQueryBuilder('customer');
+    const qb = this.customerRepo
+      .createQueryBuilder('customer')
+      .leftJoinAndSelect('customer.marketing_pic', 'marketing_pic');
 
     if (search) {
       qb.andWhere('(customer.name LIKE :search OR customer.company LIKE :search OR customer.email LIKE :search)', { search: `%${search}%` });
@@ -93,7 +95,7 @@ export class CustomersService {
   async findOne(id: number) {
     const customer = await this.customerRepo.findOne({ 
       where: { id },
-      relations: ['tenders']
+      relations: ['tenders', 'marketing_pic']
     });
     if (!customer) throw new NotFoundException('Customer not found');
     return customer;

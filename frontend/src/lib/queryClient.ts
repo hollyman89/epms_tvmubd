@@ -1,4 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
+import { AuthService } from '@/services/auth.service';
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -12,15 +13,47 @@ export const queryClient = new QueryClient({
 });
 
 /**
- * Generic Cache Updater for Tenders
- * Loops through all active query keys starting with ['tenders'] to update matching items without triggering a full network refetch.
+ * Resolves active authenticated user ID to ensure cache isolation per user.
  */
-export function updateAllTenderCaches(queryClientInstance: any, tenderId: number | string, newData: Partial<any>): boolean {
+function getActiveUserId(context?: { currentUser?: any; userId?: string | number }): string | null {
+  const user = context?.currentUser || AuthService.getUser();
+  const id = context?.userId ?? user?.sub ?? (user as any)?.id;
+  return id !== undefined && id !== null ? String(id) : null;
+}
+
+/**
+ * Checks if a TanStack Query key belongs to the specified active user.
+ */
+function isQueryMatchingUser(query: any, activeUserId: string): boolean {
+  const queryKey = query?.queryKey;
+  if (!Array.isArray(queryKey) || queryKey[0] !== 'tenders') return false;
+  const params = queryKey[1];
+  if (!params || typeof params !== 'object') return false;
+  return params.userId !== undefined && String(params.userId) === activeUserId;
+}
+
+/**
+ * Generic Cache Updater for Tenders
+ * Loops through active query keys starting with ['tenders'] belonging strictly to the active user
+ * to update matching items without triggering a full network refetch or polluting other users' cache.
+ */
+export function updateAllTenderCaches(
+  queryClientInstance: any, 
+  tenderId: number | string, 
+  newData: Partial<any>,
+  context?: { currentUser?: any; userId?: string | number }
+): boolean {
   try {
     if (!queryClientInstance || typeof queryClientInstance.getQueryCache !== 'function' || tenderId === undefined || tenderId === null) return false;
     
+    const activeUserId = getActiveUserId(context);
+    if (!activeUserId) return false;
+
     const queryCache = queryClientInstance.getQueryCache();
-    const matchingQueries = queryCache.findAll({ queryKey: ['tenders'] });
+    const allTenderQueries = queryCache.findAll({ queryKey: ['tenders'] });
+    if (!allTenderQueries || allTenderQueries.length === 0) return false;
+
+    const matchingQueries = allTenderQueries.filter((query: any) => isQueryMatchingUser(query, activeUserId));
     if (!matchingQueries || matchingQueries.length === 0) return false;
 
     const stringTenderId = String(tenderId); // Standarisasi ke String sekali di awal
@@ -140,19 +173,27 @@ export function enrichTenderItem(item: any, context: { customers?: any[]; users?
 
 /**
  * Append Helper for Tenders Cache
- * Adds a new tender item to all active queries starting with ['tenders'] if not already present.
+ * Adds a new tender item to active queries starting with ['tenders'] belonging strictly to active user if not already present.
  */
 export function appendTenderToCache(
   queryClientInstance: any, 
   newTender: any, 
-  context?: { customers?: any[]; users?: any[]; currentUser?: any }
+  context?: { customers?: any[]; users?: any[]; currentUser?: any; userId?: string | number }
 ): boolean {
   if (!queryClientInstance || typeof queryClientInstance.getQueryCache !== 'function' || !newTender || !newTender.id) return false;
+
+  const activeUserId = getActiveUserId(context);
+  if (!activeUserId) return false;
 
   const itemToInsert = context ? enrichTenderItem(newTender, context) : newTender;
 
   const queryCache = queryClientInstance.getQueryCache();
-  const matchingQueries = queryCache.findAll({ queryKey: ['tenders'] });
+  const allTenderQueries = queryCache.findAll({ queryKey: ['tenders'] });
+  if (!allTenderQueries || allTenderQueries.length === 0) return false;
+
+  const matchingQueries = allTenderQueries.filter((query: any) => isQueryMatchingUser(query, activeUserId));
+  if (!matchingQueries || matchingQueries.length === 0) return false;
+
   const stringNewId = String(itemToInsert.id);
   let hasAppended = false;
 
@@ -194,13 +235,25 @@ export function appendTenderToCache(
 
 /**
  * Remove Helper for Tenders Cache
- * Immutably removes a tender item matching tenderId from all active queries starting with ['tenders'].
+ * Immutably removes a tender item matching tenderId from active queries starting with ['tenders'] belonging strictly to active user.
  */
-export function removeTenderFromCache(queryClientInstance: any, tenderId: number | string): boolean {
+export function removeTenderFromCache(
+  queryClientInstance: any, 
+  tenderId: number | string,
+  context?: { currentUser?: any; userId?: string | number }
+): boolean {
   if (!queryClientInstance || typeof queryClientInstance.getQueryCache !== 'function' || tenderId === undefined || tenderId === null) return false;
 
+  const activeUserId = getActiveUserId(context);
+  if (!activeUserId) return false;
+
   const queryCache = queryClientInstance.getQueryCache();
-  const matchingQueries = queryCache.findAll({ queryKey: ['tenders'] });
+  const allTenderQueries = queryCache.findAll({ queryKey: ['tenders'] });
+  if (!allTenderQueries || allTenderQueries.length === 0) return false;
+
+  const matchingQueries = allTenderQueries.filter((query: any) => isQueryMatchingUser(query, activeUserId));
+  if (!matchingQueries || matchingQueries.length === 0) return false;
+
   const stringTenderId = String(tenderId);
   let hasRemoved = false;
 
@@ -239,3 +292,4 @@ export function removeTenderFromCache(queryClientInstance: any, tenderId: number
 
   return hasRemoved;
 }
+

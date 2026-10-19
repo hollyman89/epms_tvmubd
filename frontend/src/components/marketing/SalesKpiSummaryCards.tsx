@@ -79,7 +79,7 @@ export const SalesKpiSummaryCards: React.FC<SalesKpiSummaryCardsProps> = ({ kpis
                 lineHeight: 1.2,
               }}
             >
-              <CountUp preserveValue end={kpis.count.value} separator="." />
+              <CountUp end={kpis.count.value} separator="." />
             </div>
             <div style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 3 }}>
               Total peluang dalam periode
@@ -142,7 +142,7 @@ export const SalesKpiSummaryCards: React.FC<SalesKpiSummaryCardsProps> = ({ kpis
                 textOverflow: 'ellipsis',
               }}
             >
-              Rp <CountUp preserveValue end={kpis.won.value} separator="." />
+              Rp <CountUp end={kpis.won.value} separator="." />
             </div>
             <div style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 3 }}>
               Nilai tender berstatus WON
@@ -205,7 +205,7 @@ export const SalesKpiSummaryCards: React.FC<SalesKpiSummaryCardsProps> = ({ kpis
                 textOverflow: 'ellipsis',
               }}
             >
-              Rp <CountUp preserveValue end={kpis.active.value} separator="." />
+              Rp <CountUp end={kpis.active.value} separator="." />
             </div>
             <div style={{ fontSize: 11.5, color: '#94A3B8', marginTop: 3 }}>
               Total estimasi tender aktif
@@ -271,7 +271,7 @@ export const SalesKpiSummaryCards: React.FC<SalesKpiSummaryCardsProps> = ({ kpis
                   lineHeight: 1.2,
                 }}
               >
-                <CountUp preserveValue end={kpis.winRate.value} decimals={1} />%
+                <CountUp end={kpis.winRate.value} decimals={1} />%
               </span>
               <Text style={{ fontSize: 11.5, color: '#64748B', fontWeight: 500 }}>
                 (by count: {kpis.winRate.countValue}%)

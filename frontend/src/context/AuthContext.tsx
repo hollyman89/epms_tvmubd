@@ -59,6 +59,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const router = useRouter();
 
+  // Unified canonical session termination helper to guarantee client cache & auth isolation
+  const terminateSession = useCallback(
+    (options?: { notifyOtherTabs?: boolean; redirectToLogin?: boolean; errorMessage?: string }) => {
+      isLoggedOut = true;
+      queryClient.clear();
+      AuthService.clearSession();
+      setUser(null);
+      setIsAuthenticated(false);
+      delete apiClient.defaults.headers.common['Authorization'];
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('epms:auth_session_cleared'));
+      }
+
+      if (options?.notifyOtherTabs) {
+        authChannel?.postMessage({ type: 'AUTH_LOGOUT' });
+      }
+
+      if (options?.errorMessage) {
+        message.error(options.errorMessage);
+      }
+
+      if (options?.redirectToLogin) {
+        router.push('/login');
+      }
+    },
+    [router]
+  );
+
   // 1. Initial Session Verification & Recovery on Mount / Reload
   useEffect(() => {
     let isMounted = true;
@@ -86,7 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           return;
         } catch {
-          AuthService.clearSession();
+          terminateSession({ notifyOtherTabs: false, redirectToLogin: false });
         }
       }
 
@@ -104,12 +133,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       } catch {
         // Refresh cookie missing, expired, or revoked
-        AuthService.clearSession();
-        if (isMounted) {
-          setUser(null);
-          setIsAuthenticated(false);
-          delete apiClient.defaults.headers.common['Authorization'];
-        }
+        terminateSession({ notifyOtherTabs: false, redirectToLogin: false });
       } finally {
         if (isMounted) {
           setIsLoading(false);
@@ -122,7 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [terminateSession]);
 
   // 2. Multi-Tab Auth Event Synchronization (BroadcastChannel + Storage Event Fallback)
   useEffect(() => {
@@ -142,12 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
         setIsAuthenticated(true);
       } else if (data.type === 'AUTH_LOGOUT') {
-        isLoggedOut = true;
-        AuthService.clearSession();
-        setUser(null);
-        setIsAuthenticated(false);
-        delete apiClient.defaults.headers.common['Authorization'];
-        router.push('/login');
+        terminateSession({ notifyOtherTabs: false, redirectToLogin: true });
       }
     };
 
@@ -156,11 +175,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const handleStorage = (e: StorageEvent) => {
       if (e.key === null || e.key === 'epms_user') {
         if (!AuthService.getUser()) {
-          isLoggedOut = true;
-          setUser(null);
-          setIsAuthenticated(false);
-          delete apiClient.defaults.headers.common['Authorization'];
-          router.push('/login');
+          terminateSession({ notifyOtherTabs: false, redirectToLogin: true });
         }
       }
     };
@@ -171,7 +186,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       authChannel?.removeEventListener('message', handleBroadcast);
       window.removeEventListener('storage', handleStorage);
     };
-  }, [router]);
+  }, [terminateSession]);
 
   // 3. Silent Auto-Refresh Interval & User Activity Tracker
   useEffect(() => {
@@ -305,14 +320,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               // Never logout on 403, 5xx, timeout, or network connection drop
               const isRevokedOrExpired = refreshErr.response?.status === 401;
               if (isRevokedOrExpired && !isLoggedOut) {
-                isLoggedOut = true;
-                authChannel?.postMessage({ type: 'AUTH_LOGOUT' });
-                message.error('Sesi Anda telah berakhir, silakan login kembali.');
-                AuthService.clearSession();
-                setUser(null);
-                setIsAuthenticated(false);
-                delete apiClient.defaults.headers.common['Authorization'];
-                router.push('/login');
+                terminateSession({
+                  notifyOtherTabs: true,
+                  redirectToLogin: true,
+                  errorMessage: 'Sesi Anda telah berakhir, silakan login kembali.',
+                });
               }
 
               throw refreshErr;
@@ -343,7 +355,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       apiClient.interceptors.response.eject(interceptor);
     };
-  }, [router]);
+  }, [terminateSession]);
 
   const login = useCallback((token: string, userData: User) => {
     isLoggedOut = false;
@@ -352,25 +364,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(userData);
     setIsAuthenticated(true);
     apiClient.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('epms:auth_session_established', { detail: { user: userData } }));
+    }
     authChannel?.postMessage({ type: 'AUTH_REFRESH_SUCCESS', accessToken: token, user: userData });
   }, []);
 
   const logout = useCallback(async () => {
-    isLoggedOut = true;
-    queryClient.clear();
     try {
       await apiClient.post('/auth/logout', {}, { withCredentials: true });
     } catch {
       // Ignore network errors on logout
     }
-    AuthService.clearSession();
-    setUser(null);
-    setIsAuthenticated(false);
-    delete apiClient.defaults.headers.common['Authorization'];
-    authChannel?.postMessage({ type: 'AUTH_LOGOUT' });
+    terminateSession({ notifyOtherTabs: true, redirectToLogin: true });
     message.success('Berhasil logout');
-    router.push('/login');
-  }, [router]);
+  }, [terminateSession]);
 
   const roles = useMemo(() => user?.roles || [], [user]);
   const isSuperAdmin = useMemo(() => roles.includes('SUPER_ADMIN'), [roles]);

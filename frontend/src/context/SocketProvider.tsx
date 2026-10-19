@@ -50,12 +50,26 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     window.addEventListener('storage', checkToken);
     window.addEventListener('focus', checkToken);
     document.addEventListener('visibilitychange', checkToken);
+    window.addEventListener('epms:auth_session_cleared', checkToken);
+    window.addEventListener('epms:auth_session_established', checkToken);
+
+    let authChannel: BroadcastChannel | null = null;
+    try {
+      authChannel = new BroadcastChannel('epms_auth_sync');
+      authChannel.addEventListener('message', checkToken);
+    } catch {
+      // BroadcastChannel fallback
+    }
 
     return () => {
       clearInterval(interval);
       window.removeEventListener('storage', checkToken);
       window.removeEventListener('focus', checkToken);
       document.removeEventListener('visibilitychange', checkToken);
+      window.removeEventListener('epms:auth_session_cleared', checkToken);
+      window.removeEventListener('epms:auth_session_established', checkToken);
+      authChannel?.removeEventListener('message', checkToken);
+      authChannel?.close();
     };
   }, []);
 
@@ -87,9 +101,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setIsConnected(false);
     };
 
+    const handleImmediateTeardown = () => {
+      cleanupSockets();
+    };
+    window.addEventListener('epms:auth_session_cleared', handleImmediateTeardown);
+
     if (!token) {
       cleanupSockets();
-      return;
+      return () => {
+        window.removeEventListener('epms:auth_session_cleared', handleImmediateTeardown);
+      };
     }
 
     const baseUrl = process.env.NEXT_PUBLIC_SOCKET_URL || '';
@@ -142,7 +163,18 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         queryClient.invalidateQueries({ queryKey: ['rfq'], type: 'active' });
         queryClient.invalidateQueries({ queryKey: ['pr-workflow-instance-review-modal'], type: 'active' });
         queryClient.invalidateQueries({ queryKey: ['legal-contracts'], type: 'active' });
-        queryClient.invalidateQueries({ queryKey: ['tenders'], type: 'active' });
+
+        const currentUser = AuthService.getUser();
+        const activeUserId = currentUser?.sub ?? (currentUser as any)?.id;
+        if (activeUserId) {
+          queryClient.invalidateQueries({
+            predicate: (query) => {
+              const qk = query.queryKey;
+              return Array.isArray(qk) && qk[0] === 'tenders' && typeof qk[1] === 'object' && String(qk[1]?.userId) === String(activeUserId);
+            },
+            type: 'active',
+          });
+        }
 
         // Trigger authoritative fetch for active manual-state screens
         if (typeof window !== 'undefined') {
@@ -207,7 +239,17 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           queryClient.invalidateQueries({ queryKey: ['legal-review'], type: 'active' });
           queryClient.invalidateQueries({ queryKey: ['legal-contracts'], type: 'active' });
         } else if (eventName.startsWith('marketing.')) {
-          queryClient.invalidateQueries({ queryKey: ['tenders'], type: 'active' });
+          const currentUser = AuthService.getUser();
+          const activeUserId = currentUser?.sub ?? (currentUser as any)?.id;
+          if (activeUserId) {
+            queryClient.invalidateQueries({
+              predicate: (query) => {
+                const qk = query.queryKey;
+                return Array.isArray(qk) && qk[0] === 'tenders' && typeof qk[1] === 'object' && String(qk[1]?.userId) === String(activeUserId);
+              },
+              type: 'active',
+            });
+          }
         }
 
         // Notify active manual-state screens via browser event with canonical envelope
@@ -218,6 +260,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     }
 
     return () => {
+      window.removeEventListener('epms:auth_session_cleared', handleImmediateTeardown);
       cleanupSockets();
     };
   }, [token]);

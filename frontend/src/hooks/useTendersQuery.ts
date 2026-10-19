@@ -56,7 +56,7 @@ export function useTendersQuery(options: UseTendersQueryOptions = {}) {
     },
     staleTime: 60000,
     gcTime: 300000,
-    enabled,
+    enabled: Boolean(user?.sub) && enabled,
   });
 
   // Attach Listener to Global Socket for live updates
@@ -146,7 +146,7 @@ export function useTendersQuery(options: UseTendersQueryOptions = {}) {
         if (typeof window !== 'undefined') {
           console.log(`[${now}] [QUERY] INVALIDATE FALLBACK`, { queryKey: ['tenders'], action: payload?.action, reason: 'Direct cache match missed or non-patch action' });
         }
-        queryClient.invalidateQueries({ queryKey: ['tenders'] });
+        queryClient.invalidateQueries({ queryKey: ['tenders', { userId: user?.sub }] });
       } else {
         if (typeof window !== 'undefined') {
           console.log(`[${now}] [QUERY] DIRECT IN-MEMORY CACHE UPDATE SUCCESS`, { tenderId: payload.tenderId, action: payload?.action });

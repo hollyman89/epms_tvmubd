@@ -48,6 +48,11 @@ export class CreateInvoiceDto {
   @IsOptional()
   evidenceRef?: string;
 
+  @ApiProperty({ example: 1, description: 'Optional ID of the Service Claim supporting this service invoice', required: false })
+  @IsNumber()
+  @IsOptional()
+  serviceClaimId?: number;
+
   @ApiProperty({ example: '2026-07-09T10:00:00Z', description: 'Date of the invoice' })
   @IsDateString()
   @IsNotEmpty()
