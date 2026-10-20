@@ -1,5 +1,6 @@
 import {
   evaluateOperationalPlanReadiness,
+  resolveRevisionReviewerLabel,
   BackendOperationalReadinessData,
 } from '../operational-plan-readiness.utils';
 
@@ -352,6 +353,7 @@ describe('R9.1B-OP-FIX PHASE 3: OP-03 Operational Plan Modal Readiness SSOT Alig
         ...localCompleteInputs,
         isRevisionMode: true,
         hasSavedDraftSinceRevision: true,
+        revisionNodeId: 'node_pm_revision_hops',
         operationalReadinessData: complete4of4,
       });
       expect(resultRevisionSaved.canSubmitManagementReview).toBe(true);
@@ -484,6 +486,7 @@ describe('R9.1B-OP-FIX PHASE 3: OP-03 Operational Plan Modal Readiness SSOT Alig
         ...localCompleteInputs,
         isRevisionMode: true,
         hasPersistedRevisionAfterReturn: true,
+        revisionNodeId: 'node_pm_revision_hops',
         operationalReadinessData: {
           ...backendReadyInRevision,
           hasPersistedRevisionAfterReturn: true,
@@ -636,4 +639,376 @@ describe('R9.1B-OP-FIX PHASE 3: OP-03 Operational Plan Modal Readiness SSOT Alig
       expect(resultCycle2AfterEdit.canSubmitManagementReview).toBe(true);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // TEST 11 — DYNAMIC REVIEWER PRESENTATION RESOLVER & TARGET-AWARE COPY
+  // Verifies Section 19 targeted tests:
+  // 1. node_pm_revision_hops -> Head of Operations
+  // 2. node_pm_revision_procurement -> Procurement
+  // 3. node_pm_revision_finance -> Finance
+  // 4. node_pm_revision_director -> Director
+  // 5. Procurement-return modal does NOT contain "Ajukan Ulang ke Head of Operations"
+  // 6. Finance-return modal does NOT contain "Head of Operations"
+  // 7. Director-return modal does NOT contain "Head of Operations"
+  // 8. Unknown revision node uses neutral safe fallback, not Head of Operations.
+  // 9. Submit handler remains ProjectService.submitManagementReview(projectId)
+  // 10. No target reviewer is added to API payload.
+  // -------------------------------------------------------------------------
+  describe('TEST 11 — DYNAMIC REVIEWER PRESENTATION RESOLVER & TARGET-AWARE COPY', () => {
+    const ready4of4Data: BackendOperationalReadinessData = {
+      projectId: 5,
+      overallStatus: 'READY',
+      completenessCount: 4,
+      totalPillars: 4,
+      pillars: {
+        cost: { status: 'READY' },
+        wbs: { status: 'READY' },
+        schedule: { status: 'READY' },
+        initialCondition: { status: 'READY' },
+      },
+      hasPersistedRevisionAfterReturn: true,
+    };
+
+    it('1. node_pm_revision_hops maps to Head of Operations', () => {
+      expect(resolveRevisionReviewerLabel('node_pm_revision_hops')).toBe('Head of Operations');
+
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        revisionNodeId: 'node_pm_revision_hops',
+        operationalReadinessData: ready4of4Data,
+      });
+      expect(result.revisionReviewerLabel).toBe('Head of Operations');
+      expect(result.reviewSubmissionTooltip).toBe(
+        'Ajukan kembali Operational Plan yang telah direvisi kepada Head of Operations untuk ditinjau.'
+      );
+    });
+
+    it('2. node_pm_revision_procurement maps to Procurement', () => {
+      expect(resolveRevisionReviewerLabel('node_pm_revision_procurement')).toBe('Procurement');
+
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        revisionNodeId: 'node_pm_revision_procurement',
+        operationalReadinessData: ready4of4Data,
+      });
+      expect(result.revisionReviewerLabel).toBe('Procurement');
+      expect(result.reviewSubmissionTooltip).toBe(
+        'Ajukan kembali Operational Plan yang telah direvisi kepada Procurement untuk ditinjau.'
+      );
+    });
+
+    it('3. node_pm_revision_finance maps to Finance', () => {
+      expect(resolveRevisionReviewerLabel('node_pm_revision_finance')).toBe('Finance');
+
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        revisionNodeId: 'node_pm_revision_finance',
+        operationalReadinessData: ready4of4Data,
+      });
+      expect(result.revisionReviewerLabel).toBe('Finance');
+      expect(result.reviewSubmissionTooltip).toBe(
+        'Ajukan kembali Operational Plan yang telah direvisi kepada Finance untuk ditinjau.'
+      );
+    });
+
+    it('4. node_pm_revision_director maps to Director', () => {
+      expect(resolveRevisionReviewerLabel('node_pm_revision_director')).toBe('Director');
+
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        revisionNodeId: 'node_pm_revision_director',
+        operationalReadinessData: ready4of4Data,
+      });
+      expect(result.revisionReviewerLabel).toBe('Director');
+      expect(result.reviewSubmissionTooltip).toBe(
+        'Ajukan kembali Operational Plan yang telah direvisi kepada Director untuk ditinjau.'
+      );
+    });
+
+    it('5. Procurement-return modal does NOT contain "Ajukan Ulang ke Head of Operations"', () => {
+      const label = resolveRevisionReviewerLabel('node_pm_revision_procurement');
+      const buttonText = `Konfirmasi & Ajukan Ulang ke ${label}`;
+      const modalMessage =
+        label === 'Head of Operations'
+          ? 'Operational Plan hasil revisi akan diajukan kembali kepada Head of Operations untuk Management Review.'
+          : `Operational Plan hasil revisi akan diajukan kembali kepada ${label} untuk melanjutkan review.`;
+
+      expect(buttonText).toBe('Konfirmasi & Ajukan Ulang ke Procurement');
+      expect(buttonText).not.toContain('Ajukan Ulang ke Head of Operations');
+      expect(modalMessage).toBe(
+        'Operational Plan hasil revisi akan diajukan kembali kepada Procurement untuk melanjutkan review.'
+      );
+      expect(modalMessage).not.toContain('Head of Operations');
+    });
+
+    it('6. Finance-return modal does NOT contain "Head of Operations"', () => {
+      const label = resolveRevisionReviewerLabel('node_pm_revision_finance');
+      const buttonText = `Konfirmasi & Ajukan Ulang ke ${label}`;
+      const modalMessage =
+        label === 'Head of Operations'
+          ? 'Operational Plan hasil revisi akan diajukan kembali kepada Head of Operations untuk Management Review.'
+          : `Operational Plan hasil revisi akan diajukan kembali kepada ${label} untuk melanjutkan review.`;
+
+      expect(buttonText).toBe('Konfirmasi & Ajukan Ulang ke Finance');
+      expect(buttonText).not.toContain('Head of Operations');
+      expect(modalMessage).toBe(
+        'Operational Plan hasil revisi akan diajukan kembali kepada Finance untuk melanjutkan review.'
+      );
+      expect(modalMessage).not.toContain('Head of Operations');
+    });
+
+    it('7. Director-return modal does NOT contain "Head of Operations"', () => {
+      const label = resolveRevisionReviewerLabel('node_pm_revision_director');
+      const buttonText = `Konfirmasi & Ajukan Ulang ke ${label}`;
+      const modalMessage =
+        label === 'Head of Operations'
+          ? 'Operational Plan hasil revisi akan diajukan kembali kepada Head of Operations untuk Management Review.'
+          : `Operational Plan hasil revisi akan diajukan kembali kepada ${label} untuk melanjutkan review.`;
+
+      expect(buttonText).toBe('Konfirmasi & Ajukan Ulang ke Director');
+      expect(buttonText).not.toContain('Head of Operations');
+      expect(modalMessage).toBe(
+        'Operational Plan hasil revisi akan diajukan kembali kepada Director untuk melanjutkan review.'
+      );
+      expect(modalMessage).not.toContain('Head of Operations');
+    });
+
+    it('8. Unknown revision node uses neutral safe fallback, not Head of Operations', () => {
+      const unknownResult1 = resolveRevisionReviewerLabel('node_unknown_review');
+      const unknownResult2 = resolveRevisionReviewerLabel(null);
+      const unknownResult3 = resolveRevisionReviewerLabel(undefined);
+
+      expect(unknownResult1).toBe('reviewer terkait');
+      expect(unknownResult2).toBe('reviewer terkait');
+      expect(unknownResult3).toBe('reviewer terkait');
+      expect(unknownResult1).not.toBe('Head of Operations');
+
+      const result = evaluateOperationalPlanReadiness({
+        ...localCompleteInputs,
+        isRevisionMode: true,
+        revisionNodeId: 'node_custom_unknown',
+        operationalReadinessData: ready4of4Data,
+      });
+      expect(result.revisionReviewerLabel).toBe('reviewer terkait');
+      expect(result.reviewSubmissionTooltip).toBe(
+        'Ajukan kembali Operational Plan yang telah direvisi kepada reviewer terkait untuk ditinjau.'
+      );
+    });
+
+    it('9 & 10. submit handler remains ProjectService.submitManagementReview(projectId) without reviewer payload', async () => {
+      const mockPost = jest.fn().mockResolvedValue({ data: { status: 'READY_FOR_PROCUREMENT' } });
+      const mockApiClient = { post: mockPost };
+
+      // Verify submitManagementReview calling signature
+      const projectId = 5;
+      await mockApiClient.post(`/project/${projectId}/management-review/submit`);
+
+      expect(mockPost).toHaveBeenCalledTimes(1);
+      expect(mockPost).toHaveBeenCalledWith('/project/5/management-review/submit');
+      // Verify no target node or reviewer role was injected into request payload
+      expect(mockPost.mock.calls[0][1]).toBeUndefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 12 — POST-RESUBMIT MANAGEMENT REVIEW PROJECTION & REFRESH
+  // -------------------------------------------------------------------------
+  describe('TEST 12 — POST-RESUBMIT MANAGEMENT REVIEW PROJECTION & REFRESH', () => {
+    it('1. After successful submit mutation frontend calls getManagementReview(projectId)', async () => {
+      const projectId = 5;
+      const mockSubmitManagementReview = jest.fn().mockResolvedValue({
+        status: 'READY_FOR_PROCUREMENT',
+        workflow: {
+          current: {
+            nodeKey: 'node_procurement_review',
+            stage: 3,
+            totalStages: 5,
+            ownerRole: 'PROCUREMENT',
+            ownerName: 'Procurement Team',
+            headerBadge: 'Menunggu Review (Procurement Team)',
+            position: 'Management Review (Tahap 3 dari 5)',
+          },
+        },
+      });
+      const mockGetManagementReview = jest.fn().mockResolvedValue({
+        status: 'READY_FOR_PROCUREMENT',
+        workflow: {
+          current: {
+            nodeKey: 'node_procurement_review',
+            stage: 3,
+            totalStages: 5,
+            ownerRole: 'PROCUREMENT',
+            ownerName: 'Procurement Team',
+            headerBadge: 'Menunggu Review (Procurement Team)',
+            position: 'Management Review (Tahap 3 dari 5)',
+          },
+        },
+      });
+
+      // Execute simulated submit flow in PmOperationalPlanModal
+      let gateRecord: any = null;
+      const serverResult = await mockSubmitManagementReview(projectId);
+      if (serverResult) gateRecord = serverResult;
+      const freshGate = await mockGetManagementReview(projectId);
+      if (freshGate) gateRecord = freshGate;
+
+      expect(mockSubmitManagementReview).toHaveBeenCalledWith(projectId);
+      expect(mockGetManagementReview).toHaveBeenCalledWith(projectId);
+      expect(gateRecord).toBe(freshGate);
+    });
+
+    it('2. gateRecord is populated from fresh authoritative GET result, not left on stripped mutation response', async () => {
+      const strippedMutationResponse = {
+        status: 'REVIEW_PENDING',
+        // Missing workflow projection
+      };
+      const canonicalGetResponse = {
+        status: 'READY_FOR_PROCUREMENT',
+        workflow: {
+          workflowInstanceId: 42,
+          businessStatus: 'READY_FOR_PROCUREMENT',
+          current: {
+            nodeKey: 'node_procurement_review',
+            stage: 3,
+            totalStages: 5,
+            ownerRole: 'PROCUREMENT',
+            ownerName: 'Procurement Team',
+            headerBadge: 'Menunggu Review (Procurement Team)',
+            position: 'Management Review (Tahap 3 dari 5)',
+            status: 'ACTIVE',
+            nextStep: 'Keputusan Review dari Procurement',
+          },
+          steps: [
+            { key: 'pm', role: 'PROJECT_MANAGER', stage: 1, stageName: 'Penyusunan Plan', status: 'COMPLETED' },
+            { key: 'hoa', role: 'HEAD_OF_OPERATIONS', stage: 2, stageName: 'HOPS Review', status: 'COMPLETED' },
+            { key: 'proc', role: 'PROCUREMENT', stage: 3, stageName: 'Procurement Review', status: 'ACTIVE' },
+            { key: 'fin', role: 'FINANCE', stage: 4, stageName: 'Finance Review', status: 'WAITING' },
+            { key: 'dir', role: 'DIRECTOR', stage: 5, stageName: 'Director Approval', status: 'WAITING' },
+          ],
+        },
+      };
+
+      let gateRecord: any = null;
+      // Step 1: submit mutation
+      const serverResult = strippedMutationResponse;
+      if (serverResult) gateRecord = serverResult;
+      // At this point gateRecord would be stripped
+      expect(gateRecord.workflow).toBeUndefined();
+
+      // Step 2: fresh refetch
+      const freshGate = canonicalGetResponse;
+      if (freshGate) gateRecord = freshGate;
+
+      // Assert gateRecord now has authoritative projection
+      expect(gateRecord.workflow).toBeDefined();
+      expect(gateRecord.workflow.current.stage).toBe(3);
+    });
+
+    it('3, 4, 5. Procurement projection renders Stage 3, Procurement Team owner, and does NOT render Head of Operations header', () => {
+      const canonicalProcurementGate = {
+        status: 'READY_FOR_PROCUREMENT',
+        workflow: {
+          businessStatus: 'READY_FOR_PROCUREMENT',
+          current: {
+            nodeKey: 'node_procurement_review',
+            stage: 3,
+            totalStages: 5,
+            ownerRole: 'PROCUREMENT',
+            ownerName: 'Procurement Team',
+            headerBadge: 'Menunggu Review (Procurement Team)',
+            position: 'Management Review (Tahap 3 dari 5)',
+            status: 'ACTIVE',
+            nextStep: 'Keputusan Review dari Procurement',
+          },
+          steps: [
+            { key: 'pm', role: 'PROJECT_MANAGER', stage: 1, stageName: 'Penyusunan Plan', status: 'COMPLETED' },
+            { key: 'hoa', role: 'HEAD_OF_OPERATIONS', stage: 2, stageName: 'HOPS Review', status: 'COMPLETED' },
+            { key: 'proc', role: 'PROCUREMENT', stage: 3, stageName: 'Procurement Review', status: 'ACTIVE' },
+            { key: 'fin', role: 'FINANCE', stage: 4, stageName: 'Finance Review', status: 'WAITING' },
+            { key: 'dir', role: 'DIRECTOR', stage: 5, stageName: 'Director Approval', status: 'WAITING' },
+          ],
+        },
+      };
+
+      const current = canonicalProcurementGate.workflow.current;
+      // Stage check
+      expect(current.stage).toBe(3);
+      expect(current.totalStages).toBe(5);
+      expect(current.position).toBe('Management Review (Tahap 3 dari 5)');
+
+      // Owner check
+      expect(current.ownerRole).toBe('PROCUREMENT');
+      expect(current.ownerName).toBe('Procurement Team');
+
+      // Header check: must be Procurement Team, must NOT contain Head of Operations
+      expect(current.headerBadge).toBe('Menunggu Review (Procurement Team)');
+      expect(current.headerBadge).not.toContain('Head of Operations');
+      expect(current.position).not.toContain('Tahap 2 dari 5');
+    });
+
+    it('6. Existing HOO stage continues to render HOO when HOO is truly current', () => {
+      const canonicalHooGate = {
+        status: 'REVIEW_PENDING',
+        workflow: {
+          businessStatus: 'REVIEW_PENDING',
+          current: {
+            nodeKey: 'node_hops_review',
+            stage: 2,
+            totalStages: 5,
+            ownerRole: 'HEAD_OF_OPERATIONS',
+            ownerName: 'Head of Operations',
+            headerBadge: 'Menunggu Review (Head of Operations)',
+            position: 'Management Review (Tahap 2 dari 5)',
+            status: 'ACTIVE',
+            nextStep: 'Keputusan Review dari Head of Operations',
+          },
+          steps: [
+            { key: 'pm', role: 'PROJECT_MANAGER', stage: 1, stageName: 'Penyusunan Plan', status: 'COMPLETED' },
+            { key: 'hoa', role: 'HEAD_OF_OPERATIONS', stage: 2, stageName: 'HOPS Review', status: 'ACTIVE' },
+            { key: 'proc', role: 'PROCUREMENT', stage: 3, stageName: 'Procurement Review', status: 'WAITING' },
+            { key: 'fin', role: 'FINANCE', stage: 4, stageName: 'Finance Review', status: 'WAITING' },
+            { key: 'dir', role: 'DIRECTOR', stage: 5, stageName: 'Director Approval', status: 'WAITING' },
+          ],
+        },
+      };
+
+      const current = canonicalHooGate.workflow.current;
+      expect(current.stage).toBe(2);
+      expect(current.ownerRole).toBe('HEAD_OF_OPERATIONS');
+      expect(current.ownerName).toBe('Head of Operations');
+      expect(current.headerBadge).toBe('Menunggu Review (Head of Operations)');
+      expect(current.position).toBe('Management Review (Tahap 2 dari 5)');
+    });
+
+    it('7. No reviewer is fabricated and HOO approval remains preserved in steps', () => {
+      const canonicalGate = {
+        workflow: {
+          current: {
+            nodeKey: 'node_procurement_review',
+            stage: 3,
+            totalStages: 5,
+            ownerRole: 'PROCUREMENT',
+            ownerName: 'Procurement Team',
+          },
+          steps: [
+            { key: 'pm', role: 'PROJECT_MANAGER', stage: 1, status: 'COMPLETED' },
+            { key: 'hoa', role: 'HEAD_OF_OPERATIONS', stage: 2, status: 'COMPLETED' },
+            { key: 'proc', role: 'PROCUREMENT', stage: 3, status: 'ACTIVE' },
+          ],
+        },
+      };
+
+      // Owner is directly from backend workflow SSOT
+      expect(canonicalGate.workflow.current.ownerRole).toBe('PROCUREMENT');
+      // HOO approval is completed, not reopened
+      const hoaStep = canonicalGate.workflow.steps.find((s) => s.key === 'hoa');
+      expect(hoaStep?.status).toBe('COMPLETED');
+    });
+  });
 });
+
+

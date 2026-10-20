@@ -53,7 +53,7 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
   onPaymentCreated,
   onViewReceipt,
   currentUserName = 'Finance Team',
-  canProcessPayment = true,
+  canProcessPayment = false,
 }) => {
   const [form] = Form.useForm();
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -146,6 +146,11 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
       return;
     }
 
+    if (!canProcessPayment) {
+      message.error('Hanya role Finance yang berwenang mengeksekusi pembayaran.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const payload: CreatePaymentPayload = {
@@ -195,6 +200,32 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
   };
 
   if (!invoice) return null;
+
+  if (!canProcessPayment) {
+    return (
+      <Modal
+        open={open}
+        onCancel={onClose}
+        width={480}
+        centered
+        destroyOnClose
+        title="Akses Ditolak"
+        footer={[
+          <Button key="close" onClick={onClose}>
+            Tutup
+          </Button>,
+        ]}
+      >
+        <Alert
+          type="error"
+          showIcon
+          message="Otoritas Pembayaran Ditolak"
+          description="Hanya role Finance yang berwenang mengakses dan memproses eksekusi pembayaran tagihan. Segregation of Duties (SoD) melarang role lain untuk membuka modul eksekusi pembayaran."
+          style={{ margin: '16px 0' }}
+        />
+      </Modal>
+    );
+  }
 
   return (
     <Modal

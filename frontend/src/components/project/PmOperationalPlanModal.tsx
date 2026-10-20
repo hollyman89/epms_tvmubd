@@ -89,7 +89,7 @@ import {
   isInitialConditionComplete,
 } from './ProjectInitialConditionModal';
 import { isPmEditableWorkflowState, getCanonicalStatusColor } from './workflowUiHelpers';
-import { evaluateOperationalPlanReadiness } from './operational-plan-readiness.utils';
+import { evaluateOperationalPlanReadiness, resolveRevisionReviewerLabel } from './operational-plan-readiness.utils';
 import { ProjectService, ProcurementService } from '@/services';
 import WorkflowEngineService from '@/services/workflowEngine.service';
 import { useAuth } from '@/context/AuthContext';
@@ -762,6 +762,20 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     (gateRecord as any)?.hasPersistedRevisionAfterReturn,
   ]);
 
+  const currentRevisionNode =
+    gateRecord?.workflow?.currentNodeId ||
+    gateRecord?.workflow?.current?.nodeId ||
+    operationalReadinessData?.workflow?.currentNodeId ||
+    operationalReadinessData?.gate?.workflow?.currentNodeId ||
+    operationalReadinessData?.gate?.currentNodeId ||
+    (gateRecord as any)?.currentNodeId ||
+    null;
+
+  const currentReviewerRole =
+    gateRecord?.reviewerRole ||
+    operationalReadinessData?.gate?.reviewerRole ||
+    null;
+
   const readinessEvaluation = useMemo(() => {
     return evaluateOperationalPlanReadiness({
       operationalReadinessData,
@@ -779,6 +793,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
       hasSavedDraftSinceRevision: effectiveHasPersistedRevisionAfterReturn,
       hasPersistedRevisionAfterReturn: effectiveHasPersistedRevisionAfterReturn,
       isRevisionMode: isRevisionWorkflow,
+      revisionNodeId: currentRevisionNode,
+      reviewerRole: currentReviewerRole,
     });
   }, [
     operationalReadinessData,
@@ -795,6 +811,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     initialCondition?.id,
     effectiveHasPersistedRevisionAfterReturn,
     isRevisionWorkflow,
+    currentRevisionNode,
+    currentReviewerRole,
   ]);
 
   const {
@@ -808,7 +826,19 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     isConditionLocalDraft,
     completenessScore,
     isOperationalPlanAuthoritativeReady,
+    revisionReviewerLabel = 'reviewer terkait',
   } = readinessEvaluation;
+
+  const revisionModalMessage = useMemo(() => {
+    if (revisionReviewerLabel === 'Head of Operations') {
+      return 'Operational Plan hasil revisi akan diajukan kembali kepada Head of Operations untuk Management Review.';
+    }
+    return `Operational Plan hasil revisi akan diajukan kembali kepada ${revisionReviewerLabel} untuk melanjutkan review.`;
+  }, [revisionReviewerLabel]);
+
+  const revisionOkText = useMemo(() => {
+    return `Konfirmasi & Ajukan Ulang ke ${revisionReviewerLabel}`;
+  }, [revisionReviewerLabel]);
 
   // Save All Drafts
   const handleSaveAllDrafts = useCallback(
@@ -1136,10 +1166,16 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     setIsSubmittingReview(true);
     try {
       const serverResult = await ProjectService.submitManagementReview(pid);
-      setGateRecord(serverResult);
+      if (serverResult) {
+        setGateRecord(serverResult);
+      }
       setIsSubmitModalOpen(false);
 
-      // Refresh live readiness from server
+      // Fetch fresh authoritative Management Review gate record & readiness from server
+      const freshGate = await ProjectService.getManagementReview(pid);
+      if (freshGate) {
+        setGateRecord(freshGate);
+      }
       await fetchOperationalReadiness(pid);
 
       if (isResubmission) {
@@ -4314,9 +4350,9 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
       <Modal
         title={
           <Space>
-            <RocketOutlined style={{ color: gateRecord?.status === 'NEEDS_REVISION' ? '#d97706' : '#059669', fontSize: 18 }} />
+            <RocketOutlined style={{ color: (isRevisionWorkflow || gateRecord?.status === 'NEEDS_REVISION') ? '#d97706' : '#059669', fontSize: 18 }} />
             <span style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
-              {gateRecord?.status === 'NEEDS_REVISION'
+              {(isRevisionWorkflow || gateRecord?.status === 'NEEDS_REVISION')
                 ? 'Ajukan Ulang Operational Plan untuk Review?'
                 : 'Ajukan Operational Plan untuk Review?'}
             </span>
@@ -4327,8 +4363,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         onOk={handleSubmitForManagementReview}
         confirmLoading={isSubmittingReview}
         okText={
-          gateRecord?.status === 'NEEDS_REVISION'
-            ? 'Konfirmasi & Ajukan Ulang ke Head of Operations'
+          (isRevisionWorkflow || gateRecord?.status === 'NEEDS_REVISION')
+            ? revisionOkText
             : 'Konfirmasi & Ajukan ke Head of Operations'
         }
         cancelText="Batal"
@@ -4337,8 +4373,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
           loading: isSubmittingReview,
           disabled: isSubmittingReview,
           style: {
-            backgroundColor: gateRecord?.status === 'NEEDS_REVISION' ? '#d97706' : '#059669',
-            borderColor: gateRecord?.status === 'NEEDS_REVISION' ? '#d97706' : '#059669',
+            backgroundColor: (isRevisionWorkflow || gateRecord?.status === 'NEEDS_REVISION') ? '#d97706' : '#059669',
+            borderColor: (isRevisionWorkflow || gateRecord?.status === 'NEEDS_REVISION') ? '#d97706' : '#059669',
             fontWeight: 600,
           },
         }}
@@ -4346,11 +4382,11 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
       >
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <Alert
-            type={gateRecord?.status === 'NEEDS_REVISION' ? 'warning' : 'info'}
+            type={(isRevisionWorkflow || gateRecord?.status === 'NEEDS_REVISION') ? 'warning' : 'info'}
             showIcon
             message={
-              gateRecord?.status === 'NEEDS_REVISION'
-                ? 'Operational Plan hasil revisi akan diajukan kembali kepada Head of Operations untuk Management Review.'
+              (isRevisionWorkflow || gateRecord?.status === 'NEEDS_REVISION')
+                ? revisionModalMessage
                 : 'Operational Plan akan diajukan kepada Head of Operations untuk Management Review.'
             }
             description="Pastikan Cost Estimate (RAB), Struktur WBS 100%, Penjadwalan, dan Baseline Kondisi Awal telah lengkap dan valid sebelum mengajukan."

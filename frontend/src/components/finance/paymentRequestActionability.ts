@@ -20,6 +20,21 @@ export interface PaymentRequestUiState {
   activeRequest?: any;
 }
 
+/**
+ * Canonical Payment Execution Authority & State Guard
+ * Enforces BOTH: Role authority (Finance only) AND Business state (APPROVED_FOR_PAYMENT and unpaid).
+ */
+export function canExecutePayment(
+  isFinance: boolean,
+  request?: { status?: string } | null,
+  invoice?: { paymentStatus?: string } | null
+): boolean {
+  if (!isFinance) return false;
+  if (!request || request.status !== 'APPROVED_FOR_PAYMENT') return false;
+  if (invoice && invoice.paymentStatus === 'PAID') return false;
+  return true;
+}
+
 export function isEligibleForPaymentRequest(
   invoice: {
     paymentStatus?: string;
@@ -62,9 +77,20 @@ export function getPaymentRequestActionState(
     status?: string;
     requestNumber?: string;
     revisionNotes?: string;
-  } | null
+  } | null,
+  options?: {
+    isFinance?: boolean;
+    role?: string;
+  }
 ): PaymentRequestUiState {
   const isPaid = invoice.paymentStatus === 'PAID';
+  const hasFinanceAuthority =
+    options?.isFinance !== undefined
+      ? options.isFinance
+      : options?.role
+      ? options.role === 'FINANCE'
+      : true;
+
   if (isPaid) {
     return {
       actionType: 'PAID',
@@ -92,7 +118,7 @@ export function getPaymentRequestActionState(
       return {
         actionType: 'NEEDS_REVISION',
         canSubmitNew: false,
-        canResubmit: true,
+        canResubmit: hasFinanceAuthority,
         canPay: false,
         statusLabel: 'Perlu Revisi',
         activeRequest,
@@ -104,8 +130,11 @@ export function getPaymentRequestActionState(
         actionType: 'APPROVED_FOR_PAYMENT',
         canSubmitNew: false,
         canResubmit: false,
-        canPay: true,
+        canPay: hasFinanceAuthority,
         statusLabel: 'Disetujui Pembayaran',
+        tooltipMessage: !hasFinanceAuthority
+          ? 'Hanya role Finance yang berwenang mengeksekusi pembayaran.'
+          : undefined,
         activeRequest,
       };
     }
@@ -116,7 +145,7 @@ export function getPaymentRequestActionState(
         invoice.matchStatus === 'VERIFIED' || invoice.matchStatus === 'MATCHED';
       return {
         actionType: isMatchVerified ? 'SUBMIT_NEW' : 'CANNOT_SUBMIT',
-        canSubmitNew: isMatchVerified,
+        canSubmitNew: isMatchVerified && hasFinanceAuthority,
         canResubmit: false,
         canPay: false,
         statusLabel: 'Ditolak (Dapat Diajukan Ulang)',
@@ -151,7 +180,7 @@ export function getPaymentRequestActionState(
 
   return {
     actionType: 'SUBMIT_NEW',
-    canSubmitNew: true,
+    canSubmitNew: hasFinanceAuthority,
     canResubmit: false,
     canPay: false,
   };

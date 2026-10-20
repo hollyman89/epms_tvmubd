@@ -143,18 +143,23 @@ function PaymentsPageContent() {
           setSelectedRequestForApproval(targetReq);
           setIsApprovalModalOpen(true);
         } else if (targetReq.status === 'NEEDS_REVISION') {
-          setActiveTabKey('requests');
-          setSelectedRequestForResubmit(targetReq);
-          setIsResubmitModalOpen(true);
+          if (canProcessPayment) {
+            setActiveTabKey('requests');
+            setSelectedRequestForResubmit(targetReq);
+            setIsResubmitModalOpen(true);
+          }
         } else if (targetReq.status === 'APPROVED_FOR_PAYMENT') {
-          setActiveTabKey('ready_to_pay');
-          setSelectedRequestForPay(targetReq);
-          setSelectedInvoiceForPay(targetReq.invoice || invoices.find(i => Number(i.id) === Number(targetReq.invoiceId)) || null);
-          setIsProcessModalOpen(true);
+          // STRICT ROLE-AWARE DEEP-LINK: ONLY FINANCE CAN AUTO-OPEN PAYMENT EXECUTION MODAL
+          if (canProcessPayment) {
+            setActiveTabKey('ready_to_pay');
+            setSelectedRequestForPay(targetReq);
+            setSelectedInvoiceForPay(targetReq.invoice || invoices.find(i => Number(i.id) === Number(targetReq.invoiceId)) || null);
+            setIsProcessModalOpen(true);
+          }
         }
       }
     }
-  }, [reqIdParam, paymentRequests, invoices]);
+  }, [reqIdParam, paymentRequests, invoices, canProcessPayment]);
 
   // Cross-user event sync
   useEffect(() => {
@@ -334,27 +339,38 @@ function PaymentsPageContent() {
         key: 'action',
         width: 170,
         align: 'center' as const,
-        render: (_: any, r: PaymentRequestDto) => (
-          <Tooltip title={canProcessPayment ? 'Eksekusi pembayaran kas/bank' : 'Hanya role Finance yang dapat memproses pembayaran'}>
-            <span>
-              <Button
-                size="small"
-                type="primary"
-                icon={<DollarCircleOutlined />}
-                disabled={!canProcessPayment || r.status !== 'APPROVED_FOR_PAYMENT'}
-                id={`btn-process-payment-${r.id}`}
-                onClick={() => {
-                  setSelectedRequestForPay(r);
-                  setSelectedInvoiceForPay(r.invoice || invoices.find(i => Number(i.id) === Number(r.invoiceId)) || null);
-                  setIsProcessModalOpen(true);
-                }}
-                className={styles.btnActionPrimary}
-              >
-                PROSES PEMBAYARAN
-              </Button>
-            </span>
-          </Tooltip>
-        ),
+        render: (_: any, r: PaymentRequestDto) => {
+          if (!canProcessPayment) {
+            return (
+              <span style={{ fontSize: 12, color: '#64748b' }}>
+                Siap Dibayar
+              </span>
+            );
+          }
+          if (r.status !== 'APPROVED_FOR_PAYMENT') {
+            return (
+              <span style={{ fontSize: 12, color: '#64748b' }}>
+                —
+              </span>
+            );
+          }
+          return (
+            <Button
+              size="small"
+              type="primary"
+              icon={<DollarCircleOutlined />}
+              id={`btn-process-payment-${r.id}`}
+              onClick={() => {
+                setSelectedRequestForPay(r);
+                setSelectedInvoiceForPay(r.invoice || invoices.find(i => Number(i.id) === Number(r.invoiceId)) || null);
+                setIsProcessModalOpen(true);
+              }}
+              className={styles.btnActionPrimary}
+            >
+              PROSES PEMBAYARAN
+            </Button>
+          );
+        },
       },
     ],
     [canProcessPayment, invoices]
@@ -465,39 +481,43 @@ function PaymentsPageContent() {
         align: 'center' as const,
         render: (_: any, r: PaymentRequestDto) => {
           if (r.status === 'NEEDS_REVISION') {
-            return (
-              <Button
-                size="small"
-                type="primary"
-                icon={<SyncOutlined />}
-                id={`btn-resubmit-req-${r.id}`}
-                onClick={() => {
-                  setSelectedRequestForResubmit(r);
-                  setIsResubmitModalOpen(true);
-                }}
-                className={styles.btnActionResubmit}
-              >
-                AJUKAN ULANG
-              </Button>
-            );
+            if (canProcessPayment) {
+              return (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SyncOutlined />}
+                  id={`btn-resubmit-req-${r.id}`}
+                  onClick={() => {
+                    setSelectedRequestForResubmit(r);
+                    setIsResubmitModalOpen(true);
+                  }}
+                  className={styles.btnActionResubmit}
+                >
+                  AJUKAN ULANG
+                </Button>
+              );
+            }
           }
           if (r.status === 'APPROVED_FOR_PAYMENT') {
-            return (
-              <Button
-                size="small"
-                type="primary"
-                icon={<DollarCircleOutlined />}
-                id={`btn-pay-req-${r.id}`}
-                onClick={() => {
-                  setSelectedRequestForPay(r);
-                  setSelectedInvoiceForPay(r.invoice || invoices.find(i => Number(i.id) === Number(r.invoiceId)) || null);
-                  setIsProcessModalOpen(true);
-                }}
-                className={styles.btnActionPrimary}
-              >
-                Bayar Sekarang
-              </Button>
-            );
+            if (canProcessPayment) {
+              return (
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<DollarCircleOutlined />}
+                  id={`btn-pay-req-${r.id}`}
+                  onClick={() => {
+                    setSelectedRequestForPay(r);
+                    setSelectedInvoiceForPay(r.invoice || invoices.find(i => Number(i.id) === Number(r.invoiceId)) || null);
+                    setIsProcessModalOpen(true);
+                  }}
+                  className={styles.btnActionPrimary}
+                >
+                  Bayar Sekarang
+                </Button>
+              );
+            }
           }
           return (
             <Button
@@ -515,7 +535,7 @@ function PaymentsPageContent() {
         },
       },
     ],
-    [invoices]
+    [canProcessPayment, invoices]
   );
 
   // TAB 3: Columns for Persetujuan Direktur (Director Approver View)
@@ -963,7 +983,7 @@ function PaymentsPageContent() {
         </div>
 
         {/* PROCESS PAYMENT MODAL */}
-        {selectedInvoiceForPay && (
+        {selectedInvoiceForPay && canProcessPayment && (
           <ProcessPaymentModal
             open={isProcessModalOpen}
             onClose={() => {

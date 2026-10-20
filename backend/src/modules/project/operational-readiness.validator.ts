@@ -497,6 +497,160 @@ export class OperationalReadinessValidator {
   }
 
   /**
+   * Evaluates canonical post-revision persistence:
+   * Proves that at least one legitimate plan artifact (Cost, WBS, Schedule, Initial Condition)
+   * was modified and saved strictly AFTER the current revision request timestamp.
+   *
+   * - Non-revision workflow -> true (not in revision mode)
+   * - Revision workflow with post-return save -> true
+   * - Revision workflow with NO post-return save -> false
+   */
+  public evaluateRevisionPersistence(
+    managementReview: ProjectManagementReview | null,
+    activeInstance: any | null,
+    wbsNodes: WorkBreakdownStructure[] = [],
+    estimate: ProjectCostEstimate | null = null,
+    costItems: CostItem[] = [],
+    tasks: Task[] = [],
+    initialCondition: ProjectInitialCondition | null = null,
+  ): boolean {
+    const isRevisionWorkflow = Boolean(
+      (activeInstance &&
+        typeof activeInstance.currentNodeId === 'string' &&
+        activeInstance.currentNodeId.startsWith('node_pm_revision')) ||
+      managementReview?.status === 'NEEDS_REVISION',
+    );
+
+    if (!isRevisionWorkflow) {
+      return true;
+    }
+
+    const toEpochMs = (val: any): number | null => {
+      if (!val) return null;
+      if (val instanceof Date) {
+        const t = val.getTime();
+        return isNaN(t) ? null : t;
+      }
+      if (typeof val === 'number') {
+        return isNaN(val) ? null : val;
+      }
+      if (typeof val === 'string') {
+        const d = new Date(val);
+        const t = d.getTime();
+        return isNaN(t) ? null : t;
+      }
+      return null;
+    };
+
+    let revisionRequestedAtMs: number | null = null;
+
+    if (managementReview?.status === 'NEEDS_REVISION' && managementReview.decidedAt) {
+      const decMs = toEpochMs(managementReview.decidedAt);
+      if (decMs !== null) {
+        revisionRequestedAtMs = decMs;
+      }
+    }
+
+    if (activeInstance) {
+      // 1. Check return transitions
+      const transitions = Array.isArray(activeInstance.transitions) ? activeInstance.transitions : [];
+      for (const tr of transitions) {
+        if (
+          tr.action === 'RETURN' ||
+          (typeof tr.toNodeId === 'string' && tr.toNodeId.startsWith('node_pm_revision'))
+        ) {
+          const trMs = toEpochMs(tr.createdAt);
+          if (trMs !== null && (revisionRequestedAtMs === null || trMs > revisionRequestedAtMs)) {
+            revisionRequestedAtMs = trMs;
+          }
+        }
+      }
+
+      // 2. Check pending revision task creation or returned task decision
+      const tasksArr = Array.isArray(activeInstance.tasks) ? activeInstance.tasks : [];
+      for (const t of tasksArr) {
+        if (
+          typeof t.nodeId === 'string' &&
+          t.nodeId.startsWith('node_pm_revision') &&
+          t.status === 'PENDING'
+        ) {
+          const taskCreateMs = toEpochMs(t.createdAt);
+          if (taskCreateMs !== null && (revisionRequestedAtMs === null || taskCreateMs > revisionRequestedAtMs)) {
+            revisionRequestedAtMs = taskCreateMs;
+          }
+        }
+        if (
+          (t.action === 'RETURN' || t.status === 'RETURNED') &&
+          t.decidedAt
+        ) {
+          const taskDecMs = toEpochMs(t.decidedAt);
+          if (taskDecMs !== null && (revisionRequestedAtMs === null || taskDecMs > revisionRequestedAtMs)) {
+            revisionRequestedAtMs = taskDecMs;
+          }
+        }
+      }
+    }
+
+    // Fallback: If managementReview is NEEDS_REVISION but has no decidedAt, check updatedAt
+    if (revisionRequestedAtMs === null && managementReview?.status === 'NEEDS_REVISION') {
+      const revUpdatedMs = toEpochMs(managementReview.updatedAt);
+      if (revUpdatedMs !== null) {
+        revisionRequestedAtMs = revUpdatedMs;
+      }
+    }
+
+    // If in revision workflow but no return timestamp can be established: fail closed (false)
+    if (revisionRequestedAtMs === null) {
+      return false;
+    }
+
+    let latestPlanChangeMs: number | null = null;
+
+    const considerTimestamp = (val: any) => {
+      const ms = toEpochMs(val);
+      if (ms !== null) {
+        if (latestPlanChangeMs === null || ms > latestPlanChangeMs) {
+          latestPlanChangeMs = ms;
+        }
+      }
+    };
+
+    // 1. Cost Estimate header & items
+    if (estimate) {
+      considerTimestamp(estimate.updatedAt);
+      considerTimestamp(estimate.createdAt);
+    }
+    for (const item of costItems || []) {
+      considerTimestamp(item.updatedAt);
+      considerTimestamp(item.createdAt);
+    }
+
+    // 2. WBS nodes
+    for (const w of wbsNodes || []) {
+      considerTimestamp(w.updatedAt);
+      considerTimestamp(w.createdAt);
+    }
+
+    // 3. Schedule tasks
+    for (const t of tasks || []) {
+      considerTimestamp(t.updatedAt);
+      considerTimestamp(t.createdAt);
+    }
+
+    // 4. Initial Condition
+    if (initialCondition) {
+      considerTimestamp(initialCondition.updatedAt);
+      considerTimestamp(initialCondition.createdAt);
+    }
+
+    if (latestPlanChangeMs === null) {
+      return false;
+    }
+
+    return latestPlanChangeMs > revisionRequestedAtMs;
+  }
+
+  /**
    * Deterministically aggregates 4 technical pillars and derives overall readiness.
    */
   public aggregateReadiness(
@@ -508,6 +662,7 @@ export class OperationalReadinessValidator {
     scheduleRes: ScheduleReadinessResult,
     initialConditionRes?: InitialConditionReadinessResult,
     gateRes?: ProcurementGateReadinessResult,
+    hasPersistedRevisionAfterReturn?: boolean,
   ): OperationalReadinessData {
     const finalInitialConditionRes: InitialConditionReadinessResult =
       initialConditionRes || {
@@ -560,6 +715,15 @@ export class OperationalReadinessValidator {
     // canCreatePr: True ONLY when Management Review Gate status is READY_FOR_PROCUREMENT
     const canCreatePr = finalGateRes.status === 'READY_FOR_PROCUREMENT';
 
+    const resolvedHasPersistedRevision =
+      hasPersistedRevisionAfterReturn !== undefined
+        ? hasPersistedRevisionAfterReturn
+        : finalGateRes.hasPersistedRevisionAfterReturn !== undefined
+          ? finalGateRes.hasPersistedRevisionAfterReturn
+          : true;
+
+    finalGateRes.hasPersistedRevisionAfterReturn = resolvedHasPersistedRevision;
+
     return {
       projectId,
       projectCode,
@@ -576,6 +740,7 @@ export class OperationalReadinessValidator {
         initialCondition: finalInitialConditionRes,
       },
       gate: finalGateRes,
+      hasPersistedRevisionAfterReturn: resolvedHasPersistedRevision,
     };
   }
 }

@@ -79,6 +79,7 @@ export interface ProcurementGateReadinessResult {
   activeRole?: string | null;
   activeTaskName?: string | null;
   currentStage?: OperationalPlanStage | string | null;
+  hasPersistedRevisionAfterReturn?: boolean;
 }
 
 export interface PillarsReadiness {
@@ -111,4 +112,5 @@ export interface OperationalReadinessData {
   contract?: CanonicalContractSummary | null;
   workflow?: OperationalWorkflowInfo | null;
   actualKickoffDate?: string | null;
+  hasPersistedRevisionAfterReturn: boolean;
 }

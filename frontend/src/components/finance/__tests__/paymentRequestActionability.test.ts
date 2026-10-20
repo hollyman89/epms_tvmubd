@@ -193,4 +193,53 @@ describe('Payment Request Actionability & State Gating', () => {
       expect(currentState.statusLabel).toBe('Menunggu Persetujuan Direktur');
     });
   });
+
+  describe('Role-Aware Payment Execution Authority (Segregation of Duties)', () => {
+    it('MUST DENY canPay when active user is not Finance (DIRECTOR, ADMIN, SUPER_ADMIN)', () => {
+      const invoice = { id: 1, paymentStatus: 'UNPAID', matchStatus: 'VERIFIED' };
+      const prq = { id: 1, status: 'APPROVED_FOR_PAYMENT', requestNumber: 'PRQ-20261016-001' };
+
+      // Non-Finance via isFinance: false (e.g. DIRECTOR)
+      const directorState = getPaymentRequestActionState(invoice, prq, { isFinance: false });
+      expect(directorState.actionType).toBe('APPROVED_FOR_PAYMENT');
+      expect(directorState.canPay).toBe(false);
+      expect(directorState.tooltipMessage).toContain('Hanya role Finance');
+
+      // Non-Finance via role: 'ADMIN'
+      const adminState = getPaymentRequestActionState(invoice, prq, { role: 'ADMIN' });
+      expect(adminState.canPay).toBe(false);
+
+      // Non-Finance via role: 'SUPER_ADMIN'
+      const superAdminState = getPaymentRequestActionState(invoice, prq, { role: 'SUPER_ADMIN' });
+      expect(superAdminState.canPay).toBe(false);
+    });
+
+    it('MUST ALLOW canPay when active user is FINANCE and request is APPROVED_FOR_PAYMENT', () => {
+      const invoice = { id: 1, paymentStatus: 'UNPAID', matchStatus: 'VERIFIED' };
+      const prq = { id: 1, status: 'APPROVED_FOR_PAYMENT', requestNumber: 'PRQ-20261016-001' };
+
+      const financeState = getPaymentRequestActionState(invoice, prq, { isFinance: true });
+      expect(financeState.actionType).toBe('APPROVED_FOR_PAYMENT');
+      expect(financeState.canPay).toBe(true);
+    });
+
+    it('canExecutePayment helper correctly gates role authority AND business state', () => {
+      const { canExecutePayment } = require('../paymentRequestActionability');
+
+      // Finance + APPROVED_FOR_PAYMENT + UNPAID -> ALLOWED
+      expect(canExecutePayment(true, { status: 'APPROVED_FOR_PAYMENT' }, { paymentStatus: 'UNPAID' })).toBe(true);
+
+      // DIRECTOR / Non-Finance + APPROVED_FOR_PAYMENT -> DENIED
+      expect(canExecutePayment(false, { status: 'APPROVED_FOR_PAYMENT' }, { paymentStatus: 'UNPAID' })).toBe(false);
+
+      // Finance + PENDING_DIRECTOR_APPROVAL -> DENIED
+      expect(canExecutePayment(true, { status: 'PENDING_DIRECTOR_APPROVAL' }, { paymentStatus: 'UNPAID' })).toBe(false);
+
+      // Finance + NEEDS_REVISION -> DENIED
+      expect(canExecutePayment(true, { status: 'NEEDS_REVISION' }, { paymentStatus: 'UNPAID' })).toBe(false);
+
+      // Finance + APPROVED_FOR_PAYMENT + PAID -> DENIED
+      expect(canExecutePayment(true, { status: 'APPROVED_FOR_PAYMENT' }, { paymentStatus: 'PAID' })).toBe(false);
+    });
+  });
 });

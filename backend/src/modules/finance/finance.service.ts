@@ -4,7 +4,7 @@ import { Repository, DataSource, Like, In, OptimisticLockVersionMismatchError, E
 import { Invoice } from '../../entities/invoice.entity';
 import { InvoiceItem } from '../../entities/invoice-item.entity';
 import { Payment } from '../../entities/payment.entity';
-import { PurchaseOrder } from '../../entities/purchase-order.entity';
+import { PurchaseOrder, PurchaseOrderType } from '../../entities/purchase-order.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { PoPaymentTerm, PaymentTermStatus, PaymentTermType } from '../../entities/po-payment-term.entity';
@@ -1326,8 +1326,76 @@ export class FinanceService {
       });
     }
 
+    const isServicePo = Boolean(po && (po.orderType === PurchaseOrderType.SERVICE || (po.orderType as any) === 'SERVICE'));
+
     const poTotal = po ? Number(po.totalAmount || 0) : 0;
     const invoicedAmount = Number(invoice.totalAmount || 0);
+
+    // 1.5 Service Claim Resolution and Validation (for SERVICE PO)
+    let serviceClaim: ServiceClaim | null = invoice.serviceClaim || null;
+    if (isServicePo) {
+      if (!invoice.serviceClaimId) {
+        mismatches.push({
+          code: MismatchCode.EVIDENCE_REQUIRED,
+          message: 'Invoice penagihan Service PO wajib menyertakan referensi Klaim Jasa yang telah disetujui (APPROVED_FOR_INVOICE).',
+        });
+      } else {
+        if ((!serviceClaim || !serviceClaim.items || !Array.isArray(serviceClaim.items)) && em && typeof em.findOne === 'function') {
+          serviceClaim = await em.findOne(ServiceClaim, {
+            where: { id: invoice.serviceClaimId },
+            relations: ['items'],
+          });
+        }
+
+        if (!serviceClaim || serviceClaim.deletedAt) {
+          mismatches.push({
+            code: MismatchCode.EVIDENCE_REQUIRED,
+            message: `Service Claim dengan ID ${invoice.serviceClaimId} tidak ditemukan atau telah dihapus.`,
+          });
+        } else if (Number(serviceClaim.poId) !== Number(po?.id || invoice.poId)) {
+          mismatches.push({
+            code: MismatchCode.OTHER,
+            message: 'Service Claim bukan milik Purchase Order pada invoice ini.',
+          });
+        } else if (serviceClaim.status !== ServiceClaimStatus.APPROVED_FOR_INVOICE) {
+          mismatches.push({
+            code: MismatchCode.OTHER,
+            message: `Status Service Claim tidak valid (${serviceClaim.status}). Hanya Service Claim berstatus APPROVED_FOR_INVOICE yang dapat ditagihkan.`,
+          });
+        }
+      }
+    }
+
+    if (isServicePo && serviceClaim) {
+      const approvedClaimAmount = Number(serviceClaim.approvedClaimAmount || 0);
+      if (invoicedAmount > approvedClaimAmount + 0.01) {
+        mismatches.push({
+          code: MismatchCode.AMOUNT_EXCEEDED_TERM,
+          message: `Nilai invoice (Rp${invoicedAmount.toLocaleString('id-ID')}) melebihi nilai klaim jasa yang disetujui (Rp${approvedClaimAmount.toLocaleString('id-ID')}).`,
+        });
+      }
+
+      // Check duplicate active invoice for the same Service Claim
+      let claimInvoices: Invoice[] = [];
+      if (po?.invoices && Array.isArray(po.invoices)) {
+        claimInvoices = po.invoices;
+      } else if (em && typeof em.find === 'function') {
+        claimInvoices = (await em.find(Invoice, { where: { serviceClaimId: serviceClaim.id } })) || [];
+      }
+      const otherInvoiceForClaim = claimInvoices.find(
+        i => Number(i.id) !== Number(invoice.id) &&
+             !i.deletedAt &&
+             i.status !== 'CANCELLED' &&
+             i.status !== 'REJECTED' &&
+             i.matchStatus !== 'REJECTED'
+      );
+      if (otherInvoiceForClaim) {
+        mismatches.push({
+          code: MismatchCode.OTHER,
+          message: `Service Claim '${serviceClaim.claimNumber || serviceClaim.id}' sudah ditagihkan pada invoice aktif lain (${otherInvoiceForClaim.invoiceNumber || otherInvoiceForClaim.id}).`,
+        });
+      }
+    }
 
     // 2. Validate current invoice status
     if (invoice.matchStatus === 'VERIFIED') {
@@ -1355,10 +1423,13 @@ export class FinanceService {
           });
         }
       } else {
-        if (po.status !== 'COMPLETED') {
+        const eligibleStatuses = isServicePo ? ['ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED'] : ['COMPLETED'];
+        if (!eligibleStatuses.includes(po.status)) {
           mismatches.push({
             code: MismatchCode.PO_NOT_ACTIVE,
-            message: 'Purchase Order harus berstatus COMPLETED untuk verifikasi invoice penuh.',
+            message: isServicePo
+              ? `Purchase Order tidak aktif atau status tidak valid (${po.status}).`
+              : 'Purchase Order harus berstatus COMPLETED untuk verifikasi invoice penuh.',
           });
         }
       }
@@ -1385,15 +1456,14 @@ export class FinanceService {
     // 4.5. Item-Level Matching (Ownership, Price, Quantity)
     if (invoice.items && invoice.items.length > 0) {
       const poItems = po?.items || [];
-      let activeInvoiceItems: any[] = [];
+      let otherInvoices: Invoice[] = [];
       if (po?.invoices && Array.isArray(po.invoices)) {
-        activeInvoiceItems = po.invoices.filter(i => !i.deletedAt && i.status !== 'CANCELLED' && i.status !== 'REJECTED' && i.matchStatus !== 'REJECTED' && Number(i.id) !== Number(invoice.id))
-                                      .flatMap(i => i.items || []);
+        otherInvoices = po.invoices.filter(i => !i.deletedAt && i.status !== 'CANCELLED' && i.status !== 'REJECTED' && i.matchStatus !== 'REJECTED' && Number(i.id) !== Number(invoice.id));
       } else if (po?.id && em && typeof em.find === 'function') {
-        const otherInvoices = (await em.find(Invoice, { where: { poId: po.id }, relations: ['items'] })) || [];
-        activeInvoiceItems = otherInvoices.filter(i => !i.deletedAt && i.status !== 'CANCELLED' && i.status !== 'REJECTED' && i.matchStatus !== 'REJECTED' && Number(i.id) !== Number(invoice.id))
-                                         .flatMap(i => i.items || []);
+        const found = (await em.find(Invoice, { where: { poId: po.id }, relations: ['items'] })) || [];
+        otherInvoices = found.filter(i => !i.deletedAt && i.status !== 'CANCELLED' && i.status !== 'REJECTED' && i.matchStatus !== 'REJECTED' && Number(i.id) !== Number(invoice.id));
       }
+      const activeInvoiceItems = otherInvoices.flatMap(i => i.items || []);
 
       for (const invItem of invoice.items) {
         if (invItem.deletedAt) continue;
@@ -1415,19 +1485,59 @@ export class FinanceService {
           });
         }
 
-        const previouslyInvoicedQty = activeInvoiceItems
-          .filter(i => Number(i.poItemId) === Number(invItem.poItemId) && !i.deletedAt)
-          .reduce((sum, i) => sum + Number(i.quantity || 0), 0);
-
         const currentQty = Number(invItem.quantity || 0);
-        const receivedQty = Number(authoritativePoItem.receivedQuantity || 0);
-        const remainingBillable = Math.max(0, receivedQty - previouslyInvoicedQty);
 
-        if (currentQty > remainingBillable + 0.001) {
-          mismatches.push({
-            code: MismatchCode.QUANTITY_EXCEEDED,
-            message: `Kuantitas item invoice (${currentQty}) melebihi sisa kapasitas tagih (Diterima: ${receivedQty}, Sudah ditagihkan: ${previouslyInvoicedQty}).`,
-          });
+        if (!isServicePo) {
+          const previouslyInvoicedQty = activeInvoiceItems
+            .filter(i => Number(i.poItemId) === Number(invItem.poItemId) && !i.deletedAt)
+            .reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+
+          const receivedQty = Number(authoritativePoItem.receivedQuantity || 0);
+          const remainingBillable = Math.max(0, receivedQty - previouslyInvoicedQty);
+
+          if (currentQty > remainingBillable + 0.001) {
+            mismatches.push({
+              code: MismatchCode.QUANTITY_EXCEEDED,
+              message: `Kuantitas item invoice (${currentQty}) melebihi sisa kapasitas tagih (Diterima: ${receivedQty}, Sudah ditagihkan: ${previouslyInvoicedQty}).`,
+            });
+          }
+        } else {
+          // Canonical Service Reconciliation: Quantity authority is derived from the linked approved Service Claim
+          if (serviceClaim) {
+            const claimItem = serviceClaim.items?.find(ci => Number(ci.poItemId) === Number(invItem.poItemId));
+            if (!claimItem) {
+              mismatches.push({
+                code: MismatchCode.ITEM_NOT_FOUND,
+                message: `Item invoice (PO Item ID: ${invItem.poItemId}) tidak tercantum dalam Service Claim yang disetujui.`,
+              });
+            } else {
+              const approvedClaimQty = Number(claimItem.currentClaimQuantity || 0);
+              const otherClaimInvoices = otherInvoices.filter(i => Number(i.serviceClaimId) === Number(serviceClaim.id));
+              const previouslyInvoicedClaimQty = otherClaimInvoices
+                .flatMap(i => i.items || [])
+                .filter(i => Number(i.poItemId) === Number(invItem.poItemId) && !i.deletedAt)
+                .reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+              const remainingClaimQty = Math.max(0, approvedClaimQty - previouslyInvoicedClaimQty);
+
+              const totalPoItemQty = Number(authoritativePoItem.quantity || 0);
+              const previouslyInvoicedTotalQty = activeInvoiceItems
+                .filter(i => Number(i.poItemId) === Number(invItem.poItemId) && !i.deletedAt)
+                .reduce((sum, i) => sum + Number(i.quantity || 0), 0);
+              const remainingPoContractQty = Math.max(0, totalPoItemQty - previouslyInvoicedTotalQty);
+
+              if (currentQty > remainingClaimQty + 0.001) {
+                mismatches.push({
+                  code: MismatchCode.QUANTITY_EXCEEDED,
+                  message: `Kuantitas item invoice (${currentQty}) melebihi kuantitas klaim jasa yang disetujui (Disetujui: ${approvedClaimQty}, Sudah ditagihkan: ${previouslyInvoicedClaimQty}).`,
+                });
+              } else if (currentQty > remainingPoContractQty + 0.001) {
+                mismatches.push({
+                  code: MismatchCode.QUANTITY_EXCEEDED,
+                  message: `Kuantitas item invoice (${currentQty}) melebihi sisa kuantitas kontrak PO (${remainingPoContractQty}).`,
+                });
+              }
+            }
+          }
         }
       }
     }
@@ -1485,144 +1595,146 @@ export class FinanceService {
 
         // Prerequisites / Evidence
         if (paymentTerm.termType === PaymentTermType.PROGRESS) {
-          // Preview-only resolution: If called from read-only matching preview and DTO has no explicit evidence,
-          // resolve canonical active Goods Receipt from invoice.poId -> goods_receipts
-          let previewResolvedGr: GoodsReceipt | null = null;
-          if (!grRefStr && !grRefId && (dto as any)?.isPreview) {
-            const targetPoId = invoice.poId || po?.id;
-            if (targetPoId && em && typeof em.find === 'function') {
-              const poGrs = await em.find(GoodsReceipt, {
-                where: { poId: targetPoId },
-                relations: ['items'],
-                order: { id: 'DESC' },
-              });
-              const validGrs = (poGrs || []).filter(g =>
-                !g.deletedAt &&
-                Number(g.poId) === Number(targetPoId) &&
-                Array.isArray(g.items) &&
-                g.items.length > 0 &&
-                g.items.some(gi => Number(gi.receivedQuantity) > 0)
-              );
-              if (validGrs.length > 0) {
-                previewResolvedGr = validGrs[0];
-                grRefId = previewResolvedGr.id;
-                grRefStr = previewResolvedGr.grNumber;
-              }
-            }
-          }
-
-          if (!grRefStr && !grRefId) {
-            mismatches.push({
-              code: MismatchCode.EVIDENCE_REQUIRED,
-              message: 'Verifikasi termin progress wajib menyertakan referensi Goods Receipt valid.',
-            });
-          } else {
-            let gr: GoodsReceipt | null = previewResolvedGr;
-            if (!gr) {
-              if (grRefId && em && typeof em.findOne === 'function') {
-                gr = await em.findOne(GoodsReceipt, {
-                  where: { id: grRefId },
+          if (!isServicePo) {
+            // Preview-only resolution: If called from read-only matching preview and DTO has no explicit evidence,
+            // resolve canonical active Goods Receipt from invoice.poId -> goods_receipts
+            let previewResolvedGr: GoodsReceipt | null = null;
+            if (!grRefStr && !grRefId && (dto as any)?.isPreview) {
+              const targetPoId = invoice.poId || po?.id;
+              if (targetPoId && em && typeof em.find === 'function') {
+                const poGrs = await em.find(GoodsReceipt, {
+                  where: { poId: targetPoId },
                   relations: ['items'],
+                  order: { id: 'DESC' },
                 });
-              } else if (grRefStr && em && typeof em.findOne === 'function') {
-                gr = await em.findOne(GoodsReceipt, {
-                  where: { grNumber: grRefStr },
-                  relations: ['items'],
-                });
-                if (!gr && !isNaN(Number(grRefStr))) {
-                  gr = await em.findOne(GoodsReceipt, {
-                    where: { id: Number(grRefStr) },
-                    relations: ['items'],
-                  });
+                const validGrs = (poGrs || []).filter(g =>
+                  !g.deletedAt &&
+                  Number(g.poId) === Number(targetPoId) &&
+                  Array.isArray(g.items) &&
+                  g.items.length > 0 &&
+                  g.items.some(gi => Number(gi.receivedQuantity) > 0)
+                );
+                if (validGrs.length > 0) {
+                  previewResolvedGr = validGrs[0];
+                  grRefId = previewResolvedGr.id;
+                  grRefStr = previewResolvedGr.grNumber;
                 }
               }
             }
 
-            if (!gr) {
+            if (!grRefStr && !grRefId) {
               mismatches.push({
-                code: MismatchCode.GR_NOT_FOUND,
-                message: `Goods Receipt '${grRefStr || grRefId}' tidak ditemukan di sistem.`,
-              });
-            } else if (gr.deletedAt) {
-              mismatches.push({
-                code: MismatchCode.GR_DELETED,
-                message: 'Goods Receipt telah dihapus atau dibatalkan.',
-              });
-            } else if (Number(gr.poId) !== Number(invoice.poId)) {
-              mismatches.push({
-                code: MismatchCode.GR_PO_MISMATCH,
-                message: 'Goods Receipt bukan milik Purchase Order pada invoice ini.',
-              });
-            } else if (!gr.items || gr.items.length === 0 || !gr.items.some(gi => Number(gi.receivedQuantity) > 0)) {
-              mismatches.push({
-                code: MismatchCode.GR_ITEM_INVALID,
-                message: 'Goods Receipt tidak memiliki rincian item barang valid.',
+                code: MismatchCode.EVIDENCE_REQUIRED,
+                message: 'Verifikasi termin progress wajib menyertakan referensi Goods Receipt valid.',
               });
             } else {
-              // Validate physical delivery capacity
-              const allPoGrs = (em && typeof em.find === 'function' ? await em.find(GoodsReceipt, {
-                where: { poId: invoice.poId },
-                relations: ['items'],
-              }) : []) || [];
-              let totalReceivedPhysicalValue = 0;
-              for (const g of allPoGrs) {
-                if (g.deletedAt) continue;
-                for (const gi of g.items || []) {
-                  const poi = po?.items?.find(i => Number(i.id) === Number(gi.poItemId));
-                  if (poi) {
-                    totalReceivedPhysicalValue += Number(gi.receivedQuantity) * Number(poi.unitPrice || 0);
+              let gr: GoodsReceipt | null = previewResolvedGr;
+              if (!gr) {
+                if (grRefId && em && typeof em.findOne === 'function') {
+                  gr = await em.findOne(GoodsReceipt, {
+                    where: { id: grRefId },
+                    relations: ['items'],
+                  });
+                } else if (grRefStr && em && typeof em.findOne === 'function') {
+                  gr = await em.findOne(GoodsReceipt, {
+                    where: { grNumber: grRefStr },
+                    relations: ['items'],
+                  });
+                  if (!gr && !isNaN(Number(grRefStr))) {
+                    gr = await em.findOne(GoodsReceipt, {
+                      where: { id: Number(grRefStr) },
+                      relations: ['items'],
+                    });
                   }
                 }
               }
 
-              let previousProgressBilled = 0;
-              const allInvoices = (po?.invoices || (em && typeof em.find === 'function' ? await em.find(Invoice, { where: { poId: invoice.poId } }) : [])) || [];
-              for (const inv of allInvoices) {
-                if (inv.deletedAt || inv.status === 'CANCELLED' || Number(inv.id) === Number(invoice.id)) continue;
-                const term = inv.paymentTerm || (inv.paymentTermId && em && typeof em.findOne === 'function' ? await em.findOne(PoPaymentTerm, { where: { id: inv.paymentTermId } }) : null);
-                if (term && term.termType === PaymentTermType.PROGRESS) {
-                  previousProgressBilled += Number(inv.totalAmount || 0);
-                }
-              }
-
-              const currentInvoiceAmount = Number(invoice.totalAmount || 0);
-              if (Math.round((previousProgressBilled + currentInvoiceAmount) * 100) / 100 > Math.round(totalReceivedPhysicalValue * 100) / 100 + 0.01) {
+              if (!gr) {
                 mismatches.push({
-                  code: MismatchCode.PROGRESS_BILLING_EXCEEDS_RECEIVED,
-                  message: `Nilai akumulasi penagihan progress (Rp${(previousProgressBilled + currentInvoiceAmount).toLocaleString('id-ID')}) melebihi total nilai fisik barang yang telah diterima (Rp${totalReceivedPhysicalValue.toLocaleString('id-ID')}).`,
+                  code: MismatchCode.GR_NOT_FOUND,
+                  message: `Goods Receipt '${grRefStr || grRefId}' tidak ditemukan di sistem.`,
                 });
-              }
+              } else if (gr.deletedAt) {
+                mismatches.push({
+                  code: MismatchCode.GR_DELETED,
+                  message: 'Goods Receipt telah dihapus atau dibatalkan.',
+                });
+              } else if (Number(gr.poId) !== Number(invoice.poId)) {
+                mismatches.push({
+                  code: MismatchCode.GR_PO_MISMATCH,
+                  message: 'Goods Receipt bukan milik Purchase Order pada invoice ini.',
+                });
+              } else if (!gr.items || gr.items.length === 0 || !gr.items.some(gi => Number(gi.receivedQuantity) > 0)) {
+                mismatches.push({
+                  code: MismatchCode.GR_ITEM_INVALID,
+                  message: 'Goods Receipt tidak memiliki rincian item barang valid.',
+                });
+              } else {
+                // Validate physical delivery capacity
+                const allPoGrs = (em && typeof em.find === 'function' ? await em.find(GoodsReceipt, {
+                  where: { poId: invoice.poId },
+                  relations: ['items'],
+                }) : []) || [];
+                let totalReceivedPhysicalValue = 0;
+                for (const g of allPoGrs) {
+                  if (g.deletedAt) continue;
+                  for (const gi of g.items || []) {
+                    const poi = po?.items?.find(i => Number(i.id) === Number(gi.poItemId));
+                    if (poi) {
+                      totalReceivedPhysicalValue += Number(gi.receivedQuantity) * Number(poi.unitPrice || 0);
+                    }
+                  }
+                }
 
-              // Milestone Eligibility Gate in evaluateMatching
-              const is100PercentMilestone =
-                /100%|fisik\s*100%|lengkap/i.test(paymentTerm.triggerCondition || '') ||
-                Number(paymentTerm.percentage) === 100;
+                let previousProgressBilled = 0;
+                const allInvoices = (po?.invoices || (em && typeof em.find === 'function' ? await em.find(Invoice, { where: { poId: invoice.poId } }) : [])) || [];
+                for (const inv of allInvoices) {
+                  if (inv.deletedAt || inv.status === 'CANCELLED' || Number(inv.id) === Number(invoice.id)) continue;
+                  const term = inv.paymentTerm || (inv.paymentTermId && em && typeof em.findOne === 'function' ? await em.findOne(PoPaymentTerm, { where: { id: inv.paymentTermId } }) : null);
+                  if (term && term.termType === PaymentTermType.PROGRESS) {
+                    previousProgressBilled += Number(inv.totalAmount || 0);
+                  }
+                }
 
-              if (is100PercentMilestone) {
-                const isAllItemsCompleted =
-                  po?.status === 'COMPLETED' &&
-                  po?.items &&
-                  po.items.length > 0 &&
-                  po.items.every(item => Number(item.receivedQuantity || 0) >= Number(item.quantity || 0));
-
-                if (!isAllItemsCompleted) {
+                const currentInvoiceAmount = Number(invoice.totalAmount || 0);
+                if (Math.round((previousProgressBilled + currentInvoiceAmount) * 100) / 100 > Math.round(totalReceivedPhysicalValue * 100) / 100 + 0.01) {
                   mismatches.push({
-                    code: MismatchCode.INSUFFICIENT_DELIVERY,
-                    message: `Termin progress dengan syarat milestone '${paymentTerm.triggerCondition || 'Kemajuan Fisik 100%'}' tidak dapat diverifikasi karena pengiriman fisik barang/jasa belum selesai 100% (status PO: ${po?.status || 'UNKNOWN'}).`,
+                    code: MismatchCode.PROGRESS_BILLING_EXCEEDS_RECEIVED,
+                    message: `Nilai akumulasi penagihan progress (Rp${(previousProgressBilled + currentInvoiceAmount).toLocaleString('id-ID')}) melebihi total nilai fisik barang yang telah diterima (Rp${totalReceivedPhysicalValue.toLocaleString('id-ID')}).`,
                   });
                 }
-              } else {
-                const matchPercent = (paymentTerm.triggerCondition || '').match(/(\d+(?:\.\d+)?)\s*%/);
-                if (matchPercent) {
-                  const targetPercent = parseFloat(matchPercent[1]);
-                  if (targetPercent < 100) {
-                    const poTotal = Number(po?.totalAmount || 0);
-                    const physicalProgress = poTotal > 0 ? (totalReceivedPhysicalValue / poTotal) * 100 : 0;
-                    if (Math.round(physicalProgress * 100) / 100 + 0.5 < targetPercent) {
-                      mismatches.push({
-                        code: MismatchCode.INSUFFICIENT_DELIVERY,
-                        message: `Termin progress dengan syarat milestone '${paymentTerm.triggerCondition}' tidak dapat diverifikasi karena kemajuan fisik baru mencapai ${physicalProgress.toFixed(2)}% (target: ${targetPercent}%).`,
-                      });
+
+                // Milestone Eligibility Gate in evaluateMatching
+                const is100PercentMilestone =
+                  /100%|fisik\s*100%|lengkap/i.test(paymentTerm.triggerCondition || '') ||
+                  Number(paymentTerm.percentage) === 100;
+
+                if (is100PercentMilestone) {
+                  const isAllItemsCompleted =
+                    po?.status === 'COMPLETED' &&
+                    po?.items &&
+                    po.items.length > 0 &&
+                    po.items.every(item => Number(item.receivedQuantity || 0) >= Number(item.quantity || 0));
+
+                  if (!isAllItemsCompleted) {
+                    mismatches.push({
+                      code: MismatchCode.INSUFFICIENT_DELIVERY,
+                      message: `Termin progress dengan syarat milestone '${paymentTerm.triggerCondition || 'Kemajuan Fisik 100%'}' tidak dapat diverifikasi karena pengiriman fisik barang/jasa belum selesai 100% (status PO: ${po?.status || 'UNKNOWN'}).`,
+                    });
+                  }
+                } else {
+                  const matchPercent = (paymentTerm.triggerCondition || '').match(/(\d+(?:\.\d+)?)\s*%/);
+                  if (matchPercent) {
+                    const targetPercent = parseFloat(matchPercent[1]);
+                    if (targetPercent < 100) {
+                      const poTotal = Number(po?.totalAmount || 0);
+                      const physicalProgress = poTotal > 0 ? (totalReceivedPhysicalValue / poTotal) * 100 : 0;
+                      if (Math.round(physicalProgress * 100) / 100 + 0.5 < targetPercent) {
+                        mismatches.push({
+                          code: MismatchCode.INSUFFICIENT_DELIVERY,
+                          message: `Termin progress dengan syarat milestone '${paymentTerm.triggerCondition}' tidak dapat diverifikasi karena kemajuan fisik baru mencapai ${physicalProgress.toFixed(2)}% (target: ${targetPercent}%).`,
+                        });
+                      }
                     }
                   }
                 }
@@ -1630,22 +1742,24 @@ export class FinanceService {
             }
           }
         } else if (paymentTerm.termType === PaymentTermType.FINAL_DELIVERY) {
-          if (!po || po.status !== 'COMPLETED') {
-            mismatches.push({
-              code: MismatchCode.INSUFFICIENT_DELIVERY,
-              message: 'Termin final delivery hanya dapat diverifikasi setelah Purchase Order selesai (COMPLETED) dan seluruh barang diterima penuh.',
-            });
-          } else {
-            const isAllItemsCompleted =
-              po.items &&
-              po.items.length > 0 &&
-              po.items.every(item => Number(item.receivedQuantity || 0) >= Number(item.quantity || 0));
-
-            if (!isAllItemsCompleted) {
+          if (!isServicePo) {
+            if (!po || po.status !== 'COMPLETED') {
               mismatches.push({
                 code: MismatchCode.INSUFFICIENT_DELIVERY,
-                message: 'Termin final delivery gagal diverifikasi karena masih ada barang yang belum diterima penuh.',
+                message: 'Termin final delivery hanya dapat diverifikasi setelah Purchase Order selesai (COMPLETED) dan seluruh barang diterima penuh.',
               });
+            } else {
+              const isAllItemsCompleted =
+                po.items &&
+                po.items.length > 0 &&
+                po.items.every(item => Number(item.receivedQuantity || 0) >= Number(item.quantity || 0));
+
+              if (!isAllItemsCompleted) {
+                mismatches.push({
+                  code: MismatchCode.INSUFFICIENT_DELIVERY,
+                  message: 'Termin final delivery gagal diverifikasi karena masih ada barang yang belum diterima penuh.',
+                });
+              }
             }
           }
         } else if (paymentTerm.termType === PaymentTermType.RETENTION || paymentTerm.isRetention) {
@@ -1771,30 +1885,41 @@ export class FinanceService {
       }
 
       if (po) {
-        const goodsReceipts = (await em.find(GoodsReceipt, {
-          where: { poId: po.id },
-          relations: ['items'],
-        })) || [];
+        if (!isServicePo) {
+          const goodsReceipts = (await em.find(GoodsReceipt, {
+            where: { poId: po.id },
+            relations: ['items'],
+          })) || [];
 
-        let totalGrAmount = 0;
-        for (const gr of goodsReceipts) {
-          for (const grItem of gr.items || []) {
-            const matchedPoItem = po.items?.find(i => i.id === grItem.poItemId);
-            if (matchedPoItem) {
-              totalGrAmount += Number(grItem.receivedQuantity) * Number(matchedPoItem.unitPrice);
+          let totalGrAmount = 0;
+          for (const gr of goodsReceipts) {
+            for (const grItem of gr.items || []) {
+              const matchedPoItem = po.items?.find(i => i.id === grItem.poItemId);
+              if (matchedPoItem) {
+                totalGrAmount += Number(grItem.receivedQuantity) * Number(matchedPoItem.unitPrice);
+              }
             }
           }
-        }
 
-        const isMatched = (
-          Math.abs(invoicedAmount - totalGrAmount) < 0.01
-        );
+          const isMatched = (
+            Math.abs(invoicedAmount - totalGrAmount) < 0.01
+          );
 
-        if (!isMatched) {
-          mismatches.push({
-            code: MismatchCode.THREE_WAY_MISMATCH,
-            message: `3-Way Matching gagal: Nilai tagihan (Rp${invoicedAmount.toLocaleString('id-ID')}) tidak sesuai dengan nilai penerimaan barang (Rp${totalGrAmount.toLocaleString('id-ID')}).`,
-          });
+          if (!isMatched) {
+            mismatches.push({
+              code: MismatchCode.THREE_WAY_MISMATCH,
+              message: `3-Way Matching gagal: Nilai tagihan (Rp${invoicedAmount.toLocaleString('id-ID')}) tidak sesuai dengan nilai penerimaan barang (Rp${totalGrAmount.toLocaleString('id-ID')}).`,
+            });
+          }
+        } else {
+          const approvedClaimAmount = serviceClaim ? Number(serviceClaim.approvedClaimAmount || 0) : 0;
+          const isMatched = Math.abs(invoicedAmount - approvedClaimAmount) < 0.01;
+          if (!isMatched) {
+            mismatches.push({
+              code: MismatchCode.THREE_WAY_MISMATCH,
+              message: `Rekonsiliasi Jasa gagal: Nilai tagihan (Rp${invoicedAmount.toLocaleString('id-ID')}) tidak sesuai dengan nilai klaim jasa yang disetujui (Rp${approvedClaimAmount.toLocaleString('id-ID')}).`,
+            });
+          }
         }
       }
     }
@@ -1861,7 +1986,7 @@ export class FinanceService {
   ): Promise<MatchingResult> {
     const invoice = await this.invoiceRepository.findOne({
       where: { id: invoiceId },
-      relations: ['purchaseOrder', 'purchaseOrder.items', 'purchaseOrder.vendor', 'purchaseOrder.paymentTerms', 'purchaseOrder.invoices', 'paymentTerm', 'items', 'payments'],
+      relations: ['purchaseOrder', 'purchaseOrder.items', 'purchaseOrder.vendor', 'purchaseOrder.paymentTerms', 'purchaseOrder.invoices', 'paymentTerm', 'items', 'payments', 'serviceClaim', 'serviceClaim.items'],
     });
 
     if (!invoice || invoice.deletedAt) {
@@ -1888,7 +2013,7 @@ export class FinanceService {
       const invoice = await queryRunner.manager.findOne(Invoice, {
         where: { id: invoiceId },
         lock: { mode: 'pessimistic_write' },
-        relations: ['purchaseOrder', 'purchaseOrder.items', 'purchaseOrder.vendor', 'paymentTerm', 'items', 'payments'],
+        relations: ['purchaseOrder', 'purchaseOrder.items', 'purchaseOrder.vendor', 'paymentTerm', 'items', 'payments', 'serviceClaim', 'serviceClaim.items'],
       });
 
       if (!invoice || invoice.deletedAt) {

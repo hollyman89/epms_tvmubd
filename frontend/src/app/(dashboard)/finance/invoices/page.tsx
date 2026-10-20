@@ -965,7 +965,7 @@ export default function InvoicesPage() {
             : null;
 
           const activePrq = activePaymentRequestsByInvoiceId.get(Number(r.id)) || null;
-          const uiState = getPaymentRequestActionState(r, activePrq);
+          const uiState = getPaymentRequestActionState(r, activePrq, { isFinance: canProcessPayment });
 
           return (
             <Space size={6} wrap={false}>
@@ -1016,7 +1016,7 @@ export default function InvoicesPage() {
                 </Button>
               )}
 
-              {!isPaid && uiState.actionType === 'APPROVED_FOR_PAYMENT' && (
+              {!isPaid && uiState.actionType === 'APPROVED_FOR_PAYMENT' && canProcessPayment && (
                 <Button
                   size="small"
                   type="primary"
@@ -1030,6 +1030,20 @@ export default function InvoicesPage() {
                 >
                   Bayar Sekarang
                 </Button>
+              )}
+
+              {!isPaid && uiState.actionType === 'APPROVED_FOR_PAYMENT' && !canProcessPayment && (
+                <Tag
+                  color="cyan"
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: '12px',
+                    fontWeight: 600,
+                    borderRadius: '4px',
+                  }}
+                >
+                  Disetujui Pembayaran
+                </Tag>
               )}
 
               {!isPaid && (uiState.actionType === 'SUBMIT_NEW' || uiState.actionType === 'CANNOT_SUBMIT') && (
@@ -1331,7 +1345,7 @@ export default function InvoicesPage() {
       )}
 
       {/* PROCESS PAYMENT MODAL */}
-      {selectedInvoiceForPay && (
+      {selectedInvoiceForPay && canProcessPayment && (
         <ProcessPaymentModal
           open={isProcessPaymentModalOpen}
           onClose={() => {

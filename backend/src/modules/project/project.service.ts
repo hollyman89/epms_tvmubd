@@ -3707,6 +3707,16 @@ export class ProjectService {
       const initialConditionResult = validator.evaluateInitialConditionReadiness(initialCondition);
       const gateResult = validator.evaluateManagementReview(managementReview);
 
+      const hasPersistedRevisionAfterReturn = validator.evaluateRevisionPersistence(
+        managementReview,
+        activeInstance,
+        activeWbs,
+        estimate,
+        costItems,
+        activeTasks,
+        initialCondition,
+      );
+
       const aggregated = validator.aggregateReadiness(
         pid,
         project.code || `PRJ-${project.id}`,
@@ -3716,6 +3726,7 @@ export class ProjectService {
         scheduleResult,
         initialConditionResult,
         gateResult,
+        hasPersistedRevisionAfterReturn,
       );
 
       let workflowInfo: OperationalWorkflowInfo | null = null;
@@ -3734,6 +3745,7 @@ export class ProjectService {
         };
 
         aggregated.gate.status = projection.businessStatus;
+        aggregated.gate.hasPersistedRevisionAfterReturn = hasPersistedRevisionAfterReturn;
       }
 
       let resolvedStage: OperationalPlanStage = 'NOT_STARTED';
@@ -4090,6 +4102,14 @@ export class ProjectService {
     const projectionService = this.getProjectWorkflowProjectionService();
     const projection = projectionService.buildProjection(activeInstance, review);
 
+    let hasPersistedRevisionAfterReturn = true;
+    try {
+      const readiness = await this.getOperationalReadiness(projectId);
+      hasPersistedRevisionAfterReturn = Boolean(readiness.hasPersistedRevisionAfterReturn);
+    } catch {
+      // safe fallback
+    }
+
     return {
       id: review?.id || null,
       projectId: Number(projectId),
@@ -4111,6 +4131,7 @@ export class ProjectService {
       checklistSnapshot: review?.checklistSnapshot || null,
       createdAt: review?.createdAt || null,
       updatedAt: review?.updatedAt || null,
+      hasPersistedRevisionAfterReturn,
     };
   }
 
@@ -4168,6 +4189,11 @@ export class ProjectService {
         typeof activeInstance.currentNodeId === 'string' &&
         activeInstance.currentNodeId.startsWith('node_pm_revision')
       ) {
+        if (!readiness.hasPersistedRevisionAfterReturn) {
+          throw new BadRequestException(
+            'Operational Plan revision must be saved before resubmission.',
+          );
+        }
         const pendingTask = (activeInstance.tasks || []).find(
           (t: any) => t.nodeId === activeInstance.currentNodeId && t.status === 'PENDING',
         );
@@ -4193,6 +4219,14 @@ export class ProjectService {
         where: { projectId: Number(projectId) },
       });
       if (existingReview && !existingReview.deletedAt) {
+        if (
+          existingReview.status === 'NEEDS_REVISION' &&
+          !readiness.hasPersistedRevisionAfterReturn
+        ) {
+          throw new BadRequestException(
+            'Operational Plan revision must be saved before resubmission.',
+          );
+        }
         if (existingReview.status === 'REVIEW_PENDING') {
           throw new ConflictException(
             'Rencana operasional proyek sudah dalam status REVIEW_PENDING dan sedang ditinjau oleh manajemen.',
@@ -4224,7 +4258,7 @@ export class ProjectService {
       }
     }
 
-    return await this.managementReviewRepo.manager.transaction(async (manager) => {
+    await this.managementReviewRepo.manager.transaction(async (manager) => {
       let review = await manager.findOne(ProjectManagementReview, {
         where: { projectId: Number(projectId) },
       });
@@ -4280,22 +4314,9 @@ export class ProjectService {
           completenessCount: readiness.completenessCount,
         },
       });
-
-      return {
-        id: review.id,
-        projectId: Number(review.projectId),
-        status: review.status,
-        submittedBy: review.submittedBy ? Number(review.submittedBy) : null,
-        submittedAt: review.submittedAt,
-        decidedBy: null,
-        decidedAt: null,
-        reviewerRole: null,
-        revisionNotes: null,
-        checklistSnapshot: review.checklistSnapshot,
-        createdAt: review.createdAt,
-        updatedAt: review.updatedAt,
-      };
     });
+
+    return await this.getManagementReview(projectId);
   }
 
   /**

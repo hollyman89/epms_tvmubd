@@ -58,6 +58,8 @@ export interface EvaluateReadinessParams {
   hasPersistedRevisionAfterReturn?: boolean;
   hasMeaningfulRevisionAfterReturn?: boolean;
   isRevisionMode?: boolean;
+  revisionNodeId?: string | null;
+  reviewerRole?: string | null;
 }
 
 export interface OperationalPlanReadinessResult {
@@ -86,6 +88,71 @@ export interface OperationalPlanReadinessResult {
   // Management Review Eligibility
   canSubmitManagementReview: boolean;
   reviewSubmissionTooltip: string;
+  revisionReviewerLabel: string;
+}
+
+/**
+ * Presentation-only resolver for PM revision resubmit destination.
+ *
+ * Maps canonical workflow revision node to human-readable reviewer label.
+ * Backend remains sole authority for workflow transitions.
+ *
+ * node_pm_revision_hops -> "Head of Operations"
+ * node_pm_revision_procurement -> "Procurement"
+ * node_pm_revision_finance -> "Finance"
+ * node_pm_revision_director -> "Director"
+ * Unknown/missing node -> "reviewer terkait" (safe neutral fallback, never defaults to HOO)
+ */
+export function resolveRevisionReviewerLabel(nodeIdOrRole?: string | null): string {
+  if (!nodeIdOrRole || typeof nodeIdOrRole !== 'string') {
+    return 'reviewer terkait';
+  }
+  const normalized = nodeIdOrRole.trim().toLowerCase();
+
+  if (
+    normalized === 'node_pm_revision_hops' ||
+    normalized === 'node_hops_review' ||
+    normalized === 'head_of_operations' ||
+    normalized === 'hops'
+  ) {
+    return 'Head of Operations';
+  }
+  if (
+    normalized === 'node_pm_revision_procurement' ||
+    normalized === 'node_procurement_review' ||
+    normalized === 'procurement'
+  ) {
+    return 'Procurement';
+  }
+  if (
+    normalized === 'node_pm_revision_finance' ||
+    normalized === 'node_finance_review' ||
+    normalized === 'finance'
+  ) {
+    return 'Finance';
+  }
+  if (
+    normalized === 'node_pm_revision_director' ||
+    normalized === 'node_director_approval' ||
+    normalized === 'director'
+  ) {
+    return 'Director';
+  }
+
+  if (normalized.includes('procurement')) {
+    return 'Procurement';
+  }
+  if (normalized.includes('finance')) {
+    return 'Finance';
+  }
+  if (normalized.includes('director')) {
+    return 'Director';
+  }
+  if (normalized.includes('hops') || normalized.includes('head_of_operations')) {
+    return 'Head of Operations';
+  }
+
+  return 'reviewer terkait';
 }
 
 /**
@@ -114,6 +181,8 @@ export function evaluateOperationalPlanReadiness(
     hasPersistedRevisionAfterReturn,
     hasMeaningfulRevisionAfterReturn,
     isRevisionMode = false,
+    revisionNodeId = null,
+    reviewerRole = null,
   } = params;
 
   // 1. Authoritative Backend SSOT Pillar Readiness
@@ -168,7 +237,17 @@ export function evaluateOperationalPlanReadiness(
                 ? Boolean(operationalReadinessData.gate.hasPersistedRevisionAfterReturn)
                 : Boolean(hasSavedDraftSinceRevision);
 
-  // 6. Management Review UI Gate Alignment
+  // 6. Dynamic Target Reviewer Resolution for Revision Mode
+  const resolvedTargetReviewer = resolveRevisionReviewerLabel(
+    revisionNodeId ||
+      reviewerRole ||
+      operationalReadinessData?.workflow?.currentNodeId ||
+      operationalReadinessData?.gate?.workflow?.currentNodeId ||
+      operationalReadinessData?.gate?.currentNodeId ||
+      operationalReadinessData?.gate?.reviewerRole
+  );
+
+  // 7. Management Review UI Gate Alignment
   let canSubmitManagementReview = false;
   let reviewSubmissionTooltip = '';
 
@@ -181,7 +260,7 @@ export function evaluateOperationalPlanReadiness(
       reviewSubmissionTooltip = `Lengkapi 4/4 pilar (${completenessScore}/${totalPillars} selesai) untuk mengajukan review.`;
     } else {
       canSubmitManagementReview = true;
-      reviewSubmissionTooltip = 'Ajukan kembali Operational Plan yang telah direvisi kepada Head of Operations untuk ditinjau.';
+      reviewSubmissionTooltip = `Ajukan kembali Operational Plan yang telah direvisi kepada ${resolvedTargetReviewer} untuk ditinjau.`;
     }
   } else {
     if (!isOperationalPlanAuthoritativeReady) {
@@ -210,5 +289,6 @@ export function evaluateOperationalPlanReadiness(
     hasMeaningfulRevisionAfterReturn: isRevisionSaved,
     canSubmitManagementReview,
     reviewSubmissionTooltip,
+    revisionReviewerLabel: resolvedTargetReviewer,
   };
 }
