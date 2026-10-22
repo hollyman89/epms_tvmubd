@@ -20,7 +20,7 @@
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
   display: flex;
   flex-direction: column;
-  justifyContent: space-between;
+  justify-content: space-between;
   min-height: 118px;
   transition: all 0.2s ease;
 }
@@ -206,3 +206,289 @@
   color: #1E40AF !important;
   text-decoration: underline;
 }
+
+/* Tab Responsive Labeling */
+.tabHeaderContent {
+  display: inline-flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.tabTextFull {
+  display: inline;
+}
+
+.tabTextShort {
+  display: none;
+}
+
+/* Toolbar Presentations */
+.desktopExtraContent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+}
+
+.mobileToolbar {
+  display: none;
+}
+
+/* Display Wrappers for Table vs Cards */
+.desktopTableWrapper {
+  display: block;
+  width: 100%;
+}
+
+.mobileCardsWrapper {
+  display: none;
+}
+
+/* Mobile Project Cards */
+.mobileCard {
+  background: #FFFFFF;
+  border: 1px solid #E2E8F0;
+  border-radius: 12px;
+  padding: 14px 14px 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mobileCard:hover {
+  border-color: #CBD5E1;
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.06);
+}
+
+.mobileCardAccentBar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+}
+
+.mobileCardHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mobileCardTitleRow {
+  display: flex;
+  justifyContent: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.mobileCardTitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1D4ED8;
+  line-height: 1.35;
+  word-break: break-word;
+  cursor: pointer;
+}
+
+.mobileCardTitle:hover {
+  text-decoration: underline;
+  color: #1E40AF;
+}
+
+.mobileCardCodeBadge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mobileCardClientRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.mobileCardPeopleSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #F8FAFC;
+  border-radius: 8px;
+  padding: 8px 12px;
+  border: 1px solid #F1F5F9;
+}
+
+.mobileCardPersonRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobileCardPersonAvatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFFFF;
+  font-size: 10.5px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.mobileCardPersonInfo {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+  min-width: 0;
+  flex: 1;
+}
+
+.mobileCardPersonName {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #0F172A;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mobileCardPersonRole {
+  font-size: 11px;
+  color: #64748B;
+}
+
+.mobileCardActionsRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #F1F5F9;
+  flex-wrap: wrap;
+}
+
+.mobileCardPrimaryBtn {
+  flex: 1;
+  min-width: 140px;
+  height: 38px !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+
+.mobileCardSecondaryBtn {
+  height: 38px !important;
+  font-weight: 500 !important;
+  font-size: 13px !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+}
+
+/* Responsive Overrides (max-width: 768px) */
+@media (max-width: 768px) {
+  .desktopExtraContent {
+    display: none !important;
+  }
+
+  .deliveryTabs :global(.ant-tabs-extra-content) {
+    display: none !important;
+  }
+
+  .mobileToolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    width: 100%;
+  }
+
+  .tabTextFull {
+    display: none !important;
+  }
+
+  .tabTextShort {
+    display: inline !important;
+    font-weight: 600;
+  }
+
+  .deliveryTabs :global(.ant-tabs-nav-operations) {
+    display: none !important;
+  }
+
+  .deliveryTabs :global(.ant-tabs-nav) {
+    margin-bottom: 12px !important;
+  }
+
+  .deliveryTabs :global(.ant-tabs-nav-wrap) {
+    overflow: visible !important;
+  }
+
+  .deliveryTabs :global(.ant-tabs-nav-list) {
+    transform: none !important;
+    display: flex !important;
+    width: 100% !important;
+  }
+
+  .deliveryTabs :global(.ant-tabs-tab) {
+    flex: 1 1 0 !important;
+    min-width: 0 !important;
+    padding: 8px 2px !important;
+    margin: 0 !important;
+    font-size: 12px !important;
+    justify-content: center !important;
+  }
+
+  .deliveryTabs :global(.ant-tabs-tab-btn) {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 100% !important;
+    text-align: center !important;
+  }
+
+  .deliveryTabs :global(.ant-tabs-tab .anticon) {
+    margin-right: 3px !important;
+    font-size: 12px !important;
+  }
+
+  .desktopTableWrapper {
+    display: none !important;
+  }
+
+  .mobileCardsWrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    width: 100%;
+    padding: 2px 0;
+  }
+
+  .tableContainer {
+    border: none !important;
+    background: transparent !important;
+  }
+
+  .tabsCard {
+    padding: 12px 12px !important;
+  }
+}
+

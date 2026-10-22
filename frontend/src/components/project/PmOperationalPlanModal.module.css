@@ -1,0 +1,439 @@
+/* PM Operational Plan Responsive Modal Styles */
+
+.modalRoot :global(.ant-modal) {
+  max-width: 1280px;
+}
+
+.modalRoot :global(.ant-modal-content) {
+  height: min(820px, 88vh);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+}
+
+.modalRoot :global(.ant-modal-header) {
+  flex: 0 0 auto;
+  padding: 12px 20px;
+  margin: 0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.modalRoot :global(.ant-modal-body) {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.modalRoot :global(.ant-modal-footer) {
+  flex: 0 0 auto;
+  padding: 12px 20px;
+  margin: 0;
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+/* Reference Strip, Timeline, History, Workspace Ordering */
+.referenceStrip {
+  flex: 0 0 auto;
+  background: #ffffff;
+  padding: 10px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  order: 1;
+}
+
+.timelineStrip {
+  flex: 0 0 auto;
+  padding: 10px 20px 0 20px;
+  background: #ffffff;
+  order: 2;
+}
+
+.historyStrip {
+  flex: 0 0 auto;
+  padding: 6px 20px 0 20px;
+  background: #ffffff;
+  order: 3;
+}
+
+.workspaceContainer {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  width: 100%;
+  order: 4;
+}
+
+/* LEFT: COMPLETENESS PANEL (Desktop Left Sidebar) */
+.leftCompletenessPanel {
+  flex: 0 0 230px;
+  width: 230px;
+  min-width: 230px;
+  max-width: 230px;
+  border-right: 1px solid #e2e8f0;
+  background: #ffffff;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.completenessSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.completenessCard {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.completenessCard:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.completenessCardActive {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+/* RIGHT: MAIN VIEWPORT */
+.rightMainViewport {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+.viewportScrollContainer {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* SECTION ITEM CONTROLS (All visible on desktop; on mobile only active section visible) */
+.sectionItem {
+  display: block;
+}
+
+.sectionItemActive {
+  display: block;
+}
+
+/* MOBILE WORKFLOW COMPACT CARD */
+.mobileWorkflowHeader {
+  display: none;
+}
+
+.workflowStepperWrapper {
+  display: block;
+  width: 100%;
+}
+
+/* FOOTER RESPONSIVE CONTAINER */
+.modalFooterContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 8px;
+}
+
+.footerLeftSection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.footerRightButtons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.footerSubRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.footerDraftBtn {
+  display: flex;
+  align-items: center;
+}
+
+.footerSubmitBtn {
+  display: flex;
+  align-items: center;
+}
+
+/* INTERNAL SCROLL WRAPPERS */
+.internalScrollWrapper {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ========================================================================= */
+/* MOBILE RESPONSIVE ADAPTATIONS (< 768px)                                   */
+/* ========================================================================= */
+@media (max-width: 767px) {
+  .modalRoot :global(.ant-modal-wrap) {
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    position: fixed !important;
+    inset: 0 !important;
+  }
+
+  .modalRoot :global(.ant-modal) {
+    max-width: 100vw !important;
+    width: 100vw !important;
+    margin: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    position: fixed !important;
+    padding: 0 !important;
+    padding-bottom: 0 !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+  }
+
+  .modalRoot :global(.ant-modal-content) {
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+
+  .modalRoot :global(.ant-modal-header) {
+    flex: 0 0 auto !important;
+    padding: 10px 14px !important;
+  }
+
+  .modalRoot :global(.ant-modal-body) {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .modalRoot :global(.ant-modal-footer) {
+    flex: 0 0 auto !important;
+    padding: 10px 14px !important;
+    background: #ffffff !important;
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05) !important;
+    position: sticky !important;
+    bottom: 0 !important;
+    z-index: 10 !important;
+  }
+
+  /* RE-ORDERING ON MOBILE:
+     1. Project Info (referenceStrip)
+     2. Kelengkapan & Working Area (workspaceContainer)
+     3. Workflow Governance (timelineStrip)
+     4. Approval History (historyStrip)
+  */
+  .referenceStrip {
+    order: 1 !important;
+    flex: 0 0 auto !important;
+    padding: 8px 12px !important;
+  }
+
+  .workspaceContainer {
+    order: 2 !important;
+    flex: 0 0 auto !important;
+    min-height: auto !important;
+    height: auto !important;
+    flex-direction: column !important;
+    overflow: visible !important;
+    width: 100% !important;
+  }
+
+  .timelineStrip {
+    order: 3 !important;
+    flex: 0 0 auto !important;
+    padding: 8px 12px 0 12px !important;
+    background: transparent !important;
+  }
+
+  .historyStrip {
+    order: 4 !important;
+    flex: 0 0 auto !important;
+    padding: 8px 12px 14px 12px !important;
+    background: transparent !important;
+  }
+
+  /* COMPLETENESS SUMMARY STACKS AT TOP (2x2 GRID NAVIGATION) */
+  .leftCompletenessPanel {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    border-right: none !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+    padding: 10px 12px !important;
+    overflow-y: visible !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+    gap: 8px !important;
+  }
+
+  .completenessSteps {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+  }
+
+  .completenessCard {
+    background: #f8fafc !important;
+    border: 1px solid #e2e8f0 !important;
+  }
+
+  .completenessCardActive {
+    background: #eff6ff !important;
+    border: 2px solid #2563eb !important;
+    box-shadow: 0 1px 3px rgba(37, 99, 235, 0.15) !important;
+  }
+
+  /* SELECTED WORKING AREA ON MOBILE:
+     Only the active section is visible on mobile
+  */
+  .rightMainViewport {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+  }
+
+  .viewportScrollContainer {
+    flex: 0 0 auto !important;
+    padding: 8px 10px !important;
+    overflow: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+  }
+
+  .sectionItem {
+    display: none !important;
+  }
+
+  .sectionItemActive {
+    display: block !important;
+  }
+
+  /* MOBILE WORKFLOW COMPACT CARD */
+  .mobileWorkflowHeader {
+    display: block !important;
+    background: #ffffff !important;
+    border: 1px solid #e2e8f0 !important;
+    border-radius: 8px !important;
+    padding: 10px 12px !important;
+  }
+
+  .workflowStepperWrapper {
+    display: none !important;
+    margin-top: 8px !important;
+    width: 100% !important;
+    overflow-x: auto !important;
+  }
+
+  .workflowExpanded {
+    display: block !important;
+  }
+
+  /* FOOTER STACKS CLEANLY */
+  .modalFooterContainer {
+    flex-direction: column-reverse !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+
+  .footerLeftSection {
+    justify-content: center !important;
+    text-align: center !important;
+    font-size: 11px !important;
+  }
+
+  .footerRightButtons {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 6px !important;
+    width: 100% !important;
+  }
+
+  .footerDraftBtn {
+    order: 1 !important;
+    width: 100% !important;
+  }
+
+  .footerDraftBtn > * {
+    width: 100% !important;
+  }
+
+  .footerSubmitBtn {
+    order: 2 !important;
+    width: 100% !important;
+  }
+
+  .footerSubmitBtn > * {
+    width: 100% !important;
+  }
+
+  .footerSubRow {
+    order: 3 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    width: 100% !important;
+  }
+
+  .footerSubRow > * {
+    flex: 1 1 50% !important;
+    width: 50% !important;
+  }
+
+  .footerRightButtons button {
+    width: 100% !important;
+    margin: 0 !important;
+    min-height: 36px !important;
+  }
+}

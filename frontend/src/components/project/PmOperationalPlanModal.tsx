@@ -99,6 +99,8 @@ import isSameOrAfter from 'dayjs/plugin/isSameOrAfter';
 
 dayjs.extend(isSameOrAfter);
 
+import styles from './PmOperationalPlanModal.module.css';
+
 const { Title, Text } = Typography;
 const { TextArea } = Input;
 
@@ -151,6 +153,26 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
     initialCondition: false,
   });
 
+  // Mobile responsive active working section state (defaults to 'cost')
+  const [mobileActiveSection, setMobileActiveSection] = useState<SectionId>('cost');
+  // Mobile workflow governance expansion toggle
+  const [isMobileWorkflowExpanded, setIsMobileWorkflowExpanded] = useState<boolean>(false);
+
+  const handleSelectSection = (section: SectionId) => {
+    setMobileActiveSection(section);
+    if (maximizedSection && maximizedSection !== section) {
+      setMaximizedSection(section);
+    }
+    setMinimizedSections((p) => ({ ...p, [section]: false }));
+    const elMap: Record<SectionId, string> = {
+      cost: 'section-cost',
+      wbs: 'section-wbs',
+      schedule: 'section-schedule',
+      initialCondition: 'section-initial-condition',
+    };
+    document.getElementById(elMap[section])?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   // Reset presentation state on modal open (presentation-only, not persisted)
   // Section 1 (Cost), Section 2 (WBS) & Section 4 (Initial Condition) are expanded, Section 3 (Schedule) starts minimized for instant shell render
   useEffect(() => {
@@ -162,6 +184,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         schedule: true,
         initialCondition: false,
       });
+      setMobileActiveSection('cost');
+      setIsMobileWorkflowExpanded(false);
     }
   }, [open]);
 
@@ -246,8 +270,13 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
   // Summary preview modal state
   const [isSummaryModalOpen, setIsSummaryModalOpen] = useState(false);
 
-  // Approval History collapsible presentation state (Default: EXPANDED)
-  const [isApprovalHistoryExpanded, setIsApprovalHistoryExpanded] = useState<boolean>(true);
+  // Approval History collapsible presentation state (Default: EXPANDED on desktop, COLLAPSED on mobile)
+  const [isApprovalHistoryExpanded, setIsApprovalHistoryExpanded] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768;
+    }
+    return true;
+  });
 
   // PM Submission Confirmation Modal state
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
@@ -1933,6 +1962,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         onCancel={onClose}
         width="min(1280px, 92vw)"
         centered
+        rootClassName={styles.modalRoot}
+        className={styles.modalRoot}
         style={{
           maxWidth: '1280px',
           top: 0,
@@ -1974,8 +2005,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
           },
         }}
         title={
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 28 }}>
-            <Space size={10}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 28, flexWrap: 'wrap', gap: 8 }}>
+            <Space size={10} wrap>
               <div style={{ padding: '6px 10px', background: '#eff6ff', borderRadius: 8, color: '#1d4ed8' }}>
                 <ApartmentOutlined style={{ fontSize: 18 }} />
               </div>
@@ -2067,8 +2098,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
           </div>
         }
         footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
-            <Space size={8}>
+          <div className={styles.modalFooterContainer}>
+            <div className={styles.footerLeftSection}>
               {lastSavedTime ? (
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   Draft tersimpan di browser: <strong>{lastSavedTime}</strong>
@@ -2078,118 +2109,200 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                   Belum ada perubahan tersimpan
                 </Text>
               )}
-            </Space>
-            <Space size={8}>
-              <Button onClick={onClose} style={{ borderRadius: 6 }}>
-                Tutup
-              </Button>
-              <Button
-                icon={<EyeOutlined />}
-                onClick={() => {
-                  if (canonicalProjectId > 0) {
-                    fetchOperationalReadiness(canonicalProjectId);
-                  }
-                  setIsSummaryModalOpen(true);
-                }}
-                style={{ borderRadius: 6, fontWeight: 500 }}
-              >
-                Tinjau Ringkasan
-              </Button>
+            </div>
+            <div className={styles.footerRightButtons}>
+              <div className={styles.footerSubRow}>
+                <Button onClick={onClose} style={{ borderRadius: 6 }}>
+                  Tutup
+                </Button>
+                <Button
+                  icon={<EyeOutlined />}
+                  onClick={() => {
+                    if (canonicalProjectId > 0) {
+                      fetchOperationalReadiness(canonicalProjectId);
+                    }
+                    setIsSummaryModalOpen(true);
+                  }}
+                  style={{ borderRadius: 6, fontWeight: 500 }}
+                >
+                  Tinjau Ringkasan
+                </Button>
+              </div>
               {/* ACTION: SIMPAN DRAFT (PM / SUPER_ADMIN ONLY) */}
-              {showPmSubmitActions && (() => {
-                if (gateRecord?.workflow) {
-                  const curr = gateRecord.workflow.current;
-                  const isUnknown = !curr || curr.status === 'UNKNOWN' || gateRecord.workflow.businessStatus === 'UNKNOWN_WORKFLOW_STATE';
-                  if (isUnknown) {
-                    return (
-                      <Tooltip title="Status workflow tidak dikenali.">
+              {showPmSubmitActions && (
+                <div className={styles.footerDraftBtn}>
+                  {(() => {
+                    if (gateRecord?.workflow) {
+                      const curr = gateRecord.workflow.current;
+                      const isUnknown = !curr || curr.status === 'UNKNOWN' || gateRecord.workflow.businessStatus === 'UNKNOWN_WORKFLOW_STATE';
+                      if (isUnknown) {
+                        return (
+                          <Tooltip title="Status workflow tidak dikenali.">
+                            <Button
+                              type="default"
+                              icon={<SaveOutlined />}
+                              disabled={true}
+                              style={{ borderRadius: 6, fontWeight: 600 }}
+                            >
+                              Simpan Draft
+                            </Button>
+                          </Tooltip>
+                        );
+                      }
+                      if (isPmEditableWorkflowState(curr)) {
+                        return (
+                          <Button
+                            type="default"
+                            icon={<SaveOutlined />}
+                            loading={isCostSaving || isWbsSaving || isScheduleSaving}
+                            disabled={isCostSaving || isWbsSaving || isScheduleSaving}
+                            onClick={() => handleSaveAllDrafts(true)}
+                            style={{ borderRadius: 6, fontWeight: 600 }}
+                          >
+                            Simpan Draft
+                          </Button>
+                        );
+                      }
+                      return null;
+                    }
+
+                    // Legacy Fallback (ONLY if workflow instance does not exist)
+                    const isLegacyNonEditable = ['READY_FOR_PROCUREMENT', 'REVIEW_PENDING', 'REVIEW_FINANCE', 'REVIEW_DIRECTOR', 'READY_FOR_KICKOFF'].includes(gateRecord?.status || '');
+                    if (!isLegacyNonEditable) {
+                      return (
                         <Button
                           type="default"
                           icon={<SaveOutlined />}
-                          disabled={true}
+                          loading={isCostSaving || isWbsSaving || isScheduleSaving}
+                          disabled={isCostSaving || isWbsSaving || isScheduleSaving}
+                          onClick={() => handleSaveAllDrafts(true)}
                           style={{ borderRadius: 6, fontWeight: 600 }}
                         >
                           Simpan Draft
                         </Button>
-                      </Tooltip>
-                    );
-                  }
-                  if (isPmEditableWorkflowState(curr)) {
-                    return (
-                      <Button
-                        type="default"
-                        icon={<SaveOutlined />}
-                        loading={isCostSaving || isWbsSaving || isScheduleSaving}
-                        disabled={isCostSaving || isWbsSaving || isScheduleSaving}
-                        onClick={() => handleSaveAllDrafts(true)}
-                        style={{ borderRadius: 6, fontWeight: 600 }}
-                      >
-                        Simpan Draft
-                      </Button>
-                    );
-                  }
-                  return null;
-                }
-
-                // Legacy Fallback (ONLY if workflow instance does not exist)
-                const isLegacyNonEditable = ['READY_FOR_PROCUREMENT', 'REVIEW_PENDING', 'REVIEW_FINANCE', 'REVIEW_DIRECTOR', 'READY_FOR_KICKOFF'].includes(gateRecord?.status || '');
-                if (!isLegacyNonEditable) {
-                  return (
-                    <Button
-                      type="default"
-                      icon={<SaveOutlined />}
-                      loading={isCostSaving || isWbsSaving || isScheduleSaving}
-                      disabled={isCostSaving || isWbsSaving || isScheduleSaving}
-                      onClick={() => handleSaveAllDrafts(true)}
-                      style={{ borderRadius: 6, fontWeight: 600 }}
-                    >
-                      Simpan Draft
-                    </Button>
-                  );
-                }
-                return null;
-              })()}
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              )}
 
               {/* ACTION: AJUKAN UNTUK MANAGEMENT REVIEW (PM / SUPER_ADMIN ONLY) */}
-              {showPmSubmitActions && (() => {
-                if (gateRecord?.workflow) {
-                  const curr = gateRecord.workflow.current;
-                  const isUnknown = !curr || curr.status === 'UNKNOWN' || gateRecord.workflow.businessStatus === 'UNKNOWN_WORKFLOW_STATE';
-                  if (isUnknown) {
-                    return (
-                      <Tooltip title="Status workflow tidak dikenali.">
-                        <Button
-                          type="primary"
-                          icon={<RocketOutlined />}
-                          disabled={true}
-                          style={{ borderRadius: 6, fontWeight: 600 }}
-                        >
-                          Ajukan untuk Management Review
-                        </Button>
-                      </Tooltip>
-                    );
-                  }
-                  if (curr.nodeKey === 'PM_REVISION') {
-                    return (
-                      <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
-                        <Button
-                          type="primary"
-                          icon={<RocketOutlined />}
-                          disabled={!readinessEvaluation.canSubmitManagementReview}
-                          onClick={() => setIsSubmitModalOpen(true)}
-                          style={{
-                            backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
-                            borderColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
-                            borderRadius: 6,
-                            fontWeight: 600,
-                          }}
-                        >
-                          Ajukan Ulang ke Management Review
-                        </Button>
-                      </Tooltip>
-                    );
-                  }
-                  if (curr.nodeKey === 'PM_PLANNING') {
+              {showPmSubmitActions && (
+                <div className={styles.footerSubmitBtn}>
+                  {(() => {
+                    if (gateRecord?.workflow) {
+                      const curr = gateRecord.workflow.current;
+                      const isUnknown = !curr || curr.status === 'UNKNOWN' || gateRecord.workflow.businessStatus === 'UNKNOWN_WORKFLOW_STATE';
+                      if (isUnknown) {
+                        return (
+                          <Tooltip title="Status workflow tidak dikenali.">
+                            <Button
+                              type="primary"
+                              icon={<RocketOutlined />}
+                              disabled={true}
+                              style={{ borderRadius: 6, fontWeight: 600 }}
+                            >
+                              Ajukan untuk Management Review
+                            </Button>
+                          </Tooltip>
+                        );
+                      }
+                      if (curr.nodeKey === 'PM_REVISION') {
+                        return (
+                          <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
+                            <Button
+                              type="primary"
+                              icon={<RocketOutlined />}
+                              disabled={!readinessEvaluation.canSubmitManagementReview}
+                              onClick={() => setIsSubmitModalOpen(true)}
+                              style={{
+                                backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
+                                borderColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
+                                borderRadius: 6,
+                                fontWeight: 600,
+                              }}
+                            >
+                              Ajukan Ulang ke Management Review
+                            </Button>
+                          </Tooltip>
+                        );
+                      }
+                      if (curr.nodeKey === 'PM_PLANNING') {
+                        return (
+                          <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
+                            <Button
+                              type="primary"
+                              icon={<RocketOutlined />}
+                              disabled={!readinessEvaluation.canSubmitManagementReview}
+                              onClick={() => setIsSubmitModalOpen(true)}
+                              style={{
+                                backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#059669' : undefined,
+                                borderColor: readinessEvaluation.canSubmitManagementReview ? '#059669' : undefined,
+                                borderRadius: 6,
+                                fontWeight: 600,
+                              }}
+                            >
+                              Ajukan untuk Management Review
+                            </Button>
+                          </Tooltip>
+                        );
+                      }
+                      // Non-PM-editable downstream or completed: Disabled with current position tooltip
+                      return (
+                        <Tooltip title={
+                          curr.position
+                            ? `Operational Plan sedang dalam proses: ${curr.position}`
+                            : 'Operational Plan sedang ditinjau dalam alur Management Review.'
+                        }>
+                          <Button
+                            type="primary"
+                            icon={<RocketOutlined />}
+                            disabled={true}
+                            style={{ borderRadius: 6, fontWeight: 600 }}
+                          >
+                            Ajukan untuk Management Review
+                          </Button>
+                        </Tooltip>
+                      );
+                    }
+
+                    // Legacy Fallback (ONLY if workflow instance does not exist)
+                    const isLegacyDownstream = ['REVIEW_PENDING', 'READY_FOR_PROCUREMENT', 'REVIEW_FINANCE', 'REVIEW_DIRECTOR', 'READY_FOR_KICKOFF'].includes(gateRecord?.status || '');
+                    if (isLegacyDownstream) {
+                      return (
+                        <Tooltip title="Operational Plan sedang ditinjau dalam alur Management Review.">
+                          <Button
+                            type="primary"
+                            icon={<RocketOutlined />}
+                            disabled={true}
+                            style={{ borderRadius: 6, fontWeight: 600 }}
+                          >
+                            Ajukan untuk Management Review
+                          </Button>
+                        </Tooltip>
+                      );
+                    }
+                    if (gateRecord?.status === 'NEEDS_REVISION') {
+                      return (
+                        <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
+                          <Button
+                            type="primary"
+                            icon={<RocketOutlined />}
+                            disabled={!readinessEvaluation.canSubmitManagementReview}
+                            onClick={() => setIsSubmitModalOpen(true)}
+                            style={{
+                              backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
+                              borderColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
+                              borderRadius: 6,
+                              fontWeight: 600,
+                            }}
+                          >
+                            Ajukan Ulang ke Management Review
+                          </Button>
+                        </Tooltip>
+                      );
+                    }
                     return (
                       <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
                         <Button
@@ -2208,94 +2321,15 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                         </Button>
                       </Tooltip>
                     );
-                  }
-                  // Non-PM-editable downstream or completed: Disabled with current position tooltip
-                  return (
-                    <Tooltip title={
-                      curr.position
-                        ? `Operational Plan sedang dalam proses: ${curr.position}`
-                        : 'Operational Plan sedang ditinjau dalam alur Management Review.'
-                    }>
-                      <Button
-                        type="primary"
-                        icon={<RocketOutlined />}
-                        disabled={true}
-                        style={{ borderRadius: 6, fontWeight: 600 }}
-                      >
-                        Ajukan untuk Management Review
-                      </Button>
-                    </Tooltip>
-                  );
-                }
-
-                // Legacy Fallback (ONLY if workflow instance does not exist)
-                const isLegacyDownstream = ['REVIEW_PENDING', 'READY_FOR_PROCUREMENT', 'REVIEW_FINANCE', 'REVIEW_DIRECTOR', 'READY_FOR_KICKOFF'].includes(gateRecord?.status || '');
-                if (isLegacyDownstream) {
-                  return (
-                    <Tooltip title="Operational Plan sedang ditinjau dalam alur Management Review.">
-                      <Button
-                        type="primary"
-                        icon={<RocketOutlined />}
-                        disabled={true}
-                        style={{ borderRadius: 6, fontWeight: 600 }}
-                      >
-                        Ajukan untuk Management Review
-                      </Button>
-                    </Tooltip>
-                  );
-                }
-                if (gateRecord?.status === 'NEEDS_REVISION') {
-                  return (
-                    <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
-                      <Button
-                        type="primary"
-                        icon={<RocketOutlined />}
-                        disabled={!readinessEvaluation.canSubmitManagementReview}
-                        onClick={() => setIsSubmitModalOpen(true)}
-                        style={{
-                          backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
-                          borderColor: readinessEvaluation.canSubmitManagementReview ? '#d97706' : undefined,
-                          borderRadius: 6,
-                          fontWeight: 600,
-                        }}
-                      >
-                        Ajukan Ulang ke Management Review
-                      </Button>
-                    </Tooltip>
-                  );
-                }
-                return (
-                  <Tooltip title={readinessEvaluation.reviewSubmissionTooltip}>
-                    <Button
-                      type="primary"
-                      icon={<RocketOutlined />}
-                      disabled={!readinessEvaluation.canSubmitManagementReview}
-                      onClick={() => setIsSubmitModalOpen(true)}
-                      style={{
-                        backgroundColor: readinessEvaluation.canSubmitManagementReview ? '#059669' : undefined,
-                        borderColor: readinessEvaluation.canSubmitManagementReview ? '#059669' : undefined,
-                        borderRadius: 6,
-                        fontWeight: 600,
-                      }}
-                    >
-                      Ajukan untuk Management Review
-                    </Button>
-                  </Tooltip>
-                );
-              })()}
-            </Space>
+                  })()}
+                </div>
+              )}
+            </div>
           </div>
         }
       >
         {/* FIXED PROJECT REFERENCE STRIP */}
-        <div
-          style={{
-            flex: '0 0 auto',
-            background: '#ffffff',
-            padding: '10px 20px',
-            borderBottom: '1px solid #e2e8f0',
-          }}
-        >
+        <div className={styles.referenceStrip}>
           <Row gutter={[16, 8]} align="middle">
             <Col xs={24} sm={6} md={5}>
               <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block' }}>
@@ -2306,7 +2340,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
               </div>
             </Col>
 
-            <Col xs={12} sm={6} md={5}>
+            <Col xs={24} sm={6} md={5}>
               <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block' }}>
                 Customer & Kontrak
               </Text>
@@ -2336,21 +2370,89 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         </div>
 
         {/* REVIEW TRACKING / WORKFLOW TIMELINE (TOP LEVEL HIERARCHY) */}
-        <div style={{ flex: '0 0 auto', padding: '10px 20px 0 20px', background: '#ffffff' }}>
-          <ReviewTrackingTimeline
-            gateRecord={gateRecord}
-            projectId={canonicalProjectId}
-            projectStatus={charter?.status || (charter as any)?.projectStatus || 'PLANNING'}
-            prApprovalState={prApprovalState}
-            completenessScore={completenessScore}
-            isPmOnly={true}
-            compact={true}
-            showActivityHistory={false}
-          />
+        <div className={styles.timelineStrip}>
+          {(() => {
+            const workflowCurrent = gateRecord?.workflow?.current;
+            const currentPosition = workflowCurrent?.position || (
+              gateRecord?.status === 'REVIEW_PENDING' ? 'Review HOPS' :
+              gateRecord?.status === 'READY_FOR_PROCUREMENT' ? 'Procurement Handover' :
+              gateRecord?.status === 'REVIEW_FINANCE' ? 'Review Finance' :
+              gateRecord?.status === 'REVIEW_DIRECTOR' ? 'Review Director' :
+              gateRecord?.status === 'NEEDS_REVISION' ? 'Revisi Diperlukan' :
+              gateRecord?.status === 'READY_FOR_KICKOFF' ? 'Disetujui / Kick-off' :
+              'Penyusunan Plan'
+            );
+            const currentOwner = workflowCurrent?.ownerName || (
+              gateRecord?.status === 'REVIEW_PENDING' ? 'Head of Operations' :
+              gateRecord?.status === 'READY_FOR_PROCUREMENT' ? 'Procurement Lead' :
+              gateRecord?.status === 'REVIEW_FINANCE' ? 'Finance Team' :
+              gateRecord?.status === 'REVIEW_DIRECTOR' ? 'Director' :
+              'Project Manager'
+            );
+            const nextStep = workflowCurrent?.nextStep || (
+              gateRecord?.status === 'NOT_SUBMITTED' || !gateRecord?.status ? 'Head of Operations (HOPS)' :
+              gateRecord?.status === 'REVIEW_PENDING' ? 'Procurement / Finance' :
+              gateRecord?.status === 'READY_FOR_PROCUREMENT' ? 'Review Finance' :
+              gateRecord?.status === 'REVIEW_FINANCE' ? 'Review Director' :
+              gateRecord?.status === 'REVIEW_DIRECTOR' ? 'Kick-off Execution' :
+              '-'
+            );
+
+            return (
+              <>
+                {/* Mobile Compact Workflow Governance Card */}
+                <div className={styles.mobileWorkflowHeader}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <AuditOutlined style={{ color: '#2563eb', fontSize: 13 }} />
+                      <Text strong style={{ fontSize: 12, color: '#0f172a' }}>Status Workflow</Text>
+                    </div>
+                    <Button
+                      type="text"
+                      size="small"
+                      onClick={() => setIsMobileWorkflowExpanded((v) => !v)}
+                      style={{ fontSize: 11, color: '#2563eb', padding: '0 4px', height: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}
+                    >
+                      {isMobileWorkflowExpanded ? 'Sembunyikan Alur ▲' : 'Lihat Alur Persetujuan ▼'}
+                    </Button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 11, color: '#475569' }}>
+                    <div>
+                      <span style={{ color: '#64748b' }}>Posisi: </span>
+                      <span style={{ fontWeight: 600, color: '#0f172a' }}>{currentPosition}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 4 }}>
+                      <div>
+                        <span style={{ color: '#64748b' }}>Owner: </span>
+                        <span style={{ fontWeight: 600, color: '#0f172a' }}>{currentOwner}</span>
+                      </div>
+                      <div>
+                        <span style={{ color: '#64748b' }}>Next: </span>
+                        <span style={{ fontWeight: 600, color: '#2563eb' }}>{nextStep}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className={`${styles.workflowStepperWrapper} ${isMobileWorkflowExpanded ? styles.workflowExpanded : ''}`}>
+                  <ReviewTrackingTimeline
+                    gateRecord={gateRecord}
+                    projectId={canonicalProjectId}
+                    projectStatus={charter?.status || (charter as any)?.projectStatus || 'PLANNING'}
+                    prApprovalState={prApprovalState}
+                    completenessScore={completenessScore}
+                    isPmOnly={true}
+                    compact={true}
+                    showActivityHistory={false}
+                  />
+                </div>
+              </>
+            );
+          })()}
         </div>
 
         {/* APPROVAL HISTORY — COMPACT ENTERPRISE SSOT-DRIVEN TIMELINE */}
-        <div style={{ flex: '0 0 auto', padding: '6px 20px 0 20px', background: '#ffffff' }}>
+        <div className={styles.historyStrip}>
           <div
             style={{
               padding: '8px 12px',
@@ -2499,23 +2601,9 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
         </div>
 
         {/* WORKSPACE FLEX CONTAINER: FIXED LEFT PANEL + SCROLLABLE RIGHT VIEWPORT */}
-        <div style={{ flex: '1 1 auto', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
-          {/* LEFT: FIXED COMPLETENESS PANEL */}
-          <div
-            style={{
-              flex: '0 0 230px',
-              width: 230,
-              minWidth: 230,
-              maxWidth: 230,
-              borderRight: '1px solid #e2e8f0',
-              background: '#ffffff',
-              padding: '14px 12px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              overflowY: 'auto',
-            }}
-          >
+        <div className={styles.workspaceContainer}>
+          {/* LEFT: COMPLETENESS PANEL */}
+          <div className={styles.leftCompletenessPanel}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 4 }}>
               <Space size={6}>
                 <AuditOutlined style={{ color: '#1d4ed8', fontSize: 13 }} />
@@ -2543,15 +2631,11 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
               </Tag>
             </div>
 
+            <div className={styles.completenessSteps}>
             {/* Step 1: Cost */}
             <div
-              onClick={() => {
-                if (maximizedSection && maximizedSection !== 'cost') {
-                  setMaximizedSection('cost');
-                }
-                setMinimizedSections((p) => ({ ...p, cost: false }));
-                document.getElementById('section-cost')?.scrollIntoView({ behavior: 'smooth' });
-              }}
+              className={`${styles.completenessCard} ${mobileActiveSection === 'cost' ? styles.completenessCardActive : ''}`}
+              onClick={() => handleSelectSection('cost')}
               style={{
                 padding: '8px 10px',
                 borderRadius: 6,
@@ -2594,13 +2678,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
 
             {/* Step 2: WBS */}
             <div
-              onClick={() => {
-                if (maximizedSection && maximizedSection !== 'wbs') {
-                  setMaximizedSection('wbs');
-                }
-                setMinimizedSections((p) => ({ ...p, wbs: false }));
-                document.getElementById('section-wbs')?.scrollIntoView({ behavior: 'smooth' });
-              }}
+              className={`${styles.completenessCard} ${mobileActiveSection === 'wbs' ? styles.completenessCardActive : ''}`}
+              onClick={() => handleSelectSection('wbs')}
               style={{
                 padding: '8px 10px',
                 borderRadius: 6,
@@ -2637,13 +2716,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
 
             {/* Step 3: Schedule */}
             <div
-              onClick={() => {
-                if (maximizedSection && maximizedSection !== 'schedule') {
-                  setMaximizedSection('schedule');
-                }
-                setMinimizedSections((p) => ({ ...p, schedule: false }));
-                document.getElementById('section-schedule')?.scrollIntoView({ behavior: 'smooth' });
-              }}
+              className={`${styles.completenessCard} ${mobileActiveSection === 'schedule' ? styles.completenessCardActive : ''}`}
+              onClick={() => handleSelectSection('schedule')}
               style={{
                 padding: '8px 10px',
                 borderRadius: 6,
@@ -2684,13 +2758,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
 
             {/* Step 4: Initial Condition */}
             <div
-              onClick={() => {
-                if (maximizedSection && maximizedSection !== 'initialCondition') {
-                  setMaximizedSection('initialCondition');
-                }
-                setMinimizedSections((p) => ({ ...p, initialCondition: false }));
-                document.getElementById('section-initial-condition')?.scrollIntoView({ behavior: 'smooth' });
-              }}
+              className={`${styles.completenessCard} ${mobileActiveSection === 'initialCondition' ? styles.completenessCardActive : ''}`}
+              onClick={() => handleSelectSection('initialCondition')}
               style={{
                 padding: '8px 10px',
                 borderRadius: 6,
@@ -2728,6 +2797,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                   : 'Belum ada baseline'}
               </div>
             </div>
+            </div>
 
             <Divider style={{ margin: '4px 0' }} />
 
@@ -2749,32 +2819,18 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
           </div>
 
           {/* RIGHT: MAIN VIEWPORT (Stacked Minimize/Maximize Sections) */}
-          <div
-            style={{
-              flex: '1 1 auto',
-              minWidth: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              background: '#f8fafc',
-            }}
-          >
+          <div className={styles.rightMainViewport}>
             {/* WORKSPACE VIEWPORT CONTAINER */}
             <div
+              className={styles.viewportScrollContainer}
               style={{
-                flex: '1 1 auto',
-                minHeight: 0,
                 overflowY: maximizedSection ? 'hidden' : 'auto',
-                overflowX: 'hidden',
-                padding: '12px 16px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 10,
               }}
             >
               {/* ========================================================================= */}
               {/* SECTION 1: COST ESTIMATE / RAB                                            */}
               {/* ========================================================================= */}
+              <div className={`${styles.sectionItem} ${mobileActiveSection === 'cost' ? styles.sectionItemActive : ''}`}>
               {(() => {
                 const isCostMaximized = maximizedSection === 'cost';
                 const isCostMinimized = !isCostMaximized && (maximizedSection !== null || minimizedSections.cost);
@@ -3146,8 +3202,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                 }}
                                               >
                                                 {/* Primary Compact Row */}
-                                                <Row gutter={6} align="middle">
-                                                  <Col span={8}>
+                                                <Row gutter={[6, 6]} align="middle">
+                                                  <Col xs={24} sm={8}>
                                                     <Input
                                                       size="small"
                                                       placeholder={`Nama Item #${idx + 1}`}
@@ -3156,7 +3212,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                       style={{ fontSize: 12 }}
                                                     />
                                                   </Col>
-                                                  <Col span={3}>
+                                                  <Col xs={10} sm={3}>
                                                     <InputNumber
                                                       size="small"
                                                       style={{ width: '100%', fontSize: 12 }}
@@ -3166,7 +3222,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                       placeholder="Qty"
                                                     />
                                                   </Col>
-                                                  <Col span={3}>
+                                                  <Col xs={14} sm={3}>
                                                     <Select
                                                       size="small"
                                                       style={{ width: '100%', fontSize: 11.5 }}
@@ -3175,7 +3231,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                       options={COMMON_UOMS.map((u) => ({ label: u, value: u }))}
                                                     />
                                                   </Col>
-                                                  <Col span={4}>
+                                                  <Col xs={24} sm={4}>
                                                     <InputNumber
                                                       size="small"
                                                       style={{ width: '100%', fontSize: 12 }}
@@ -3187,12 +3243,12 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                       placeholder="Harga Satuan"
                                                     />
                                                   </Col>
-                                                  <Col span={3} style={{ textAlign: 'right' }}>
+                                                  <Col xs={14} sm={3} style={{ textAlign: 'right' }}>
                                                     <Text strong style={{ fontSize: 11.5, color: '#1d4ed8', whiteSpace: 'nowrap' }}>
                                                       Rp {(item.subtotal || 0).toLocaleString('id-ID')}
                                                     </Text>
                                                   </Col>
-                                                  <Col span={2} style={{ textAlign: 'center' }}>
+                                                  <Col xs={5} sm={2} style={{ textAlign: 'center' }}>
                                                     <Button
                                                       size="small"
                                                       type="link"
@@ -3208,7 +3264,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                       {isMapped || isOrphaned || isMissingWbs ? 'WBS' : 'Detail'}
                                                     </Button>
                                                   </Col>
-                                                  <Col span={1} style={{ textAlign: 'center' }}>
+                                                  <Col xs={5} sm={1} style={{ textAlign: 'center' }}>
                                                     <Button
                                                       size="small"
                                                       type="text"
@@ -3235,8 +3291,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                     }}
                                                   >
                                                     {/* Row 1: Resource Type, Cost Source, Rate Type */}
-                                                    <Row gutter={8} align="middle">
-                                                      <Col span={8}>
+                                                    <Row gutter={[8, 8]} align="middle">
+                                                      <Col xs={24} sm={8}>
                                                         <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
                                                           Tipe Sumber Daya:
                                                         </Text>
@@ -3250,7 +3306,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                           style={{ width: '100%', fontSize: 11 }}
                                                         />
                                                       </Col>
-                                                      <Col span={8}>
+                                                      <Col xs={24} sm={8}>
                                                         <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
                                                           Sumber Harga:
                                                         </Text>
@@ -3264,7 +3320,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                           style={{ width: '100%', fontSize: 11 }}
                                                         />
                                                       </Col>
-                                                      <Col span={8}>
+                                                      <Col xs={24} sm={8}>
                                                         <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
                                                           Tipe Tarif:
                                                         </Text>
@@ -3281,8 +3337,8 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                     </Row>
 
                                                     {/* Row 2: Cost Assignment Scope & Target */}
-                                                    <Row gutter={8} align="middle">
-                                                      <Col span={8}>
+                                                    <Row gutter={[8, 8]} align="middle">
+                                                      <Col xs={24} sm={8}>
                                                         <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
                                                           Scope Pemetaan Biaya:
                                                         </Text>
@@ -3298,7 +3354,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                           style={{ width: '100%', fontSize: 11 }}
                                                         />
                                                       </Col>
-                                                      <Col span={10}>
+                                                      <Col xs={24} sm={10}>
                                                         {isWbsScope ? (
                                                           <div>
                                                             <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
@@ -3358,7 +3414,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                                           </div>
                                                         )}
                                                       </Col>
-                                                      <Col span={6}>
+                                                      <Col xs={24} sm={6}>
                                                         <Text type="secondary" style={{ fontSize: 10, display: 'block', marginBottom: 2 }}>
                                                           Status Pemetaan:
                                                         </Text>
@@ -3507,10 +3563,12 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                   </Card>
                 );
               })()}
+              </div>
 
               {/* ========================================================================= */}
               {/* SECTION 2: WORK BREAKDOWN STRUCTURE (WBS)                                 */}
               {/* ========================================================================= */}
+              <div className={`${styles.sectionItem} ${mobileActiveSection === 'wbs' ? styles.sectionItemActive : ''}`}>
               {(() => {
                 const isWbsMaximized = maximizedSection === 'wbs';
                 const isWbsMinimized = !isWbsMaximized && (maximizedSection !== null || minimizedSections.wbs);
@@ -3801,28 +3859,33 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                           </Empty>
                         </Card>
                       ) : (
-                        <Table
-                          columns={wbsColumns}
-                          dataSource={filteredWbsData}
-                          rowKey="id"
-                          pagination={false}
-                          size="small"
-                          bordered
-                          expandable={{
-                            expandedRowKeys,
-                            onExpandedRowsChange: (keys) => setExpandedRowKeys(keys as React.Key[]),
-                            rowExpandable: (record) => Boolean(record.children && record.children.length > 0),
-                          }}
-                        />
+                        <div className={styles.internalScrollWrapper}>
+                          <Table
+                            columns={wbsColumns}
+                            dataSource={filteredWbsData}
+                            rowKey="id"
+                            pagination={false}
+                            size="small"
+                            bordered
+                            scroll={{ x: 'max-content' }}
+                            expandable={{
+                              expandedRowKeys,
+                              onExpandedRowsChange: (keys) => setExpandedRowKeys(keys as React.Key[]),
+                              rowExpandable: (record) => Boolean(record.children && record.children.length > 0),
+                            }}
+                          />
+                        </div>
                       )}
                     </div>
                   </Card>
                 );
               })()}
+              </div>
 
               {/* ========================================================================= */}
               {/* SECTION 3: SCHEDULE & GANTT                                               */}
               {/* ========================================================================= */}
+              <div className={`${styles.sectionItem} ${mobileActiveSection === 'schedule' ? styles.sectionItemActive : ''}`}>
               {(() => {
                 const isScheduleMaximized = maximizedSection === 'schedule';
                 const isScheduleMinimized = !isScheduleMaximized && (maximizedSection !== null || minimizedSections.schedule);
@@ -3995,32 +4058,36 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                             style={{ marginBottom: 12 }}
                           />
                         )}
-                        <ScheduleGanttTab
-                          charter={charter}
-                          wbsData={wbsData}
-                          initialScheduleData={scheduleData}
-                          onScheduleChange={(items, isUserEdit) => {
-                            setScheduleData(items);
-                            if (isUserEdit) {
-                              setIsScheduleServerSynced(false);
-                              setIsLegacyScheduleDraftDetected(true);
-                            }
-                          }}
-                          onNavigateToWbs={() => {
-                            if (maximizedSection === 'schedule') setMaximizedSection('wbs');
-                            setMinimizedSections((p) => ({ ...p, wbs: false }));
-                            document.getElementById('section-wbs')?.scrollIntoView({ behavior: 'smooth' });
-                          }}
-                        />
+                        <div className={styles.internalScrollWrapper}>
+                          <ScheduleGanttTab
+                            charter={charter}
+                            wbsData={wbsData}
+                            initialScheduleData={scheduleData}
+                            onScheduleChange={(items, isUserEdit) => {
+                              setScheduleData(items);
+                              if (isUserEdit) {
+                                setIsScheduleServerSynced(false);
+                                setIsLegacyScheduleDraftDetected(true);
+                              }
+                            }}
+                            onNavigateToWbs={() => {
+                              if (maximizedSection === 'schedule') setMaximizedSection('wbs');
+                              setMinimizedSections((p) => ({ ...p, wbs: false }));
+                              document.getElementById('section-wbs')?.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                          />
+                        </div>
                       </Spin>
                     )}
                   </Card>
                 );
               })()}
+              </div>
 
               {/* ========================================================================= */}
               {/* SECTION 4: KONDISI AWAL PROYEK (BASELINE PERENCANAAN)                     */}
               {/* ========================================================================= */}
+              <div className={`${styles.sectionItem} ${mobileActiveSection === 'initialCondition' ? styles.sectionItemActive : ''}`}>
               {(() => {
                 const isCondMaximized = maximizedSection === 'initialCondition';
                 const isCondMinimized = !isCondMaximized && (maximizedSection !== null || minimizedSections.initialCondition);
@@ -4187,14 +4254,14 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                                 {initialCondition.locationCondition || '-'}
                               </div>
                             </div>
-                            <Row gutter={12}>
-                              <Col span={12}>
+                            <Row gutter={[12, 8]}>
+                              <Col xs={24} sm={12}>
                                 <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>KENDALA AWAL:</Text>
                                 <div style={{ fontSize: 11.5, color: '#b45309' }}>
                                   {initialCondition.initialConstraints || '-'}
                                 </div>
                               </Col>
-                              <Col span={12}>
+                              <Col xs={24} sm={12}>
                                 <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>RISIKO AWAL:</Text>
                                 <div style={{ fontSize: 11.5, color: '#dc2626' }}>
                                   {initialCondition.initialRisks || '-'}
@@ -4240,6 +4307,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                   </Card>
                 );
               })()}
+              </div>
             </div>
           </div>
         </div>
@@ -4305,7 +4373,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
           </Form.Item>
 
           <Row gutter={12}>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 name="weightPercentage"
                 label={<Text strong style={{ fontSize: 12.5 }}>Bobot WBS (%)</Text>}
@@ -4314,7 +4382,7 @@ export const PmOperationalPlanModal: React.FC<PmOperationalPlanModalProps> = ({
                 <InputNumber min={0} max={100} step={0.5} precision={1} style={{ width: '100%' }} addonAfter="%" placeholder="10.0" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item label={<Text strong style={{ fontSize: 12.5 }}>Tingkat</Text>}>
                 <Input
                   disabled

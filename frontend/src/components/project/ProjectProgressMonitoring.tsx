@@ -785,7 +785,7 @@ export const ProjectProgressMonitoring: React.FC<ProjectProgressMonitoringProps>
         {workPackages.length === 0 ? (
           <div className={styles.emptyBox}>Tidak ada Work Package terdaftar pada baseline aktif.</div>
         ) : (
-          <div data-testid="work-package-table">
+          <div data-testid="work-package-table" className={styles.tableScrollWrapper}>
             <Table
               dataSource={workPackages}
               columns={wpColumns}
@@ -817,13 +817,16 @@ export const ProjectProgressMonitoring: React.FC<ProjectProgressMonitoringProps>
           {milestones.length === 0 ? (
             <div className={styles.emptyBox}>Tidak ada milestone pada baseline aktif proyek.</div>
           ) : (
-            <Table
-              dataSource={milestones}
-              columns={milestoneColumns}
-              rowKey="taskId"
-              pagination={false}
-              size="small"
-            />
+            <div className={styles.tableScrollWrapper} data-testid="milestone-table-wrapper">
+              <Table
+                dataSource={milestones}
+                columns={milestoneColumns}
+                rowKey="taskId"
+                pagination={false}
+                size="small"
+                scroll={{ x: 500 }}
+              />
+            </div>
           )}
         </div>
 

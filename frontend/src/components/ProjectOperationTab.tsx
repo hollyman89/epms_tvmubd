@@ -202,10 +202,49 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
   const [selectedWorkspaceProjectId, setSelectedWorkspaceProjectId] = useState<number | null>(null);
   const [selectedWorkspaceSection, setSelectedWorkspaceSection] = useState<'overview' | 'tasks' | 'monitoring' | 'gantt' | 'issue-risk' | 'closure'>('overview');
 
+  const handleTabChange = useCallback((key: string) => {
+    setActiveTab(key);
+    if (typeof window !== 'undefined') {
+      const currentUrl = new URL(window.location.href);
+      if (currentUrl.searchParams.get('tab') !== key) {
+        currentUrl.searchParams.set('tab', key);
+        currentUrl.searchParams.delete('subtab');
+        window.history.pushState({}, '', currentUrl.toString());
+      }
+    }
+  }, []);
+
   useEffect(() => {
-    const tabVal = searchParams.get('subtab') || searchParams.get('tab');
-    if (tabVal === '2' || tabVal === 'active' || tabVal === 'berjalan') {
-      setActiveTab('2');
+    const syncTabFromUrl = () => {
+      let rawVal: string | null = null;
+      if (typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        rawVal = urlParams.get('tab') || urlParams.get('subtab');
+      }
+      if (!rawVal) {
+        rawVal = searchParams.get('tab') || searchParams.get('subtab');
+      }
+      if (!rawVal) {
+        setActiveTab('1');
+        return;
+      }
+      const tabVal = rawVal.toLowerCase().trim();
+      if (tabVal === '1' || tabVal === 'waiting' || tabVal === 'kickoff' || tabVal === 'antrean') {
+        setActiveTab('1');
+      } else if (tabVal === '2' || tabVal === 'active' || tabVal === 'berjalan') {
+        setActiveTab('2');
+      } else if (tabVal === '3' || tabVal === 'completed' || tabVal === 'selesai' || tabVal === 'closed') {
+        setActiveTab('3');
+      }
+    };
+
+    syncTabFromUrl();
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('popstate', syncTabFromUrl);
+      return () => {
+        window.removeEventListener('popstate', syncTabFromUrl);
+      };
     }
   }, [searchParams]);
 
@@ -3007,6 +3046,474 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
     },
   ];
 
+  // Mobile Card Renderer: Waiting Kick-off Queue
+  const renderPendingMobileCard = (record: ProjectCharter) => {
+    const isRevision =
+      record.operationalPlanStatus === 'NEEDS_REVISION' ||
+      record.handoverStatus === 'PERLU_REVISI_PM';
+    const accentColor = isRevision ? '#EF4444' : '#2563EB';
+    const pm = resolvePmIdentity(record);
+    const mkt = resolveMarketingIdentity(record);
+    const { opTag, hoTag } = getKickoffQueueStatusTags(record, readinessMap);
+    const action = resolveNextAction(record, readinessMap, user?.sub, userRoles);
+
+    return (
+      <div key={`pending-${record.id || record.contractId}`} className={styles.mobileCard} data-testid={`mobile-pending-card-${record.id || record.contractId}`}>
+        <div className={styles.mobileCardAccentBar} style={{ backgroundColor: accentColor }} />
+        <div className={styles.mobileCardHeader}>
+          <div className={styles.mobileCardTitleRow}>
+            <span
+              className={styles.mobileCardTitle}
+              onClick={() => handleOpenDetailDrawer(record)}
+              role="button"
+              tabIndex={0}
+            >
+              {record.project_name}
+            </span>
+          </div>
+          <div>
+            <span
+              className={styles.mobileCardCodeBadge}
+              style={{
+                color: '#0891B2',
+                backgroundColor: '#ECFEFF',
+                border: '1px solid #A5F3FC',
+              }}
+            >
+              {record.project_code}
+            </span>
+          </div>
+          <div className={styles.mobileCardClientRow}>
+            <BankOutlined style={{ fontSize: 12, color: '#64748B', flexShrink: 0 }} />
+            <span>{record.customerName || '-'}</span>
+          </div>
+        </div>
+
+        {/* People Section */}
+        <div className={styles.mobileCardPeopleSection}>
+          <div className={styles.mobileCardPersonRow}>
+            <div
+              className={styles.mobileCardPersonAvatar}
+              style={{ backgroundColor: pm.isAssigned ? '#2563EB' : '#94A3B8' }}
+            >
+              {pm.isAssigned ? pm.initials : <UserOutlined style={{ fontSize: 11 }} />}
+            </div>
+            <div className={styles.mobileCardPersonInfo}>
+              <span className={styles.mobileCardPersonName}>{pm.name}</span>
+              <span className={styles.mobileCardPersonRole}>Project Manager</span>
+            </div>
+          </div>
+          <div className={styles.mobileCardPersonRow}>
+            <div
+              className={styles.mobileCardPersonAvatar}
+              style={{ backgroundColor: mkt.isAssigned ? '#475569' : '#94A3B8' }}
+            >
+              {mkt.isAssigned ? mkt.initials : <UserOutlined style={{ fontSize: 11 }} />}
+            </div>
+            <div className={styles.mobileCardPersonInfo}>
+              <span className={styles.mobileCardPersonName}>{mkt.name}</span>
+              <span className={styles.mobileCardPersonRole}>Marketing PIC</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Status / Readiness Section */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '2px 4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontSize: 11.5, color: '#64748B', fontWeight: 500 }}>Operational Plan</span>
+            <Tooltip title={opTag.tooltip}>{renderStatusChip(opTag)}</Tooltip>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontSize: 11.5, color: '#64748B', fontWeight: 500 }}>Handover</span>
+            <Tooltip title={hoTag.tooltip}>{renderStatusChip(hoTag)}</Tooltip>
+          </div>
+        </div>
+
+        {/* Actions Row */}
+        <div className={styles.mobileCardActionsRow}>
+          {action.mode === 'KICKOFF_BUTTON' && (
+            <Button
+              type="primary"
+              icon={<RocketOutlined />}
+              onClick={() => handleOpenFormalKickoffModal(record)}
+              className={styles.mobileCardPrimaryBtn}
+              style={{ backgroundColor: '#1677FF', borderColor: '#1677FF' }}
+            >
+              {action.buttonLabel || 'Kick Off Proyek'}
+            </Button>
+          )}
+          {action.mode === 'ASSIGN_PM_BUTTON' && (
+            <Button
+              type="primary"
+              icon={<UserOutlined />}
+              onClick={() => handleOpenClaimModal(record)}
+              className={styles.mobileCardPrimaryBtn}
+              style={{ backgroundColor: '#10B981', borderColor: '#10B981' }}
+            >
+              {action.buttonLabel || 'Tugaskan PM'}
+            </Button>
+          )}
+          {action.mode === 'OPERATIONAL_PLAN_BUTTON' && (
+            <Button
+              icon={<FileTextOutlined />}
+              onClick={() => handleOpenOperationalPlan(record)}
+              className={styles.mobileCardPrimaryBtn}
+              style={{ borderColor: '#93C5FD', color: '#1D4ED8', backgroundColor: '#EFF6FF' }}
+            >
+              {action.buttonLabel || 'Operational Plan'}
+            </Button>
+          )}
+          {action.mode === 'REVISION_PLAN_BUTTON' && (
+            <Button
+              danger
+              icon={<EditOutlined />}
+              onClick={() => handleOpenOperationalPlan(record)}
+              className={styles.mobileCardPrimaryBtn}
+            >
+              {action.buttonLabel || 'Revisi Plan'}
+            </Button>
+          )}
+          {action.mode === 'WAITING_PM_KICKOFF' && (
+            <div style={{ flex: 1, display: 'inline-flex', alignItems: 'center', gap: 6, color: '#475569', fontSize: 12.5, fontWeight: 500 }}>
+              <ClockCircleOutlined style={{ color: '#2563EB', fontSize: 13 }} />
+              <span>{action.waitingText}</span>
+            </div>
+          )}
+          {action.mode === 'WAITING_PMO_ASSIGN' && (
+            <div style={{ flex: 1, color: '#B45309', fontSize: 12, fontWeight: 500, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              <ClockCircleOutlined /> {action.waitingText}
+            </div>
+          )}
+          {action.mode === 'WAITING_GOVERNANCE' && (
+            <div style={{ flex: 1, color: '#1D4ED8', fontSize: 12 }}>
+              <ClockCircleOutlined style={{ marginRight: 4, color: '#2563EB' }} />
+              <span>{action.waitingText}: <strong>{action.actorName}</strong></span>
+            </div>
+          )}
+          <Button
+            icon={<EyeOutlined />}
+            onClick={() => handleOpenDetailDrawer(record)}
+            className={styles.mobileCardSecondaryBtn}
+          >
+            Detail
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Mobile Card Renderer: Active Projects
+  const renderActiveMobileCard = (record: ProjectCharter) => {
+    const pm = resolvePmIdentity(record);
+    const mkt = resolveMarketingIdentity(record);
+    const {
+      plannedText,
+      plannedPercent,
+      actualText,
+      actualPercent,
+      varianceText,
+      varianceTone,
+    } = resolvePlanVsActual((record as any).control, record.overallProgress);
+    const health = resolveOperationalHealth((record as any).control);
+    const schedule = resolveSchedule((record as any).control);
+    const action = resolveActiveNextAction({
+      project: record,
+      user,
+      userRoles,
+    });
+
+    const toneStyles: Record<string, { bg: string; border: string; color: string }> = {
+      blue: { bg: '#EFF6FF', border: '#BFDBFE', color: '#1D4ED8' },
+      green: { bg: '#F0FDF4', border: '#BBF7D0', color: '#15803D' },
+      red: { bg: '#FEF2F2', border: '#FECACA', color: '#DC2626' },
+      slate: { bg: '#F8FAFC', border: '#E2E8F0', color: '#64748B' },
+    };
+    const healthStyle = toneStyles[health.tone] || toneStyles.slate;
+    const varColor =
+      varianceTone === 'red'
+        ? '#DC2626'
+        : varianceTone === 'green'
+        ? '#16A34A'
+        : '#64748B';
+
+    return (
+      <div key={`active-${record.id || record.projectId}`} className={styles.mobileCard} data-testid={`mobile-active-card-${record.id || record.projectId}`}>
+        <div className={styles.mobileCardAccentBar} style={{ backgroundColor: '#2563EB' }} />
+        <div className={styles.mobileCardHeader}>
+          <div className={styles.mobileCardTitleRow}>
+            <span
+              className={styles.mobileCardTitle}
+              onClick={() => handleOpenProjectWorkspace(record, 'overview')}
+              role="button"
+              tabIndex={0}
+            >
+              {record.project_name}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span
+              className={styles.mobileCardCodeBadge}
+              style={{
+                color: '#0891B2',
+                backgroundColor: '#ECFEFF',
+                border: '1px solid #A5F3FC',
+              }}
+            >
+              {record.project_code}
+            </span>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                fontSize: 10.5,
+                fontWeight: 700,
+                borderRadius: 4,
+                padding: '1px 6px',
+                backgroundColor: healthStyle.bg,
+                border: `1px solid ${healthStyle.border}`,
+                color: healthStyle.color,
+              }}
+            >
+              {health.iconType === 'ahead' && <RiseOutlined style={{ fontSize: 10 }} />}
+              {health.iconType === 'on_plan' && <CheckCircleFilled style={{ fontSize: 10 }} />}
+              {health.iconType === 'behind' && <ExclamationCircleFilled style={{ fontSize: 10 }} />}
+              {health.iconType === 'unavailable' && <ClockCircleOutlined style={{ fontSize: 10 }} />}
+              {health.label}
+            </span>
+          </div>
+          <div className={styles.mobileCardClientRow}>
+            <BankOutlined style={{ fontSize: 12, color: '#64748B', flexShrink: 0 }} />
+            <span>{record.customerName || '-'}</span>
+          </div>
+        </div>
+
+        {/* People Section */}
+        <div className={styles.mobileCardPeopleSection}>
+          <div className={styles.mobileCardPersonRow}>
+            <div
+              className={styles.mobileCardPersonAvatar}
+              style={{ backgroundColor: pm.isAssigned ? '#2563EB' : '#94A3B8' }}
+            >
+              {pm.isAssigned ? pm.initials : <UserOutlined style={{ fontSize: 11 }} />}
+            </div>
+            <div className={styles.mobileCardPersonInfo}>
+              <span className={styles.mobileCardPersonName}>{pm.name}</span>
+              <span className={styles.mobileCardPersonRole}>Project Manager</span>
+            </div>
+          </div>
+          <div className={styles.mobileCardPersonRow}>
+            <div
+              className={styles.mobileCardPersonAvatar}
+              style={{ backgroundColor: '#0EA5E9' }}
+            >
+              {mkt.initials || <UserOutlined style={{ fontSize: 11 }} />}
+            </div>
+            <div className={styles.mobileCardPersonInfo}>
+              <span className={styles.mobileCardPersonName}>{mkt.name}</span>
+              <span className={styles.mobileCardPersonRole}>Marketing PIC</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress Plan vs Actual */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, background: '#F8FAFC', borderRadius: 8, padding: '10px 12px', border: '1px solid #F1F5F9' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontSize: 11.5, color: '#64748B', fontWeight: 500, width: 50 }}>Rencana</span>
+            <div style={{ flex: 1, maxWidth: 120 }}>
+              <Progress percent={plannedPercent ?? 0} size="small" showInfo={false} strokeColor="#3B82F6" trailColor="#E2E8F0" style={{ margin: 0 }} />
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', width: 40, textAlign: 'right' }}>{plannedText}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ fontSize: 11.5, color: '#64748B', fontWeight: 500, width: 50 }}>Aktual</span>
+            <div style={{ flex: 1, maxWidth: 120 }}>
+              <Progress percent={actualPercent ?? 0} size="small" showInfo={false} strokeColor="#0D9488" trailColor="#E2E8F0" style={{ margin: 0 }} />
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', width: 40, textAlign: 'right' }}>{actualText}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 2, borderTop: '1px dashed #E2E8F0' }}>
+            <span style={{ fontSize: 11.5, color: '#64748B', fontWeight: 500 }}>Deviasi Progres</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: varColor }}>{varianceText}</span>
+          </div>
+        </div>
+
+        {/* Schedule Info */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px', fontSize: 11.5 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#64748B' }}>
+            <CalendarOutlined style={{ fontSize: 11 }} />
+            <span>Target: <strong>{schedule.plannedFinishText}</strong></span>
+          </div>
+          <div>
+            {schedule.overdueTone === 'red' ? (
+              <span style={{ color: '#DC2626', fontWeight: 600 }}>{schedule.overdueText}</span>
+            ) : schedule.overdueTone === 'green' ? (
+              <span style={{ color: '#16A34A', fontWeight: 500 }}>0 Terlambat</span>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Actions Row */}
+        <div className={styles.mobileCardActionsRow}>
+          {action.mode === 'UPDATE_PROGRESS_BUTTON' && (
+            <Button
+              type="primary"
+              icon={<EditOutlined />}
+              onClick={() => handleOpenDetailDrawer(record, 'progress')}
+              className={styles.mobileCardPrimaryBtn}
+              style={{ backgroundColor: '#2563EB', borderColor: '#2563EB' }}
+            >
+              Update Progress
+            </Button>
+          )}
+          {action.mode === 'REVIEW_PROGRESS_BUTTON' && (
+            <Button
+              type="primary"
+              icon={<CheckSquareOutlined />}
+              onClick={() => handleOpenDetailDrawer(record, 'progress')}
+              className={styles.mobileCardPrimaryBtn}
+              style={{ backgroundColor: '#2563EB', borderColor: '#2563EB' }}
+            >
+              Review Progress
+            </Button>
+          )}
+          {action.mode === 'ASSIGN_PM_BUTTON' && (
+            <Button
+              type="primary"
+              icon={<UserOutlined />}
+              onClick={() => handleOpenClaimModal(record)}
+              className={styles.mobileCardPrimaryBtn}
+            >
+              Tugaskan PM
+            </Button>
+          )}
+          <Button
+            icon={<AppstoreOutlined />}
+            onClick={() => handleOpenProjectWorkspace(record, 'overview')}
+            className={action.mode ? styles.mobileCardSecondaryBtn : styles.mobileCardPrimaryBtn}
+            style={!action.mode ? { backgroundColor: '#2563EB', borderColor: '#2563EB', color: '#FFFFFF' } : undefined}
+          >
+            Workspace
+          </Button>
+          <Button
+            icon={<EyeOutlined />}
+            onClick={() => handleOpenDetailDrawer(record)}
+            className={styles.mobileCardSecondaryBtn}
+          >
+            Detail
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
+  // Mobile Card Renderer: Completed Projects
+  const renderCompletedMobileCard = (record: ProjectCharter) => {
+    const pm = resolvePmIdentity(record);
+    const mkt = resolveMarketingIdentity(record);
+    const cStatus = (record as any).closureStatus || 'APPROVED';
+    const rawDate = (record as any).closedAt || (record as any).actualFinishAt || record.endDate;
+    const formattedDate = rawDate ? dayjs(rawDate).format('DD MMM YYYY') : '-';
+
+    return (
+      <div key={`completed-${record.id || record.projectId}`} className={styles.mobileCard} data-testid={`mobile-completed-card-${record.id || record.projectId}`}>
+        <div className={styles.mobileCardAccentBar} style={{ backgroundColor: '#10B981' }} />
+        <div className={styles.mobileCardHeader}>
+          <div className={styles.mobileCardTitleRow}>
+            <span
+              className={styles.mobileCardTitle}
+              style={{ color: '#047857' }}
+              onClick={() => handleOpenDetailDrawer(record)}
+              role="button"
+              tabIndex={0}
+            >
+              {record.project_name}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span
+              className={styles.mobileCardCodeBadge}
+              style={{
+                color: '#065F46',
+                backgroundColor: '#ECFDF5',
+                border: '1px solid #A7F3D0',
+              }}
+            >
+              {record.project_code}
+            </span>
+            <Tag color="success" style={{ borderRadius: 4, margin: 0, fontWeight: 700, fontSize: 10.5 }}>
+              CLOSED
+            </Tag>
+            <Tag color="blue" style={{ borderRadius: 4, margin: 0, fontWeight: 700, fontSize: 10.5 }}>
+              {cStatus}
+            </Tag>
+          </div>
+          <div className={styles.mobileCardClientRow}>
+            <BankOutlined style={{ fontSize: 12, color: '#64748B', flexShrink: 0 }} />
+            <span>{record.customerName || '-'}</span>
+          </div>
+        </div>
+
+        {/* People Section */}
+        <div className={styles.mobileCardPeopleSection}>
+          <div className={styles.mobileCardPersonRow}>
+            <div
+              className={styles.mobileCardPersonAvatar}
+              style={{ backgroundColor: pm.isAssigned ? '#2563EB' : '#94A3B8' }}
+            >
+              {pm.isAssigned ? pm.initials : <UserOutlined style={{ fontSize: 11 }} />}
+            </div>
+            <div className={styles.mobileCardPersonInfo}>
+              <span className={styles.mobileCardPersonName}>{pm.name}</span>
+              <span className={styles.mobileCardPersonRole}>Project Manager</span>
+            </div>
+          </div>
+          <div className={styles.mobileCardPersonRow}>
+            <div
+              className={styles.mobileCardPersonAvatar}
+              style={{ backgroundColor: '#0EA5E9' }}
+            >
+              {mkt.initials || <UserOutlined style={{ fontSize: 11 }} />}
+            </div>
+            <div className={styles.mobileCardPersonInfo}>
+              <span className={styles.mobileCardPersonName}>{mkt.name}</span>
+              <span className={styles.mobileCardPersonRole}>Marketing PIC</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Closure Metadata */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 8px', fontSize: 11.5, background: '#F0FDF4', borderRadius: 6, border: '1px solid #BBF7D0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#065F46', fontWeight: 600 }}>
+            <CheckCircleOutlined style={{ color: '#059669' }} />
+            <span>Selesai: {formattedDate}</span>
+          </div>
+          <span style={{ color: '#059669', fontWeight: 700 }}>100% Selesai</span>
+        </div>
+
+        {/* Actions Row */}
+        <div className={styles.mobileCardActionsRow}>
+          <Button
+            type="primary"
+            icon={<EyeOutlined />}
+            onClick={() => handleOpenDetailDrawer(record)}
+            className={styles.mobileCardPrimaryBtn}
+            style={{ backgroundColor: '#059669', borderColor: '#059669' }}
+          >
+            Lihat Detail
+          </Button>
+          <Button
+            icon={<AppstoreOutlined />}
+            onClick={() => handleOpenProjectWorkspace(record, 'overview')}
+            className={styles.mobileCardSecondaryBtn}
+          >
+            Workspace
+          </Button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className={styles.workspaceContainer}>
       {selectedWorkspaceProjectId ? (
@@ -3037,7 +3544,10 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
           {/* Header Metrics */}
       <Row gutter={[16, 16]} className={styles.metricsRow}>
         <Col xs={24} sm={12} lg={8}>
-          <div className={styles.summaryCard}>
+          <div
+            className={styles.summaryCard}
+            data-testid="summary-card-kickoff"
+          >
             <div className={styles.cardHeader}>
               <div className={styles.iconSurface} style={{ background: '#EFF6FF', color: '#2563EB' }}>
                 <ClockCircleOutlined />
@@ -3057,7 +3567,10 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
         </Col>
 
         <Col xs={24} sm={12} lg={8}>
-          <div className={styles.summaryCard}>
+          <div
+            className={styles.summaryCard}
+            data-testid="summary-card-active"
+          >
             <div className={styles.cardHeader}>
               <div className={styles.iconSurface} style={{ background: '#F0FDF4', color: '#16A34A' }}>
                 <ProjectOutlined />
@@ -3077,7 +3590,10 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
         </Col>
 
         <Col xs={24} sm={24} lg={8}>
-          <div className={styles.summaryCard}>
+          <div
+            className={styles.summaryCard}
+            data-testid="summary-card-completed"
+          >
             <div className={styles.cardHeader}>
               <div className={styles.iconSurface} style={{ background: '#ECFDF5', color: '#059669', border: '1px solid #A7F3D0' }}>
                 <CheckCircleOutlined />
@@ -3099,14 +3615,27 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
 
       {/* Main Tabs Workspace */}
       <div className={styles.tabsCard}>
+        {/* Dedicated Mobile Toolbar (search only, inert filter removed) */}
+        <div className={styles.mobileToolbar}>
+          <Input
+            prefix={<SearchOutlined style={{ color: '#94A3B8' }} />}
+            placeholder="Cari proyek, klien, atau PM..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            allowClear
+            style={{ width: '100%', borderRadius: 8, height: 36, fontSize: 13 }}
+            data-testid="mobile-project-search"
+          />
+        </div>
+
         <Tabs
           data-testid="project-delivery-tabs"
           className={styles.deliveryTabs}
           activeKey={activeTab}
-          onChange={setActiveTab}
+          onChange={handleTabChange}
           tabBarExtraContent={{
             right: (
-              <Space size={8} style={{ paddingBottom: 6 }}>
+              <div className={styles.desktopExtraContent}>
                 <Input
                   prefix={<SearchOutlined style={{ color: '#94A3B8' }} />}
                   placeholder="Cari proyek, klien, atau PM..."
@@ -3114,23 +3643,19 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
                   onChange={(e) => setSearchText(e.target.value)}
                   allowClear
                   style={{ width: 230, borderRadius: 6, height: 32, fontSize: 13 }}
+                  data-testid="desktop-project-search"
                 />
-                <Button
-                  icon={<FilterOutlined />}
-                  style={{ borderRadius: 6, height: 32, fontSize: 13, color: '#475569', borderColor: '#CBD5E1' }}
-                >
-                  Filter
-                </Button>
-              </Space>
+              </div>
             ),
           }}
           items={[
             {
               key: '1',
               label: (
-                <Space size={6}>
+                <Space size={6} className={styles.tabHeaderContent}>
                   <ClockCircleOutlined />
-                  <span>Antrean Kick-off Charter</span>
+                  <span className={styles.tabTextFull}>Antrean Kick-off Charter</span>
+                  <span className={styles.tabTextShort}>Kick-off</span>
                   <span className={`${styles.tabBadge} ${activeTab === '1' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
                     {pendingKickoff.length}
                   </span>
@@ -3138,30 +3663,47 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
               ),
               children: (
                 <div className={styles.tableContainer}>
-                  <Table
-                    className={styles.deliveryTable}
-                    dataSource={filteredPendingKickoff}
-                    columns={pendingColumns}
-                    rowKey="id"
-                    loading={loading}
-                    pagination={false}
-                    size="middle"
-                    scroll={{ x: 1100 }}
-                    rowClassName={(record: ProjectCharter) => {
-                      const cidNum = contractIdParam ? Number(contractIdParam) : null;
-                      const isFocused = cidNum && (Number(record.contractId) === cidNum || Number(record.id) === cidNum);
-                      return isFocused ? 'ant-table-row-selected' : '';
-                    }}
-                  />
+                  {/* Desktop Table View */}
+                  <div className={styles.desktopTableWrapper}>
+                    <Table
+                      className={styles.deliveryTable}
+                      dataSource={filteredPendingKickoff}
+                      columns={pendingColumns}
+                      rowKey="id"
+                      loading={loading}
+                      pagination={false}
+                      size="middle"
+                      scroll={{ x: 1100 }}
+                      rowClassName={(record: ProjectCharter) => {
+                        const cidNum = contractIdParam ? Number(contractIdParam) : null;
+                        const isFocused = cidNum && (Number(record.contractId) === cidNum || Number(record.id) === cidNum);
+                        return isFocused ? 'ant-table-row-selected' : '';
+                      }}
+                    />
+                  </div>
+                  {/* Mobile Card List View */}
+                  <div className={styles.mobileCardsWrapper} data-testid="mobile-pending-cards">
+                    {filteredPendingKickoff.length === 0 ? (
+                      <div style={{ padding: '24px 0', textAlign: 'center' }}>
+                        <Empty
+                          description="Tidak ada SPK dalam antrean kick-off"
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        />
+                      </div>
+                    ) : (
+                      filteredPendingKickoff.map((record) => renderPendingMobileCard(record))
+                    )}
+                  </div>
                 </div>
               ),
             },
             {
               key: '2',
               label: (
-                <Space size={6}>
+                <Space size={6} className={styles.tabHeaderContent}>
                   <ProjectOutlined />
-                  <span>Daftar Proyek Berjalan</span>
+                  <span className={styles.tabTextFull}>Daftar Proyek Berjalan</span>
+                  <span className={styles.tabTextShort}>Berjalan</span>
                   <span className={`${styles.tabBadge} ${activeTab === '2' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
                     {activeProjects.length}
                   </span>
@@ -3169,25 +3711,42 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
               ),
               children: (
                 <div className={styles.tableContainer} data-testid="active-projects-table">
-                  <Table
-                    className={styles.deliveryTable}
-                    dataSource={filteredActiveProjects}
-                    columns={activeColumns}
-                    rowKey="id"
-                    loading={loading}
-                    pagination={false}
-                    size="middle"
-                    scroll={{ x: 1150 }}
-                  />
+                  {/* Desktop Table View */}
+                  <div className={styles.desktopTableWrapper}>
+                    <Table
+                      className={styles.deliveryTable}
+                      dataSource={filteredActiveProjects}
+                      columns={activeColumns}
+                      rowKey="id"
+                      loading={loading}
+                      pagination={false}
+                      size="middle"
+                      scroll={{ x: 1150 }}
+                    />
+                  </div>
+                  {/* Mobile Card List View */}
+                  <div className={styles.mobileCardsWrapper} data-testid="mobile-active-cards">
+                    {filteredActiveProjects.length === 0 ? (
+                      <div style={{ padding: '24px 0', textAlign: 'center' }}>
+                        <Empty
+                          description="Tidak ada proyek berjalan"
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        />
+                      </div>
+                    ) : (
+                      filteredActiveProjects.map((record) => renderActiveMobileCard(record))
+                    )}
+                  </div>
                 </div>
               ),
             },
             {
               key: '3',
               label: (
-                <Space size={6}>
+                <Space size={6} className={styles.tabHeaderContent}>
                   <CheckCircleOutlined />
-                  <span>Proyek Selesai</span>
+                  <span className={styles.tabTextFull}>Proyek Selesai</span>
+                  <span className={styles.tabTextShort}>Selesai</span>
                   <span className={`${styles.tabBadge} ${activeTab === '3' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
                     {completedProjects.length}
                   </span>
@@ -3195,16 +3754,32 @@ export const ProjectOperationTab: React.FC<ProjectOperationTabProps> = ({ refres
               ),
               children: (
                 <div className={styles.tableContainer} data-testid="completed-projects-table">
-                  <Table
-                    className={styles.deliveryTable}
-                    dataSource={filteredCompletedProjects}
-                    columns={completedColumns}
-                    rowKey="id"
-                    loading={loading}
-                    pagination={false}
-                    size="middle"
-                    scroll={{ x: 1150 }}
-                  />
+                  {/* Desktop Table View */}
+                  <div className={styles.desktopTableWrapper}>
+                    <Table
+                      className={styles.deliveryTable}
+                      dataSource={filteredCompletedProjects}
+                      columns={completedColumns}
+                      rowKey="id"
+                      loading={loading}
+                      pagination={false}
+                      size="middle"
+                      scroll={{ x: 1150 }}
+                    />
+                  </div>
+                  {/* Mobile Card List View */}
+                  <div className={styles.mobileCardsWrapper} data-testid="mobile-completed-cards">
+                    {filteredCompletedProjects.length === 0 ? (
+                      <div style={{ padding: '24px 0', textAlign: 'center' }}>
+                        <Empty
+                          description="Tidak ada proyek selesai"
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        />
+                      </div>
+                    ) : (
+                      filteredCompletedProjects.map((record) => renderCompletedMobileCard(record))
+                    )}
+                  </div>
                 </div>
               ),
             },
