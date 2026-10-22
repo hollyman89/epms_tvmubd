@@ -564,7 +564,10 @@ export const SalesPipelinePage = () => {
       render: (_: any, record: any) => (
         <Button 
           size="small" 
-          onClick={() => router.push(`/sales/tenders/${record.id}`)}
+          onClick={() => {
+            setSelectedTenderForDetail(record);
+            setDetailDrawerOpen(true);
+          }}
           icon={<EyeOutlined style={{ color: '#2563EB', fontSize: 12 }} />}
           style={{
             borderRadius: 6,
@@ -582,7 +585,7 @@ export const SalesPipelinePage = () => {
         </Button>
       ) 
     }
-  ], [router]);
+  ], []);
 
   const updateTenderStatus = async (id: number, status: string) => {
     try {
