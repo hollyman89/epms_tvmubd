@@ -68,7 +68,7 @@ import {
 import { apiClient } from '@/lib/axios';
 import { queryClient, updateAllTenderCaches, appendTenderToCache } from '../lib/queryClient';
 import { peekPendingSalesDrawerRequest } from '@/lib/salesNavigation';
-import { evaluateMarketingActionItem } from '@/lib/marketingActionItemPredicate';
+import { evaluateMarketingActionItem, MarketingActionConditionType } from '@/lib/marketingActionItemPredicate';
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -464,23 +464,56 @@ export const SalesPipelinePage = () => {
   }, [activeTendersData]);
 
   const actionItemsData = useMemo(() => {
-    const items = activeTendersData.filter((t: any) => {
-      const evaluation = evaluateMarketingActionItem(t);
-      return evaluation.isActionItem;
-    });
+    const items = activeTendersData
+      .map((t: any) => {
+        const evaluation = evaluateMarketingActionItem(t);
+        return {
+          ...t,
+          actionItemEvaluation: evaluation,
+        };
+      })
+      .filter((t: any) => t.actionItemEvaluation?.isActionItem);
+
+    const conditionRank: Record<string, number> = {
+      [MarketingActionConditionType.OVERDUE]: 1,
+      [MarketingActionConditionType.UPCOMING_DEADLINE]: 2,
+      [MarketingActionConditionType.STUCK]: 3,
+    };
 
     return items.sort((a: any, b: any) => {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const dateA = a.bid_submission_deadline ? new Date(a.bid_submission_deadline) : new Date(8640000000000000);
-      const dateB = b.bid_submission_deadline ? new Date(b.bid_submission_deadline) : new Date(8640000000000000);
-      const isOverdueA = dateA < today;
-      const isOverdueB = dateB < today;
+      const condA = a.actionItemEvaluation?.conditionType || '';
+      const condB = b.actionItemEvaluation?.conditionType || '';
+      const rankA = conditionRank[condA] || 99;
+      const rankB = conditionRank[condB] || 99;
 
-      if (isOverdueA && !isOverdueB) return -1;
-      if (!isOverdueA && isOverdueB) return 1;
-      return dateA.getTime() - dateB.getTime();
-    }).slice(0, 10);
+      if (rankA !== rankB) {
+        return rankA - rankB;
+      }
+
+      // 1. OVERDUE: longest overdue first (higher daysOverdue first)
+      if (condA === MarketingActionConditionType.OVERDUE) {
+        const diff = (b.actionItemEvaluation?.daysOverdue || 0) - (a.actionItemEvaluation?.daysOverdue || 0);
+        if (diff !== 0) return diff;
+      }
+
+      // 2. UPCOMING_DEADLINE: nearest deadline first (lower daysRemaining first)
+      if (condA === MarketingActionConditionType.UPCOMING_DEADLINE) {
+        const diff = (a.actionItemEvaluation?.daysRemaining || 0) - (b.actionItemEvaluation?.daysRemaining || 0);
+        if (diff !== 0) return diff;
+      }
+
+      // 3. STUCK: longest stuck first (higher stuckDays first)
+      if (condA === MarketingActionConditionType.STUCK) {
+        const diff = (b.actionItemEvaluation?.stuckDays || 0) - (a.actionItemEvaluation?.stuckDays || 0);
+        if (diff !== 0) return diff;
+      }
+
+      const dateA = a.bid_submission_deadline ? new Date(a.bid_submission_deadline).getTime() : 8640000000000000;
+      const dateB = b.bid_submission_deadline ? new Date(b.bid_submission_deadline).getTime() : 8640000000000000;
+      if (dateA !== dateB) return dateA - dateB;
+
+      return (b.id || 0) - (a.id || 0);
+    });
   }, [activeTendersData]);
 
   const actionItemsColumns = useMemo(() => [
@@ -510,6 +543,55 @@ export const SalesPipelinePage = () => {
       key: 'stage',
       render: (val: string) => renderStageBadge(val),
     },
+    {
+      title: 'Condition & Urgency',
+      key: 'condition',
+      width: 190,
+      render: (_: any, record: any) => {
+        const evalData = record.actionItemEvaluation || evaluateMarketingActionItem(record);
+        if (!evalData || !evalData.conditionType) return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
+
+        const isOverdue = evalData.conditionType === MarketingActionConditionType.OVERDUE;
+        const isUpcoming = evalData.conditionType === MarketingActionConditionType.UPCOMING_DEADLINE;
+
+        const tagConfig = isOverdue
+          ? { color: '#DC2626', bg: '#FEF2F2', border: '#FECACA', text: 'OVERDUE' }
+          : isUpcoming
+          ? { color: '#D97706', bg: '#FFFBEB', border: '#FDE68A', text: 'UPCOMING' }
+          : { color: '#4F46E5', bg: '#EEF2FF', border: '#C7D2FE', text: 'STUCK' };
+
+        const urgencyLabel = isOverdue
+          ? `Lewat jatuh tempo ${evalData.daysOverdue} hari`
+          : isUpcoming
+          ? (evalData.daysRemaining === 0 ? 'Jatuh tempo hari ini' : `Deadline ${evalData.daysRemaining} hari lagi`)
+          : `Tidak ada progress ${evalData.stuckDays} hari`;
+
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                fontSize: 10.5,
+                fontWeight: 700,
+                color: tagConfig.color,
+                backgroundColor: tagConfig.bg,
+                border: `1px solid ${tagConfig.border}`,
+                borderRadius: 4,
+                padding: '1px 6px',
+                width: 'fit-content',
+                letterSpacing: 0.5,
+              }}
+            >
+              {tagConfig.text}
+            </span>
+            <span style={{ fontSize: 11.5, color: '#475569', fontWeight: 500 }}>
+              {urgencyLabel}
+            </span>
+          </div>
+        );
+      },
+    },
     { 
       title: 'Bid Submission Deadline', 
       key: 'deadline', 
@@ -517,11 +599,6 @@ export const SalesPipelinePage = () => {
         if (!record.bid_submission_deadline) return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
         const deadlineDate = new Date(record.bid_submission_deadline);
         deadlineDate.setHours(0, 0, 0, 0);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const stage = record.stage?.toUpperCase();
-        const isOverdue = deadlineDate < today && !['WON', 'LOST'].includes(stage);
-        const daysOverdue = isOverdue ? Math.floor((today.getTime() - deadlineDate.getTime()) / (1000 * 60 * 60 * 24)) : 0;
         const formattedDate = deadlineDate.toLocaleDateString('id-ID', {
           day: '2-digit',
           month: '2-digit',
@@ -529,31 +606,9 @@ export const SalesPipelinePage = () => {
         });
 
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 140 }}>
-            <span style={{ fontSize: 12.5, color: '#334155', fontWeight: 500, whiteSpace: 'nowrap' }}>
-              {formattedDate}
-            </span>
-            {isOverdue && (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: '#DC2626',
-                  backgroundColor: '#FEF2F2',
-                  border: '1px solid #FECACA',
-                  borderRadius: 4,
-                  padding: '1px 6px',
-                  width: 'fit-content',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Lewat jatuh tempo ({daysOverdue} hari)
-              </span>
-            )}
-          </div>
+          <span style={{ fontSize: 12.5, color: '#334155', fontWeight: 500, whiteSpace: 'nowrap' }}>
+            {formattedDate}
+          </span>
         );
       } 
     },
