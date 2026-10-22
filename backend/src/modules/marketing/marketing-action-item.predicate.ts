@@ -1,3 +1,5 @@
+import { toJakartaDateString, diffInJakartaCalendarDays } from './tender-followup.helper';
+
 export enum MarketingActionConditionType {
   OVERDUE = "OVERDUE",
   UPCOMING_DEADLINE = "UPCOMING_DEADLINE",
@@ -28,9 +30,9 @@ export interface TenderActionItemInput {
  *
  * Invariants:
  * 1. WON and LOST tenders (both stage and status) are strictly EXCLUDED.
- * 2. OVERDUE: bid_submission_deadline is prior to current calendar day.
- * 3. UPCOMING_DEADLINE: stage in QUALIFICATION, NEGOTIATION, PROPOSAL and deadline within 14 days (0 <= diffDays <= 14).
- * 4. STUCK: probability_percentage is 0% and tender age > 7 days.
+ * 2. OVERDUE: bid_submission_deadline is prior to current calendar day in Asia/Jakarta.
+ * 3. UPCOMING_DEADLINE: stage in QUALIFICATION, NEGOTIATION, PROPOSAL and deadline within 14 calendar days (0 <= diffDays <= 14).
+ * 4. STUCK: probability_percentage is 0% and tender age > 7 calendar days.
  * 5. Deterministic priority ordering: OVERDUE > UPCOMING_DEADLINE > STUCK.
  */
 export function evaluateMarketingActionItem(
@@ -50,19 +52,13 @@ export function evaluateMarketingActionItem(
     return { isActionItem: false, conditionType: null };
   }
 
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
+  const todayStr = toJakartaDateString(now);
 
-  // 2. Condition A: OVERDUE (Deadline strictly before today 00:00:00)
+  // 2. Condition A: OVERDUE (Deadline strictly before today in Asia/Jakarta)
   if (tender.bid_submission_deadline) {
-    const deadline = new Date(tender.bid_submission_deadline);
-    const deadlineDay = new Date(deadline);
-    deadlineDay.setHours(0, 0, 0, 0);
-
-    if (deadlineDay < today) {
-      const daysOverdue = Math.floor(
-        (today.getTime() - deadlineDay.getTime()) / (1000 * 60 * 60 * 24),
-      );
+    const deadlineStr = toJakartaDateString(tender.bid_submission_deadline);
+    if (deadlineStr < todayStr) {
+      const daysOverdue = diffInJakartaCalendarDays(todayStr, deadlineStr);
       return {
         isActionItem: true,
         conditionType: MarketingActionConditionType.OVERDUE,
@@ -78,9 +74,8 @@ export function evaluateMarketingActionItem(
     stage === "NEGOTIATION" ||
     stage === "PROPOSAL";
   if (isQualOrNegOrProposal && tender.bid_submission_deadline) {
-    const deadline = new Date(tender.bid_submission_deadline);
-    const diffTime = deadline.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const deadlineStr = toJakartaDateString(tender.bid_submission_deadline);
+    const diffDays = diffInJakartaCalendarDays(deadlineStr, todayStr);
 
     if (diffDays <= 14 && diffDays >= 0) {
       return {
@@ -103,10 +98,8 @@ export function evaluateMarketingActionItem(
       : null;
 
   if (prob === 0) {
-    const rawDate = tender.created_at || tender.createdAt;
-    const created = rawDate ? new Date(rawDate) : now;
-    const diffTime = now.getTime() - created.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    const rawDate = tender.created_at || tender.createdAt || now;
+    const diffDays = diffInJakartaCalendarDays(todayStr, rawDate);
 
     if (diffDays > 7) {
       return {

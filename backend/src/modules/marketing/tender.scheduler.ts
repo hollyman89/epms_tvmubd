@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, EntityManager } from 'typeorm';
+import { Repository, LessThan, EntityManager, DataSource } from 'typeorm';
 import { randomUUID } from 'crypto';
 import { Tender, TenderStatus, TenderStage } from '../../entities/tender.entity';
 import { Contract, LegalStatus } from '../../entities/contract.entity';
@@ -9,6 +9,15 @@ import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
 import { BusinessEvent } from '../../shared/contracts/business-event.contract';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { emitLegalQueueUpdated } from '../../shared/helpers/legal-event.helper';
+import {
+  evaluateMarketingActionItem,
+  MarketingActionConditionType,
+} from './marketing-action-item.predicate';
+import {
+  toJakartaDateString,
+  diffInJakartaCalendarDays,
+  calculateInactivityReferenceDate,
+} from './tender-followup.helper';
 
 @Injectable()
 export class TenderScheduler {
@@ -18,7 +27,12 @@ export class TenderScheduler {
     @InjectRepository(Tender)
     private readonly tenderRepo: Repository<Tender>,
     private readonly eventEmitter: EventEmitter2,
+    @Optional() private readonly dataSource?: DataSource,
   ) {}
+
+  private getDataSource(): DataSource {
+    return this.dataSource || (this.tenderRepo.manager.connection as DataSource);
+  }
 
   /**
    * Helper: Save canonical BusinessEvent to transactional Outbox
@@ -502,6 +516,407 @@ export class TenderScheduler {
         entityName: 'tenders',
         reason: 'Approval timeout (> 2 jam), diekskalasi ke C-Suite'
       });
+    }
+  }
+
+  /**
+   * Helper: Resolve responsible marketing user (PIC primary, fallback to creator with active MARKETING role).
+   */
+  private async resolveResponsibleMarketingUser(
+    manager: EntityManager,
+    tender: { marketing_pic_id?: number | null; created_by?: number | null },
+  ): Promise<number | null> {
+    const candidatePicId = tender.marketing_pic_id ? Number(tender.marketing_pic_id) : null;
+    if (candidatePicId) {
+      const validPic = await manager.query(
+        `SELECT u.id
+         FROM users u
+         JOIN user_roles ur ON u.id = ur.user_id
+         JOIN roles r ON r.id = ur.role_id
+         WHERE u.id = ?
+           AND (u.is_active = 1 OR u.is_active = true)
+           AND u.deleted_at IS NULL
+           AND r.name = 'MARKETING'
+           AND r.deleted_at IS NULL
+         LIMIT 1`,
+        [candidatePicId],
+      );
+      if (validPic && validPic.length > 0) {
+        return candidatePicId;
+      }
+    }
+
+    // Fallback to created_by if marketing_pic_id is null
+    const candidateCreatorId = tender.created_by ? Number(tender.created_by) : null;
+    if (!candidatePicId && candidateCreatorId) {
+      const validCreator = await manager.query(
+        `SELECT u.id
+         FROM users u
+         JOIN user_roles ur ON u.id = ur.user_id
+         JOIN roles r ON r.id = ur.role_id
+         WHERE u.id = ?
+           AND (u.is_active = 1 OR u.is_active = true)
+           AND u.deleted_at IS NULL
+           AND r.name = 'MARKETING'
+           AND r.deleted_at IS NULL
+         LIMIT 1`,
+        [candidateCreatorId],
+      );
+      if (validCreator && validCreator.length > 0) {
+        return candidateCreatorId;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Helper: Find latest whitelisted meaningful marketing follow-up activity performed by responsible marketing user.
+   */
+  private async findLatestMeaningfulMarketingActivity(
+    manager: EntityManager,
+    tenderId: number,
+    responsibleUserId: number,
+  ): Promise<Date | null> {
+    const dates: Date[] = [];
+
+    // 1. Check tender_activities by responsibleUserId with whitelisted content
+    const activities = await manager.query(
+      `SELECT created_at
+       FROM tender_activities
+       WHERE tender_id = ?
+         AND user_id = ?
+         AND (
+           content LIKE 'Tender stage changed from %'
+           OR content LIKE 'Marketing submitted tender for GO / NO GO review%'
+           OR content LIKE 'Marketing resubmitted tender for GO / NO GO review%'
+           OR content LIKE 'Dokumen SPK (%) berhasil diunggah%'
+           OR content LIKE 'Dokumen revisi SPK (%) berhasil diunggah%'
+         )
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [tenderId, responsibleUserId],
+    );
+    if (activities && activities.length > 0 && activities[0].created_at) {
+      dates.push(new Date(activities[0].created_at));
+    }
+
+    // 2. Check tender_price_history changed_by responsibleUserId
+    const priceHistories = await manager.query(
+      `SELECT created_at
+       FROM tender_price_history
+       WHERE tender_id = ?
+         AND changed_by = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [tenderId, responsibleUserId],
+    );
+    if (priceHistories && priceHistories.length > 0 && priceHistories[0].created_at) {
+      dates.push(new Date(priceHistories[0].created_at));
+    }
+
+    // 3. Check documents created_by responsibleUserId (category = 'PROPOSAL')
+    const proposalDocs = await manager.query(
+      `SELECT created_at
+       FROM documents
+       WHERE entity_type = 'TENDER'
+         AND entity_id = ?
+         AND category = 'PROPOSAL'
+         AND created_by = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [tenderId, responsibleUserId],
+    );
+    if (proposalDocs && proposalDocs.length > 0 && proposalDocs[0].created_at) {
+      dates.push(new Date(proposalDocs[0].created_at));
+    }
+
+    if (dates.length === 0) return null;
+    return new Date(Math.max(...dates.map((d) => d.getTime())));
+  }
+
+  /**
+   * Helper: Find timestamp when tender entered current stage via tender_activities.
+   */
+  private async findStageEntryDate(
+    manager: EntityManager,
+    tenderId: number,
+    currentStage: string,
+  ): Promise<Date | null> {
+    const stageActivity = await manager.query(
+      `SELECT created_at
+       FROM tender_activities
+       WHERE tender_id = ?
+         AND content LIKE ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [tenderId, `% to ${currentStage}%`],
+    );
+    if (stageActivity && stageActivity.length > 0 && stageActivity[0].created_at) {
+      return new Date(stageActivity[0].created_at);
+    }
+    return null;
+  }
+
+  /**
+   * Phase FOLLOWUP-P1: Daily 09:00 Asia/Jakarta Evaluation of Active Marketing Tenders.
+   * Multi-instance safe via MySQL connection-scoped GET_LOCK('epms_marketing_followup_daily_scan', 0).
+   * Emits max one Marketing reminder per tender/PIC/day and one Director escalation per 2-calendar-day inactivity cycle.
+   */
+  @Cron('0 9 * * *', {
+    timeZone: 'Asia/Jakarta',
+  })
+  async handleDailyMarketingFollowUpScan(): Promise<void> {
+    const ds = this.getDataSource();
+    if (!ds || typeof ds.createQueryRunner !== 'function') {
+      this.logger.warn('[FOLLOWUP_SCAN_FAILED] DataSource is not available for advisory lock. Skipping scan.');
+      return;
+    }
+
+    const lockRunner = ds.createQueryRunner();
+    await lockRunner.connect();
+    let lockAcquired = false;
+
+    try {
+      const lockResult = await lockRunner.query(
+        `SELECT GET_LOCK('epms_marketing_followup_daily_scan', 0) AS lock_acquired`
+      );
+      lockAcquired = lockResult && Number(lockResult[0]?.lock_acquired) === 1;
+
+      if (!lockAcquired) {
+        this.logger.warn(
+          `[FOLLOWUP_SCAN_SKIPPED_LOCK] Another backend instance holds 'epms_marketing_followup_daily_scan'. Exiting cleanly.`
+        );
+        return;
+      }
+
+      this.logger.log(`[FOLLOWUP_SCAN_STARTED] Acquired advisory lock. Starting daily follow-up evaluation...`);
+
+      // 1. Resolve active Directors ONCE per scan
+      let directorIds: number[] = [];
+      try {
+        const activeDirectors = await lockRunner.query(
+          `SELECT DISTINCT u.id
+           FROM users u
+           JOIN user_roles ur ON u.id = ur.user_id
+           JOIN roles r ON r.id = ur.role_id
+           WHERE r.name = 'DIRECTOR'
+             AND (u.is_active = 1 OR u.is_active = true)
+             AND u.deleted_at IS NULL
+             AND r.deleted_at IS NULL`
+        );
+        directorIds = activeDirectors ? activeDirectors.map((d: any) => Number(d.id)) : [];
+      } catch (dirErr: any) {
+        this.logger.error(`Error resolving DIRECTOR users: ${dirErr?.message}`);
+      }
+
+      if (directorIds.length === 0) {
+        this.logger.warn(`[FOLLOWUP_NO_DIRECTOR] No active DIRECTOR users found in database.`);
+        this.eventEmitter.emit('audit.log', {
+          action: 'RECIPIENT_RESOLUTION_FAILED',
+          entityName: 'tenders',
+          reason: 'FOLLOWUP_NO_DIRECTOR: No active DIRECTOR users found in database.',
+        });
+      }
+
+      // 2. Query all active non-terminal candidate tenders
+      const candidates = await this.tenderRepo
+        .createQueryBuilder('tender')
+        .leftJoinAndSelect('tender.customer', 'customer')
+        .where('tender.status NOT IN (:...terminalStatuses)', { terminalStatuses: ['WON', 'LOST'] })
+        .andWhere('tender.stage NOT IN (:...terminalStages)', { terminalStages: ['WON', 'LOST'] })
+        .andWhere('tender.deleted_at IS NULL')
+        .getMany();
+
+      const actionableCandidates = candidates.filter((c) => {
+        const evaluation = evaluateMarketingActionItem(c);
+        return evaluation.isActionItem;
+      });
+
+      this.logger.log(
+        `[FOLLOWUP_ELIGIBLE_COUNT] Found ${actionableCandidates.length} eligible actionable tenders (from ${candidates.length} active).`
+      );
+
+      // 3. Process each actionable tender in its own bounded transaction
+      for (const candidate of actionableCandidates) {
+        try {
+          await this.tenderRepo.manager.transaction(async (manager) => {
+            // Re-read current tender inside transaction to guard against race condition
+            const tender = await manager.findOne(Tender, {
+              where: { id: candidate.id },
+              relations: ['customer'],
+              lock: { mode: 'pessimistic_read' },
+            });
+
+            if (
+              !tender ||
+              ['WON', 'LOST'].includes(String(tender.stage).toUpperCase()) ||
+              ['WON', 'LOST'].includes(String(tender.status).toUpperCase())
+            ) {
+              this.logger.log(
+                `[FOLLOWUP_TERMINAL_SKIPPED] Tender #${candidate.id} transitioned to terminal state. Skipping.`
+              );
+              return;
+            }
+
+            const currentEval = evaluateMarketingActionItem(tender);
+            if (!currentEval.isActionItem) {
+              return;
+            }
+
+            // Resolve responsible Marketing user (PIC -> created_by fallback with validation)
+            const responsibleUserId = await this.resolveResponsibleMarketingUser(manager, tender);
+            if (!responsibleUserId) {
+              this.logger.warn(
+                `[FOLLOWUP_NO_PIC] No valid Marketing PIC or creator found for Tender #${tender.id}.`
+              );
+              this.eventEmitter.emit('audit.log', {
+                action: 'RECIPIENT_RESOLUTION_FAILED',
+                entityId: tender.id,
+                entityName: 'tenders',
+                reason: `FOLLOWUP_NO_PIC: Tender #${tender.id} has no active marketing_pic_id or active marketing created_by`,
+              });
+              return;
+            }
+
+            // A. Daily Marketing Reminder (Max ONE per tender per PIC per calendar day)
+            const jakartaToday = toJakartaDateString();
+            const reminderEventId = `marketing-followup:${tender.id}:${responsibleUserId}:${jakartaToday}`;
+
+            const existingReminder = await manager.query(
+              `SELECT id FROM outbox_events WHERE event_id = ? LIMIT 1`,
+              [reminderEventId]
+            );
+
+            if (existingReminder && existingReminder.length > 0) {
+              this.logger.debug(
+                `[FOLLOWUP_REMINDER_DUPLICATE_SKIPPED] Reminder event ${reminderEventId} already exists.`
+              );
+            } else {
+              const reminderEvent: BusinessEvent = {
+                eventId: reminderEventId,
+                eventName: 'marketing.tender.followup_reminder',
+                eventVersion: 1,
+                occurredAt: new Date().toISOString(),
+                aggregateType: 'Tender',
+                aggregateId: tender.id,
+                actor: { userId: null, roles: ['SYSTEM'] },
+                routing: { userIds: [responsibleUserId] },
+                payload: {
+                  tenderId: tender.id,
+                  title: tender.title,
+                  customerName: tender.customer?.name || 'N/A',
+                  stage: tender.stage,
+                  conditionType: currentEval.conditionType,
+                  reason: currentEval.reason,
+                  bidSubmissionDeadline: tender.bid_submission_deadline,
+                  daysOverdue: currentEval.daysOverdue,
+                  daysRemaining: currentEval.daysRemaining,
+                  stuckDays: currentEval.stuckDays,
+                },
+              };
+              await this.saveOutboxEvent(manager, reminderEvent);
+              this.logger.log(
+                `[FOLLOWUP_REMINDER_EMITTED] Emitted follow-up reminder for Tender #${tender.id} to user #${responsibleUserId}.`
+              );
+            }
+
+            // B. Director Inactivity Escalation Evaluation (>= 2 calendar days)
+            const latestMeaningfulDate = await this.findLatestMeaningfulMarketingActivity(
+              manager,
+              tender.id,
+              responsibleUserId
+            );
+
+            let stageEntryDate: Date | null = null;
+            if (currentEval.conditionType === MarketingActionConditionType.UPCOMING_DEADLINE) {
+              stageEntryDate = await this.findStageEntryDate(manager, tender.id, tender.stage);
+            }
+
+            const inactivityRef = calculateInactivityReferenceDate({
+              conditionType: currentEval.conditionType!,
+              bidSubmissionDeadline: tender.bid_submission_deadline,
+              createdAt: tender.created_at || (tender as any).createdAt,
+              latestMeaningfulFollowUpDate: latestMeaningfulDate,
+              stageEntryDate,
+              probabilityZeroProvableDate: null, // Conservative: do not fabricate unproven STUCK reference
+            });
+
+            if (inactivityRef) {
+              const calendarDaysInactive = diffInJakartaCalendarDays(new Date(), inactivityRef);
+              if (calendarDaysInactive >= 2 && directorIds.length > 0) {
+                const cycleRefDateStr = toJakartaDateString(inactivityRef);
+                const escalationEventId = `marketing-escalation:${tender.id}:${cycleRefDateStr}`;
+
+                const existingEscalation = await manager.query(
+                  `SELECT id FROM outbox_events WHERE event_id = ? LIMIT 1`,
+                  [escalationEventId]
+                );
+
+                if (existingEscalation && existingEscalation.length > 0) {
+                  this.logger.debug(
+                    `[FOLLOWUP_ESCALATION_DUPLICATE_SKIPPED] Escalation event ${escalationEventId} already exists for cycle ${cycleRefDateStr}.`
+                  );
+                } else {
+                  const picUser = await manager.query(
+                    `SELECT full_name FROM users WHERE id = ? LIMIT 1`,
+                    [responsibleUserId]
+                  );
+                  const picFullName =
+                    picUser && picUser[0]?.full_name ? picUser[0].full_name : `User #${responsibleUserId}`;
+
+                  const escalationEvent: BusinessEvent = {
+                    eventId: escalationEventId,
+                    eventName: 'marketing.tender.director_escalation',
+                    eventVersion: 1,
+                    occurredAt: new Date().toISOString(),
+                    aggregateType: 'Tender',
+                    aggregateId: tender.id,
+                    actor: { userId: null, roles: ['SYSTEM'] },
+                    routing: { userIds: directorIds },
+                    payload: {
+                      tenderId: tender.id,
+                      title: tender.title,
+                      customerName: tender.customer?.name || 'N/A',
+                      picUserId: responsibleUserId,
+                      picFullName,
+                      stage: tender.stage,
+                      conditionType: currentEval.conditionType,
+                      reason: currentEval.reason,
+                      bidSubmissionDeadline: tender.bid_submission_deadline,
+                      lastMeaningfulFollowUp: latestMeaningfulDate ? latestMeaningfulDate.toISOString() : null,
+                      calendarDaysInactive,
+                      inactivityReferenceDate: cycleRefDateStr,
+                    },
+                  };
+                  await this.saveOutboxEvent(manager, escalationEvent);
+                  this.logger.log(
+                    `[FOLLOWUP_ESCALATION_EMITTED] Emitted Director escalation for Tender #${tender.id} (${calendarDaysInactive} days inactive).`
+                  );
+                }
+              }
+            }
+          });
+        } catch (tenderErr: any) {
+          this.logger.error(
+            `Error processing follow-up for Tender #${candidate.id}: ${tenderErr?.message}`,
+            tenderErr?.stack
+          );
+        }
+      }
+
+      this.logger.log(`[FOLLOWUP_SCAN_COMPLETED] Daily follow-up scan completed successfully.`);
+    } catch (err: any) {
+      this.logger.error(`[FOLLOWUP_SCAN_FAILED] Daily follow-up scan encountered an error: ${err?.message}`, err?.stack);
+    } finally {
+      if (lockAcquired) {
+        try {
+          await lockRunner.query(`SELECT RELEASE_LOCK('epms_marketing_followup_daily_scan')`);
+        } catch (releaseErr: any) {
+          this.logger.error(`Failed to release advisory lock: ${releaseErr?.message}`);
+        }
+      }
+      await lockRunner.release();
     }
   }
 }

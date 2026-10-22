@@ -78,6 +78,71 @@ export class CanonicalNotificationConsumer {
   }
 
   /**
+   * Phase FOLLOWUP-P1: Canonical Bell Projection for Daily Marketing Follow-Up Reminder.
+   * Projected strictly to explicit recipient (Responsible Marketing PIC/Creator).
+   * Deduplication guaranteed via: <eventId>:<recipientId>:MARKETING_FOLLOWUP_REMINDER.
+   */
+  @OnEvent('marketing.tender.followup_reminder')
+  async handleMarketingFollowUpReminder(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) {
+      this.logger.debug(
+        `[CanonicalNotificationConsumer] Skipping non-canonical marketing.tender.followup_reminder event (missing eventId)`,
+      );
+      return [];
+    }
+
+    const p = event.payload;
+    const reasonText = p?.reason || 'Memerlukan tindak lanjut segera.';
+    const customerPrefix = p?.customerName && p.customerName !== 'N/A' ? `[${p.customerName}] ` : '';
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'MARKETING_FOLLOWUP_REMINDER',
+      type: 'ALERT',
+      title: `Pengingat Tindak Lanjut: ${p?.title || `Tender #${event.aggregateId}`}`,
+      message: `${customerPrefix}${reasonText}`,
+      actionTarget: `/sales?tab=1&tenderId=${event.aggregateId}`,
+      metaData: {
+        tenderId: event.aggregateId,
+        conditionType: p?.conditionType,
+        actionType: 'MARKETING_FOLLOWUP',
+      },
+    });
+  }
+
+  /**
+   * Phase FOLLOWUP-P1: Canonical Bell Projection for Director Inactivity Escalation.
+   * Projected strictly to explicit recipients (all active Directors).
+   * Deduplication guaranteed via: <eventId>:<recipientId>:MARKETING_DIRECTOR_ESCALATION.
+   */
+  @OnEvent('marketing.tender.director_escalation')
+  async handleMarketingDirectorEscalation(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) {
+      this.logger.debug(
+        `[CanonicalNotificationConsumer] Skipping non-canonical marketing.tender.director_escalation event (missing eventId)`,
+      );
+      return [];
+    }
+
+    const p = event.payload;
+    const daysInactive = p?.calendarDaysInactive || 2;
+    const picName = p?.picFullName || 'Marketing PIC';
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'MARKETING_DIRECTOR_ESCALATION',
+      type: 'ALERT',
+      title: `Eskalasi Tender: Tidak Ada Kemajuan (${daysInactive} Hari)`,
+      message: `Tender "${p?.title || `Tender #${event.aggregateId}`}" (${picName}) tidak mengalami aktivitas bermakna selama ${daysInactive} hari kalender. Alasan: ${p?.reason || 'Perlu Perhatian'}.`,
+      actionTarget: `/sales?tab=1&tenderId=${event.aggregateId}`,
+      metaData: {
+        tenderId: event.aggregateId,
+        conditionType: p?.conditionType,
+        calendarDaysInactive: daysInactive,
+        actionType: 'DIRECTOR_ESCALATION',
+      },
+    });
+  }
+
+  /**
    * Phase N4: Canonical Bell Projection for Marketing -> Legal Handover (SPK Uploaded).
    * Informs Legal team that a contract draft is submitted and ready for review.
    * Deduplication guaranteed via: <eventId>:<recipientId>:LEGAL_REVIEW_CONTRACT_SUBMITTED.

@@ -11,6 +11,7 @@ import { ServiceClaim, ServiceClaimStatus } from '../../entities/service-claim.e
 import { ProjectClosure, ProjectClosureStatus } from '../../entities/project-closure.entity';
 import { WorkflowTask, WorkflowTaskStatus } from '../../entities/workflow-task.entity';
 import { TodoReadModelDto, InboxSummaryDto, HistoryItemDto } from './inbox.dto';
+import { evaluateMarketingActionItem } from '../marketing/marketing-action-item.predicate';
 
 const LEGAL_REVIEW_ROLES = ['LEGAL', 'SUPER_ADMIN', 'ADMIN'];
 const TENDER_GO_NOGO_ROLES = ['DIRECTOR', 'GENERAL_MANAGER', 'SUPER_ADMIN'];
@@ -675,7 +676,56 @@ export class InboxService {
       }
     }
 
-    // 8. Deterministic Ordering:
+    // 8. Authoritative Domain Queue: Marketing Tender Follow-Up
+    const isMarketingRole = normalizedRoles.some((role) => role === 'MARKETING' || role === 'SUPER_ADMIN');
+    if (isMarketingRole) {
+      try {
+        const actionableTenders = await this.tenderRepo
+          .createQueryBuilder('tender')
+          .leftJoinAndSelect('tender.customer', 'customer')
+          .where('tender.status NOT IN (:...terminalStatuses)', { terminalStatuses: ['WON', 'LOST'] })
+          .andWhere('tender.stage NOT IN (:...terminalStages)', { terminalStages: ['WON', 'LOST'] })
+          .andWhere(
+            '(tender.marketing_pic_id = :userId OR (tender.marketing_pic_id IS NULL AND tender.created_by = :userId))',
+            { userId },
+          )
+          .andWhere('tender.deleted_at IS NULL')
+          .orderBy('tender.id', 'DESC')
+          .getMany();
+
+        for (const tender of actionableTenders) {
+          const evaluation = evaluateMarketingActionItem(tender);
+          if (evaluation.isActionItem) {
+            todos.push({
+              todoId: `tender-followup-${tender.id}`,
+              sourceType: 'DOMAIN_TENDER',
+              sourceId: String(tender.id),
+              assignedRole: 'MARKETING',
+              assignedUserId: userId,
+              entityType: 'TENDER',
+              entityId: Number(tender.id),
+              actionType: 'MARKETING_FOLLOWUP',
+              actionTarget: `/sales?tab=1&tenderId=${tender.id}`,
+              title: `Tindak Lanjut Tender: ${tender.title}`,
+              description: evaluation.reason,
+              status: evaluation.conditionType || 'ACTION_REQUIRED',
+              dueAt: tender.bid_submission_deadline
+                ? new Date(tender.bid_submission_deadline).toISOString()
+                : undefined,
+              createdAt: tender.created_at
+                ? new Date(tender.created_at).toISOString()
+                : ((tender as any).createdAt ? new Date((tender as any).createdAt).toISOString() : new Date(0).toISOString()),
+              projectName: tender.title,
+              customerName: tender.customer?.name || undefined,
+            });
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch actionable marketing follow-up tenders: ${err.message}`, err.stack);
+      }
+    }
+
+    // 9. Deterministic Ordering:
     // 1st: Overdue tasks (dueAt < now, earliest dueAt first)
     // 2nd: Upcoming due dates (dueAt >= now, earliest dueAt first)
     // 3rd: Newest createdAt (newest created first)
