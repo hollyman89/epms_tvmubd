@@ -204,17 +204,29 @@ export function formatTaskTitle(
   if (actionType === 'GO_NOGO_REVISION' || rawTitle.includes('GO_NOGO_REVISION') || rawTitle === 'Revisi GO / NO-GO') {
     return 'Revisi GO/NO-GO';
   }
-  if (actionType === 'PROJECT_CLOSURE_DIRECTOR_APPROVAL' || (rawTitle.includes('DIRECTOR_APPROVAL') && (context?.entityType === 'PROJECT_CLOSURE' || rawTitle.includes('Penutupan')))) {
-    return 'Persetujuan Penutupan Proyek';
+  if (
+    actionType === 'PROJECT_CLOSURE_DIRECTOR_APPROVAL' ||
+    (rawTitle.includes('DIRECTOR_APPROVAL') && (context?.entityType === 'PROJECT_CLOSURE' || rawTitle.includes('Penutupan'))) ||
+    rawTitle === 'Persetujuan Penutupan Proyek' ||
+    rawTitle.startsWith('Penutupan Proyek Menunggu Persetujuan') ||
+    /^Persetujuan Penutupan Proyek/i.test(rawTitle)
+  ) {
+    return 'Penutupan Proyek Menunggu Persetujuan Anda';
   }
-  if (actionType === 'PROJECT_CLOSURE_HOO_REVIEW' || (rawTitle.includes('HOO_REVIEW') && (context?.entityType === 'PROJECT_CLOSURE' || rawTitle.includes('Penutupan')))) {
-    return 'Peninjauan Penutupan Proyek';
+  if (
+    actionType === 'PROJECT_CLOSURE_HOO_REVIEW' ||
+    (rawTitle.includes('HOO_REVIEW') && (context?.entityType === 'PROJECT_CLOSURE' || rawTitle.includes('Penutupan'))) ||
+    rawTitle === 'Peninjauan Penutupan Proyek' ||
+    rawTitle.startsWith('Penutupan Proyek Menunggu Peninjauan') ||
+    /^Review Penutupan Proyek/i.test(rawTitle)
+  ) {
+    return 'Penutupan Proyek Menunggu Peninjauan';
   }
   if (rawTitle.includes('DIRECTOR_APPROVAL')) {
-    return 'Persetujuan Penutupan Proyek';
+    return 'Penutupan Proyek Menunggu Persetujuan Anda';
   }
   if (rawTitle.includes('HOO_REVIEW')) {
-    return 'Peninjauan Penutupan Proyek';
+    return 'Penutupan Proyek Menunggu Peninjauan';
   }
   if (actionType === 'PAYMENT_APPROVAL' || rawTitle.includes('PAYMENT_APPROVAL')) {
     return 'Persetujuan Pembayaran';
@@ -224,6 +236,9 @@ export function formatTaskTitle(
   }
   if (actionType === 'PROCESS_PAYMENT' || /^Proses Pembayaran/i.test(rawTitle)) {
     return 'Proses Pembayaran';
+  }
+  if (actionType === 'CREATE_INVOICE' || /^Buat Invoice/i.test(rawTitle)) {
+    return rawTitle;
   }
   if (actionType === 'LEGAL_DOCUMENT_REVISION') {
     return 'Revisi Dokumen SPK / Kontrak';
@@ -246,15 +261,22 @@ export function formatTaskTitle(
   if (actionType === 'SERVICE_CLAIM_REVISION' || rawTitle.includes('SERVICE_CLAIM_REVISION')) {
     return 'Revisi Pengajuan Klaim Jasa';
   }
-  if (actionType === 'PROJECT_CLOSURE_REVISION' || rawTitle.includes('PROJECT_CLOSURE_REVISION')) {
-    return 'Revisi Penutupan Proyek';
+  if (
+    actionType === 'PROJECT_CLOSURE_REVISION' ||
+    rawTitle.includes('PROJECT_CLOSURE_REVISION') ||
+    rawTitle === 'Revisi Penutupan Proyek' ||
+    rawTitle.startsWith('Pengajuan Penutupan Proyek Perlu Diperbaiki') ||
+    /^Revisi Penutupan Proyek/i.test(rawTitle)
+  ) {
+    return 'Pengajuan Penutupan Proyek Perlu Diperbaiki';
   }
 
   // Handle prefix "Tugas Alur Kerja: ..."
   if (rawTitle.startsWith('Tugas Alur Kerja:')) {
     const key = rawTitle.replace(/^Tugas Alur Kerja:\s*/, '').trim().toUpperCase();
-    if (key === 'DIRECTOR_APPROVAL') return 'Persetujuan Penutupan Proyek';
-    if (key === 'HOO_REVIEW') return 'Peninjauan Penutupan Proyek';
+    if (key === 'DIRECTOR_APPROVAL' || key === 'PROJECT_CLOSURE_DIRECTOR_APPROVAL') return 'Penutupan Proyek Menunggu Persetujuan Anda';
+    if (key === 'HOO_REVIEW' || key === 'PROJECT_CLOSURE_HOO_REVIEW') return 'Penutupan Proyek Menunggu Peninjauan';
+    if (key === 'PROJECT_CLOSURE_REVISION') return 'Pengajuan Penutupan Proyek Perlu Diperbaiki';
     if (key === 'GO_NOGO_APPROVAL') return 'Persetujuan GO/NO-GO';
     if (key === 'LEGAL_REVIEW') return 'Review Legal Kontrak';
     if (key === 'LEGAL_DOCUMENT_REVISION') return 'Revisi Dokumen SPK / Kontrak';
@@ -334,37 +356,63 @@ export function formatHistoryTitle(item: {
   // 3. Project Closure History
   const isClosure =
     entityType === 'PROJECT_CLOSURE' ||
+    entityType === 'PENUTUPAN PROYEK' ||
     rawTitle.includes('PROJECT_CLOSURE') ||
-    rawTitle.includes('Penutupan Proyek');
+    rawTitle.includes('Penutupan Proyek') ||
+    rawTitle.includes('Peninjauan Penutupan') ||
+    taskKey.includes('PROJECT_CLOSURE');
 
-  if (isClosure || taskKey === 'DIRECTOR_APPROVAL' || rawTitle.includes('DIRECTOR_APPROVAL')) {
-    if (entityType === 'PROJECT') {
-      return 'Persetujuan Rencana Operasional (Direktur) Selesai';
-    }
-    if (taskKey === 'DIRECTOR_APPROVAL' || rawTitle.includes('DIRECTOR_APPROVAL')) {
-      if (action === 'APPROVE' || status === 'COMPLETED' || status === 'APPROVED') {
-        return 'Penutupan Proyek Disetujui';
-      }
-      if (action === 'REJECT' || status === 'REJECTED') {
-        return 'Penutupan Proyek Ditolak';
-      }
-      if (action === 'RETURN' || status === 'RETURNED') {
-        return 'Penutupan Proyek Dikembalikan';
-      }
-      return 'Persetujuan Penutupan Proyek';
-    }
-  }
+  if (isClosure) {
+    const isReturn =
+      action === 'RETURN' ||
+      status === 'RETURNED' ||
+      rawTitle.includes('Dikembalikan') ||
+      rawTitle.includes('RETURN');
 
-  if (isClosure || taskKey === 'HOO_REVIEW' || rawTitle.includes('HOO_REVIEW')) {
-    if (taskKey === 'HOO_REVIEW' || rawTitle.includes('HOO_REVIEW')) {
-      if (action === 'APPROVE' || status === 'COMPLETED' || status === 'APPROVED') {
-        return 'Peninjauan Penutupan Proyek Selesai';
+    const isHoo =
+      taskKey.includes('HOO') ||
+      taskKey.includes('HOPS') ||
+      rawTitle.includes('HOO') ||
+      rawTitle.includes('Peninjauan') ||
+      nodeId.includes('HOO');
+
+    const isDirector =
+      taskKey.includes('DIRECTOR') ||
+      rawTitle.includes('DIRECTOR') ||
+      rawTitle.includes('Persetujuan') ||
+      rawTitle.includes('Penutupan Proyek #') ||
+      rawTitle.match(/^Penutupan Proyek\s*(#\d+)?$/i) ||
+      nodeId.includes('DIRECTOR');
+
+    const isSubmit =
+      action === 'SUBMIT' ||
+      rawTitle.includes('SUBMITTED') ||
+      rawTitle.includes('SUBMIT') ||
+      rawTitle.includes('Pengajuan');
+
+    if (isHoo) {
+      if (isReturn) {
+        return 'Head of Operations mengembalikan pengajuan ke PM untuk diperbaiki.';
       }
-      if (action === 'RETURN' || status === 'RETURNED') {
-        return 'Peninjauan Penutupan Proyek Dikembalikan';
-      }
-      return 'Peninjauan Penutupan Proyek';
+      return 'Head of Operations menyetujui hasil peninjauan dan meneruskan pengajuan ke Direktur.';
     }
+
+    if (isDirector) {
+      if (isReturn) {
+        return 'Direktur mengembalikan pengajuan ke PM untuk diperbaiki.';
+      }
+      return 'Direktur menyetujui penutupan proyek.';
+    }
+
+    if (isSubmit) {
+      return 'PM mengajukan penutupan proyek.';
+    }
+
+    // Fallbacks
+    if (isReturn) {
+      return 'Head of Operations mengembalikan pengajuan ke PM untuk diperbaiki.';
+    }
+    return 'Direktur menyetujui penutupan proyek.';
   }
 
   // 4. Tender GO/NO-GO History
@@ -385,14 +433,19 @@ export function formatHistoryTitle(item: {
   // Clean raw "Tugas Alur Kerja: ..." prefix in history
   if (rawTitle.startsWith('Tugas Alur Kerja:')) {
     const key = rawTitle.replace(/^Tugas Alur Kerja:\s*/, '').trim().toUpperCase();
-    if (key === 'DIRECTOR_APPROVAL') return 'Penutupan Proyek Disetujui';
-    if (key === 'HOO_REVIEW') return 'Peninjauan Penutupan Proyek Selesai';
+    if (key === 'DIRECTOR_APPROVAL' || key === 'PROJECT_CLOSURE_DIRECTOR_APPROVAL') return 'Direktur menyetujui penutupan proyek.';
+    if (key === 'HOO_REVIEW' || key === 'PROJECT_CLOSURE_HOO_REVIEW') return 'Head of Operations menyetujui hasil peninjauan dan meneruskan pengajuan ke Direktur.';
     if (key === 'GO_NOGO_APPROVAL') return 'Persetujuan GO/NO-GO Disetujui';
     return key
       .split('_')
       .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
       .join(' ') + ' Selesai';
   }
+
+  // Strip raw event names if any leaked
+  if (rawTitle.includes('PROJECT_CLOSURE_SUBMITTED')) return 'PM mengajukan penutupan proyek.';
+  if (rawTitle.includes('PROJECT_CLOSURE_HOO_APPROVED')) return 'Head of Operations menyetujui hasil peninjauan dan meneruskan pengajuan ke Direktur.';
+  if (rawTitle.includes('PROJECT_CLOSURE_DIRECTOR_APPROVED')) return 'Direktur menyetujui penutupan proyek.';
 
   // Strip raw "Proyek #\d+: " prefix from any other history title
   let cleaned = rawTitle.replace(/^Proyek\s*#\d+:\s*/i, '');
@@ -408,6 +461,17 @@ export function formatHistoryTitle(item: {
 export function formatNotificationTitle(title?: string | null): string {
   if (!title) return '';
   let cleaned = String(title).trim();
+
+  // Project Closure Notification Titles
+  if (/^Pengajuan Penutupan Proyek$/i.test(cleaned)) {
+    cleaned = 'Pengajuan Penutupan Proyek Baru';
+  }
+  if (/^Persetujuan Penutupan Proyek Direktur$/i.test(cleaned) || /^Penutupan Proyek Menunggu Keputusan/i.test(cleaned)) {
+    cleaned = 'Penutupan Proyek Menunggu Keputusan Anda';
+  }
+  if (/^Penutupan Proyek Dikembalikan$/i.test(cleaned)) {
+    cleaned = 'Pengajuan Penutupan Proyek Dikembalikan';
+  }
 
   // PM Assignment
   cleaned = cleaned.replace(/Penugasan Project Manager Baru/gi, 'Anda Ditugaskan sebagai Project Manager');
@@ -434,6 +498,44 @@ export function formatNotificationMessage(message?: string | null): string {
   if (!message) return '';
   let cleaned = String(message);
 
+  // Project Closure Message Normalization
+  cleaned = cleaned.replace(
+    /Penutupan proyek "([^"]+)" diajukan oleh PM dan membutuhkan review Head of Operations\./gi,
+    (_, name) => {
+      const proj = name && !name.startsWith('CONT-') && !name.match(/^Proyek\s*#\d+$/i)
+        ? `proyek "${name}"`
+        : 'proyek ini';
+      return `PM telah mengajukan penutupan ${proj} untuk Anda tinjau.`;
+    }
+  );
+  cleaned = cleaned.replace(
+    /Penutupan proyek "([^"]+)" telah disetujui HOO dan menunggu persetujuan Direktur\./gi,
+    (_, name) => {
+      const proj = name && !name.startsWith('CONT-') && !name.match(/^Proyek\s*#\d+$/i)
+        ? `proyek "${name}"`
+        : 'proyek ini';
+      return `Head of Operations telah meninjau penutupan ${proj} dan meneruskannya kepada Anda untuk keputusan akhir.`;
+    }
+  );
+  cleaned = cleaned.replace(
+    /Pengajuan penutupan proyek "([^"]+)" dikembalikan\.\s*Catatan:\s*(.+)/gi,
+    (_, name, note) => {
+      const proj = name && !name.startsWith('CONT-') && !name.match(/^Proyek\s*#\d+$/i)
+        ? `proyek "${name}"`
+        : 'proyek ini';
+      return `Pengajuan penutupan ${proj} perlu diperbaiki. Catatan: ${note} Silakan lihat catatan reviewer dan ajukan kembali.`;
+    }
+  );
+  cleaned = cleaned.replace(
+    /Pengajuan penutupan proyek "([^"]+)" dikembalikan\./gi,
+    (_, name) => {
+      const proj = name && !name.startsWith('CONT-') && !name.match(/^Proyek\s*#\d+$/i)
+        ? `proyek "${name}"`
+        : 'proyek ini';
+      return `Pengajuan penutupan ${proj} perlu diperbaiki. Silakan lihat catatan reviewer dan ajukan kembali.`;
+    }
+  );
+
   // PM Assignment message correction
   cleaned = cleaned.replace(
     /Anda telah resmi ditugaskan sebagai Project Manager untuk proyek\s*#(CONT-[A-Za-z0-9\-_]+)\.?\s*Silakan mulai menyusun (?:Operational Plan|rencana operasional proyek)\.?/gi,
@@ -445,7 +547,8 @@ export function formatNotificationMessage(message?: string | null): string {
     'Kontrak $1'
   );
 
-  cleaned = cleaned.replace(/proyek\s*#(\d+)/gi, 'Proyek (ID: $1)');
+  cleaned = cleaned.replace(/proyek\s*#(\d+)/gi, 'proyek ini');
+  cleaned = cleaned.replace(/Proyek\s*\(ID:\s*\d+\)/gi, 'proyek ini');
 
   cleaned = cleaned.replace(/Operational Plan/gi, 'rencana operasional proyek');
   cleaned = cleaned.replace(/Project Siap Kick Off/gi, 'Proyek Siap Kick-Off');
@@ -516,18 +619,106 @@ export function extractItemBusinessContext(item: any): StructuredBusinessContext
     }
   }
 
-  // Internal numeric ID (only secondary when useful)
-  if (item.projectId) {
-    context.internalId = item.projectId;
-  } else if (item.entityType === 'PROJECT' && item.entityId && !context.internalId) {
-    context.internalId = item.entityId;
+  // Internal numeric ID (only secondary when useful, never for PROJECT_CLOSURE)
+  const isClosureItem =
+    item.entityType === 'PROJECT_CLOSURE' ||
+    item.entityType === 'PENUTUPAN PROYEK' ||
+    String(item.actionType || '').startsWith('PROJECT_CLOSURE') ||
+    String(item.title || '').includes('Penutupan Proyek') ||
+    String(item.title || '').includes('Peninjauan Penutupan') ||
+    item.metaData?.category === 'PROJECT_CLOSURE' ||
+    item.metaData?.reference_type === 'PROJECT_CLOSURE';
+
+  if (!isClosureItem) {
+    if (item.projectId) {
+      context.internalId = item.projectId;
+    } else if (item.entityType === 'PROJECT' && item.entityId && !context.internalId) {
+      context.internalId = item.entityId;
+    }
+  }
+
+  // Never leak raw "Proyek #123" or "CONT-..." as projectName
+  if (context.projectName && (context.projectName.match(/^Proyek\s*#\d+$/i) || context.projectName.startsWith('CONT-'))) {
+    if (context.projectName.startsWith('CONT-') && !context.contractNumber) {
+      context.contractNumber = context.projectName;
+    }
+    context.projectName = undefined;
   }
 
   return context;
 }
 
 /**
- * 7. Priority Label Normalization
+ * 7. Human-Friendly Task Description Presenter
+ * Answers:
+ * 1. Apa yang terjadi?
+ * 2. Proyek apa?
+ * 3. Siapa yang melakukan tindakan sebelumnya?
+ * 4. Apa yang harus dilakukan user sekarang?
+ */
+export function formatTaskDescription(item: {
+  actionType?: string | null;
+  entityType?: string | null;
+  title?: string | null;
+  projectName?: string | null;
+  description?: string | null;
+  returnedByName?: string | null;
+  returnReason?: string | null;
+  submittedByName?: string | null;
+}): string {
+  const actionType = String(item?.actionType || '').toUpperCase();
+  const entityType = String(item?.entityType || '').toUpperCase();
+  const rawTitle = String(item?.title || '').toUpperCase();
+
+  const isClosure =
+    entityType === 'PROJECT_CLOSURE' ||
+    entityType === 'PENUTUPAN PROYEK' ||
+    actionType.includes('PROJECT_CLOSURE') ||
+    rawTitle.includes('PENUTUPAN PROYEK');
+
+  if (isClosure) {
+    const rawProjectName = item.projectName;
+    const safeProjectName =
+      rawProjectName &&
+      !rawProjectName.match(/^Proyek\s*#\d+$/i) &&
+      !rawProjectName.startsWith('CONT-')
+        ? rawProjectName
+        : undefined;
+    const proj = safeProjectName ? `proyek "${safeProjectName}"` : 'proyek ini';
+
+    if (
+      actionType === 'PROJECT_CLOSURE_HOO_REVIEW' ||
+      rawTitle.includes('HOO') ||
+      rawTitle.includes('PENINJAUAN')
+    ) {
+      return `PM telah mengajukan penutupan ${proj}. Silakan tinjau kelengkapan pengajuan sebelum diteruskan ke Direktur.`;
+    }
+
+    if (
+      actionType === 'PROJECT_CLOSURE_DIRECTOR_APPROVAL' ||
+      rawTitle.includes('DIRECTOR') ||
+      rawTitle.includes('PERSETUJUAN')
+    ) {
+      return `Head of Operations telah menyelesaikan peninjauan penutupan ${proj} dan meneruskannya kepada Anda untuk keputusan akhir.`;
+    }
+
+    if (
+      actionType === 'PROJECT_CLOSURE_REVISION' ||
+      rawTitle.includes('REVISI') ||
+      rawTitle.includes('PERBAIK')
+    ) {
+      if (item.returnedByName) {
+        return `${item.returnedByName} mengembalikan pengajuan penutupan ${proj} untuk diperbaiki. Silakan lihat catatan reviewer, lakukan perbaikan, lalu ajukan kembali.`;
+      }
+      return `Pengajuan penutupan ${proj} dikembalikan untuk diperbaiki. Silakan lihat catatan reviewer, lakukan perbaikan, lalu ajukan kembali.`;
+    }
+  }
+
+  return item?.description || '';
+}
+
+/**
+ * 8. Priority Label Normalization
  * Translates technical priority badges into professional Indonesian.
  */
 export function formatPriorityName(priority?: string | null): string {
@@ -548,7 +739,7 @@ export function formatPriorityName(priority?: string | null): string {
 }
 
 /**
- * 6. Context-Specific CTA Button Label
+ * 9. Context-Specific CTA Button Label
  * Replaces generic "Buka" with descriptive action verbs (Section 10).
  */
 export function formatContextualCta(item: {
@@ -561,6 +752,31 @@ export function formatContextualCta(item: {
   const entityType = String(item.entityType || '').toUpperCase();
   const title = String(item.title || '').toUpperCase();
 
+  // Project Closure CTAs
+  if (
+    actionType === 'PROJECT_CLOSURE_HOO_REVIEW' ||
+    (entityType === 'PROJECT_CLOSURE' && (title.includes('HOO') || title.includes('PENINJAUAN'))) ||
+    title.includes('PENUTUPAN PROYEK MENUNGGU PENINJAUAN')
+  ) {
+    return 'Tinjau Pengajuan';
+  }
+
+  if (
+    actionType === 'PROJECT_CLOSURE_DIRECTOR_APPROVAL' ||
+    (entityType === 'PROJECT_CLOSURE' && (title.includes('DIRECTOR') || title.includes('PERSETUJUAN'))) ||
+    title.includes('PENUTUPAN PROYEK MENUNGGU PERSETUJUAN')
+  ) {
+    return 'Tinjau & Beri Keputusan';
+  }
+
+  if (
+    actionType === 'PROJECT_CLOSURE_REVISION' ||
+    (entityType === 'PROJECT_CLOSURE' && (title.includes('REVISI') || title.includes('PERBAIK'))) ||
+    title.includes('PENUTUPAN PROYEK PERLU DIPERBAIKI')
+  ) {
+    return 'Lihat Catatan & Perbaiki';
+  }
+
   // Approvals & Reviews
   if (
     actionType === 'GO_NOGO_APPROVAL' ||
@@ -568,8 +784,6 @@ export function formatContextualCta(item: {
     actionType === 'PURCHASE_REQUEST_APPROVAL' ||
     actionType === 'LEGAL_REVIEW' ||
     actionType === 'PAYMENT_APPROVAL' ||
-    actionType === 'PROJECT_CLOSURE_DIRECTOR_APPROVAL' ||
-    actionType === 'PROJECT_CLOSURE_HOO_REVIEW' ||
     actionType === 'SERVICE_CLAIM_VERIFICATION' ||
     actionType === 'SERVICE_CLAIM_COMMERCIAL_APPROVAL' ||
     title.includes('PERSETUJUAN') ||
@@ -586,7 +800,6 @@ export function formatContextualCta(item: {
     actionType === 'LEGAL_DOCUMENT_REVISION' ||
     actionType === 'PAYMENT_REQUEST_REVISION' ||
     actionType === 'SERVICE_CLAIM_REVISION' ||
-    actionType === 'PROJECT_CLOSURE_REVISION' ||
     title.includes('REVISI')
   ) {
     return 'Tinjau Revisi';
@@ -600,6 +813,16 @@ export function formatContextualCta(item: {
   // Payment execution
   if (actionType === 'PROCESS_PAYMENT') {
     return 'Proses Pembayaran';
+  }
+
+  // Procurement RFQ creation
+  if (actionType === 'CREATE_RFQ' || title.includes('BUAT RFQ')) {
+    return 'Buat RFQ';
+  }
+
+  // Finance Invoice creation
+  if (actionType === 'CREATE_INVOICE' || title.includes('BUAT INVOICE')) {
+    return 'Buat Invoice';
   }
 
   // Entity specific views
@@ -619,7 +842,7 @@ export function formatContextualCta(item: {
     return 'Lihat Klaim Jasa';
   }
   if (entityType === 'PROJECT_CLOSURE' || entityType === 'PENUTUPAN PROYEK') {
-    return 'Lihat Penutupan';
+    return 'Tinjau Pengajuan';
   }
   if (entityType === 'TENDER') {
     return 'Lihat Tender';
@@ -665,10 +888,13 @@ export function resolveItemStatusDomain(item?: {
 
   if (
     source === 'DOMAIN_PAYMENT_REQUEST' ||
+    source === 'DOMAIN_INVOICE' ||
     entity === 'PAYMENT_REQUEST' ||
     entity === 'PAYMENT' ||
     entity === 'PEMBAYARAN' ||
-    action.includes('PAYMENT')
+    entity === 'INVOICE' ||
+    action.includes('PAYMENT') ||
+    action === 'CREATE_INVOICE'
   ) {
     return 'payment';
   }

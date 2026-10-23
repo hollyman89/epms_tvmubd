@@ -14,6 +14,7 @@ import {
   getEntityTagColor,
   formatRoleName,
   formatTaskTitle,
+  formatTaskDescription,
   formatHistoryTitle,
   formatNotificationTitle,
   formatNotificationMessage,
@@ -430,6 +431,12 @@ export const InboxPage: React.FC = () => {
                   const isGoNoGoRevision = item.actionType === 'GO_NOGO_REVISION';
                   const isGoNoGoAny = isGoNoGoApproval || isGoNoGoRevision;
 
+                  const isClosureTask =
+                    item.entityType === 'PROJECT_CLOSURE' ||
+                    item.entityType === 'PENUTUPAN PROYEK' ||
+                    item.sourceType === 'DOMAIN_PROJECT_CLOSURE' ||
+                    String(item.actionType || '').startsWith('PROJECT_CLOSURE');
+
                   return (
                     <List.Item
                       key={item.todoId}
@@ -476,6 +483,13 @@ export const InboxPage: React.FC = () => {
                               <Tag color="green">TENDER</Tag>
                               <Tag color="gold">Marketing</Tag>
                             </>
+                          ) : isClosureTask ? (
+                            <>
+                              <Tag color="purple">Penutupan Proyek</Tag>
+                              {item.assignedRole && (
+                                <Tag color="gold">{formatRoleName(item.assignedRole)}</Tag>
+                              )}
+                            </>
                           ) : (
                             <>
                               {renderEntityTypeTag(item.entityType)}
@@ -501,11 +515,17 @@ export const InboxPage: React.FC = () => {
                           </Text>
                         </div>
 
-                        {renderBusinessContextBlock(item)}
+                        {isClosureTask ? (
+                          <div style={{ marginBottom: 8, fontSize: '13px', color: '#334155', lineHeight: '1.5' }}>
+                            {formatTaskDescription(item)}
+                          </div>
+                        ) : (
+                          renderBusinessContextBlock(item)
+                        )}
 
                         <div>
                           <Text type="secondary" style={{ fontSize: '12px' }}>
-                            {isGoNoGoAny ? dayjs(item.createdAt).fromNow() : `Dibuat ${dayjs(item.createdAt).fromNow()}`}
+                            {isGoNoGoAny || isClosureTask ? dayjs(item.createdAt).fromNow() : `Dibuat ${dayjs(item.createdAt).fromNow()}`}
                           </Text>
                         </div>
                       </div>

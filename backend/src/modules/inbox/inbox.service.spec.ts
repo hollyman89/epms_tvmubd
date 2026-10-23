@@ -10,6 +10,8 @@ import { ProjectProgressLog } from '../../entities/project-progress-log.entity';
 import { WorkflowTask, WorkflowTaskStatus } from '../../entities/workflow-task.entity';
 import { ServiceClaim, ServiceClaimStatus } from '../../entities/service-claim.entity';
 import { ProjectClosure, ProjectClosureStatus } from '../../entities/project-closure.entity';
+import { PurchaseRequest } from '../../entities/purchase-request.entity';
+import { Rfq } from '../../entities/rfq.entity';
 
 describe('InboxService (Unified Inbox Foundation - N1)', () => {
   let service: InboxService;
@@ -22,6 +24,8 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
   let mockClaimRepo: any;
   let mockClosureRepo: any;
   let mockTaskRepo: any;
+  let mockPurchaseRequestRepo: any;
+  let mockRfqRepo: any;
 
   beforeEach(async () => {
     workflowEngineService = {
@@ -82,6 +86,25 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
       }),
     };
 
+    mockPurchaseRequestRepo = {
+      createQueryBuilder: jest.fn().mockReturnValue({
+        leftJoinAndSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      }),
+    };
+
+    mockRfqRepo = {
+      find: jest.fn().mockResolvedValue([]),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getMany: jest.fn().mockResolvedValue([]),
+      }),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         InboxService,
@@ -94,6 +117,8 @@ describe('InboxService (Unified Inbox Foundation - N1)', () => {
         { provide: getRepositoryToken(ServiceClaim), useValue: mockClaimRepo },
         { provide: getRepositoryToken(ProjectClosure), useValue: mockClosureRepo },
         { provide: getRepositoryToken(WorkflowTask), useValue: mockTaskRepo },
+        { provide: getRepositoryToken(PurchaseRequest), useValue: mockPurchaseRequestRepo },
+        { provide: getRepositoryToken(Rfq), useValue: mockRfqRepo },
       ],
     }).compile();
 

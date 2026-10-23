@@ -7,7 +7,10 @@ export class TodoReadModelDto {
     | 'DOMAIN_PAYMENT_REQUEST'
     | 'DOMAIN_PROGRESS_CLAIM'
     | 'DOMAIN_SERVICE_CLAIM'
-    | 'DOMAIN_PROJECT_CLOSURE';
+    | 'DOMAIN_PROJECT_CLOSURE'
+    | 'DOMAIN_PURCHASE_REQUEST'
+    | 'DOMAIN_MARKETING_ACTION'
+    | 'DOMAIN_INVOICE';
   sourceId: string;
   taskId?: number;
   assignedUserId?: number;
@@ -29,6 +32,7 @@ export class TodoReadModelDto {
   submittedByName?: string;
   returnedByName?: string;
   returnReason?: string;
+  ctaLabel?: string;
 }
 
 export class InboxSummaryDto {

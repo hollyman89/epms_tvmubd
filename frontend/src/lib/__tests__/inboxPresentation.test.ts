@@ -7,11 +7,13 @@ import {
   formatNotificationTitle,
   formatNotificationMessage,
   formatContextualCta,
+  formatTaskDescription,
   formatPriorityName,
   extractItemBusinessContext,
   INBOX_TABS,
   INBOX_PAGE_CONFIG,
   INBOX_EMPTY_STATES,
+  resolveItemStatusDomain,
 } from '../inboxPresentation';
 import { resolveTodoActionTarget } from '../todoActionResolver';
 import { MENU_GROUPS } from '@/constants/menuConfig';
@@ -38,13 +40,13 @@ describe('EPMS — UNIFIED-INBOX-UX-R1 Presentation Layer Regression Tests', () 
   });
 
   describe('B & C. Workflow Titles: DIRECTOR_APPROVAL and HOO_REVIEW never render raw', () => {
-    it('B. DIRECTOR_APPROVAL maps to Persetujuan Penutupan Proyek in To-Do and Penutupan Proyek Disetujui in completed history', () => {
+    it('B. DIRECTOR_APPROVAL maps to Penutupan Proyek Menunggu Persetujuan Anda in To-Do and Direktur menyetujui penutupan proyek. in completed history', () => {
       // Pending To-Do
       const todoTitle = formatTaskTitle('Tugas Alur Kerja: DIRECTOR_APPROVAL', {
         actionType: 'PROJECT_CLOSURE_DIRECTOR_APPROVAL',
         entityType: 'PROJECT_CLOSURE',
       });
-      expect(todoTitle).toBe('Persetujuan Penutupan Proyek');
+      expect(todoTitle).toBe('Penutupan Proyek Menunggu Persetujuan Anda');
       expect(todoTitle).not.toContain('DIRECTOR_APPROVAL');
       expect(todoTitle).not.toContain('Tugas Alur Kerja');
 
@@ -56,17 +58,17 @@ describe('EPMS — UNIFIED-INBOX-UX-R1 Presentation Layer Regression Tests', () 
         status: 'COMPLETED',
         action: 'APPROVE',
       });
-      expect(historyTitle).toBe('Penutupan Proyek Disetujui');
+      expect(historyTitle).toBe('Direktur menyetujui penutupan proyek.');
       expect(historyTitle).not.toContain('DIRECTOR_APPROVAL');
     });
 
-    it('C. HOO_REVIEW maps to Peninjauan Penutupan Proyek in To-Do and Peninjauan Penutupan Proyek Selesai in completed history', () => {
+    it('C. HOO_REVIEW maps to Penutupan Proyek Menunggu Peninjauan in To-Do and Head of Operations menyetujui hasil peninjauan dan meneruskan pengajuan ke Direktur. in completed history', () => {
       // Pending To-Do
       const todoTitle = formatTaskTitle('Tugas Alur Kerja: HOO_REVIEW', {
         actionType: 'PROJECT_CLOSURE_HOO_REVIEW',
         entityType: 'PROJECT_CLOSURE',
       });
-      expect(todoTitle).toBe('Peninjauan Penutupan Proyek');
+      expect(todoTitle).toBe('Penutupan Proyek Menunggu Peninjauan');
       expect(todoTitle).not.toContain('HOO_REVIEW');
 
       // Completed History
@@ -77,7 +79,7 @@ describe('EPMS — UNIFIED-INBOX-UX-R1 Presentation Layer Regression Tests', () 
         status: 'COMPLETED',
         action: 'APPROVE',
       });
-      expect(historyTitle).toBe('Peninjauan Penutupan Proyek Selesai');
+      expect(historyTitle).toBe('Head of Operations menyetujui hasil peninjauan dan meneruskan pengajuan ke Direktur.');
       expect(historyTitle).not.toContain('HOO_REVIEW');
     });
   });
@@ -210,7 +212,7 @@ describe('EPMS — UNIFIED-INBOX-UX-R1 Presentation Layer Regression Tests', () 
         status: 'COMPLETED',
         action: 'APPROVE',
       };
-      expect(formatHistoryTitle(historyItem)).toBe('Penutupan Proyek Disetujui');
+      expect(formatHistoryTitle(historyItem)).toBe('Direktur menyetujui penutupan proyek.');
     });
   });
 
@@ -237,12 +239,12 @@ describe('EPMS — UNIFIED-INBOX-UX-R1 Presentation Layer Regression Tests', () 
       const cleanedClosure = formatTaskTitle('Tugas Alur Kerja: node_director_approval', {
         actionType: 'PROJECT_CLOSURE_DIRECTOR_APPROVAL',
       });
-      expect(cleanedClosure).toBe('Persetujuan Penutupan Proyek');
+      expect(cleanedClosure).toBe('Penutupan Proyek Menunggu Persetujuan Anda');
 
       const cleanedHoo = formatTaskTitle('Tugas Alur Kerja: HOO_REVIEW', {
         actionType: 'PROJECT_CLOSURE_HOO_REVIEW',
       });
-      expect(cleanedHoo).toBe('Peninjauan Penutupan Proyek');
+      expect(cleanedHoo).toBe('Penutupan Proyek Menunggu Peninjauan');
     });
   });
 
@@ -496,5 +498,200 @@ describe('EPMS — UNIFIED-INBOX-UX-R1 Presentation Layer Regression Tests', () 
       expect(ctx.internalId).toBe(2014);
     });
   });
+
+  describe('EPMS — PROJECT CLOSURE HUMAN-FRIENDLY COPY FIX (Section 16 Specification Tests)', () => {
+    const mockHopsItem = {
+      actionType: 'PROJECT_CLOSURE_HOO_REVIEW',
+      entityType: 'PROJECT_CLOSURE',
+      title: 'Tugas Alur Kerja: HOO_REVIEW',
+      projectName: 'PROJECT SKF BEKASI',
+      projectId: 3,
+      actionTarget: '/governance/tasks?taskId=101&projectId=3',
+    };
+
+    const mockDirectorItem = {
+      actionType: 'PROJECT_CLOSURE_DIRECTOR_APPROVAL',
+      entityType: 'PROJECT_CLOSURE',
+      title: 'Tugas Alur Kerja: DIRECTOR_APPROVAL',
+      projectName: 'PROJECT SKF BEKASI',
+      projectId: 3,
+      actionTarget: '/governance/tasks?taskId=102&projectId=3',
+    };
+
+    const mockReturnItem = {
+      actionType: 'PROJECT_CLOSURE_REVISION',
+      entityType: 'PROJECT_CLOSURE',
+      title: 'Pengajuan Penutupan Proyek Perlu Diperbaiki',
+      projectName: 'PROJECT SKF BEKASI',
+      projectId: 3,
+      actionTarget: '/governance/tasks?taskId=103&projectId=3',
+    };
+
+    it('1. HOPS task title is human-readable', () => {
+      const title = formatTaskTitle(mockHopsItem.title, mockHopsItem);
+      expect(title).toBe('Penutupan Proyek Menunggu Peninjauan');
+    });
+
+    it('2. HOPS description contains real project name', () => {
+      const desc = formatTaskDescription(mockHopsItem);
+      expect(desc).toBe(
+        'PM telah mengajukan penutupan proyek "PROJECT SKF BEKASI". Silakan tinjau kelengkapan pengajuan sebelum diteruskan ke Direktur.'
+      );
+    });
+
+    it('3. HOPS CTA = "Tinjau Pengajuan"', () => {
+      const cta = formatContextualCta(mockHopsItem);
+      expect(cta).toBe('Tinjau Pengajuan');
+    });
+
+    it('4. Director title is human-readable', () => {
+      const title = formatTaskTitle(mockDirectorItem.title, mockDirectorItem);
+      expect(title).toBe('Penutupan Proyek Menunggu Persetujuan Anda');
+    });
+
+    it('5. Director description contains real project name', () => {
+      const desc = formatTaskDescription(mockDirectorItem);
+      expect(desc).toBe(
+        'Head of Operations telah menyelesaikan peninjauan penutupan proyek "PROJECT SKF BEKASI" dan meneruskannya kepada Anda untuk keputusan akhir.'
+      );
+    });
+
+    it('6. Director CTA = "Tinjau & Beri Keputusan"', () => {
+      const cta = formatContextualCta(mockDirectorItem);
+      expect(cta).toBe('Tinjau & Beri Keputusan');
+    });
+
+    it('7. Return-to-PM copy is human-readable', () => {
+      const title = formatTaskTitle(mockReturnItem.title, mockReturnItem);
+      expect(title).toBe('Pengajuan Penutupan Proyek Perlu Diperbaiki');
+
+      const desc = formatTaskDescription(mockReturnItem);
+      expect(desc).toBe(
+        'Pengajuan penutupan proyek "PROJECT SKF BEKASI" dikembalikan untuk diperbaiki. Silakan lihat catatan reviewer, lakukan perbaikan, lalu ajukan kembali.'
+      );
+
+      const cta = formatContextualCta(mockReturnItem);
+      expect(cta).toBe('Lihat Catatan & Perbaiki');
+
+      // With specific reviewer
+      const descWithReviewer = formatTaskDescription({
+        ...mockReturnItem,
+        returnedByName: 'Head of Operations',
+      });
+      expect(descWithReviewer).toBe(
+        'Head of Operations mengembalikan pengajuan penutupan proyek "PROJECT SKF BEKASI" untuk diperbaiki. Silakan lihat catatan reviewer, lakukan perbaikan, lalu ajukan kembali.'
+      );
+    });
+
+    it('8. No raw technical enum appears in primary copy', () => {
+      const titles = [
+        formatTaskTitle(mockHopsItem.title, mockHopsItem),
+        formatTaskTitle(mockDirectorItem.title, mockDirectorItem),
+        formatTaskTitle(mockReturnItem.title, mockReturnItem),
+      ];
+      const descriptions = [
+        formatTaskDescription(mockHopsItem),
+        formatTaskDescription(mockDirectorItem),
+        formatTaskDescription(mockReturnItem),
+      ];
+      const ctas = [
+        formatContextualCta(mockHopsItem),
+        formatContextualCta(mockDirectorItem),
+        formatContextualCta(mockReturnItem),
+      ];
+
+      const forbiddenEnums = [
+        'HOO_REVIEW',
+        'PROJECT_CLOSURE_HOO_REVIEW',
+        'DIRECTOR_APPROVAL',
+        'PROJECT_CLOSURE_DIRECTOR_APPROVAL',
+        'PROJECT_CLOSURE_REVISION',
+        'node_hoo_review',
+        'node_director_approval',
+        'Workflow Task',
+        'Tugas Alur Kerja',
+      ];
+
+      [...titles, ...descriptions, ...ctas].forEach((text) => {
+        forbiddenEnums.forEach((enumVal) => {
+          expect(text).not.toContain(enumVal);
+        });
+      });
+    });
+
+    it('9. No raw project database ID is shown as "Proyek #<id>"', () => {
+      const itemWithDbId = {
+        ...mockHopsItem,
+        projectName: 'Proyek #3',
+      };
+      const desc = formatTaskDescription(itemWithDbId);
+      expect(desc).not.toContain('Proyek #3');
+      expect(desc).toContain('proyek ini');
+
+      const ctx = extractItemBusinessContext(itemWithDbId);
+      expect(ctx.projectName).toBeUndefined();
+      expect(ctx.internalId).toBeUndefined();
+    });
+
+    it('10. Existing deep-link remains unchanged', () => {
+      const hopsLink = resolveTodoActionTarget(mockHopsItem);
+      expect(hopsLink).toBe('/governance/tasks?taskId=101&projectId=3');
+
+      const dirLink = resolveTodoActionTarget(mockDirectorItem);
+      expect(dirLink).toBe('/governance/tasks?taskId=102&projectId=3');
+
+      const notifLink = resolveTodoActionTarget({
+        actionTarget: '/governance/tasks?projectId=3',
+      });
+      expect(notifLink).toBe('/governance/tasks?projectId=3');
+    });
+
+    it('11. Existing actionability behavior remains PASS', () => {
+      expect(formatRoleName('HEAD_OF_OPERATIONS')).toBe('Head of Operations');
+      expect(formatRoleName('DIRECTOR')).toBe('Direktur');
+      expect(formatRoleName('PM')).toBe('Project Manager');
+      expect(formatEntityLabel('PROJECT_CLOSURE')).toBe('PENUTUPAN PROYEK');
+    });
+
+    it('12. Missing project name uses safe fallback, not fabricated data', () => {
+      const itemWithoutName = {
+        actionType: 'PROJECT_CLOSURE_HOO_REVIEW',
+        entityType: 'PROJECT_CLOSURE',
+      };
+      const desc = formatTaskDescription(itemWithoutName);
+      expect(desc).toBe(
+        'PM telah mengajukan penutupan proyek ini. Silakan tinjau kelengkapan pengajuan sebelum diteruskan ke Direktur.'
+      );
+      expect(desc).not.toContain('Proyek #');
+      expect(desc).not.toContain('undefined');
+      expect(desc).not.toContain('null');
+    });
+
+    it('13. CREATE_INVOICE Material presentation and CTA', () => {
+      const materialItem = {
+        actionType: 'CREATE_INVOICE',
+        title: 'Buat Invoice PO PO-20261023-002',
+        entityType: 'PURCHASE_ORDER',
+        actionTarget: '/finance/invoices?tab=ready_pos&poId=11&paymentTermId=11',
+      };
+      expect(formatTaskTitle(materialItem.title, materialItem)).toBe('Buat Invoice PO PO-20261023-002');
+      expect(formatContextualCta(materialItem)).toBe('Buat Invoice');
+      expect(resolveItemStatusDomain(materialItem)).toBe('payment');
+    });
+
+    it('14. CREATE_INVOICE Service presentation and CTA', () => {
+      const serviceItem = {
+        actionType: 'CREATE_INVOICE',
+        title: 'Buat Invoice Klaim Jasa SCL-20261023-001',
+        entityType: 'SERVICE_CLAIM',
+        actionTarget: '/finance/invoices?tab=ready_pos&poId=10&serviceClaimId=5',
+      };
+      expect(formatTaskTitle(serviceItem.title, serviceItem)).toBe('Buat Invoice Klaim Jasa SCL-20261023-001');
+      expect(formatContextualCta(serviceItem)).toBe('Buat Invoice');
+      expect(resolveItemStatusDomain(serviceItem)).toBe('service_claim');
+    });
+  });
 });
+
+
 

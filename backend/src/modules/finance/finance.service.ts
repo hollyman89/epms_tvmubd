@@ -2877,5 +2877,386 @@ export class FinanceService {
       await queryRunner.release();
     }
   }
+
+  /**
+   * Evaluates canonical Material Payment Term invoice eligibility SSOT.
+   * Consumed by both createInvoice validation and InboxService CREATE_INVOICE projection.
+   */
+  isMaterialTermEligible(
+    term: PoPaymentTerm,
+    po: PurchaseOrder,
+    allTerms: PoPaymentTerm[],
+    allPoInvoices: Invoice[],
+    allPoGrs: GoodsReceipt[],
+  ): { isEligible: boolean; reason?: string } {
+    if (!term || term.deletedAt) {
+      return { isEligible: false, reason: 'Payment term tidak ditemukan atau telah dihapus.' };
+    }
+
+    if (term.status !== PaymentTermStatus.PENDING) {
+      return { isEligible: false, reason: `Payment term status bukan PENDING (${term.status}).` };
+    }
+
+    const eligiblePoStatuses = ['ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED'];
+    if (!eligiblePoStatuses.includes(po.status)) {
+      return { isEligible: false, reason: `Status PO ${po.status} tidak memenuhi syarat penagihan.` };
+    }
+
+    // 1. Single active invoice per term rule
+    const existingActiveInvoice = allPoInvoices.find(
+      (inv) =>
+        Number(inv.paymentTermId) === Number(term.id) &&
+        !inv.deletedAt &&
+        inv.status !== 'CANCELLED' &&
+        inv.matchStatus !== 'REJECTED',
+    );
+    if (existingActiveInvoice) {
+      return { isEligible: false, reason: 'Payment term sudah memiliki invoice aktif.' };
+    }
+
+    // 2. Sequence Gate
+    const currentSeq = Number(term.sequence || 1);
+    if (currentSeq > 1 && allTerms && allTerms.length > 0) {
+      const sortedTerms = [...allTerms].sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+      for (const prevTerm of sortedTerms) {
+        if (prevTerm.deletedAt || Number(prevTerm.id) === Number(term.id)) continue;
+        const prevSeq = Number(prevTerm.sequence || 0);
+        if (prevSeq < currentSeq) {
+          const matchingInv = allPoInvoices.find(
+            (inv) => Number(inv.paymentTermId) === Number(prevTerm.id) && !inv.deletedAt && inv.status !== 'CANCELLED',
+          );
+          const effectiveStatus = prevTerm.status || matchingInv?.paymentStatus || 'PENDING';
+          if (prevTerm.termType === PaymentTermType.DOWN_PAYMENT) {
+            if (effectiveStatus !== PaymentTermStatus.PAID && matchingInv?.paymentStatus !== 'PAID') {
+              return { isEligible: false, reason: `Uang Muka (${prevTerm.termName}) belum berstatus PAID.` };
+            }
+          } else {
+            const allowed = [PaymentTermStatus.VERIFIED, PaymentTermStatus.PAID];
+            if (
+              !allowed.includes(effectiveStatus as any) &&
+              matchingInv?.matchStatus !== 'VERIFIED' &&
+              matchingInv?.paymentStatus !== 'PAID'
+            ) {
+              return {
+                isEligible: false,
+                reason: `Termin sebelumnya (${prevTerm.termName}) belum mencapai status VERIFIED atau PAID.`,
+              };
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Physical GR & Fulfillment Gate
+    const activeGrs = (allPoGrs || []).filter((g) => !g.deletedAt);
+    if (activeGrs.length === 0) {
+      return { isEligible: false, reason: 'Belum ada Goods Receipt (GR) aktif untuk PO ini.' };
+    }
+
+    let totalReceivedPhysicalValue = 0;
+    for (const g of activeGrs) {
+      for (const gi of g.items || []) {
+        const poi = po.items?.find((i) => Number(i.id) === Number(gi.poItemId));
+        if (poi) {
+          totalReceivedPhysicalValue += Number(gi.receivedQuantity || 0) * Number(poi.unitPrice || 0);
+        }
+      }
+    }
+
+    if (totalReceivedPhysicalValue <= 0) {
+      return { isEligible: false, reason: 'Total nilai penerimaan fisik barang masih 0.' };
+    }
+
+    if (term.termType === PaymentTermType.RETENTION) {
+      if (po.status !== 'COMPLETED') {
+        return { isEligible: false, reason: 'Termin retensi hanya dapat ditagihkan setelah PO berstatus COMPLETED.' };
+      }
+    } else {
+      // PROGRESS or FINAL_DELIVERY
+      const is100PercentMilestone =
+        /100%|fisik\s*100%|lengkap/i.test(term.triggerCondition || '') ||
+        Number(term.percentage) === 100 ||
+        term.termType === PaymentTermType.FINAL_DELIVERY;
+
+      if (is100PercentMilestone) {
+        const isAllItemsCompleted =
+          po.status === 'COMPLETED' &&
+          po.items &&
+          po.items.length > 0 &&
+          po.items.every((item) => Number(item.receivedQuantity || 0) >= Number(item.quantity || 0));
+
+        if (!isAllItemsCompleted) {
+          return { isEligible: false, reason: 'Pengiriman fisik barang belum selesai 100%.' };
+        }
+      } else {
+        const matchPercent = (term.triggerCondition || '').match(/(\d+(?:\.\d+)?)\s*%/);
+        const targetPercent = matchPercent ? parseFloat(matchPercent[1]) : Number(term.percentage || 0);
+        if (targetPercent > 0 && targetPercent < 100) {
+          const poTotal = Number(po.totalAmount || 0);
+          const physicalProgress = poTotal > 0 ? (totalReceivedPhysicalValue / poTotal) * 100 : 0;
+          if (Math.round(physicalProgress * 100) / 100 + 0.5 < targetPercent) {
+            return {
+              isEligible: false,
+              reason: `Kemajuan fisik baru mencapai ${physicalProgress.toFixed(2)}% (target: ${targetPercent}%).`,
+            };
+          }
+        }
+      }
+
+      // Capacity check
+      let previousProgressBilled = 0;
+      for (const inv of allPoInvoices) {
+        if (inv.deletedAt || inv.status === 'CANCELLED' || inv.matchStatus === 'REJECTED') continue;
+        const matchingTerm = allTerms.find((t) => Number(t.id) === Number(inv.paymentTermId));
+        if (matchingTerm && matchingTerm.termType === PaymentTermType.PROGRESS) {
+          previousProgressBilled += Number(inv.totalAmount || 0);
+        }
+      }
+
+      const currentTermAmount = Number(term.amount || 0);
+      if (
+        Math.round((previousProgressBilled + currentTermAmount) * 100) / 100 >
+        Math.round(totalReceivedPhysicalValue * 100) / 100 + 0.01
+      ) {
+        return {
+          isEligible: false,
+          reason: 'Akumulasi penagihan progress melebihi total nilai fisik barang yang telah diterima.',
+        };
+      }
+    }
+
+    return { isEligible: true };
+  }
+
+  /**
+   * Evaluates canonical Service Claim invoice eligibility SSOT.
+   */
+  isServiceClaimEligible(
+    claim: ServiceClaim,
+    po: PurchaseOrder,
+    existingClaimInvoices: Invoice[],
+  ): { isEligible: boolean; reason?: string } {
+    if (!claim || claim.deletedAt) {
+      return { isEligible: false, reason: 'Klaim Jasa tidak ditemukan atau telah dihapus.' };
+    }
+
+    if (claim.status !== ServiceClaimStatus.APPROVED_FOR_INVOICE) {
+      return { isEligible: false, reason: `Status Klaim Jasa bukan APPROVED_FOR_INVOICE (${claim.status}).` };
+    }
+
+    if (!po || po.deletedAt) {
+      return { isEligible: false, reason: 'Purchase Order terkait tidak ditemukan.' };
+    }
+
+    const eligiblePoStatuses = ['ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED'];
+    if (!eligiblePoStatuses.includes(po.status)) {
+      return { isEligible: false, reason: `Status PO ${po.status} tidak memenuhi syarat penagihan.` };
+    }
+
+    const hasActiveInvoice = existingClaimInvoices.some(
+      (inv) =>
+        Number(inv.serviceClaimId) === Number(claim.id) &&
+        !inv.deletedAt &&
+        inv.status !== 'CANCELLED' &&
+        inv.matchStatus !== 'REJECTED',
+    );
+    if (hasActiveInvoice) {
+      return { isEligible: false, reason: 'Klaim Jasa sudah ditagihkan pada invoice aktif.' };
+    }
+
+    return { isEligible: true };
+  }
+
+  /**
+   * Retrieves all currently actionable invoice obligations for Finance.
+   * Material POs with fulfilled Goods Receipts and Service POs with APPROVED_FOR_INVOICE claims.
+   * Provides authoritative SSOT for both Inbox projection and Finance workspace.
+   */
+  async getEligibleInvoiceObligations(): Promise<EligibleInvoiceObligation[]> {
+    const obligations: EligibleInvoiceObligation[] = [];
+    const seenObligationIds = new Set<string>();
+
+    // 1. MATERIAL PO Obligations
+    try {
+      const materialPos = await this.poRepository.find({
+        where: {
+          orderType: In([PurchaseOrderType.MATERIAL, 'LEGACY_MIXED']),
+          status: In(['ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED']),
+        },
+        relations: [
+          'items',
+          'paymentTerms',
+          'vendor',
+          'purchaseRequest',
+          'purchaseRequest.project',
+          'goodsReceipts',
+          'goodsReceipts.items',
+        ],
+        order: { id: 'DESC' },
+      });
+
+      for (const po of materialPos) {
+        if (!po.goodsReceipts || po.goodsReceipts.length === 0) continue;
+
+        const allPoInvoices = await this.invoiceRepository.find({
+          where: { poId: po.id },
+          relations: ['paymentTerm'],
+        });
+
+        const projectName = po.purchaseRequest?.project?.name || undefined;
+        const projectId = po.purchaseRequest?.projectId || undefined;
+        const vendorName = po.vendor?.name || undefined;
+
+        if (po.paymentTerms && po.paymentTerms.length > 0) {
+          const sortedTerms = [...po.paymentTerms].sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+
+          for (const term of sortedTerms) {
+            const evalResult = this.isMaterialTermEligible(
+              term,
+              po,
+              sortedTerms,
+              allPoInvoices,
+              po.goodsReceipts,
+            );
+
+            if (evalResult.isEligible) {
+              const obligationId = `mat-po-${po.id}-term-${term.id}`;
+              if (!seenObligationIds.has(obligationId)) {
+                seenObligationIds.add(obligationId);
+                const latestGr = [...po.goodsReceipts]
+                  .filter((g) => !g.deletedAt)
+                  .sort(
+                    (a, b) =>
+                      new Date(b.receiptDate || (b as any).createdAt).getTime() -
+                      new Date(a.receiptDate || (a as any).createdAt).getTime(),
+                  )[0];
+
+                obligations.push({
+                  obligationId,
+                  orderType: 'MATERIAL',
+                  poId: Number(po.id),
+                  poNumber: po.poNumber,
+                  vendorName,
+                  projectName,
+                  projectId,
+                  paymentTermId: Number(term.id),
+                  paymentTermName: term.termName,
+                  paymentTermSequence: Number(term.sequence || 1),
+                  amount: Number(term.amount || 0),
+                  eligibleAt: latestGr?.receiptDate
+                    ? new Date(latestGr.receiptDate)
+                    : new Date(term.createdAt || new Date()),
+                  triggerCondition: term.triggerCondition,
+                  actionTarget: `/finance/invoices?tab=ready_pos&poId=${po.id}&paymentTermId=${term.id}`,
+                });
+              }
+            }
+          }
+        } else {
+          // Branch B (Legacy PO without terms): COMPLETED + 100% received + unbilled
+          if (po.status === 'COMPLETED') {
+            const totalOrdered = (po.items || []).reduce((sum, it) => sum + Number(it.quantity || 0), 0);
+            const totalReceived = (po.items || []).reduce((sum, it) => sum + Number(it.receivedQuantity || 0), 0);
+            const is100Percent = totalReceived >= totalOrdered && totalOrdered > 0;
+
+            const hasActiveInvoice = allPoInvoices.some(
+              (inv) => !inv.deletedAt && inv.status !== 'CANCELLED' && inv.matchStatus !== 'REJECTED',
+            );
+
+            if (is100Percent && !hasActiveInvoice) {
+              const obligationId = `mat-po-${po.id}-full`;
+              if (!seenObligationIds.has(obligationId)) {
+                seenObligationIds.add(obligationId);
+                obligations.push({
+                  obligationId,
+                  orderType: 'MATERIAL',
+                  poId: Number(po.id),
+                  poNumber: po.poNumber,
+                  vendorName,
+                  projectName,
+                  projectId,
+                  amount: Number(po.totalAmount || 0),
+                  eligibleAt: new Date(po.updatedAt || (po as any).createdAt || new Date()),
+                  actionTarget: `/finance/invoices?tab=ready_pos&poId=${po.id}`,
+                });
+              }
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to resolve Material invoice obligations:', err);
+    }
+
+    // 2. SERVICE PO Obligations
+    try {
+      const claimRepo = this.dataSource.getRepository(ServiceClaim);
+      const approvedClaims = await claimRepo.find({
+        where: {
+          status: ServiceClaimStatus.APPROVED_FOR_INVOICE,
+        },
+        relations: ['purchaseOrder', 'purchaseOrder.vendor', 'project'],
+        order: { id: 'DESC' },
+      });
+
+      for (const claim of approvedClaims) {
+        if (claim.deletedAt) continue;
+        const po = claim.purchaseOrder;
+        if (!po || po.deletedAt) continue;
+
+        const existingClaimInvoices = await this.invoiceRepository.find({
+          where: { serviceClaimId: claim.id },
+        });
+
+        const evalResult = this.isServiceClaimEligible(claim, po, existingClaimInvoices);
+        if (evalResult.isEligible) {
+          const obligationId = `srv-claim-${claim.id}`;
+          if (!seenObligationIds.has(obligationId)) {
+            seenObligationIds.add(obligationId);
+            obligations.push({
+              obligationId,
+              orderType: 'SERVICE',
+              poId: Number(claim.poId),
+              poNumber: po.poNumber || `PO #${claim.poId}`,
+              vendorName: po.vendor?.name,
+              projectName: claim.project?.name,
+              projectId: claim.projectId ? Number(claim.projectId) : undefined,
+              serviceClaimId: Number(claim.id),
+              serviceClaimNumber: claim.claimNumber,
+              amount: Number(claim.approvedClaimAmount || claim.totalClaimAmount || 0),
+              eligibleAt: claim.commercialVerifiedAt
+                ? new Date(claim.commercialVerifiedAt)
+                : new Date(claim.updatedAt || new Date()),
+              actionTarget: `/finance/invoices?tab=ready_pos&poId=${claim.poId}&serviceClaimId=${claim.id}`,
+            });
+          }
+        }
+      }
+    } catch (err: any) {
+      console.error('Failed to resolve Service invoice obligations:', err);
+    }
+
+    return obligations;
+  }
 }
+
+export interface EligibleInvoiceObligation {
+  obligationId: string;
+  orderType: 'MATERIAL' | 'SERVICE';
+  poId: number;
+  poNumber: string;
+  vendorName?: string;
+  projectName?: string;
+  projectId?: number;
+  paymentTermId?: number;
+  paymentTermName?: string;
+  paymentTermSequence?: number;
+  serviceClaimId?: number;
+  serviceClaimNumber?: string;
+  amount: number;
+  eligibleAt: Date;
+  triggerCondition?: string;
+  actionTarget: string;
+}
+
 

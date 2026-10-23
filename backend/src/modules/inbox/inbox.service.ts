@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import { NotificationService } from '../notification/notification.service';
+import { FinanceService } from '../finance/finance.service';
 import { Contract, LegalStatus } from '../../entities/contract.entity';
 import { Tender, TenderStage, GoNoGoStatus } from '../../entities/tender.entity';
 import { PaymentRequest, PaymentRequestStatus } from '../../entities/payment-request.entity';
@@ -10,6 +11,8 @@ import { ProjectProgressLog } from '../../entities/project-progress-log.entity';
 import { ServiceClaim, ServiceClaimStatus } from '../../entities/service-claim.entity';
 import { ProjectClosure, ProjectClosureStatus } from '../../entities/project-closure.entity';
 import { WorkflowTask, WorkflowTaskStatus } from '../../entities/workflow-task.entity';
+import { PurchaseRequest } from '../../entities/purchase-request.entity';
+import { Rfq } from '../../entities/rfq.entity';
 import { TodoReadModelDto, InboxSummaryDto, HistoryItemDto } from './inbox.dto';
 import { evaluateMarketingActionItem } from '../marketing/marketing-action-item.predicate';
 
@@ -51,6 +54,14 @@ export class InboxService {
     private readonly closureRepo: Repository<ProjectClosure>,
     @InjectRepository(WorkflowTask)
     private readonly taskRepo: Repository<WorkflowTask>,
+    @Optional()
+    @InjectRepository(PurchaseRequest)
+    private readonly purchaseRequestRepo?: Repository<PurchaseRequest>,
+    @Optional()
+    @InjectRepository(Rfq)
+    private readonly rfqRepo?: Repository<Rfq>,
+    @Optional()
+    private readonly financeService?: FinanceService,
   ) {}
 
   /**
@@ -71,6 +82,8 @@ export class InboxService {
         let actionType = task.taskKey || 'WORKFLOW_TASK';
         let actionTarget: string | null = null;
         let title = `Tugas Alur Kerja: ${task.taskKey || task.id}`;
+        let description: string | undefined;
+        let ctaLabel: string | undefined;
         let projectId: number | undefined;
         let projectName: string | undefined;
         let customerName: string | undefined;
@@ -187,6 +200,91 @@ export class InboxService {
             actionTarget = null;
             title = `Tugas Kontrak: ${task.taskKey || task.id}`;
           }
+        } else if (entityType === 'PROJECT_CLOSURE') {
+          let resolvedProjectId =
+            task.workflowInstance?.context?.projectId &&
+            !isNaN(Number(task.workflowInstance.context.projectId)) &&
+            Number(task.workflowInstance.context.projectId) > 0
+              ? Number(task.workflowInstance.context.projectId)
+              : undefined;
+
+          let resolvedProjectName =
+            task.workflowInstance?.context?.projectName ||
+            (task.workflowInstance as any)?.project?.name;
+
+          let closureRecord: ProjectClosure | null = null;
+          if (entityId > 0 && this.closureRepo) {
+            try {
+              closureRecord = await this.closureRepo.findOne({
+                where: { id: entityId },
+                relations: ['project', 'submittedBy'],
+              });
+              if (closureRecord?.project?.name) {
+                resolvedProjectName = closureRecord.project.name;
+              }
+              if (closureRecord?.project?.id) {
+                resolvedProjectId = closureRecord.project.id;
+              }
+              if (closureRecord?.submittedBy?.fullName && !submittedByName) {
+                submittedByName = closureRecord.submittedBy.fullName;
+              }
+            } catch (err: any) {
+              this.logger.warn(`Could not resolve closure context for closure #${entityId}: ${err?.message}`);
+            }
+          }
+
+          projectId = resolvedProjectId;
+          const safeProjectName =
+            resolvedProjectName && !resolvedProjectName.match(/^Proyek\s*#\d+$/i)
+              ? resolvedProjectName
+              : undefined;
+          projectName = safeProjectName;
+          const displayProjectName = safeProjectName || 'proyek ini';
+
+          const isHooReview =
+            task.nodeId === 'node_hoo_review' ||
+            task.taskKey === 'HOO_REVIEW' ||
+            task.taskKey === 'PROJECT_CLOSURE_HOO_REVIEW';
+
+          const isDirectorApproval =
+            task.nodeId === 'node_director_approval' ||
+            task.taskKey === 'DIRECTOR_APPROVAL' ||
+            task.taskKey === 'PROJECT_CLOSURE_DIRECTOR_APPROVAL';
+
+          if (isHooReview) {
+            actionType = 'PROJECT_CLOSURE_HOO_REVIEW';
+            actionTarget =
+              resolvedProjectId && task.id
+                ? `/governance/tasks?taskId=${task.id}&projectId=${resolvedProjectId}`
+                : null;
+            title = 'Penutupan Proyek Menunggu Peninjauan';
+            description = `PM telah mengajukan penutupan proyek "${displayProjectName}". Silakan tinjau kelengkapan pengajuan sebelum diteruskan ke Direktur.`;
+            ctaLabel = 'Tinjau Pengajuan';
+          } else if (isDirectorApproval) {
+            actionType = 'PROJECT_CLOSURE_DIRECTOR_APPROVAL';
+            actionTarget =
+              resolvedProjectId && task.id
+                ? `/governance/tasks?taskId=${task.id}&projectId=${resolvedProjectId}`
+                : null;
+            title = 'Penutupan Proyek Menunggu Persetujuan Anda';
+            description = `Head of Operations telah menyelesaikan peninjauan penutupan proyek "${displayProjectName}" dan meneruskannya kepada Anda untuk keputusan akhir.`;
+            ctaLabel = 'Tinjau & Beri Keputusan';
+          } else if (task.nodeId?.includes('revision') || task.taskKey?.includes('REVISION')) {
+            actionType = 'PROJECT_CLOSURE_REVISION';
+            actionTarget = resolvedProjectId
+              ? `/project-delivery?view=workspace&projectId=${resolvedProjectId}&section=closure`
+              : null;
+            title = 'Pengajuan Penutupan Proyek Perlu Diperbaiki';
+            description = `Pengajuan penutupan proyek "${displayProjectName}" dikembalikan untuk diperbaiki. Silakan lihat catatan reviewer, lakukan perbaikan, lalu ajukan kembali.`;
+            ctaLabel = 'Lihat Catatan & Perbaiki';
+          } else {
+            actionType = task.taskKey || 'WORKFLOW_TASK';
+            actionTarget =
+              resolvedProjectId && task.id
+                ? `/governance/tasks?taskId=${task.id}&projectId=${resolvedProjectId}`
+                : null;
+            title = `Tugas Penutupan Proyek: ${task.taskKey || task.id}`;
+          }
         } else {
           // Generic unmapped workflow task: explicit unresolved state (no /inbox fallback)
           actionType = task.taskKey || 'WORKFLOW_TASK';
@@ -206,7 +304,8 @@ export class InboxService {
           actionType,
           actionTarget,
           title,
-          description: task.comments || undefined,
+          description: description || task.comments || undefined,
+          ctaLabel,
           status: task.status,
           dueAt: task.dueAt ? new Date(task.dueAt).toISOString() : undefined,
           createdAt: task.createdAt ? new Date(task.createdAt).toISOString() : new Date().toISOString(),
@@ -400,6 +499,58 @@ export class InboxService {
       } catch (err: any) {
         this.logger.error(`Failed to fetch finance actionable payment requests: ${err.message}`, err.stack);
       }
+
+      // 4.b Authoritative Domain Queue: Eligible Invoicing Obligations (Material PO with GR & Approved Service Claims)
+      if (this.financeService) {
+        try {
+          const eligibleObligations = await this.financeService.getEligibleInvoiceObligations();
+          for (const obl of eligibleObligations) {
+            if (obl.orderType === 'MATERIAL') {
+              todos.push({
+                todoId: `finance-invoice-po-${obl.poId}-term-${obl.paymentTermId || 'full'}`,
+                sourceType: 'DOMAIN_INVOICE',
+                sourceId: `po-${obl.poId}-term-${obl.paymentTermId || 'full'}`,
+                assignedRole: 'FINANCE',
+                entityType: 'PURCHASE_ORDER',
+                entityId: Number(obl.poId),
+                projectId: obl.projectId ? Number(obl.projectId) : undefined,
+                actionType: 'CREATE_INVOICE',
+                actionTarget: obl.actionTarget,
+                title: `Buat Invoice PO ${obl.poNumber}`,
+                description: obl.paymentTermName
+                  ? `PO material telah memenuhi syarat penagihan (${obl.paymentTermName} - Rp ${Number(obl.amount || 0).toLocaleString('id-ID')}).`
+                  : `PO material ${obl.poNumber} telah selesai pengiriman dan siap ditagihkan.`,
+                status: 'READY_TO_INVOICE',
+                createdAt: obl.eligibleAt ? new Date(obl.eligibleAt).toISOString() : new Date().toISOString(),
+                projectName: obl.projectName,
+                customerName: obl.vendorName,
+                ctaLabel: 'Buat Invoice',
+              });
+            } else if (obl.orderType === 'SERVICE') {
+              todos.push({
+                todoId: `finance-invoice-claim-${obl.serviceClaimId}`,
+                sourceType: 'DOMAIN_SERVICE_CLAIM',
+                sourceId: `claim-${obl.serviceClaimId}`,
+                assignedRole: 'FINANCE',
+                entityType: 'SERVICE_CLAIM',
+                entityId: Number(obl.serviceClaimId),
+                projectId: obl.projectId ? Number(obl.projectId) : undefined,
+                actionType: 'CREATE_INVOICE',
+                actionTarget: obl.actionTarget,
+                title: `Buat Invoice Klaim Jasa ${obl.serviceClaimNumber || '#' + obl.serviceClaimId}`,
+                description: `Klaim jasa senilai Rp ${Number(obl.amount || 0).toLocaleString('id-ID')} telah disetujui komersial untuk penagihan.`,
+                status: 'APPROVED_FOR_INVOICE',
+                createdAt: obl.eligibleAt ? new Date(obl.eligibleAt).toISOString() : new Date().toISOString(),
+                projectName: obl.projectName,
+                customerName: obl.vendorName,
+                ctaLabel: 'Buat Invoice',
+              });
+            }
+          }
+        } catch (err: any) {
+          this.logger.error(`Failed to fetch eligible invoice obligations for Finance: ${err.message}`, err.stack);
+        }
+      }
     }
 
     // 5. Authoritative Domain Queue: Project Progress Claim Verification (HEAD_OF_OPERATIONS & PMO)
@@ -574,29 +725,81 @@ export class InboxService {
 
     if (this.closureRepo) {
       try {
-        const actionableClosures = await this.closureRepo.find({
-          where: {
-            status: In([
-              ProjectClosureStatus.PENDING_HOO_REVIEW,
-              ProjectClosureStatus.PENDING_DIRECTOR_APPROVAL,
-              ProjectClosureStatus.RETURNED,
-            ]),
-          },
+        const allClosures = await this.closureRepo.find({
           relations: ['project', 'submittedBy', 'returnActor'],
           order: { id: 'DESC' },
         });
 
-        for (const closure of actionableClosures) {
+        // Canonical Rule DASH-REC-001: Group by project_id and select only the CURRENT/LATEST closure cycle
+        const latestClosureByProject = new Map<number, ProjectClosure>();
+
+        for (const closure of allClosures) {
+          const resolvedPId = Number(closure.projectId ?? (closure as any).project_id);
+          if (!resolvedPId || isNaN(resolvedPId) || resolvedPId <= 0) continue;
+
+          const currentLatest = latestClosureByProject.get(resolvedPId);
+          if (!currentLatest) {
+            latestClosureByProject.set(resolvedPId, closure);
+            continue;
+          }
+
+          // Authority order:
+          // 1. Highest cycleNumber
+          const currentCycle = Number(closure.cycleNumber ?? (closure as any).cycle_number);
+          const latestCycle = Number(currentLatest.cycleNumber ?? (currentLatest as any).cycle_number);
+
+          const hasValidCurrentCycle = !isNaN(currentCycle) && currentCycle > 0;
+          const hasValidLatestCycle = !isNaN(latestCycle) && latestCycle > 0;
+
+          if (hasValidCurrentCycle && hasValidLatestCycle) {
+            if (currentCycle > latestCycle) {
+              latestClosureByProject.set(resolvedPId, closure);
+            } else if (currentCycle === latestCycle) {
+              // Tie-breaker: latest row ID / created_at
+              if (Number(closure.id) > Number(currentLatest.id)) {
+                latestClosureByProject.set(resolvedPId, closure);
+              }
+            }
+          } else if (hasValidCurrentCycle && !hasValidLatestCycle) {
+            latestClosureByProject.set(resolvedPId, closure);
+          } else if (!hasValidCurrentCycle && !hasValidLatestCycle) {
+            if (Number(closure.id) > Number(currentLatest.id)) {
+              latestClosureByProject.set(resolvedPId, closure);
+            }
+          }
+        }
+
+        const ACTIONABLE_STATUSES: string[] = [
+          ProjectClosureStatus.PENDING_HOO_REVIEW,
+          ProjectClosureStatus.PENDING_DIRECTOR_APPROVAL,
+          ProjectClosureStatus.RETURNED,
+        ];
+
+        for (const closure of latestClosureByProject.values()) {
+          // Only actionable status of the CURRENT closure cycle can project an action
+          if (!ACTIONABLE_STATUSES.includes(String(closure.status))) {
+            continue;
+          }
+
+          const closureProjectId = Number(closure.projectId ?? (closure as any).project_id);
+
           // Transitional Deduplication with WORKFLOW_TASK
           const hasMatchingWfTask = todos.some(
             (t) =>
               t.sourceType === 'WORKFLOW_TASK' &&
               t.entityType === 'PROJECT_CLOSURE' &&
-              Number(t.entityId) === Number(closure.id),
+              (Number(t.entityId) === Number(closure.id) ||
+                (t.projectId && closureProjectId && Number(t.projectId) === closureProjectId)),
           );
           if (hasMatchingWfTask) continue;
 
-          const projectName = closure.project?.name || `Proyek #${closure.projectId}`;
+          const rawProjectName = closure.project?.name;
+          const safeProjectName =
+            rawProjectName && !rawProjectName.match(/^Proyek\s*#\d+$/i)
+              ? rawProjectName
+              : undefined;
+          const projectName = safeProjectName;
+          const displayProjectName = safeProjectName || 'proyek ini';
 
           // 7.1 PENDING_HOO_REVIEW -> HEAD_OF_OPERATIONS / SUPER_ADMIN
           if (closure.status === ProjectClosureStatus.PENDING_HOO_REVIEW && isHooRole) {
@@ -610,11 +813,13 @@ export class InboxService {
               projectId: Number(closure.projectId),
               actionType: 'PROJECT_CLOSURE_HOO_REVIEW',
               actionTarget: `/governance/tasks?projectId=${closure.projectId}`,
-              title: `Review Penutupan Proyek: ${projectName}`,
-              description: `Pengajuan penutupan proyek siklus ${closure.cycleNumber} menunggu review Head of Operations.`,
+              title: safeProjectName
+                ? `Penutupan Proyek Menunggu Peninjauan: ${safeProjectName}`
+                : `Penutupan Proyek Menunggu Peninjauan`,
+              description: `PM telah mengajukan penutupan proyek "${displayProjectName}". Silakan tinjau kelengkapan pengajuan sebelum diteruskan ke Direktur.`,
               status: closure.status,
               createdAt: closure.submittedAt ? new Date(closure.submittedAt).toISOString() : new Date().toISOString(),
-              projectName,
+              projectName: safeProjectName,
               submittedByName: closure.submittedBy?.fullName || undefined,
             });
           }
@@ -631,11 +836,13 @@ export class InboxService {
               projectId: Number(closure.projectId),
               actionType: 'PROJECT_CLOSURE_DIRECTOR_APPROVAL',
               actionTarget: `/governance/tasks?projectId=${closure.projectId}`,
-              title: `Persetujuan Penutupan Proyek: ${projectName}`,
-              description: `Penutupan proyek siklus ${closure.cycleNumber} telah direview HOO dan menunggu persetujuan Direktur.`,
+              title: safeProjectName
+                ? `Penutupan Proyek Menunggu Persetujuan Anda: ${safeProjectName}`
+                : `Penutupan Proyek Menunggu Persetujuan Anda`,
+              description: `Head of Operations telah menyelesaikan peninjauan penutupan proyek "${displayProjectName}" dan meneruskannya kepada Anda untuk keputusan akhir.`,
               status: closure.status,
               createdAt: closure.hooReviewedAt ? new Date(closure.hooReviewedAt).toISOString() : (closure.submittedAt ? new Date(closure.submittedAt).toISOString() : new Date().toISOString()),
-              projectName,
+              projectName: safeProjectName,
               submittedByName: closure.submittedBy?.fullName || undefined,
             });
           }
@@ -649,6 +856,11 @@ export class InboxService {
             const isSubmitter = Number(closure.submittedById) === Number(userId);
 
             if (isAssignedPm || isSubmitter || normalizedRoles.includes('SUPER_ADMIN')) {
+              const reviewerRoleOrName = closure.returnActor?.fullName || 'Head of Operations';
+              const returnDesc = closure.returnReason
+                ? `${reviewerRoleOrName} mengembalikan pengajuan penutupan proyek "${displayProjectName}" untuk diperbaiki. Catatan: ${closure.returnReason}`
+                : `${reviewerRoleOrName} mengembalikan pengajuan penutupan proyek "${displayProjectName}" untuk diperbaiki. Silakan lihat catatan reviewer, lakukan perbaikan, lalu ajukan kembali.`;
+
               todos.push({
                 todoId: `closure-ret-${closure.id}`,
                 sourceType: 'DOMAIN_PROJECT_CLOSURE',
@@ -660,11 +872,13 @@ export class InboxService {
                 projectId: Number(closure.projectId),
                 actionType: 'PROJECT_CLOSURE_REVISION',
                 actionTarget: `/project-delivery?view=workspace&projectId=${closure.projectId}&section=closure`,
-                title: `Revisi Penutupan Proyek: ${projectName}`,
-                description: closure.returnReason ? `Catatan: ${closure.returnReason}` : 'Penutupan proyek dikembalikan untuk revisi.',
+                title: safeProjectName
+                  ? `Pengajuan Penutupan Proyek Perlu Diperbaiki: ${safeProjectName}`
+                  : `Pengajuan Penutupan Proyek Perlu Diperbaiki`,
+                description: returnDesc,
                 status: closure.status,
                 createdAt: closure.returnTimestamp ? new Date(closure.returnTimestamp).toISOString() : new Date().toISOString(),
-                projectName,
+                projectName: safeProjectName,
                 returnedByName: closure.returnActor?.fullName || undefined,
                 returnReason: closure.returnReason || undefined,
               });
@@ -725,7 +939,57 @@ export class InboxService {
       }
     }
 
-    // 9. Deterministic Ordering:
+    // 9. Authoritative Domain Queue: Purchase Requests Ready for RFQ Creation (PROCUREMENT / PURCHASING / SUPER_ADMIN)
+    const isProcurementUser = normalizedRoles.some((role) =>
+      ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'].includes(role),
+    );
+    if (isProcurementUser) {
+      try {
+        const approvedPrs = await this.purchaseRequestRepo
+          .createQueryBuilder('pr')
+          .leftJoinAndSelect('pr.project', 'project')
+          .where('pr.status = :prStatus', { prStatus: 'APPROVED' })
+          .andWhere('pr.deleted_at IS NULL')
+          .andWhere((qb) => {
+            const subQuery = qb
+              .subQuery()
+              .select('1')
+              .from(Rfq, 'rfq')
+              .where('rfq.pr_id = pr.id')
+              .andWhere('rfq.status != :cancelledStatus', { cancelledStatus: 'CANCELLED' })
+              .andWhere('rfq.deleted_at IS NULL')
+              .getQuery();
+            return `NOT EXISTS ${subQuery}`;
+          })
+          .orderBy('pr.created_at', 'DESC')
+          .getMany();
+
+        for (const pr of approvedPrs) {
+          todos.push({
+            todoId: `domain-pr-${pr.id}`,
+            sourceType: 'DOMAIN_PURCHASE_REQUEST',
+            sourceId: String(pr.id),
+            assignedRole: 'PROCUREMENT',
+            entityType: 'PURCHASE_REQUEST',
+            entityId: pr.id,
+            projectId: pr.projectId || pr.project?.id,
+            projectName: pr.project?.name,
+            actionType: 'CREATE_RFQ',
+            actionTarget: `/procurement?tab=pr&prId=${pr.id}`,
+            title: `Buat RFQ: PR ${pr.prNumber || pr.id}`,
+            description: `Purchase Request ${pr.prNumber || pr.id} telah disetujui Direktur. Siap untuk proses pembuatan RFQ.`,
+            status: 'PENDING',
+            priority: 'HIGH',
+            ctaLabel: 'Buat RFQ',
+            createdAt: pr.createdAt ? new Date(pr.createdAt).toISOString() : new Date().toISOString(),
+          });
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch approved PRs for RFQ creation: ${err.message}`, err.stack);
+      }
+    }
+
+    // 10. Deterministic Ordering:
     // 1st: Overdue tasks (dueAt < now, earliest dueAt first)
     // 2nd: Upcoming due dates (dueAt >= now, earliest dueAt first)
     // 3rd: Newest createdAt (newest created first)
@@ -843,6 +1107,44 @@ export class InboxService {
             const context = await this.enrichTenderBusinessContext(entityId);
             projectName = context.projectName;
             customerName = context.customerName;
+          } else if (entityType === 'PROJECT_CLOSURE') {
+            projectId = Number(task.workflowInstance?.context?.projectId || 0) || undefined;
+            let resolvedPName = task.workflowInstance?.context?.projectName;
+            if (!resolvedPName && entityId > 0 && this.closureRepo) {
+              try {
+                const closure = await this.closureRepo.findOne({
+                  where: { id: entityId },
+                  relations: ['project'],
+                });
+                if (closure?.project?.name) resolvedPName = closure.project.name;
+                if (!projectId && closure?.projectId) projectId = closure.projectId;
+              } catch {}
+            }
+            projectName = resolvedPName && !resolvedPName.match(/^Proyek\s*#\d+$/i) ? resolvedPName : undefined;
+          }
+
+          let historyTitle = task.taskKey || `Tugas #${task.id}`;
+          if (entityType === 'PROJECT_CLOSURE') {
+            const isHoo =
+              task.nodeId === 'node_hoo_review' ||
+              task.taskKey === 'HOO_REVIEW' ||
+              task.taskKey === 'PROJECT_CLOSURE_HOO_REVIEW';
+            const isDirector =
+              task.nodeId === 'node_director_approval' ||
+              task.taskKey === 'DIRECTOR_APPROVAL' ||
+              task.taskKey === 'PROJECT_CLOSURE_DIRECTOR_APPROVAL';
+
+            if (isHoo) {
+              historyTitle =
+                task.status === 'RETURNED'
+                  ? 'Head of Operations mengembalikan pengajuan ke PM untuk diperbaiki.'
+                  : 'Head of Operations menyetujui hasil peninjauan dan meneruskan pengajuan ke Direktur.';
+            } else if (isDirector) {
+              historyTitle =
+                task.status === 'RETURNED'
+                  ? 'Direktur mengembalikan pengajuan ke PM untuk diperbaiki.'
+                  : 'Direktur menyetujui penutupan proyek.';
+            }
           }
 
           history.push({
@@ -856,7 +1158,7 @@ export class InboxService {
             projectId,
             projectName,
             customerName,
-            title: task.taskKey || `Tugas #${task.id}`,
+            title: historyTitle,
             status: task.status,
             action: task.action || undefined,
             decidedBy: task.decidedBy ? Number(task.decidedBy) : undefined,
@@ -958,7 +1260,7 @@ export class InboxService {
             entityId: Number(cl.id),
             projectId: Number(cl.projectId),
             projectName: cl.project?.name || undefined,
-            title: `Penutupan Proyek #${cl.projectId}`,
+            title: 'Direktur menyetujui penutupan proyek.',
             status: cl.status,
             action: 'APPROVE',
             decidedBy: cl.directorApproverId ? Number(cl.directorApproverId) : undefined,

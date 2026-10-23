@@ -10,7 +10,9 @@ export interface TodoItem {
     | 'DOMAIN_MARKETING_ACTION'
     | 'DOMAIN_PROGRESS_CLAIM'
     | 'DOMAIN_SERVICE_CLAIM'
-    | 'DOMAIN_PROJECT_CLOSURE';
+    | 'DOMAIN_PROJECT_CLOSURE'
+    | 'DOMAIN_PURCHASE_REQUEST'
+    | 'DOMAIN_INVOICE';
   sourceId: string;
   taskId?: number;
   assignedUserId?: number;
