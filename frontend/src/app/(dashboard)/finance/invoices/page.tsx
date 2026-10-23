@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, Suspense, useRef } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Table,
@@ -16,6 +17,7 @@ import {
   Badge,
   Empty,
   Tooltip,
+  Spin,
 } from 'antd';
 import {
   FileTextOutlined,
@@ -47,10 +49,6 @@ const CreateInvoiceModal = dynamic(
 );
 const InvoiceDetailModal = dynamic(
   () => import('@/components/finance/InvoiceDetailModal').then((m) => m.InvoiceDetailModal),
-  { ssr: false }
-);
-const ProcessPaymentModal = dynamic(
-  () => import('@/components/finance/ProcessPaymentModal').then((m) => m.ProcessPaymentModal),
   { ssr: false }
 );
 const PaymentReceiptModal = dynamic(
@@ -278,23 +276,39 @@ const getQueueTermEligibility = (
   };
 };
 
-export default function InvoicesPage() {
+function InvoicesPageContent() {
   const { user, isFinance } = useAuth();
   const canCreateInvoice = isFinance;
   const canProcessPayment = isFinance;
 
+  const searchParams = useSearchParams();
+  const urlTab = searchParams?.get('tab');
+  const urlPoId = searchParams?.get('poId');
+  const urlPaymentTermId = searchParams?.get('paymentTermId');
+  const urlServiceClaimId = searchParams?.get('serviceClaimId');
+
   // Active Tab
-  const [activeTabKey, setActiveTabKey] = useState<string>('ready_pos');
+  const [activeTabKey, setActiveTabKey] = useState<string>(urlTab || 'ready_pos');
+  const handledDeepLinkRef = useRef<string | null>(null);
 
   // Modal States
   const [selectedPoForInvoice, setSelectedPoForInvoice] = useState<PurchaseOrder | null>(null);
+  const [selectedPaymentTermForInvoice, setSelectedPaymentTermForInvoice] = useState<any | null>(null);
+  const [selectedServiceClaimIdForInvoice, setSelectedServiceClaimIdForInvoice] = useState<number | undefined>(undefined);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
+
+  // Canonical State Transition Handler for CreateInvoiceModal
+  // Shared by Manual "Terbitkan Termin" Button & Deep-Link Auto-Opener
+  const handleCreateInvoice = useCallback((po: PurchaseOrder, paymentTerm?: any, serviceClaimId?: number) => {
+    setSelectedPoForInvoice(po);
+    setSelectedPaymentTermForInvoice(paymentTerm || null);
+    setSelectedServiceClaimIdForInvoice(serviceClaimId ? Number(serviceClaimId) : undefined);
+    setIsCreateModalOpen(true);
+  }, []);
   const [selectedInvoiceForDetail, setSelectedInvoiceForDetail] = useState<InvoiceDto | null>(null);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState<boolean>(false);
 
-  // Payment Modal States
-  const [selectedInvoiceForPay, setSelectedInvoiceForPay] = useState<InvoiceDto | null>(null);
-  const [isProcessPaymentModalOpen, setIsProcessPaymentModalOpen] = useState<boolean>(false);
+  // Payment Receipt Modal State (Read-Only)
   const [selectedPaymentForReceipt, setSelectedPaymentForReceipt] = useState<PaymentDto | null>(null);
   const [isReceiptModalOpen, setIsReceiptModalOpen] = useState<boolean>(false);
   const [selectedInvoiceForPaymentRequest, setSelectedInvoiceForPaymentRequest] = useState<InvoiceDto | null>(null);
@@ -422,6 +436,102 @@ export default function InvoicesPage() {
       window.removeEventListener('epms:reconnect-resync', handleReconnect);
     };
   }, [queryClient]);
+
+  // Handle URL deep link tab
+  useEffect(() => {
+    if (urlTab) {
+      setActiveTabKey(urlTab);
+    }
+  }, [urlTab]);
+
+  // Handle URL deep link auto-opening of PO invoice modal (Canonical Async-Safe Handler)
+  useEffect(() => {
+    // 1. Tab synchronization
+    if (urlTab && urlTab !== activeTabKey) {
+      setActiveTabKey(urlTab);
+    }
+
+    // 2. Validate deep-link parameters
+    if (!urlPoId) {
+      handledDeepLinkRef.current = null;
+      return;
+    }
+
+    const targetPoId = Number(urlPoId);
+    if (isNaN(targetPoId) || targetPoId <= 0) {
+      // Invalid poId parameter: fail gracefully without crash
+      return;
+    }
+
+    const targetTermId = urlPaymentTermId ? Number(urlPaymentTermId) : null;
+    if (urlPaymentTermId && (isNaN(Number(urlPaymentTermId)) || Number(urlPaymentTermId) <= 0)) {
+      // Invalid paymentTermId parameter: fail gracefully without crash
+      return;
+    }
+
+    const targetServiceClaimId = urlServiceClaimId ? Number(urlServiceClaimId) : null;
+    if (urlServiceClaimId && (isNaN(Number(urlServiceClaimId)) || Number(urlServiceClaimId) <= 0)) {
+      // Invalid serviceClaimId parameter: fail gracefully
+      return;
+    }
+
+    // 3. Async Data Safety: Wait until Purchase Orders data has finished loading
+    if (loadingPos) {
+      return;
+    }
+
+    // 4. Resolve Matching Purchase Order
+    const matchingPo = purchaseOrders.find((p) => Number(p.id) === targetPoId);
+    if (!matchingPo) {
+      // Target PO not found (e.g. invalid ID or not yet loaded): fallback safely without modal
+      return;
+    }
+
+    // Construct unique context key for idempotency
+    const currentDeepLinkKey = `${targetPoId}:${targetTermId ?? ''}:${targetServiceClaimId ?? ''}`;
+
+    // If this exact context has already been handled, do not re-open (prevents reopening after close or re-renders)
+    if (handledDeepLinkRef.current === currentDeepLinkKey) {
+      return;
+    }
+
+    // 5. Resolve Payment Term / Service Claim Context
+    if (targetTermId !== null) {
+      const terms = matchingPo.paymentTerms || [];
+      const matchingTerm = terms.find((t) => Number(t.id) === targetTermId);
+      if (!matchingTerm) {
+        // Requested paymentTermId does not belong to this PO: fallback safely without modal
+        return;
+      }
+      handledDeepLinkRef.current = currentDeepLinkKey;
+      handleCreateInvoice(matchingPo, matchingTerm);
+      return;
+    }
+
+    if (targetServiceClaimId !== null) {
+      handledDeepLinkRef.current = currentDeepLinkKey;
+      const applicableTerm = (matchingPo.paymentTerms || []).find((t) => {
+        const isDp = (t.termType || '').toUpperCase() === 'DP' || (t.termName || '').toUpperCase().includes('DP');
+        return !isDp && t.status === 'PENDING';
+      }) || matchingPo.paymentTerms?.[0];
+      handleCreateInvoice(matchingPo, applicableTerm, targetServiceClaimId);
+      return;
+    }
+
+    // Default: PO without specific term or claim specified
+    handledDeepLinkRef.current = currentDeepLinkKey;
+    const defaultTerm = (matchingPo.paymentTerms || []).find((t) => t.status === 'PENDING' || !t.status);
+    handleCreateInvoice(matchingPo, defaultTerm);
+  }, [
+    urlTab,
+    urlPoId,
+    urlPaymentTermId,
+    urlServiceClaimId,
+    purchaseOrders,
+    loadingPos,
+    activeTabKey,
+    handleCreateInvoice,
+  ]);
 
   // 3. Filter POs: POs eligible for billing (DP, Progress with GR, or Full Delivery COMPLETED)
   const readyCompletedPos = useMemo(() => {
@@ -771,8 +881,7 @@ export default function InvoicesPage() {
                       disabled={!canSubmitAction}
                       onClick={() => {
                         if (!canSubmitAction) return;
-                        setSelectedPoForInvoice(r);
-                        setIsCreateModalOpen(true);
+                        handleCreateInvoice(r, nextPendingTerm);
                       }}
                       className={canSubmitAction ? styles.btnActionPrimary : styles.btnActionDisabled}
                     >
@@ -1016,30 +1125,19 @@ export default function InvoicesPage() {
                 </Button>
               )}
 
-              {!isPaid && uiState.actionType === 'APPROVED_FOR_PAYMENT' && canProcessPayment && (
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<DollarCircleOutlined />}
-                  id={`btn-pay-approved-invoice-${r.id}`}
-                  onClick={() => {
-                    setSelectedInvoiceForPay(r);
-                    setIsProcessPaymentModalOpen(true);
-                  }}
-                  style={{ background: '#059669', borderColor: '#059669' }}
-                >
-                  Bayar Sekarang
-                </Button>
-              )}
-
-              {!isPaid && uiState.actionType === 'APPROVED_FOR_PAYMENT' && !canProcessPayment && (
+              {!isPaid && uiState.actionType === 'APPROVED_FOR_PAYMENT' && (
                 <Tag
                   color="cyan"
+                  icon={<CheckCircleOutlined />}
+                  id={`tag-approved-payment-${r.id}`}
                   style={{
                     padding: '3px 8px',
                     fontSize: '12px',
                     fontWeight: 600,
                     borderRadius: '4px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
                   }}
                 >
                   Disetujui Pembayaran
@@ -1312,10 +1410,26 @@ export default function InvoicesPage() {
           onClose={() => {
             setIsCreateModalOpen(false);
             setSelectedPoForInvoice(null);
+            setSelectedPaymentTermForInvoice(null);
+            setSelectedServiceClaimIdForInvoice(undefined);
           }}
           po={selectedPoForInvoice as any}
           canCreateInvoice={canCreateInvoice}
           currentUserName={user?.fullName || user?.email || 'Finance Team'}
+          initialPaymentTermId={
+            selectedPaymentTermForInvoice
+              ? Number(selectedPaymentTermForInvoice.id)
+              : urlPaymentTermId
+              ? Number(urlPaymentTermId)
+              : undefined
+          }
+          initialServiceClaimId={
+            selectedServiceClaimIdForInvoice
+              ? Number(selectedServiceClaimIdForInvoice)
+              : urlServiceClaimId
+              ? Number(urlServiceClaimId)
+              : undefined
+          }
           onInvoiceCreated={(newInv) => {
             queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] });
             queryClient.invalidateQueries({ queryKey: ['finance', 'purchase-orders'] });
@@ -1340,31 +1454,6 @@ export default function InvoicesPage() {
           onVerified={() => {
             queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] });
             queryClient.invalidateQueries({ queryKey: ['finance', 'payment-requests'] });
-          }}
-        />
-      )}
-
-      {/* PROCESS PAYMENT MODAL */}
-      {selectedInvoiceForPay && canProcessPayment && (
-        <ProcessPaymentModal
-          open={isProcessPaymentModalOpen}
-          onClose={() => {
-            setIsProcessPaymentModalOpen(false);
-            setSelectedInvoiceForPay(null);
-          }}
-          invoice={selectedInvoiceForPay}
-          canProcessPayment={canProcessPayment}
-          currentUserName={user?.fullName || user?.email || 'Finance Team'}
-          onPaymentCreated={(newPayment, updatedInvoice) => {
-            queryClient.invalidateQueries({ queryKey: ['finance', 'payments'] });
-            queryClient.invalidateQueries({ queryKey: ['finance', 'payment-requests'] });
-            queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] });
-            queryClient.invalidateQueries({ queryKey: ['finance', 'purchase-orders'] });
-            queryClient.invalidateQueries({ queryKey: ['inbox', 'todos'] });
-          }}
-          onViewReceipt={(payment) => {
-            setSelectedPaymentForReceipt(payment);
-            setIsReceiptModalOpen(true);
           }}
         />
       )}
@@ -1425,5 +1514,19 @@ export default function InvoicesPage() {
       )}
       </div>
     </ProtectedRoute>
+  );
+}
+
+export default function InvoicesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 400 }}>
+          <Spin size="large" />
+        </div>
+      }
+    >
+      <InvoicesPageContent />
+    </Suspense>
   );
 }

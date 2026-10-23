@@ -48,6 +48,8 @@ export interface CreateInvoiceModalProps {
   onViewExistingInvoice?: (inv: InvoiceDto | any) => void;
   currentUserName?: string;
   canCreateInvoice?: boolean;
+  initialPaymentTermId?: number;
+  initialServiceClaimId?: number;
 }
 
 // 2. CANONICAL CREATE INVOICE MODAL COMPONENT
@@ -60,6 +62,8 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   onViewExistingInvoice,
   currentUserName = 'Finance Team',
   canCreateInvoice = true,
+  initialPaymentTermId,
+  initialServiceClaimId,
 }) => {
   const [form] = Form.useForm();
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -179,7 +183,9 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
           .then((claims) => {
             const validClaims = (claims || []).filter(c => c.status === 'APPROVED_FOR_INVOICE');
             setApprovedServiceClaims(validClaims);
-            if (validClaims.length === 1) {
+            if (initialServiceClaimId && validClaims.some((c) => Number(c.id) === Number(initialServiceClaimId))) {
+              setSelectedServiceClaimId(Number(initialServiceClaimId));
+            } else if (validClaims.length === 1) {
               setSelectedServiceClaimId(validClaims[0].id);
             } else {
               setSelectedServiceClaimId(undefined);
@@ -201,7 +207,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
       setApprovedServiceClaims([]);
       setSelectedServiceClaimId(undefined);
     }
-  }, [open, poId, po]);
+  }, [open, poId, po, initialServiceClaimId]);
 
   // Selected Canonical Goods Receipt
   const selectedGr = useMemo(() => {
@@ -531,9 +537,12 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     if (open && po) {
       setSubmitError(null);
       if (paymentTerms.length > 0) {
-        // Auto-select first PENDING term
+        // Auto-select initialPaymentTermId if provided, else first PENDING term
+        const matchedInitial = initialPaymentTermId
+          ? paymentTerms.find((t) => Number(t.id) === Number(initialPaymentTermId))
+          : null;
         const pendingTerm = paymentTerms.find((t) => t.status === 'PENDING' || !t.status);
-        const initialTermId = pendingTerm ? pendingTerm.id : paymentTerms[0]?.id;
+        const initialTermId = matchedInitial ? matchedInitial.id : (pendingTerm ? pendingTerm.id : paymentTerms[0]?.id);
         setSelectedTermId(initialTermId);
         form.setFieldsValue({
           paymentTermId: initialTermId,
@@ -551,7 +560,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
         });
       }
     }
-  }, [open, po, paymentTerms, form]);
+  }, [open, po, paymentTerms, form, initialPaymentTermId]);
 
   // Submit Handler: Canonical Backend API Dispatch (POST /api/v1/finance/invoices)
   const handleSubmit = async (values: any) => {
