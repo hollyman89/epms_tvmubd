@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException, ConflictException, ForbiddenException, Logger, Inject, HttpException, HttpStatus, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Like, In } from 'typeorm';
+import { Repository, DataSource, Like, In, Not } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WorkflowService } from '../workflow-engine/workflow.service';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
@@ -217,7 +217,33 @@ export class ProcurementService {
       throw new BadRequestException('Purchase Request not found');
     }
 
+    // Pre-check: PR must not already have an active (non-cancelled) RFQ
+    const existingActiveRfq = await this.rfqRepo.findOne({
+      where: {
+        prId: dto.purchaseRequestId,
+        status: Not('CANCELLED'),
+      },
+    });
+    if (existingActiveRfq) {
+      throw new BadRequestException(
+        `Purchase Request already has active RFQ ${existingActiveRfq.rfqNumber || existingActiveRfq.id}.`,
+      );
+    }
+
     return await this.dataSource.transaction(async (manager) => {
+      // In-transaction guard against concurrent active RFQ creation
+      const inTxActiveRfq = await manager.findOne(Rfq, {
+        where: {
+          prId: dto.purchaseRequestId,
+          status: Not('CANCELLED'),
+        },
+      });
+      if (inTxActiveRfq) {
+        throw new BadRequestException(
+          `Purchase Request already has active RFQ ${inTxActiveRfq.rfqNumber || inTxActiveRfq.id}.`,
+        );
+      }
+
       // Auto generate RFQ Number (Monotonic & Anti-Reuse: withDeleted + pessimistic lock)
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const rfqPrefix = `RFQ-${dateStr}-`;

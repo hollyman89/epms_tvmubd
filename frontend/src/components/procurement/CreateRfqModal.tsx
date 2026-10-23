@@ -99,6 +99,58 @@ export const countRfqCancelButtons = (
   return 1;
 };
 
+/**
+ * Canonical helper for resolving PR action CTA:
+ * PR + no RFQ -> 'Buat RFQ'
+ * PR + active RFQ (OPEN / EVALUATED / CLOSED) -> 'Kelola RFQ'
+ * PR + CANCELLED RFQ -> 'Buat RFQ Baru'
+ */
+export function resolvePrRfqAction(
+  pr: any,
+  activeRfq?: any,
+  latestRfq?: any,
+  po?: any,
+  canActOnPr: boolean = true,
+): 'Lihat PO' | 'Kelola RFQ' | 'Buat RFQ Baru' | 'Buat RFQ' | 'Alur Approval' {
+  if (po) return 'Lihat PO';
+  if (activeRfq && activeRfq.status !== 'CANCELLED') return 'Kelola RFQ';
+  const effectiveStatus = pr?.status || 'SUBMITTED';
+  const isApproved = effectiveStatus === 'APPROVED';
+  if (isApproved && canActOnPr) {
+    if (latestRfq && latestRfq.status === 'CANCELLED') {
+      return 'Buat RFQ Baru';
+    }
+    return 'Buat RFQ';
+  }
+  return 'Alur Approval';
+}
+
+/**
+ * Canonical helper for resolving CreateRfqModal display mode:
+ * Active RFQ -> isViewMode = true
+ * Cancelled RFQ -> isViewMode = false, hasCancelledRfq = true (reissue mode)
+ */
+export function resolveCreateRfqModalMode(
+  viewOnly: boolean = false,
+  activeRfq?: any,
+): {
+  isViewMode: boolean;
+  hasActiveNonCancelledRfq: boolean;
+  hasCancelledRfq: boolean;
+  isReissueMode: boolean;
+} {
+  const hasActiveNonCancelledRfq = Boolean(activeRfq && activeRfq.status !== 'CANCELLED');
+  const hasCancelledRfq = Boolean(activeRfq && activeRfq.status === 'CANCELLED');
+  const isViewMode = viewOnly || hasActiveNonCancelledRfq;
+  const isReissueMode = !isViewMode && hasCancelledRfq;
+  return {
+    isViewMode,
+    hasActiveNonCancelledRfq,
+    hasCancelledRfq,
+    isReissueMode,
+  };
+}
+
 export interface RfqPrototypeRecord {
   rfqId: string;
   rfqNumber: string;
@@ -291,7 +343,10 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
     }
   };
 
-  const isViewMode = viewOnly || Boolean(activeRfq);
+  const { hasActiveNonCancelledRfq, hasCancelledRfq, isViewMode } = resolveCreateRfqModalMode(
+    viewOnly,
+    activeRfq,
+  );
 
   // Canonical Project Identity: RFQ -> PR -> Project
   const projectName = useMemo(() => {
@@ -396,14 +451,14 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
 
   useEffect(() => {
     if (open) {
-      if (activeRfq?.id || (activeRfq as any)?.rfqId) {
+      if (isViewMode && (activeRfq?.id || (activeRfq as any)?.rfqId)) {
         fetchQuotations();
       } else {
         setQuotations([]);
       }
-      setExistingComparison((activeRfq as any)?.comparison || null);
+      setExistingComparison(isViewMode ? ((activeRfq as any)?.comparison || null) : null);
     }
-  }, [open, activeRfq?.id, (activeRfq as any)?.rfqId, fetchQuotations]);
+  }, [open, isViewMode, activeRfq?.id, (activeRfq as any)?.rfqId, fetchQuotations]);
 
   const isEvaluated = activeRfq?.status === 'EVALUATED' || Boolean(existingComparison);
   const isRfqOpen = activeRfq?.status === 'OPEN';
@@ -576,11 +631,17 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
           </div>
           <div>
             <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
-              {isViewMode ? `Rincian Request for Quotation — ${activeRfq?.rfqNumber}` : 'Buat Request for Quotation (RFQ)'}
+              {isViewMode
+                ? `Rincian Request for Quotation — ${activeRfq?.rfqNumber}`
+                : hasCancelledRfq
+                ? 'Buat Request for Quotation (RFQ) Baru'
+                : 'Buat Request for Quotation (RFQ)'}
             </div>
             <Text type="secondary" style={{ fontSize: 11, color: '#64748b' }}>
               {isViewMode
                 ? 'Paket penawaran harga pengadaan material & jasa untuk vendor terdaftar'
+                : hasCancelledRfq
+                ? 'Terbitkan RFQ baru untuk Purchase Request ini setelah RFQ sebelumnya dibatalkan'
                 : 'Terbitkan permintaan penawaran harga kepada vendor berdasarkan Purchase Request yang telah disetujui'}
             </Text>
           </div>
@@ -588,6 +649,27 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
       }
     >
       <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Previous Cancelled RFQ Reference Strip (Reissue Context) */}
+        {!isViewMode && hasCancelledRfq && (
+          <Alert
+            type="warning"
+            showIcon
+            icon={<CloseCircleOutlined style={{ color: '#d97706' }} />}
+            message={
+              <span style={{ fontWeight: 700, fontSize: 12.5 }}>
+                RFQ Sebelumnya Dibatalkan — Siap Terbitkan RFQ Baru
+              </span>
+            }
+            description={
+              <div style={{ fontSize: 11.5, marginTop: 2 }}>
+                RFQ sebelumnya <strong>{activeRfq?.rfqNumber || `RFQ #${activeRfq?.id}`}</strong> telah dibatalkan ({activeRfq?.status}). 
+                Riwayat pembatalan tetap tersimpan sebagai audit trail. Formulir di bawah ini akan menerbitkan <strong>RFQ baru</strong> dengan nomor dan pencatatan baru untuk Purchase Request yang sama.
+              </div>
+            }
+            style={{ borderRadius: 8, border: '1px solid #fde68a', background: '#fffbeb' }}
+          />
+        )}
+
         {/* Active RFQ Notification in View Mode */}
         {isViewMode && activeRfq && (
           <Alert

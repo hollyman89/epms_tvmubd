@@ -762,6 +762,36 @@ export class WorkflowEngineService {
 
           await manager.save(AuditLog, audit);
         }
+
+        // 4. Phase PROCUREMENT-RFQ: Save Outbox Event & emit canonical event when PR transitions into APPROVED
+        if (newStatus === 'APPROVED' && oldStatus !== 'APPROVED') {
+          const approvedEvent: BusinessEvent<any> = {
+            eventId: crypto.randomUUID(),
+            eventName: 'procurement.pr.approved',
+            eventVersion: 1,
+            occurredAt: new Date().toISOString(),
+            aggregateType: 'PURCHASE_REQUEST',
+            aggregateId: Number(instance.entityId),
+            projectId: pr?.projectId ? Number(pr.projectId) : undefined,
+            actor: actorId ? { userId: Number(actorId) } : undefined,
+            routing: {
+              roles: ['PROCUREMENT', 'PURCHASING'],
+            },
+            notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+            payload: {
+              purchaseRequestId: Number(instance.entityId),
+              prNumber: pr?.prNumber,
+              projectId: pr?.projectId,
+              approvedBy: actorId ? Number(actorId) : undefined,
+              approvedAt: new Date().toISOString(),
+            },
+          };
+
+          await this.saveOutboxEvent(manager, approvedEvent);
+
+          // Eager in-process emit for immediate real-time notification
+          this.eventEmitter.emit('procurement.pr.approved', approvedEvent);
+        }
       }
     } else if (instance.entityType === 'PROJECT' && instance.entityId) {
       const nodeType = (targetNode.data?.type || targetNode.type || '').toUpperCase();

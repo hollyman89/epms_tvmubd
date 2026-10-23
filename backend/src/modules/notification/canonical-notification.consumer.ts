@@ -835,6 +835,55 @@ export class CanonicalNotificationConsumer {
     });
   }
 
+  /**
+   * Phase PROCUREMENT-RFQ: Canonical Bell Projection for Approved Purchase Request.
+   * Informs PROCUREMENT and PURCHASING that approved PR is ready for RFQ preparation.
+   * Deduplication guaranteed via: <eventId>:<recipientId>:PROCUREMENT_PR_APPROVED_RFQ.
+   */
+  @OnEvent('procurement.pr.approved')
+  @OnEvent('purchase_request.approved')
+  async handlePurchaseRequestApproved(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) {
+      this.logger.debug(
+        `[CanonicalNotificationConsumer] Skipping non-canonical procurement.pr.approved event (missing eventId)`,
+      );
+      return [];
+    }
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const prId = payload.purchaseRequestId || payload.prId || event.aggregateId;
+    const prNumber = payload.prNumber || `PR #${prId}`;
+    const projectId = payload.projectId || event.projectId;
+
+    const recipientIds = await this.resolveRoleUserIds(['PROCUREMENT', 'PURCHASING']);
+    if (!recipientIds || recipientIds.length === 0) {
+      this.logger.warn(
+        `[CanonicalNotificationConsumer] No active users with role PROCUREMENT or PURCHASING found for PR #${prId}`,
+      );
+      return [];
+    }
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'PROCUREMENT_PR_APPROVED_RFQ',
+      type: 'ALERT',
+      title: 'Purchase Request Disetujui — Siap Proses RFQ',
+      message: `Purchase Request "${prNumber}" telah disetujui Direktur dan siap untuk proses pembuatan RFQ.`,
+      actionTarget: `/procurement?tab=pr&prId=${prId}`,
+      recipientIds,
+      metaData: {
+        category: 'PROCUREMENT',
+        priority: 'HIGH',
+        reference_type: 'PURCHASE_REQUEST',
+        reference_id: prId,
+        prId,
+        purchaseRequestId: prId,
+        prNumber,
+        projectId,
+        actionType: 'CREATE_RFQ',
+      },
+    });
+  }
+
   @OnEvent('project.closure.submitted')
   async handleProjectClosureSubmitted(event: any): Promise<CanonicalNotificationResult[]> {
     if (!event || typeof event !== 'object') return [];
@@ -843,8 +892,17 @@ export class CanonicalNotificationConsumer {
 
     const payload = event.payload?.businessPayload || event.payload || {};
     const projectId = payload.projectId;
-    const projectCode = payload.projectCode || `PRJ-${projectId}`;
     const closureId = payload.closureId || event.aggregate_id || event.aggregateId;
+
+    let projectName = payload.projectName;
+    if (!projectName && projectId && this.dataSource) {
+      try {
+        const rows = await this.dataSource.query(`SELECT name FROM projects WHERE id = ?`, [projectId]);
+        if (rows && rows.length > 0 && rows[0].name) projectName = rows[0].name;
+      } catch {}
+    }
+    const safeProjectName = projectName && !projectName.match(/^Proyek\s*#\d+$/i) ? projectName : undefined;
+    const displayProjectName = safeProjectName || 'proyek ini';
 
     const hooUserIds = await this.resolveRoleUserIds(['HEAD_OF_OPERATIONS', 'SUPER_ADMIN']);
     const recipientIds = hooUserIds.length > 0 ? hooUserIds : (event.routing?.userIds || []);
@@ -854,8 +912,8 @@ export class CanonicalNotificationConsumer {
       {
         purpose: 'PROJECT_CLOSURE_SUBMITTED',
         type: 'ALERT',
-        title: 'Pengajuan Penutupan Proyek',
-        message: `Penutupan proyek "${projectCode}" diajukan oleh PM dan membutuhkan review Head of Operations.`,
+        title: 'Pengajuan Penutupan Proyek Baru',
+        message: `PM telah mengajukan penutupan proyek "${displayProjectName}" untuk Anda tinjau.`,
         actionTarget: `/governance/tasks?projectId=${projectId}`,
         recipientIds,
         metaData: {
@@ -865,6 +923,7 @@ export class CanonicalNotificationConsumer {
           reference_id: closureId,
           projectId,
           closureId,
+          projectName: safeProjectName,
           actionType: 'CLOSURE_SUBMITTED',
         },
       },
@@ -880,8 +939,17 @@ export class CanonicalNotificationConsumer {
 
     const payload = event.payload?.businessPayload || event.payload || {};
     const projectId = payload.projectId;
-    const projectCode = payload.projectCode || `PRJ-${projectId}`;
     const closureId = payload.closureId || event.aggregate_id || event.aggregateId;
+
+    let projectName = payload.projectName;
+    if (!projectName && projectId && this.dataSource) {
+      try {
+        const rows = await this.dataSource.query(`SELECT name FROM projects WHERE id = ?`, [projectId]);
+        if (rows && rows.length > 0 && rows[0].name) projectName = rows[0].name;
+      } catch {}
+    }
+    const safeProjectName = projectName && !projectName.match(/^Proyek\s*#\d+$/i) ? projectName : undefined;
+    const displayProjectName = safeProjectName || 'proyek ini';
 
     const directorUserIds = await this.resolveRoleUserIds(['DIRECTOR', 'SUPER_ADMIN']);
     const recipientIds = directorUserIds.length > 0 ? directorUserIds : (event.routing?.userIds || []);
@@ -896,8 +964,8 @@ export class CanonicalNotificationConsumer {
       {
         purpose: 'PROJECT_CLOSURE_HOO_APPROVED',
         type: 'ALERT',
-        title: 'Persetujuan Penutupan Proyek Direktur',
-        message: `Penutupan proyek "${projectCode}" telah disetujui HOO dan menunggu persetujuan Direktur.`,
+        title: 'Penutupan Proyek Menunggu Keputusan Anda',
+        message: `Head of Operations telah meninjau penutupan proyek "${displayProjectName}" dan meneruskannya kepada Anda untuk keputusan akhir.`,
         actionTarget: `/governance/tasks?projectId=${projectId}`,
         recipientIds,
         metaData: {
@@ -907,6 +975,7 @@ export class CanonicalNotificationConsumer {
           reference_id: closureId,
           projectId,
           closureId,
+          projectName: safeProjectName,
           actionType: 'CLOSURE_HOO_APPROVED',
         },
       },
@@ -922,8 +991,17 @@ export class CanonicalNotificationConsumer {
 
     const payload = event.payload?.businessPayload || event.payload || {};
     const projectId = payload.projectId;
-    const projectCode = payload.projectCode || `PRJ-${projectId}`;
     const closureId = payload.closureId || event.aggregate_id || event.aggregateId;
+
+    let projectName = payload.projectName;
+    if (!projectName && projectId && this.dataSource) {
+      try {
+        const rows = await this.dataSource.query(`SELECT name FROM projects WHERE id = ?`, [projectId]);
+        if (rows && rows.length > 0 && rows[0].name) projectName = rows[0].name;
+      } catch {}
+    }
+    const safeProjectName = projectName && !projectName.match(/^Proyek\s*#\d+$/i) ? projectName : undefined;
+    const displayProjectName = safeProjectName || 'proyek ini';
 
     let pmId: number | null = payload.actorId ? Number(payload.actorId) : null;
     if (!pmId && projectId && this.dataSource) {
@@ -945,7 +1023,7 @@ export class CanonicalNotificationConsumer {
         purpose: 'PROJECT_CLOSURE_APPROVED',
         type: 'SYSTEM',
         title: 'Penutupan Proyek Disetujui',
-        message: `Penutupan proyek "${projectCode}" telah disetujui Direktur. Proyek resmi ditutup.`,
+        message: `Penutupan proyek "${displayProjectName}" telah disetujui Direktur. Proyek resmi ditutup.`,
         actionTarget: `/project-delivery?view=workspace&projectId=${projectId}&section=closure`,
         recipientIds,
         metaData: {
@@ -955,6 +1033,7 @@ export class CanonicalNotificationConsumer {
           reference_id: closureId,
           projectId,
           closureId,
+          projectName: safeProjectName,
           actionType: 'CLOSURE_APPROVED',
         },
       },
@@ -971,9 +1050,17 @@ export class CanonicalNotificationConsumer {
 
     const payload = event.payload?.businessPayload || event.payload || {};
     const projectId = payload.projectId;
-    const projectCode = payload.projectCode || `PRJ-${projectId}`;
     const closureId = payload.closureId || event.aggregate_id || event.aggregateId;
-    const returnReason = payload.returnReason || 'Penutupan proyek dikembalikan untuk revisi.';
+
+    let projectName = payload.projectName;
+    if (!projectName && projectId && this.dataSource) {
+      try {
+        const rows = await this.dataSource.query(`SELECT name FROM projects WHERE id = ?`, [projectId]);
+        if (rows && rows.length > 0 && rows[0].name) projectName = rows[0].name;
+      } catch {}
+    }
+    const safeProjectName = projectName && !projectName.match(/^Proyek\s*#\d+$/i) ? projectName : undefined;
+    const displayProjectName = safeProjectName || 'proyek ini';
 
     let pmId: number | null = payload.actorId ? Number(payload.actorId) : null;
     if (!pmId && projectId && this.dataSource) {
@@ -994,8 +1081,8 @@ export class CanonicalNotificationConsumer {
       {
         purpose: 'PROJECT_CLOSURE_RETURNED',
         type: 'ALERT',
-        title: 'Penutupan Proyek Dikembalikan',
-        message: `Pengajuan penutupan proyek "${projectCode}" dikembalikan. Catatan: ${returnReason}`,
+        title: 'Pengajuan Penutupan Proyek Dikembalikan',
+        message: `Pengajuan penutupan proyek "${displayProjectName}" perlu diperbaiki. Silakan lihat catatan reviewer dan ajukan kembali.`,
         actionTarget: `/project-delivery?view=workspace&projectId=${projectId}&section=closure`,
         recipientIds,
         metaData: {
@@ -1005,6 +1092,7 @@ export class CanonicalNotificationConsumer {
           reference_id: closureId,
           projectId,
           closureId,
+          projectName: safeProjectName,
           actionType: 'CLOSURE_RETURNED',
         },
       },
