@@ -571,14 +571,38 @@ export const ProcurementPage: React.FC = () => {
     };
   }, [prIdParam, prs, prsLoading]);
 
-  const rfqMapByPrId = useMemo(() => {
-    const map: Record<string, RfqRecord> = {};
-    for (const r of rfqs) {
-      if (r.prId) map[String(r.prId)] = r;
-      if (r.purchaseRequest?.prNumber) map[String(r.purchaseRequest.prNumber)] = r;
+  const { activeRfqMapByPrId, latestRfqMapByPrId } = useMemo(() => {
+    const activeMap: Record<string, RfqRecord> = {};
+    const latestMap: Record<string, RfqRecord> = {};
+
+    // Sort rfqs newest first
+    const sortedRfqs = [...rfqs].sort((a: any, b: any) => {
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      if (timeA !== timeB) return timeB - timeA;
+      return (Number(b.id) || 0) - (Number(a.id) || 0);
+    });
+
+    for (const r of sortedRfqs) {
+      const keys: string[] = [];
+      if (r.prId) keys.push(String(r.prId));
+      if (r.purchaseRequest?.prNumber) keys.push(String(r.purchaseRequest.prNumber));
+
+      for (const k of keys) {
+        if (!latestMap[k]) {
+          latestMap[k] = r;
+        }
+        if (r.status !== 'CANCELLED' && !activeMap[k]) {
+          activeMap[k] = r;
+        }
+      }
     }
-    return map;
+
+    return { activeRfqMapByPrId: activeMap, latestRfqMapByPrId: latestMap };
   }, [rfqs]);
+
+  // Backward compatibility alias: rfqMapByPrId points to latest historical RFQ
+  const rfqMapByPrId = latestRfqMapByPrId;
 
   const poMapByPrId = useMemo(() => {
     const map: Record<string, any> = {};
@@ -1104,7 +1128,9 @@ export const ProcurementPage: React.FC = () => {
         render: (_: any, r: any) => {
           const effectiveStatus = r.status || 'SUBMITTED';
           const isApproved = effectiveStatus === 'APPROVED';
-          const rfq = rfqMapByPrId[String(r.id)] || (r.prNumber ? rfqMapByPrId[String(r.prNumber)] : undefined);
+          const activeRfq = activeRfqMapByPrId[String(r.id)] || (r.prNumber ? activeRfqMapByPrId[String(r.prNumber)] : undefined);
+          const latestRfq = latestRfqMapByPrId[String(r.id)] || (r.prNumber ? latestRfqMapByPrId[String(r.prNumber)] : undefined);
+          const rfq = latestRfq;
           const po = poMapByPrId[String(r.id)] || (r.prNumber ? poMapByPrId[String(r.prNumber)] : undefined);
           const canActOnPr = isProcurement || isPurchasing;
 
@@ -1123,7 +1149,7 @@ export const ProcurementPage: React.FC = () => {
                 Lihat PO
               </Button>
             );
-          } else if (rfq) {
+          } else if (activeRfq) {
             primaryBtn = (
               <Button
                 size="small"
@@ -1138,6 +1164,7 @@ export const ProcurementPage: React.FC = () => {
               </Button>
             );
           } else if (isApproved && canActOnPr) {
+            const hasCancelledRfqOnly = Boolean(latestRfq && latestRfq.status === 'CANCELLED');
             primaryBtn = (
               <Button
                 type="primary"
@@ -1149,7 +1176,7 @@ export const ProcurementPage: React.FC = () => {
                 }}
                 className={styles.btnActionPrimary}
               >
-                Buat RFQ
+                {hasCancelledRfqOnly ? 'Buat RFQ Baru' : 'Buat RFQ'}
               </Button>
             );
           } else {
@@ -1178,12 +1205,12 @@ export const ProcurementPage: React.FC = () => {
               label: 'Lihat Detail PR',
               onClick: () => handleOpenPrApproval(r),
             },
-            ...(rfq
+            ...(latestRfq
               ? [
                   {
                     key: 'rfq',
                     icon: <EyeOutlined />,
-                    label: 'Lihat RFQ',
+                    label: activeRfq ? 'Lihat RFQ' : 'Lihat Riwayat RFQ (Batal)',
                     onClick: () => {
                       setSelectedPrForRfq(r);
                       setIsCreateRfqModalOpen(true);
@@ -1217,7 +1244,7 @@ export const ProcurementPage: React.FC = () => {
         },
       },
     ],
-    [prVersion, rfqVersion, poVersion, isProcurement, isPurchasing, prs, pos, rfqMapByPrId, poMapByPrId, checkIsDuplicate]
+    [prVersion, rfqVersion, poVersion, isProcurement, isPurchasing, prs, pos, rfqMapByPrId, activeRfqMapByPrId, latestRfqMapByPrId, poMapByPrId, checkIsDuplicate]
   );
 
   // ─────────────────────────────────────────────
@@ -1838,7 +1865,9 @@ export const ProcurementPage: React.FC = () => {
     (r: any, isService: boolean) => {
       const isDuplicate = checkIsDuplicate(r);
       const effectiveStatus: PrApprovalStatus = (r.status as PrApprovalStatus) || 'SUBMITTED';
-      const rfq = rfqMapByPrId[String(r.id)] || (r.prNumber ? rfqMapByPrId[String(r.prNumber)] : undefined);
+      const activeRfq = activeRfqMapByPrId[String(r.id)] || (r.prNumber ? activeRfqMapByPrId[String(r.prNumber)] : undefined);
+      const latestRfq = latestRfqMapByPrId[String(r.id)] || (r.prNumber ? latestRfqMapByPrId[String(r.prNumber)] : undefined);
+      const rfq = latestRfq;
       const po = poMapByPrId[String(r.id)] || (r.prNumber ? poMapByPrId[String(r.prNumber)] : undefined);
       const isApproved = effectiveStatus === 'APPROVED';
       const canActOnPr = isProcurement || isPurchasing;
@@ -1859,7 +1888,7 @@ export const ProcurementPage: React.FC = () => {
               Kelola SPK / WO
             </Button>
           );
-        } else if (rfq && rfq.status === 'OPEN') {
+        } else if (activeRfq) {
           primaryBtn = (
             <Button
               size="small"
@@ -1873,7 +1902,7 @@ export const ProcurementPage: React.FC = () => {
               Kelola RFQ
             </Button>
           );
-        } else if (isApproved && canActOnPr && (!rfq || rfq.status === 'CANCELLED')) {
+        } else if (isApproved && canActOnPr && !activeRfq) {
           primaryBtn = (
             <Button
               size="small"
@@ -1914,7 +1943,7 @@ export const ProcurementPage: React.FC = () => {
               Lihat PO
             </Button>
           );
-        } else if (rfq) {
+        } else if (activeRfq) {
           primaryBtn = (
             <Button
               size="small"
@@ -1929,6 +1958,7 @@ export const ProcurementPage: React.FC = () => {
             </Button>
           );
         } else if (isApproved && canActOnPr) {
+          const hasCancelledRfqOnly = Boolean(latestRfq && latestRfq.status === 'CANCELLED');
           primaryBtn = (
             <Button
               type="primary"
@@ -1940,7 +1970,7 @@ export const ProcurementPage: React.FC = () => {
               }}
               className={styles.btnActionPrimary}
             >
-              Buat RFQ
+              {hasCancelledRfqOnly ? 'Buat RFQ Baru' : 'Buat RFQ'}
             </Button>
           );
         } else {
@@ -1970,12 +2000,12 @@ export const ProcurementPage: React.FC = () => {
           label: 'Lihat Detail PR',
           onClick: () => handleOpenPrApproval(r),
         },
-        ...(rfq
+        ...(latestRfq
           ? [
               {
                 key: 'rfq',
                 icon: <EyeOutlined />,
-                label: 'Lihat RFQ',
+                label: activeRfq ? 'Lihat RFQ' : 'Lihat Riwayat RFQ (Batal)',
                 onClick: () => {
                   setSelectedPrForRfq(r);
                   setIsCreateRfqModalOpen(true);
@@ -2658,36 +2688,61 @@ export const ProcurementPage: React.FC = () => {
           setSelectedPrForApproval(null);
         }}
         footer={null}
-        width="min(880px, 94vw)"
+        width="min(1180px, calc(100vw - 64px))"
         centered
         destroyOnClose
         title={null}
-        styles={{ body: { padding: 0 } }}
+        closable={false}
+        styles={{
+          content: {
+            padding: 0,
+            maxHeight: 'calc(100vh - 80px)',
+            overflow: 'hidden',
+          },
+          body: {
+            padding: 0,
+            overflow: 'hidden',
+          },
+        }}
       >
         {selectedPrForApproval && (
-          <div style={{ padding: '8px 4px' }}>
+          <div style={{ padding: 0, height: '100%' }}>
             <PrApprovalWorkflow
               prId={selectedPrForApproval.id}
-              prNumber={selectedPrForApproval.prNumber || `PR-${selectedPrForApproval.id}`}
+              prNumber={selectedPrForApproval.prNumber || undefined}
               projectId={selectedPrForApproval.projectId || selectedPrForApproval.id}
               projectName={
-                (selectedPrForApproval as any).project?.name ||
-                selectedPrForApproval.projectName ||
-                selectedPrForApproval.project_name ||
-                '[Proyek Tidak Terdefinisi]'
+                ((selectedPrForApproval as any).project?.name ||
+                  selectedPrForApproval.projectName ||
+                  selectedPrForApproval.project_name ||
+                  '').trim() || undefined
               }
-              totalAmount={Number(selectedPrForApproval.totalEstimatedAmount || 0)}
-              customerName={selectedPrForApproval.customerName || selectedPrForApproval.customer_name || '-'}
-              budgetAllocation={Number(selectedPrForApproval.totalEstimatedAmount || 0)}
-              wbsTaskName={selectedPrForApproval.wbsTaskName || 'WBS Pengadaan Material & Peralatan'}
-              opPlanRef={selectedPrForApproval.opPlanRef || (selectedPrForApproval.projectId ? `OP-${selectedPrForApproval.projectId}` : `PR-${selectedPrForApproval.id}`)}
+              totalAmount={
+                selectedPrForApproval.totalEstimatedAmount != null
+                  ? Number(selectedPrForApproval.totalEstimatedAmount)
+                  : undefined
+              }
+              customerName={selectedPrForApproval.customerName || selectedPrForApproval.customer_name || undefined}
+              budgetAllocation={
+                selectedPrForApproval.budgetAllocation != null
+                  ? Number(selectedPrForApproval.budgetAllocation)
+                  : selectedPrForApproval.wbsAllocation != null
+                  ? Number(selectedPrForApproval.wbsAllocation)
+                  : undefined
+              }
+              wbsTaskName={selectedPrForApproval.wbsTaskName || selectedPrForApproval.wbsName || undefined}
+              opPlanRef={selectedPrForApproval.opPlanRef || selectedPrForApproval.gate || undefined}
               items={selectedPrForApproval.items || []}
               initialStatus={(selectedPrForApproval.status as PrApprovalStatus) || 'SUBMITTED'}
               isProcurement={isProcurement}
               isFinance={isFinance}
               isDirector={isDirector}
               isSuperAdmin={isSuperAdmin}
-              currentUserName={user?.fullName || user?.email || 'User'}
+              currentUserName={user?.fullName || user?.email || undefined}
+              onClose={() => {
+                setIsPrApprovalModalOpen(false);
+                setSelectedPrForApproval(null);
+              }}
               onStatusChange={() => {
                 setPrVersion((v) => v + 1);
                 queryClient.invalidateQueries({ queryKey: ['procurement', 'prs'] });
@@ -2699,6 +2754,20 @@ export const ProcurementPage: React.FC = () => {
                 setSelectedPrForRfq(selectedPrForApproval);
                 setIsCreateRfqModalOpen(true);
               }}
+              activeRfq={
+                selectedPrForApproval
+                  ? activeRfqMapByPrId[String(selectedPrForApproval.id)] ||
+                    activeRfqMapByPrId[String(selectedPrForApproval.prNumber)] ||
+                    null
+                  : null
+              }
+              latestRfq={
+                selectedPrForApproval
+                  ? latestRfqMapByPrId[String(selectedPrForApproval.id)] ||
+                    latestRfqMapByPrId[String(selectedPrForApproval.prNumber)] ||
+                    null
+                  : null
+              }
             />
           </div>
         )}
@@ -2715,8 +2784,10 @@ export const ProcurementPage: React.FC = () => {
           pr={selectedPrForRfq}
           existingRfq={
             selectedPrForRfq
-              ? rfqMapByPrId[String(selectedPrForRfq.id)] ||
-                rfqMapByPrId[String(selectedPrForRfq.prNumber)] ||
+              ? activeRfqMapByPrId[String(selectedPrForRfq.id)] ||
+                activeRfqMapByPrId[String(selectedPrForRfq.prNumber)] ||
+                latestRfqMapByPrId[String(selectedPrForRfq.id)] ||
+                latestRfqMapByPrId[String(selectedPrForRfq.prNumber)] ||
                 null
               : null
           }

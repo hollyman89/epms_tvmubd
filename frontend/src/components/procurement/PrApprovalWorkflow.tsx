@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Card,
   Tag,
   Button,
   Typography,
@@ -11,11 +10,10 @@ import {
   Form,
   Input,
   Descriptions,
-  Divider,
   Alert,
-  Timeline,
-  Radio,
-  Tooltip,
+  Table,
+  Skeleton,
+  Empty,
   message,
 } from 'antd';
 import {
@@ -25,12 +23,16 @@ import {
   ArrowRightOutlined,
   RollbackOutlined,
   SafetyCertificateOutlined,
-  AuditOutlined,
-  UserSwitchOutlined,
   InfoCircleOutlined,
   SendOutlined,
   EyeOutlined,
   HistoryOutlined,
+  FileTextOutlined,
+  CloseOutlined,
+  ShoppingOutlined,
+  UserOutlined,
+  CalendarOutlined,
+  FolderOpenOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import WorkflowEngineService, {
@@ -38,42 +40,49 @@ import WorkflowEngineService, {
   WorkflowTask,
   WorkflowTransition,
 } from '@/services/workflowEngine.service';
+import { ProcurementService, PurchaseRequest } from '@/services/procurement.service';
+import { formatCurrency, formatNumber } from '@/lib/formatters';
+import {
+  PrApprovalStatus,
+  StepState,
+  WorkflowStepPresentation,
+  BusinessWorkflowEvent,
+  PrItemPresentation,
+  resolvePrStatusConfig,
+  deriveWorkflowSteps,
+  formatPrInfoPresentation,
+  resolveRfqCta,
+  deriveWorkflowHistoryEvents,
+  derivePrItemsMetrics,
+} from './prApprovalWorkflow.utils';
+import styles from './PrApprovalWorkflow.module.css';
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
-// ─────────────────────────────────────────────
-// PR Approval State Model (SSOT Workflow Engine)
-// ─────────────────────────────────────────────
-export type PrApprovalStatus =
-  | 'SUBMITTED'
-  | 'FINANCE_REVIEW'
-  | 'DIRECTOR_APPROVAL'
-  | 'APPROVED'
-  | 'REJECTED_TO_PROCUREMENT'
-  | 'PO_ISSUED';
+export type { PrApprovalStatus };
 
 export interface PrApprovalState {
   prId: string | number;
   prNumber: string;
   projectId: string | number;
   projectName: string;
-  totalAmount: number;
+  totalAmount?: number | null;
   status: PrApprovalStatus;
-  budgetAllocation?: number;
-  wbsTaskName?: string;
-  opPlanRef?: string;
-  submittedBy?: string;
-  submittedAt?: string;
-  financeReviewedBy?: string;
-  financeReviewedAt?: string;
+  budgetAllocation?: number | null;
+  wbsTaskName?: string | null;
+  opPlanRef?: string | null;
+  submittedBy?: string | null;
+  submittedAt?: string | null;
+  financeReviewedBy?: string | null;
+  financeReviewedAt?: string | null;
   financeAction?: 'PASSED_TO_DIRECTOR' | 'REJECTED';
-  directorDecisionBy?: string;
-  directorDecisionAt?: string;
+  directorDecisionBy?: string | null;
+  directorDecisionAt?: string | null;
   directorAction?: 'APPROVED' | 'REJECTED';
-  rejectedBy?: string;
-  rejectedAt?: string;
-  rejectionReason?: string;
+  rejectedBy?: string | null;
+  rejectedAt?: string | null;
+  rejectionReason?: string | null;
   rejectedByRole?: 'FINANCE' | 'DIRECTOR';
   revisionHistory?: Array<{
     round: number;
@@ -89,110 +98,125 @@ export interface PrApprovalState {
 // Status Badge (Authoritative SSOT)
 // ─────────────────────────────────────────────
 export function PrStatusBadge({ status }: { status: PrApprovalStatus }) {
-  const cfg: Record<PrApprovalStatus, { color: string; label: string; icon: React.ReactNode }> = {
-    SUBMITTED:               { color: '#1d4ed8', label: 'Menunggu Review Finance', icon: <ClockCircleFilled style={{ color: '#1d4ed8' }} /> },
-    FINANCE_REVIEW:          { color: '#d97706', label: 'Financial Review', icon: <ClockCircleFilled style={{ color: '#d97706' }} /> },
-    DIRECTOR_APPROVAL:       { color: '#7c3aed', label: 'Menunggu Final Approval Director', icon: <ClockCircleFilled style={{ color: '#7c3aed' }} /> },
-    APPROVED:                { color: '#059669', label: 'PR Disetujui', icon: <CheckCircleFilled style={{ color: '#059669' }} /> },
-    REJECTED_TO_PROCUREMENT: { color: '#dc2626', label: 'Ditolak & Dikembalikan ke Procurement', icon: <ExclamationCircleFilled style={{ color: '#dc2626' }} /> },
-    PO_ISSUED:               { color: '#059669', label: 'PO Diterbitkan (Disetujui)', icon: <CheckCircleFilled style={{ color: '#059669' }} /> },
-  };
-  const c = cfg[status] || { color: '#64748b', label: status, icon: null };
+  const cfg = resolvePrStatusConfig(status);
+  const isApproved = status === 'APPROVED' || status === 'PO_ISSUED';
+  const isRejected = status === 'REJECTED_TO_PROCUREMENT';
+
   return (
-    <Tag icon={c.icon} style={{ color: c.color, border: `1.5px solid ${c.color}33`, background: `${c.color}11`, fontWeight: 700, fontSize: 11.5, padding: '3px 10px', borderRadius: 6 }}>
-      {c.label}
+    <Tag
+      icon={
+        isApproved ? (
+          <CheckCircleFilled style={{ color: cfg.color }} />
+        ) : isRejected ? (
+          <ExclamationCircleFilled style={{ color: cfg.color }} />
+        ) : (
+          <ClockCircleFilled style={{ color: cfg.color }} />
+        )
+      }
+      style={{
+        color: cfg.color,
+        border: `1px solid ${cfg.borderColor}`,
+        background: cfg.bgColor,
+        fontWeight: 600,
+        fontSize: 12,
+        padding: '3px 10px',
+        borderRadius: 20,
+        margin: 0,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+      }}
+    >
+      {cfg.label}
     </Tag>
   );
 }
 
 // ─────────────────────────────────────────────
-// 4-Step Tracker
+// 4-Step Connected Stepper
 // ─────────────────────────────────────────────
 export function PrApprovalTracker({
   status,
   instance,
+  transitions = [],
+  activeRfq,
 }: {
   status: PrApprovalStatus;
   instance?: WorkflowInstance | null;
+  transitions?: WorkflowTransition[];
+  activeRfq?: any;
 }) {
-  type SS = 'COMPLETED' | 'ACTIVE' | 'PENDING' | 'REJECTED';
-  const isRej = status === 'REJECTED_TO_PROCUREMENT';
+  const steps = useMemo(
+    () =>
+      deriveWorkflowSteps({
+        status,
+        instance,
+        transitions,
+        activeRfq,
+      }),
+    [status, instance, transitions, activeRfq],
+  );
 
-  const isFinanceCompleted =
-    instance?.tasks?.some(
-      (t) => t.nodeId === 'node_finance_review' && t.status === 'COMPLETED',
-    ) ||
-    status === 'DIRECTOR_APPROVAL' ||
-    status === 'APPROVED' ||
-    status === 'PO_ISSUED';
-
-  const isDirectorCompleted =
-    instance?.tasks?.some(
-      (t) => t.nodeId === 'node_director_approval' && t.status === 'COMPLETED',
-    ) ||
-    status === 'APPROVED' ||
-    status === 'PO_ISSUED';
-
-  const financeState: SS = isFinanceCompleted
-    ? 'COMPLETED'
-    : status === 'SUBMITTED' || status === 'FINANCE_REVIEW'
-    ? 'ACTIVE'
-    : 'PENDING';
-
-  const directorState: SS = isDirectorCompleted
-    ? 'COMPLETED'
-    : status === 'DIRECTOR_APPROVAL'
-    ? 'ACTIVE'
-    : 'PENDING';
-
-  const procurementNextState: SS =
-    status === 'PO_ISSUED'
-      ? 'COMPLETED'
-      : status === 'APPROVED'
-      ? 'ACTIVE'
-      : 'PENDING';
-
-  const steps: { key: string; role: string; label: string; state: SS }[] = [
-    {
-      key: 'submit',
-      role: 'Procurement',
-      label: isRej ? 'Perlu Perbaikan' : 'Pengajuan PR',
-      state: isRej ? 'REJECTED' : 'COMPLETED',
-    },
-    {
-      key: 'finance',
-      role: 'Finance',
-      label: 'Financial Review',
-      state: financeState,
-    },
-    {
-      key: 'director',
-      role: 'Director',
-      label: 'Final Approval',
-      state: directorState,
-    },
-    {
-      key: 'approved',
-      role: 'Procurement Next',
-      label: status === 'PO_ISSUED' ? 'PO Diterbitkan' : 'RFQ → PO → GR',
-      state: procurementNextState,
-    },
-  ];
-  const colors: Record<SS, string> = { COMPLETED: '#059669', ACTIVE: '#1d4ed8', PENDING: '#94a3b8', REJECTED: '#dc2626' };
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflowX: 'auto', padding: '4px 0' }}>
-      {steps.map((s, i) => (
-        <React.Fragment key={s.key}>
-          <div style={{ flex: '1 1 0', minWidth: 95, padding: '5px 8px', borderRadius: 6, border: `1.5px solid ${colors[s.state]}44`, background: s.state === 'ACTIVE' ? '#eff6ff' : s.state === 'COMPLETED' ? '#f0fdf4' : s.state === 'REJECTED' ? '#fef2f2' : '#f8fafc', textAlign: 'center' }}>
-            <div style={{ fontSize: 10, color: colors[s.state], fontWeight: 700 }}>{s.role}</div>
-            <div style={{ fontSize: 10.5, fontWeight: 600, color: '#1e293b' }}>{s.label}</div>
-            <Tag color={s.state === 'COMPLETED' ? 'success' : s.state === 'ACTIVE' ? 'processing' : s.state === 'REJECTED' ? 'error' : 'default'} style={{ fontSize: 8.5, margin: '2px 0 0', padding: '0 4px', fontWeight: 700 }}>
-              {s.state === 'COMPLETED' ? 'Selesai' : s.state === 'ACTIVE' ? 'Sedang Berjalan' : s.state === 'REJECTED' ? 'Perlu Revisi' : 'Menunggu'}
-            </Tag>
-          </div>
-          {i < steps.length - 1 && <ArrowRightOutlined style={{ color: '#cbd5e1', fontSize: 11, flexShrink: 0 }} />}
-        </React.Fragment>
-      ))}
+    <div className={styles.stepperRow}>
+      {steps.map((step, idx) => {
+        let circleClass = styles.stepCirclePending;
+        let iconContent: React.ReactNode = step.stepNumber;
+
+        if (step.state === 'COMPLETED') {
+          circleClass = styles.stepCircleCompleted;
+          iconContent = <CheckCircleFilled style={{ fontSize: 14 }} />;
+        } else if (step.state === 'ACTIVE') {
+          circleClass = styles.stepCircleActive;
+          iconContent = step.stepNumber;
+        } else if (step.state === 'REJECTED') {
+          circleClass = styles.stepCircleRejected;
+          iconContent = <RollbackOutlined style={{ fontSize: 13 }} />;
+        }
+
+        const isLineActive = step.state === 'COMPLETED';
+
+        return (
+          <React.Fragment key={step.key}>
+            <div className={styles.stepItem}>
+              <div className={`${styles.stepCircle} ${circleClass}`}>{iconContent}</div>
+              <div className={styles.stepContent}>
+                <span
+                  className={`${styles.stepRole} ${
+                    step.state === 'ACTIVE' ? styles.stepRoleActive : ''
+                  }`}
+                >
+                  {step.role}
+                </span>
+                <span className={styles.stepTitle} title={step.label}>
+                  {step.label}
+                </span>
+                <Tag
+                  color={step.tagColor}
+                  style={{
+                    fontSize: 10,
+                    margin: '2px 0 0',
+                    padding: '0 6px',
+                    fontWeight: 600,
+                    borderRadius: 4,
+                    lineHeight: '16px',
+                    width: 'fit-content',
+                  }}
+                >
+                  {step.statusLabel}
+                </Tag>
+              </div>
+            </div>
+            {idx < steps.length - 1 && (
+              <div
+                className={`${styles.stepConnector} ${
+                  isLineActive ? styles.stepConnectorCompleted : ''
+                }`}
+              />
+            )}
+          </React.Fragment>
+        );
+      })}
     </div>
   );
 }
@@ -202,23 +226,26 @@ export function PrApprovalTracker({
 // ─────────────────────────────────────────────
 export interface PrApprovalWorkflowProps {
   prId: string | number;
-  prNumber: string;
-  projectId: string | number;
-  projectName: string;
-  totalAmount: number;
+  prNumber?: string;
+  projectId?: string | number;
+  projectName?: string;
+  totalAmount?: number | null;
   customerName?: string;
-  budgetAllocation?: number;
-  wbsTaskName?: string;
-  opPlanRef?: string;
-  items?: Array<{ itemName: string; quantity: number; estimatedUnitPrice: number }>;
+  budgetAllocation?: number | null;
+  wbsTaskName?: string | null;
+  opPlanRef?: string | null;
+  items?: PrItemPresentation[];
   isProcurement?: boolean;
   isFinance?: boolean;
   isDirector?: boolean;
   isSuperAdmin?: boolean;
   initialStatus?: PrApprovalStatus;
   currentUserName?: string;
+  onClose?: () => void;
   onStatusChange?: (newStatus: PrApprovalStatus) => void;
   onCreateRfqClick?: () => void;
+  activeRfq?: any;
+  latestRfq?: any;
 }
 
 // ─────────────────────────────────────────────
@@ -226,28 +253,33 @@ export interface PrApprovalWorkflowProps {
 // ─────────────────────────────────────────────
 export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
   prId,
-  prNumber,
-  projectId,
-  projectName,
-  totalAmount,
+  prNumber: initialPrNumber,
+  projectId: initialProjectId,
+  projectName: initialProjectName,
+  totalAmount: initialTotalAmount,
   customerName,
-  budgetAllocation,
-  wbsTaskName,
-  opPlanRef,
-  items = [],
+  budgetAllocation: initialBudgetAllocation,
+  wbsTaskName: initialWbsTaskName,
+  opPlanRef: initialOpPlanRef,
+  items: initialItems,
   initialStatus = 'SUBMITTED',
   isProcurement = false,
   isFinance = false,
   isDirector = false,
   isSuperAdmin = false,
-  currentUserName = 'User',
+  currentUserName,
+  onClose,
   onStatusChange,
   onCreateRfqClick,
+  activeRfq,
+  latestRfq,
 }) => {
   const [state, setState] = useState<PrApprovalState | null>(null);
   const [instance, setInstance] = useState<WorkflowInstance | null>(null);
   const [transitions, setTransitions] = useState<WorkflowTransition[]>([]);
+  const [fetchedPr, setFetchedPr] = useState<PurchaseRequest | null>(null);
   const [loadingWorkflow, setLoadingWorkflow] = useState(false);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -257,205 +289,108 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
   const [showTechnicalDetails, setShowTechnicalDetails] = useState<boolean>(false);
   const [form] = Form.useForm();
 
+  // Load authoritative workflow and PR data
   const loadWorkflowData = useCallback(async () => {
     if (!prId) return;
+    setLoadingWorkflow(true);
+    setWorkflowError(null);
+
     try {
-      setLoadingWorkflow(true);
-      const rawInst = await WorkflowEngineService.getInstanceByEntity('PURCHASE_REQUEST', prId);
-      const inst: WorkflowInstance | null = (rawInst as any)?.data?.id ? (rawInst as any).data : rawInst;
-      if (inst && inst.id) {
-        setInstance(inst);
-        const trans = await WorkflowEngineService.getTransitions(inst.id);
-        setTransitions(trans);
+      // 1. Fetch workflow instance and transitions concurrently with authoritative PR record if needed
+      const [rawInst, prResult] = await Promise.allSettled([
+        WorkflowEngineService.getInstanceByEntity('PURCHASE_REQUEST', prId),
+        !initialItems || initialItems.length === 0 || !initialProjectName
+          ? ProcurementService.getPurchaseRequestById(Number(prId))
+          : Promise.resolve(null),
+      ]);
 
-        // Extract start transition (initial submission)
-        const startTrans = trans.find(
-          (t) => t.action === 'START' || t.fromNodeId === 'node_start',
-        );
+      let currentInst: WorkflowInstance | null = null;
+      if (rawInst.status === 'fulfilled') {
+        const payload = rawInst.value;
+        currentInst = (payload as any)?.data?.id ? (payload as any).data : payload;
+        if (currentInst && currentInst.id) {
+          setInstance(currentInst);
+          const trans = await WorkflowEngineService.getTransitions(currentInst.id);
+          setTransitions(trans || []);
 
-        // Extract reviewer Finance and Director from completed transitions
-        const financeTrans = trans.find(
-          (t) => t.fromNodeId === 'node_finance_review' && t.action === 'APPROVE',
-        );
-        const directorTrans = trans.find(
-          (t) => t.fromNodeId === 'node_director_approval' && t.action === 'APPROVE',
-        );
+          // Extract start transition (initial submission)
+          const startTrans = trans.find(
+            (t) => t.action === 'START' || t.fromNodeId === 'node_start',
+          );
 
-        setState((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            submittedAt: inst.createdAt || startTrans?.createdAt || prev.submittedAt,
-            submittedBy: startTrans?.actor?.fullName || prev.submittedBy || 'Procurement Team',
-            ...(financeTrans
-              ? {
-                  financeReviewedBy: financeTrans.actor?.fullName || 'Finance Team',
-                  financeReviewedAt: financeTrans.createdAt,
-                  financeAction: 'PASSED_TO_DIRECTOR',
-                }
-              : {}),
-            ...(directorTrans
-              ? {
-                  directorDecisionBy: directorTrans.actor?.fullName || 'Director',
-                  directorDecisionAt: directorTrans.createdAt,
-                  directorAction: 'APPROVED',
-                }
-              : {}),
-          };
-        });
+          // Extract completed reviewer decisions
+          const financeTrans = trans.find(
+            (t) => t.fromNodeId === 'node_finance_review' && t.action === 'APPROVE',
+          );
+          const directorTrans = trans.find(
+            (t) => t.fromNodeId === 'node_director_approval' && t.action === 'APPROVE',
+          );
+
+          setState((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              submittedAt: startTrans?.createdAt || currentInst?.createdAt || prev.submittedAt,
+              submittedBy: startTrans?.actor?.fullName || startTrans?.actor?.email || prev.submittedBy || null,
+              ...(financeTrans
+                ? {
+                    financeReviewedBy: financeTrans.actor?.fullName || financeTrans.actor?.email || null,
+                    financeReviewedAt: financeTrans.createdAt,
+                    financeAction: 'PASSED_TO_DIRECTOR',
+                  }
+                : {}),
+              ...(directorTrans
+                ? {
+                    directorDecisionBy: directorTrans.actor?.fullName || directorTrans.actor?.email || null,
+                    directorDecisionAt: directorTrans.createdAt,
+                    directorAction: 'APPROVED',
+                  }
+                : {}),
+            };
+          });
+        }
       }
-    } catch (err) {
-      console.error('Failed to load workflow instance:', err);
+
+      if (prResult.status === 'fulfilled' && prResult.value) {
+        setFetchedPr(prResult.value);
+      }
+    } catch (err: any) {
+      console.warn('Failed to load workflow instance:', err);
+      setWorkflowError(err?.message || 'Gagal memuat status workflow pengadaan');
     } finally {
       setLoadingWorkflow(false);
     }
-  }, [prId]);
+  }, [prId, initialItems, initialProjectName]);
 
   const load = useCallback(() => {
     const init: PrApprovalState = {
       prId,
-      prNumber,
-      projectId,
-      projectName,
-      totalAmount,
-      budgetAllocation: budgetAllocation || totalAmount,
-      wbsTaskName: wbsTaskName || 'WBS Pengadaan Material & Peralatan',
-      opPlanRef: opPlanRef || `OP-${projectId}`,
+      prNumber: initialPrNumber || '',
+      projectId: initialProjectId || prId,
+      projectName: initialProjectName || '',
+      totalAmount: initialTotalAmount != null ? Number(initialTotalAmount) : null,
+      budgetAllocation: initialBudgetAllocation != null ? Number(initialBudgetAllocation) : null,
+      wbsTaskName: initialWbsTaskName || null,
+      opPlanRef: initialOpPlanRef || null,
       status: initialStatus || 'SUBMITTED',
-      submittedBy: 'Procurement Team',
-      submittedAt: undefined,
+      submittedBy: null,
+      submittedAt: null,
       revisionHistory: [],
     };
     setState(init);
     loadWorkflowData();
-  }, [prId, prNumber, projectId, projectName, totalAmount, budgetAllocation, wbsTaskName, opPlanRef, initialStatus, loadWorkflowData]);
-
-  // ─────────────────────────────────────────────
-  // Business-Friendly Workflow Events Derivation
-  // ─────────────────────────────────────────────
-  interface BusinessWorkflowEvent {
-    id: string | number;
-    title: string;
-    actor: string;
-    roleTag: { label: string; color: string };
-    statusTag: { label: string; color: string };
-    timestamp?: string;
-    formattedTime?: string;
-    note?: string | null;
-    prRef?: string;
-    isPending?: boolean;
-  }
-
-  const businessWorkflowEvents: BusinessWorkflowEvent[] = useMemo(() => {
-    const list: BusinessWorkflowEvent[] = [];
-
-    // 1. Initial Submission Event (Procurement)
-    const creationTime = instance?.createdAt || state?.submittedAt;
-    list.push({
-      id: 'event_initial_pr_submit',
-      title: 'Pengajuan Purchase Request (PR)',
-      actor: state?.submittedBy || 'Procurement Team',
-      roleTag: { label: 'Procurement', color: 'blue' },
-      statusTag: { label: 'Diajukan', color: 'success' },
-      timestamp: creationTime,
-      formattedTime: creationTime ? dayjs(creationTime).format('DD MMM YYYY HH:mm') : '-',
-      prRef: prNumber || (prId ? `PR-${prId}` : undefined),
-    });
-
-    // 2. Map Completed Transitions (excluding raw START/AUTO system transitions)
-    transitions.forEach((t) => {
-      if (t.action === 'START' || t.fromNodeId === 'node_start') {
-        return;
-      }
-
-      if (t.fromNodeId === 'node_finance_review') {
-        const isApproved = t.action === 'APPROVE';
-        list.push({
-          id: `trans_${t.id}`,
-          title: isApproved ? 'Review Finance Diselesaikan' : 'Revisi Diminta oleh Finance',
-          actor: t.actor?.fullName || 'Finance Team',
-          roleTag: { label: 'Finance Team', color: 'cyan' },
-          statusTag: isApproved ? { label: 'Disetujui', color: 'success' } : { label: 'Perlu Revisi', color: 'error' },
-          timestamp: t.createdAt,
-          formattedTime: dayjs(t.createdAt).format('DD MMM YYYY HH:mm'),
-          note: t.reason || (isApproved ? 'Anggaran dan kelayakan harga telah disetujui.' : null),
-        });
-      } else if (t.fromNodeId === 'node_director_approval') {
-        const isApproved = t.action === 'APPROVE';
-        list.push({
-          id: `trans_${t.id}`,
-          title: isApproved ? 'Persetujuan Akhir Director Diselesaikan' : 'Revisi Diminta oleh Director',
-          actor: t.actor?.fullName || 'Director',
-          roleTag: { label: 'Director', color: 'purple' },
-          statusTag: isApproved ? { label: 'Disetujui', color: 'success' } : { label: 'Perlu Revisi', color: 'error' },
-          timestamp: t.createdAt,
-          formattedTime: dayjs(t.createdAt).format('DD MMM YYYY HH:mm'),
-          note: t.reason || (isApproved ? 'Pengadaan telah disetujui penuh.' : null),
-        });
-      } else {
-        const actionLabel = t.action === 'APPROVE' ? 'Disetujui' : t.action === 'REJECT' || t.action === 'RETURN' ? 'Perlu Revisi' : 'Diproses';
-        list.push({
-          id: `trans_${t.id}`,
-          title: `Tahap ${t.fromNodeId.replace(/^node_/, '').replace(/_/g, ' ').toUpperCase()}`,
-          actor: t.actor?.fullName || 'Workflow Actor',
-          roleTag: { label: 'Workflow', color: 'default' },
-          statusTag: { label: actionLabel, color: t.action === 'APPROVE' ? 'success' : 'processing' },
-          timestamp: t.createdAt,
-          formattedTime: dayjs(t.createdAt).format('DD MMM YYYY HH:mm'),
-          note: t.reason,
-        });
-      }
-    });
-
-    // 3. Active / Pending Task
-    const effectiveStatus = instance?.status || state?.status;
-    if (effectiveStatus === 'IN_PROGRESS' || state?.status === 'SUBMITTED' || state?.status === 'DIRECTOR_APPROVAL') {
-      const activePendingTask = instance?.tasks?.find((t) => t.status === 'PENDING');
-      const currentNode = instance?.currentNodeId;
-
-      if (currentNode === 'node_director_approval' || state?.status === 'DIRECTOR_APPROVAL' || activePendingTask?.assigneeRole?.name === 'DIRECTOR') {
-        list.push({
-          id: 'pending_director_task',
-          title: 'Menunggu Persetujuan Director',
-          actor: 'Director',
-          roleTag: { label: 'Director', color: 'purple' },
-          statusTag: { label: 'Sedang Berjalan', color: 'purple' },
-          formattedTime: 'Menunggu Keputusan',
-          isPending: true,
-          note: 'Menunggu peninjauan dan persetujuan akhir dari Director.',
-        });
-      } else if (currentNode === 'node_finance_review' || state?.status === 'SUBMITTED' || activePendingTask?.assigneeRole?.name === 'FINANCE') {
-        list.push({
-          id: 'pending_finance_task',
-          title: 'Menunggu Review Finance',
-          actor: 'Finance Team',
-          roleTag: { label: 'Finance Team', color: 'cyan' },
-          statusTag: { label: 'Sedang Berjalan', color: 'processing' },
-          formattedTime: 'Menunggu Pemeriksaan',
-          isPending: true,
-          note: 'Sedang dalam pemeriksaan pagu anggaran dan kelayakan finansial.',
-        });
-      }
-    }
-
-    // 4. Legacy Revision History Fallback (if no transitions exist)
-    if (transitions.length === 0 && (state?.revisionHistory?.length ?? 0) > 0) {
-      state!.revisionHistory!.forEach((h) => {
-        list.push({
-          id: `rev_${h.round}`,
-          title: `Revisi Diminta oleh ${h.rejectedByRole === 'FINANCE' ? 'Finance Team' : 'Director'} (Putaran ${h.round})`,
-          actor: h.rejectedByRole === 'FINANCE' ? 'Finance Team' : 'Director',
-          roleTag: { label: h.rejectedByRole === 'FINANCE' ? 'Finance' : 'Director', color: h.rejectedByRole === 'FINANCE' ? 'cyan' : 'purple' },
-          statusTag: { label: 'Perlu Revisi', color: 'error' },
-          timestamp: h.rejectedAt,
-          formattedTime: dayjs(h.rejectedAt).format('DD MMM YYYY HH:mm'),
-          note: h.reason,
-        });
-      });
-    }
-
-    return list;
-  }, [instance, transitions, state, prNumber, prId]);
+  }, [
+    prId,
+    initialPrNumber,
+    initialProjectId,
+    initialProjectName,
+    initialTotalAmount,
+    initialBudgetAllocation,
+    initialWbsTaskName,
+    initialOpPlanRef,
+    initialStatus,
+    loadWorkflowData,
+  ]);
 
   useEffect(() => {
     load();
@@ -470,9 +405,21 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
     if (instance) {
       if (instance.status === 'COMPLETED') return 'APPROVED';
       if (instance.status === 'REJECTED') return 'REJECTED_TO_PROCUREMENT';
-      if (activeTask?.nodeId === 'node_director_approval' || instance.currentNodeId === 'node_director_approval') return 'DIRECTOR_APPROVAL';
-      if (activeTask?.nodeId === 'node_procurement_revision' || instance.currentNodeId === 'node_procurement_revision') return 'REJECTED_TO_PROCUREMENT';
-      if (activeTask?.nodeId === 'node_finance_review' || instance.currentNodeId === 'node_finance_review') return 'SUBMITTED';
+      if (
+        activeTask?.nodeId === 'node_director_approval' ||
+        instance.currentNodeId === 'node_director_approval'
+      )
+        return 'DIRECTOR_APPROVAL';
+      if (
+        activeTask?.nodeId === 'node_procurement_revision' ||
+        instance.currentNodeId === 'node_procurement_revision'
+      )
+        return 'REJECTED_TO_PROCUREMENT';
+      if (
+        activeTask?.nodeId === 'node_finance_review' ||
+        instance.currentNodeId === 'node_finance_review'
+      )
+        return 'SUBMITTED';
     }
     return initialStatus || state?.status || 'SUBMITTED';
   }, [instance, activeTask, initialStatus, state?.status]);
@@ -633,409 +580,536 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
     if (hist.length > 0) hist[hist.length - 1] = { ...hist[hist.length - 1], resubmittedAt: now };
     update({
       status: 'SUBMITTED',
-      rejectedBy: undefined,
-      rejectedAt: undefined,
-      rejectionReason: undefined,
+      rejectedBy: null,
+      rejectedAt: null,
+      rejectionReason: null,
       rejectedByRole: undefined,
       submittedAt: now,
       revisionHistory: hist,
     });
   };
 
-  // Canonical approved PR detection for current project
-  const canonicalApprovedPr = useMemo(() => {
+  // ── Effective Items, Amounts, Project Name Hydration ──
+  const effectiveItems: PrItemPresentation[] = useMemo(() => {
+    if (initialItems && initialItems.length > 0) return initialItems;
+    if (fetchedPr?.items && fetchedPr.items.length > 0) {
+      return fetchedPr.items.map((it) => ({
+        id: it.id,
+        itemName: it.itemName,
+        quantity: Number(it.quantity) || 0,
+        uom: it.uom,
+        estimatedUnitPrice: it.estimatedUnitPrice ? Number(it.estimatedUnitPrice) : undefined,
+        totalPrice:
+          (it as any).totalPrice != null
+            ? Number((it as any).totalPrice)
+            : it.estimatedUnitPrice != null && it.quantity != null
+            ? Number(it.quantity) * Number(it.estimatedUnitPrice)
+            : undefined,
+      }));
+    }
+    return [];
+  }, [initialItems, fetchedPr]);
+
+  const effectiveTotalAmount = useMemo(() => {
+    if (initialTotalAmount != null && !isNaN(Number(initialTotalAmount))) {
+      return Number(initialTotalAmount);
+    }
+    if (fetchedPr?.totalEstimatedAmount != null) {
+      return Number(fetchedPr.totalEstimatedAmount);
+    }
+    if (effectiveItems.length > 0) {
+      return effectiveItems.reduce((acc, it) => {
+        const val =
+          it.totalPrice != null
+            ? Number(it.totalPrice)
+            : it.estimatedUnitPrice != null
+            ? Number(it.quantity) * Number(it.estimatedUnitPrice)
+            : 0;
+        return acc + val;
+      }, 0);
+    }
     return null;
-  }, []);
+  }, [initialTotalAmount, fetchedPr, effectiveItems]);
+
+  const effectiveProjectName = useMemo(() => {
+    if (initialProjectName && initialProjectName.trim()) return initialProjectName.trim();
+    if (fetchedPr?.project?.name) return fetchedPr.project.name.trim();
+    if (fetchedPr?.projectName) return fetchedPr.projectName.trim();
+    return '';
+  }, [initialProjectName, fetchedPr]);
+
+  const effectivePrNumber = useMemo(() => {
+    if (initialPrNumber && initialPrNumber.trim()) return initialPrNumber.trim();
+    if (fetchedPr?.prNumber) return fetchedPr.prNumber.trim();
+    return 'Belum ada data';
+  }, [initialPrNumber, fetchedPr]);
+
+  // Derive Info Presentation
+  const infoPresentation = useMemo(() => {
+    return formatPrInfoPresentation({
+      prNumber: effectivePrNumber,
+      prId,
+      projectName: effectiveProjectName,
+      totalAmount: effectiveTotalAmount,
+      budgetAllocation: state?.budgetAllocation ?? initialBudgetAllocation,
+      wbsTaskName: state?.wbsTaskName ?? initialWbsTaskName,
+      opPlanRef: state?.opPlanRef ?? initialOpPlanRef,
+      submittedBy: state?.submittedBy,
+      submittedAt: state?.submittedAt,
+      financeReviewedBy: state?.financeReviewedBy,
+      financeReviewedAt: state?.financeReviewedAt,
+      directorDecisionBy: state?.directorDecisionBy,
+      directorDecisionAt: state?.directorDecisionAt,
+    });
+  }, [
+    effectivePrNumber,
+    prId,
+    effectiveProjectName,
+    effectiveTotalAmount,
+    state,
+    initialBudgetAllocation,
+    initialWbsTaskName,
+    initialOpPlanRef,
+  ]);
+
+  // Derive PR Items Metrics
+  const itemsMetrics = useMemo(
+    () => derivePrItemsMetrics(effectiveItems),
+    [effectiveItems],
+  );
+
+  // Derive History Events
+  const historyEvents = useMemo(() => {
+    return deriveWorkflowHistoryEvents({
+      instance,
+      transitions,
+      prNumber: effectivePrNumber,
+      prId,
+      submittedBy: state?.submittedBy || undefined,
+      submittedAt: state?.submittedAt || undefined,
+      effectiveStatus,
+      revisionHistory: state?.revisionHistory,
+    });
+  }, [instance, transitions, effectivePrNumber, prId, state, effectiveStatus]);
+
+  // RFQ CTA Resolution
+  const rfqCta = useMemo(() => resolveRfqCta(activeRfq, latestRfq), [activeRfq, latestRfq]);
 
   if (!state) return null;
 
   const status = effectiveStatus;
-  const isDuplicateActivePr = Boolean(canonicalApprovedPr && status !== 'APPROVED');
 
   const showFinanceActions =
     canActAsFinance &&
     status === 'SUBMITTED' &&
-    (!activeTask || activeTask.nodeId === 'node_finance_review') &&
-    !isDuplicateActivePr;
+    (!activeTask || activeTask.nodeId === 'node_finance_review');
 
   const showDirectorActions =
     canActAsDirector &&
     status === 'DIRECTOR_APPROVAL' &&
-    (!activeTask || activeTask.nodeId === 'node_director_approval') &&
-    !isDuplicateActivePr;
+    (!activeTask || activeTask.nodeId === 'node_director_approval');
 
   const showProcRevise =
     canActAsProcurement &&
     status === 'REJECTED_TO_PROCUREMENT' &&
-    (!activeTask || activeTask.nodeId === 'node_procurement_revision') &&
-    !isDuplicateActivePr;
+    (!activeTask || activeTask.nodeId === 'node_procurement_revision');
 
-  const borderColor =
-    status === 'APPROVED' || status === 'PO_ISSUED'
-      ? '#86efac'
-      : status === 'REJECTED_TO_PROCUREMENT'
-      ? '#fca5a5'
-      : status === 'DIRECTOR_APPROVAL'
-      ? '#c4b5fd'
-      : '#bfdbfe';
-
-  const bgColor =
-    status === 'APPROVED' || status === 'PO_ISSUED'
-      ? '#f0fdf4'
-      : status === 'REJECTED_TO_PROCUREMENT'
-      ? '#fef2f2'
-      : status === 'DIRECTOR_APPROVAL'
-      ? '#faf5ff'
-      : '#eff6ff';
+  // Columns for PR items table
+  const itemTableColumns = [
+    {
+      title: 'No.',
+      key: 'no',
+      width: 50,
+      align: 'center' as const,
+      render: (_: any, __: any, index: number) => index + 1,
+    },
+    {
+      title: 'Deskripsi Item',
+      dataIndex: 'itemName',
+      key: 'itemName',
+      width: '46%',
+      render: (text: string) => (
+        <span
+          style={{
+            fontWeight: 500,
+            color: '#1e293b',
+            wordBreak: 'break-word',
+            whiteSpace: 'normal',
+            lineHeight: 1.45,
+            display: 'inline-block',
+          }}
+        >
+          {text || 'Belum ada data'}
+        </span>
+      ),
+    },
+    {
+      title: 'Qty',
+      dataIndex: 'quantity',
+      key: 'quantity',
+      width: '8%',
+      align: 'right' as const,
+      render: (q: number) => formatNumber(q, { fallback: '0' }),
+    },
+    ...(itemsMetrics.hasUom
+      ? [
+          {
+            title: 'Satuan',
+            dataIndex: 'uom',
+            key: 'uom',
+            width: '10%',
+            align: 'center' as const,
+            render: (u: string) => (
+              <Tag style={{ margin: 0, fontSize: 11, borderRadius: 4 }}>{u || '-'}</Tag>
+            ),
+          },
+        ]
+      : []),
+    ...(itemsMetrics.hasUnitPrice
+      ? [
+          {
+            title: 'Harga Satuan',
+            dataIndex: 'estimatedUnitPrice',
+            key: 'estimatedUnitPrice',
+            width: '16%',
+            align: 'right' as const,
+            render: (p: number) =>
+              p != null && p > 0 ? formatCurrency(p, { fallback: '-' }) : '-',
+          },
+        ]
+      : []),
+    ...(itemsMetrics.hasSubtotal
+      ? [
+          {
+            title: 'Subtotal',
+            key: 'subtotal',
+            width: '18%',
+            align: 'right' as const,
+            render: (_: any, record: PrItemPresentation) => {
+              const sub =
+                record.totalPrice != null
+                  ? record.totalPrice
+                  : record.quantity != null && record.estimatedUnitPrice != null
+                  ? Number(record.quantity) * Number(record.estimatedUnitPrice)
+                  : null;
+              return (
+                <span style={{ fontWeight: 700, color: '#1d4ed8' }}>
+                  {formatCurrency(sub, { fallback: '-' })}
+                </span>
+              );
+            },
+          },
+        ]
+      : []),
+  ];
 
   return (
-    <div style={{ marginTop: 12 }}>
-      {/* ── Main PR Approval Card ── */}
-      <Card
-        size="small"
-        style={{ borderRadius: 10, border: `1.5px solid ${borderColor}`, background: bgColor }}
-        title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <Space size={8}>
-              <AuditOutlined style={{ color: '#1d4ed8' }} />
-              <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
-                PR Approval Workflow — {prNumber}
-              </span>
-            </Space>
-            <PrStatusBadge status={status} />
+    <div className={styles.workflowModalContainer}>
+      {/* ── MODAL HEADER ── */}
+      <div className={styles.modalHeader}>
+        <div className={styles.modalHeaderLeft}>
+          <FileTextOutlined className={styles.modalHeaderIcon} />
+          <span className={styles.modalHeaderTitle}>
+            PR Approval Workflow — {infoPresentation.prNumber}
+          </span>
+        </div>
+        <div className={styles.modalHeaderRight}>
+          <PrStatusBadge status={status} />
+          {onClose && (
+            <button
+              type="button"
+              className={`${styles.modalCloseBtn} ant-modal-close`}
+              onClick={onClose}
+              aria-label="Close"
+              title="Tutup Modal"
+            >
+              <CloseOutlined style={{ fontSize: 12 }} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── WORKFLOW STEPPER ── */}
+      <div className={styles.stepperContainer}>
+        <PrApprovalTracker
+          status={status}
+          instance={instance}
+          transitions={transitions}
+          activeRfq={activeRfq}
+        />
+      </div>
+
+      {/* ── MODAL BODY ── */}
+      <div className={styles.modalBody}>
+        {loadingWorkflow && (
+          <div style={{ padding: '12px 4px' }}>
+            <Skeleton active paragraph={{ rows: 6 }} />
           </div>
-        }
-      >
-        {/* ── 4-Step Tracker ── */}
-        <PrApprovalTracker status={status} instance={instance} />
-        <Divider style={{ margin: '10px 0' }} />
+        )}
 
-        {/* ── PR Summary & References (Finance / Director Review Info) ── */}
-        <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} style={{ fontSize: 11.5 }}>
-          <Descriptions.Item label="Nomor PR">
-            <Text strong>{prNumber}</Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="Proyek">
-            <Text strong>{projectName}</Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="Total Pengajuan PR">
-            <Text strong style={{ color: '#1d4ed8', fontSize: 12.5 }}>
-              Rp {Number(totalAmount).toLocaleString('id-ID')}
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="Alokasi Budget WBS">
-            <Text style={{ color: '#059669', fontWeight: 600 }}>
-              Rp {Number(state.budgetAllocation || budgetAllocation || totalAmount).toLocaleString('id-ID')}
-            </Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="WBS Reference">
-            <Tag color="cyan" style={{ fontFamily: 'monospace', fontSize: 10.5, margin: 0 }}>
-              {state.wbsTaskName || wbsTaskName || 'WBS Pengadaan Material'}
-            </Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label="Op. Plan Gate">
-            <Tag color="gold" style={{ fontSize: 10.5, margin: 0 }}>
-              {state.opPlanRef || opPlanRef || `OP-${projectId}`} (Approved by HOA)
-            </Tag>
-          </Descriptions.Item>
-          {(instance?.createdAt || state.submittedAt) && (
-            <Descriptions.Item label="Diajukan oleh">
-              <Text type="secondary">
-                {state.submittedBy || 'Procurement Team'} ({dayjs(instance?.createdAt || state.submittedAt).format('DD/MM HH:mm')})
-              </Text>
-            </Descriptions.Item>
-          )}
-          {state.financeReviewedAt && (
-            <Descriptions.Item label="Finance Review">
-              <Text type="secondary">
-                {state.financeReviewedBy} ({dayjs(state.financeReviewedAt).format('DD/MM HH:mm')})
-              </Text>
-            </Descriptions.Item>
-          )}
-          {state.directorDecisionAt && (
-            <Descriptions.Item label="Director Approval">
-              <Text type="secondary">
-                {state.directorDecisionBy} ({dayjs(state.directorDecisionAt).format('DD/MM HH:mm')})
-              </Text>
-            </Descriptions.Item>
-          )}
-        </Descriptions>
+        {workflowError && (
+          <Alert
+            type="error"
+            showIcon
+            message={workflowError}
+            style={{ borderRadius: 8 }}
+          />
+        )}
 
-        {/* ── Items preview ── */}
-        {items.length > 0 && (
-          <>
-            <Divider style={{ margin: '8px 0', fontSize: 11 }}>Rincian Item Pengadaan ({items.length} item)</Divider>
-            <div style={{ maxHeight: 110, overflowY: 'auto' }}>
-              {items.map((item, i) => (
-                <div
-                  key={i}
+        {/* ── INFORMASI PENGAJUAN PR CARD (3-Column Layout) ── */}
+        <div className={styles.cardSurface}>
+          <div className={styles.cardHeader}>
+            <div className={styles.cardTitle}>
+              <FolderOpenOutlined style={{ color: '#2563eb' }} />
+              <span>Informasi Pengajuan PR</span>
+            </div>
+          </div>
+
+          <div className={styles.infoGrid}>
+            {/* Column 1 */}
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>Nomor PR</span>
+              <span
+                className={
+                  infoPresentation.prNumber === 'Belum ada data'
+                    ? styles.infoValueMuted
+                    : styles.infoValue
+                }
+              >
+                {infoPresentation.prNumber}
+              </span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>Proyek</span>
+              <span
+                className={
+                  infoPresentation.projectName === 'Belum ada data'
+                    ? styles.infoValueMuted
+                    : styles.infoValue
+                }
+              >
+                {infoPresentation.projectName}
+              </span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>Total Pengajuan PR</span>
+              <span
+                className={
+                  infoPresentation.totalAmountText === 'N/A'
+                    ? styles.infoValueMuted
+                    : `${styles.infoValue} ${styles.infoValueAmount}`
+                }
+              >
+                {infoPresentation.totalAmountText}
+              </span>
+            </div>
+
+            {/* Column 2 */}
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>Alokasi Budget WBS</span>
+              <span
+                className={
+                  infoPresentation.budgetAllocationText === 'N/A'
+                    ? styles.infoValueMuted
+                    : `${styles.infoValue} ${styles.infoValueBudget}`
+                }
+              >
+                {infoPresentation.budgetAllocationText}
+              </span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>WBS Reference</span>
+              {infoPresentation.hasWbsReference ? (
+                <Tag
+                  color="cyan"
                   style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
+                    fontFamily: 'monospace',
                     fontSize: 11,
-                    padding: '2px 6px',
-                    background: i % 2 === 0 ? '#f8fafc' : '#fff',
-                    borderRadius: 3,
+                    margin: 0,
+                    width: 'fit-content',
+                    borderRadius: 4,
                   }}
                 >
-                  <span>{item.itemName} × {item.quantity}</span>
-                  <span style={{ fontWeight: 600, color: '#1d4ed8' }}>
-                    Rp {(item.quantity * item.estimatedUnitPrice).toLocaleString('id-ID')}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* ── Rejection Alert ── */}
-        {status === 'REJECTED_TO_PROCUREMENT' && state.rejectionReason && (
-          <>
-            <Divider style={{ margin: '10px 0' }} />
-            <Alert
-              type="error"
-              showIcon
-              message={
-                <span style={{ fontWeight: 700, fontSize: 12 }}>
-                  Ditolak oleh {state.rejectedByRole === 'FINANCE' ? 'Finance Team (Financial Review)' : 'Director (Final Authority)'}
+                  {infoPresentation.wbsReferenceText}
+                </Tag>
+              ) : (
+                <span className={styles.infoValueMuted}>
+                  {infoPresentation.wbsReferenceText}
                 </span>
-              }
-              description={
-                <div>
-                  <div style={{ fontSize: 11.5 }}>
-                    <strong>Alasan:</strong> {state.rejectionReason}
-                  </div>
-                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
-                    oleh {state.rejectedBy} — {state.rejectedAt ? dayjs(state.rejectedAt).format('DD MMM YYYY HH:mm') : ''}
-                  </div>
-                </div>
-              }
-              style={{ borderRadius: 6 }}
-            />
-          </>
-        )}
+              )}
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>Gate</span>
+              {infoPresentation.hasGate ? (
+                <Tag
+                  color="gold"
+                  style={{
+                    fontSize: 11,
+                    margin: 0,
+                    width: 'fit-content',
+                    borderRadius: 4,
+                  }}
+                >
+                  {infoPresentation.gateText}
+                </Tag>
+              ) : (
+                <span className={styles.infoValueMuted}>
+                  {infoPresentation.gateText}
+                </span>
+              )}
+            </div>
 
-        {/* ── Approval Alert ── */}
+            {/* Column 3 */}
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>Diajukan oleh</span>
+              <span
+                className={
+                  infoPresentation.submittedByText === 'N/A'
+                    ? styles.infoValueMuted
+                    : styles.infoValue
+                }
+              >
+                {infoPresentation.submittedByText}
+              </span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>Finance Review</span>
+              <span
+                className={
+                  infoPresentation.financeReviewText === 'Belum ada data'
+                    ? styles.infoValueMuted
+                    : styles.infoValue
+                }
+              >
+                {infoPresentation.financeReviewText}
+              </span>
+            </div>
+            <div className={styles.infoItem}>
+              <span className={styles.infoLabel}>Director Approval</span>
+              <span
+                className={
+                  infoPresentation.directorApprovalText === 'Belum ada data'
+                    ? styles.infoValueMuted
+                    : styles.infoValue
+                }
+              >
+                {infoPresentation.directorApprovalText}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── CURRENT ACTION / STATUS CARD ── */}
         {(status === 'APPROVED' || status === 'PO_ISSUED') && (
-          <>
-            <Divider style={{ margin: '10px 0' }} />
-            <Alert
-              type="success"
-              showIcon
-              icon={<SafetyCertificateOutlined />}
-              message={
-                <span style={{ fontWeight: 700, fontSize: 12 }}>
+          <div className={`${styles.actionBanner} ${styles.actionBannerApproved}`}>
+            <div className={styles.actionBannerContent}>
+              <CheckCircleFilled
+                className={styles.actionBannerIcon}
+                style={{ color: '#059669' }}
+              />
+              <div className={styles.actionBannerText}>
+                <span className={styles.actionBannerTitle}>
                   {status === 'PO_ISSUED'
                     ? 'PR Disetujui Penuh & PO Telah Diterbitkan'
                     : 'PR Disetujui — Siap Proses RFQ / Vendor / PO'}
                 </span>
-              }
-              description={
-                <div style={{ fontSize: 11.5 }}>
-                  <div>
-                    Disetujui oleh {state.directorDecisionBy || 'Director'} pada{' '}
-                    {state.directorDecisionAt ? dayjs(state.directorDecisionAt).format('DD MMM YYYY HH:mm') : ''}.
-                    {status === 'PO_ISSUED'
-                      ? ' Seluruh tahapan persetujuan telah selesai dan Purchase Order telah resmi diterbitkan.'
-                      : ' Procurement Team dapat melanjutkan ke penerbitan RFQ, perbandingan vendor, dan Purchase Order (PO).'}
-                  </div>
-                  {status !== 'PO_ISSUED' && canActAsProcurement && onCreateRfqClick && (
-                    <div style={{ marginTop: 10 }}>
-                      <Button
-                        type="primary"
-                        size="small"
-                        icon={<SendOutlined />}
-                        onClick={onCreateRfqClick}
-                        style={{
-                          backgroundColor: '#059669',
-                          borderColor: '#059669',
-                          fontWeight: 600,
-                          borderRadius: 6,
-                          fontSize: 11.5,
-                        }}
-                      >
-                        Buat RFQ
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              }
-              style={{ borderRadius: 6 }}
-            />
-          </>
-        )}
+                <span className={styles.actionBannerDesc}>
+                  Disetujui oleh {state.directorDecisionBy || 'Director'} pada{' '}
+                  {state.directorDecisionAt
+                    ? dayjs(state.directorDecisionAt).format('DD MMM YYYY HH:mm')
+                    : '-'}.
+                  {status === 'PO_ISSUED'
+                    ? ' Seluruh tahapan persetujuan telah selesai dan Purchase Order telah resmi diterbitkan.'
+                    : ' Procurement Team dapat melanjutkan ke penerbitan RFQ, perbandingan vendor, dan Purchase Order (PO).'}
+                </span>
+              </div>
+            </div>
 
-        {/* ── Riwayat Proses Pengadaan (Business-Friendly View) ── */}
-        <div style={{ marginTop: 10, marginBottom: 10 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <Space size={6}>
-              <HistoryOutlined style={{ color: '#2563eb', fontSize: 13 }} />
-              <span style={{ fontWeight: 700, fontSize: 12, color: '#0f172a' }}>
-                Riwayat Proses Pengadaan
-              </span>
-            </Space>
-            {isSuperAdmin && transitions.length > 0 && (
-              <Button
-                size="small"
-                type="link"
-                onClick={() => setShowTechnicalDetails((p) => !p)}
-                style={{ fontSize: 10.5, padding: 0, height: 'auto', color: '#64748b' }}
-              >
-                {showTechnicalDetails ? 'Sembunyikan Teknis' : 'Detail Teknis (Admin)'}
-              </Button>
+            {status !== 'PO_ISSUED' && canActAsProcurement && onCreateRfqClick && (
+              <div className={styles.actionBannerCta}>
+                <Button
+                  type={rfqCta.buttonType}
+                  size="middle"
+                  icon={activeRfq ? <EyeOutlined /> : <SendOutlined />}
+                  onClick={onCreateRfqClick}
+                  style={{
+                    backgroundColor: activeRfq ? undefined : '#059669',
+                    borderColor: activeRfq ? undefined : '#059669',
+                    color: activeRfq ? undefined : '#ffffff',
+                    fontWeight: 600,
+                    borderRadius: 6,
+                    fontSize: 12.5,
+                  }}
+                >
+                  {rfqCta.label}
+                </Button>
+              </div>
             )}
           </div>
+        )}
 
+        {status === 'REJECTED_TO_PROCUREMENT' && (
+          <div className={`${styles.actionBanner} ${styles.actionBannerRejected}`}>
+            <div className={styles.actionBannerContent}>
+              <ExclamationCircleFilled
+                className={styles.actionBannerIcon}
+                style={{ color: '#dc2626' }}
+              />
+              <div className={styles.actionBannerText}>
+                <span className={styles.actionBannerTitle} style={{ color: '#991b1b' }}>
+                  Ditolak oleh{' '}
+                  {state.rejectedByRole === 'FINANCE'
+                    ? 'Finance Team (Financial Review)'
+                    : 'Director (Final Authority)'}
+                </span>
+                <span className={styles.actionBannerDesc}>
+                  <strong>Catatan:</strong> {state.rejectionReason || 'N/A'}
+                  {state.rejectedBy && (
+                    <span style={{ display: 'block', color: '#64748b', fontSize: 11, marginTop: 2 }}>
+                      oleh {state.rejectedBy} —{' '}
+                      {state.rejectedAt ? dayjs(state.rejectedAt).format('DD MMM YYYY HH:mm') : ''}
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+
+            {showProcRevise && (
+              <div className={styles.actionBannerCta}>
+                <Button
+                  type="primary"
+                  icon={<RollbackOutlined />}
+                  onClick={handleResubmit}
+                  loading={submitting}
+                  style={{ backgroundColor: '#1d4ed8', borderRadius: 6, fontWeight: 600, fontSize: 12 }}
+                >
+                  Perbaiki &amp; Submit Ulang
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Finance Actions Card */}
+        {showFinanceActions && (
           <div
+            className={styles.cardSurface}
             style={{
-              padding: '10px 12px',
-              background: '#f8fafc',
-              borderRadius: 8,
-              border: '1px solid #e2e8f0',
+              borderColor: '#c7d2fe',
+              background: '#f5f3ff',
               display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
             }}
           >
-            {businessWorkflowEvents.map((ev) => (
-              <div
-                key={ev.id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: ev.note ? 'flex-start' : 'center',
-                  fontSize: 11,
-                  padding: '6px 10px',
-                  borderRadius: 6,
-                  background: ev.isPending ? '#faf5ff' : ev.statusTag.color === 'error' ? '#fef2f2' : '#ffffff',
-                  border: `1px solid ${ev.isPending ? '#e9d5ff' : ev.statusTag.color === 'error' ? '#fecaca' : '#e2e8f0'}`,
-                  flexWrap: 'wrap',
-                  gap: 6,
-                }}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                    <Tag color={ev.statusTag.color} style={{ fontWeight: 700, fontSize: 9.5, margin: 0, padding: '0 6px', lineHeight: '18px', borderRadius: 4 }}>
-                      {ev.statusTag.label}
-                    </Tag>
-                    <span style={{ color: ev.isPending ? '#6b21a8' : '#0f172a', fontWeight: 700, fontSize: 11.5 }}>
-                      {ev.title}
-                    </span>
-                    <span style={{ color: '#94a3b8' }}>•</span>
-                    <span style={{ color: '#475569', fontSize: 11 }}>
-                      Oleh: <strong>{ev.actor}</strong>
-                    </span>
-                    {ev.prRef && (
-                      <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 4px', lineHeight: '14px' }}>
-                        PR: {ev.prRef}
-                      </Tag>
-                    )}
-                  </div>
-                  {ev.note && (
-                    <div style={{ fontSize: 11, color: ev.isPending ? '#7e22ce' : ev.statusTag.color === 'error' ? '#991b1b' : '#334155', fontStyle: 'italic', paddingLeft: 2, marginTop: 2 }}>
-                      {ev.note}
-                    </div>
-                  )}
-                </div>
-                <div style={{ fontSize: 10.5, color: ev.isPending ? '#7e22ce' : '#64748b', whiteSpace: 'nowrap', fontWeight: ev.isPending ? 600 : 400 }}>
-                  {ev.formattedTime}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Optional Admin Technical Audit Drawer/Collapse */}
-          {isSuperAdmin && showTechnicalDetails && transitions.length > 0 && (
-            <div style={{ marginTop: 8, padding: '8px 10px', background: '#f1f5f9', borderRadius: 6, border: '1px dashed #cbd5e1', fontSize: 10.5 }}>
-              <div style={{ fontWeight: 600, color: '#475569', marginBottom: 4 }}>Audit Jejak Teknis Workflow Engine:</div>
-              {transitions.map((t) => (
-                <div key={t.id} style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b', fontFamily: 'monospace', fontSize: 10 }}>
-                  <span>Transition #{t.id}: {t.action} ({t.fromNodeId} → {t.toNodeId})</span>
-                  <span>{dayjs(t.createdAt).format('HH:mm:ss')}</span>
-                </div>
-              ))}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <InfoCircleOutlined style={{ color: '#4f46e5', fontSize: 16 }} />
+              <span style={{ fontSize: 12, color: '#312e81', fontWeight: 600 }}>
+                Aksi Finance: Lakukan evaluasi anggaran WBS sebelum memutuskan.
+              </span>
             </div>
-          )}
-        </div>
-
-        <Divider style={{ margin: '10px 0' }} />
-
-        {/* ── Duplicate Active PR Warning Alert ── */}
-        {isDuplicateActivePr && canonicalApprovedPr && (
-          <Alert
-            type="warning"
-            showIcon
-            message={
-              <span style={{ fontWeight: 700, fontSize: 12 }}>
-                DUPLICATE PR — PERSETUJUAN DIKUNCI
-              </span>
-            }
-            description={
-              <div style={{ fontSize: 11.5 }}>
-                Item pada pengajuan ini sudah tercakup pada Purchase Request canonical{' '}
-                <strong>{canonicalApprovedPr.prNumber || canonicalApprovedPr.prId}</strong> yang telah{' '}
-                <strong>Disetujui (APPROVED)</strong>. Aksi persetujuan (Finance / Director) pada duplicate PR ini
-                dinonaktifkan untuk menjaga integritas pagu anggaran proyek.
-              </div>
-            }
-            style={{ borderRadius: 6, marginBottom: 12, border: '1px solid #fde047', background: '#fefce8' }}
-          />
-        )}
-
-        {/* ── ROLE-SPECIFIC ACTION BAR ── */}
-
-        {/* Info when user cannot take action at this state */}
-        {status === 'SUBMITTED' && !canActAsFinance && !isDuplicateActivePr && (
-          <Alert
-            type="info"
-            showIcon
-            icon={<ClockCircleFilled />}
-            message={
-              <span style={{ fontSize: 11.5 }}>
-                PR sedang dalam tahap <strong>Financial Review oleh Finance Team</strong>. Menunggu pemeriksaan anggaran dan kelayakan finansial.
-              </span>
-            }
-            style={{ borderRadius: 6 }}
-          />
-        )}
-
-        {status === 'DIRECTOR_APPROVAL' && !canActAsDirector && (
-          <Alert
-            type="info"
-            showIcon
-            icon={<ClockCircleFilled />}
-            message={
-              <span style={{ fontSize: 11.5 }}>
-                PR telah disetujui Finance dan sedang <strong>Menunggu Final Approval Director</strong>.
-              </span>
-            }
-            style={{ borderRadius: 6 }}
-          />
-        )}
-
-        {/* PROCUREMENT Actions: Resubmit after rejection */}
-        {showProcRevise && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <span style={{ fontSize: 11.5, color: '#dc2626', fontWeight: 600 }}>
-              PR perlu diperbaiki sesuai catatan sebelum diajukan kembali.
-            </span>
-            <Button
-              type="primary"
-              icon={<RollbackOutlined />}
-              onClick={handleResubmit}
-              style={{ backgroundColor: '#1d4ed8', borderRadius: 6, fontWeight: 600, fontSize: 12 }}
-            >
-              Perbaiki &amp; Submit Ulang
-            </Button>
-          </div>
-        )}
-
-        {/* FINANCE Actions */}
-        {showFinanceActions && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <span style={{ fontSize: 11.5, color: '#1e40af', fontWeight: 600 }}>
-              Aksi Finance: Lakukan evaluasi anggaran WBS sebelum memutuskan.
-            </span>
             <Space>
               <Button
                 danger
@@ -1053,7 +1127,13 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
                 type="primary"
                 icon={<ArrowRightOutlined />}
                 onClick={() => setFinancePassOpen(true)}
-                style={{ backgroundColor: '#7c3aed', borderColor: '#7c3aed', borderRadius: 6, fontWeight: 600, fontSize: 12 }}
+                style={{
+                  backgroundColor: '#7c3aed',
+                  borderColor: '#7c3aed',
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  fontSize: 12,
+                }}
               >
                 Lanjutkan ke Director
               </Button>
@@ -1061,12 +1141,26 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
           </div>
         )}
 
-        {/* DIRECTOR Actions */}
+        {/* Director Actions Card */}
         {showDirectorActions && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <span style={{ fontSize: 11.5, color: '#7c3aed', fontWeight: 600 }}>
-              Aksi Director: Keputusan Otorisasi Final Pengadaan.
-            </span>
+          <div
+            className={styles.cardSurface}
+            style={{
+              borderColor: '#bbf7d0',
+              background: '#f0fdf4',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 16 }} />
+              <span style={{ fontSize: 12, color: '#065f46', fontWeight: 600 }}>
+                Aksi Director: Keputusan Otorisasi Final Pengadaan.
+              </span>
+            </div>
             <Space>
               <Button
                 danger
@@ -1084,14 +1178,220 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
                 type="primary"
                 icon={<SafetyCertificateOutlined />}
                 onClick={() => setDirApproveOpen(true)}
-                style={{ backgroundColor: '#059669', borderColor: '#059669', borderRadius: 6, fontWeight: 600, fontSize: 12 }}
+                style={{
+                  backgroundColor: '#059669',
+                  borderColor: '#059669',
+                  borderRadius: 6,
+                  fontWeight: 600,
+                  fontSize: 12,
+                }}
               >
                 Approve PR
               </Button>
             </Space>
           </div>
         )}
-      </Card>
+
+        {/* Informational Alerts when user cannot act */}
+        {status === 'SUBMITTED' && !canActAsFinance && (
+          <Alert
+            type="info"
+            showIcon
+            icon={<ClockCircleFilled />}
+            message={
+              <span style={{ fontSize: 12 }}>
+                PR sedang dalam tahap <strong>Financial Review oleh Finance Team</strong>. Menunggu pemeriksaan anggaran dan kelayakan finansial.
+              </span>
+            }
+            style={{ borderRadius: 8 }}
+          />
+        )}
+
+        {status === 'DIRECTOR_APPROVAL' && !canActAsDirector && (
+          <Alert
+            type="info"
+            showIcon
+            icon={<ClockCircleFilled />}
+            message={
+              <span style={{ fontSize: 12 }}>
+                PR telah disetujui Finance dan sedang <strong>Menunggu Final Approval Director</strong>.
+              </span>
+            }
+            style={{ borderRadius: 8 }}
+          />
+        )}
+
+        {/* ── RINCIAN ITEM PENGADAAN TABLE ── */}
+        <div className={styles.cardSurface}>
+          <div className={styles.cardHeader}>
+            <div className={styles.cardTitle}>
+              <ShoppingOutlined style={{ color: '#2563eb' }} />
+              <span>Rincian Item Pengadaan ({itemsMetrics.itemCount} item)</span>
+            </div>
+          </div>
+
+          {effectiveItems.length === 0 ? (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description="Belum ada data rincian item pengadaan"
+            />
+          ) : (
+            <div className={styles.tableContainer}>
+              <Table
+                dataSource={effectiveItems.map((it, idx) => ({ ...it, key: it.id || idx }))}
+                columns={itemTableColumns}
+                pagination={
+                  effectiveItems.length > 5
+                    ? { pageSize: 5, size: 'small', showTotal: (t) => `Total ${t} item` }
+                    : false
+                }
+                size="small"
+                summary={() => (
+                  <Table.Summary fixed>
+                    <Table.Summary.Row style={{ background: '#f8fafc', fontWeight: 600 }}>
+                      <Table.Summary.Cell index={0} colSpan={2}>
+                        Total
+                      </Table.Summary.Cell>
+                      <Table.Summary.Cell index={1} align="right">
+                        {formatNumber(itemsMetrics.totalQuantity, { fallback: '0' })}
+                      </Table.Summary.Cell>
+                      {itemsMetrics.hasUom && <Table.Summary.Cell index={2} />}
+                      {itemsMetrics.hasUnitPrice && <Table.Summary.Cell index={3} />}
+                      {itemsMetrics.hasSubtotal && (
+                        <Table.Summary.Cell index={4} align="right">
+                          <span style={{ color: '#1d4ed8', fontSize: 12.5, fontWeight: 700 }}>
+                            {formatCurrency(
+                              itemsMetrics.totalCalculatedSubtotal || effectiveTotalAmount,
+                              { fallback: '-' },
+                            )}
+                          </span>
+                        </Table.Summary.Cell>
+                      )}
+                    </Table.Summary.Row>
+                  </Table.Summary>
+                )}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* ── RIWAYAT PROSES PENGADAAN (TIMELINE) ── */}
+        <div className={styles.cardSurface}>
+          <div className={styles.cardHeader}>
+            <div className={styles.cardTitle}>
+              <HistoryOutlined style={{ color: '#2563eb' }} />
+              <span>Riwayat Proses Pengadaan</span>
+            </div>
+            {isSuperAdmin && transitions.length > 0 && (
+              <Button
+                size="small"
+                type="link"
+                onClick={() => setShowTechnicalDetails((p) => !p)}
+                style={{ fontSize: 11, padding: 0, height: 'auto', color: '#64748b' }}
+              >
+                {showTechnicalDetails ? 'Sembunyikan Teknis' : 'Detail Teknis (Admin)'}
+              </Button>
+            )}
+          </div>
+
+          <div className={styles.historyTimeline}>
+            {historyEvents.map((ev) => {
+              let dotClass = styles.historyRowDot;
+              if (ev.statusTag.color === 'success') dotClass = `${styles.historyRowDot} ${styles.historyRowDotSuccess}`;
+              else if (ev.statusTag.color === 'error') dotClass = `${styles.historyRowDot} ${styles.historyRowDotError}`;
+              else if (ev.statusTag.color === 'processing') dotClass = `${styles.historyRowDot} ${styles.historyRowDotActive}`;
+
+              return (
+                <div key={ev.id} className={styles.historyRow}>
+                  <div className={dotClass} />
+                  <div className={styles.historyMain}>
+                    <div className={styles.historyHeader}>
+                      <Tag
+                        color={ev.statusTag.color}
+                        style={{
+                          fontWeight: 700,
+                          fontSize: 10,
+                          margin: 0,
+                          padding: '0 6px',
+                          lineHeight: '18px',
+                          borderRadius: 4,
+                        }}
+                      >
+                        {ev.statusTag.label}
+                      </Tag>
+                      <span className={styles.historyTitle}>{ev.title}</span>
+                    </div>
+
+                    <div className={styles.historyMeta}>
+                      <UserOutlined style={{ fontSize: 11 }} />
+                      <span>
+                        Oleh: <strong>{ev.actor}</strong>
+                      </span>
+                      {ev.prRef && (
+                        <Tag
+                          color="blue"
+                          style={{
+                            fontSize: 9.5,
+                            margin: 0,
+                            padding: '0 4px',
+                            lineHeight: '14px',
+                            borderRadius: 3,
+                          }}
+                        >
+                          PR: {ev.prRef}
+                        </Tag>
+                      )}
+                    </div>
+
+                    {/* Strict: Only display note if actually present in backend data */}
+                    {ev.note && <div className={styles.historyNote}>{ev.note}</div>}
+                  </div>
+
+                  <div className={styles.historyTime}>
+                    <CalendarOutlined style={{ fontSize: 11 }} />
+                    <span>{ev.formattedTime}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Optional Admin Technical Transitions Audit Drawer */}
+          {isSuperAdmin && showTechnicalDetails && transitions.length > 0 && (
+            <div
+              style={{
+                marginTop: 12,
+                padding: '10px 12px',
+                background: '#f1f5f9',
+                borderRadius: 6,
+                border: '1px dashed #cbd5e1',
+                fontSize: 11,
+              }}
+            >
+              <div style={{ fontWeight: 600, color: '#475569', marginBottom: 4 }}>
+                Audit Jejak Teknis Workflow Engine:
+              </div>
+              {transitions.map((t) => (
+                <div
+                  key={t.id}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    color: '#64748b',
+                    fontFamily: 'monospace',
+                    fontSize: 10.5,
+                  }}
+                >
+                  <span>
+                    Transition #{t.id}: {t.action} ({t.fromNodeId} → {t.toNodeId})
+                  </span>
+                  <span>{dayjs(t.createdAt).format('HH:mm:ss')}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* ── Reject Modal (Finance / Director) ── */}
       <Modal
@@ -1136,7 +1436,13 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
           </Form.Item>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={() => setRejectOpen(false)}>Batal</Button>
-            <Button type="primary" danger htmlType="submit" icon={<RollbackOutlined />}>
+            <Button
+              type="primary"
+              danger
+              htmlType="submit"
+              icon={<RollbackOutlined />}
+              loading={submitting}
+            >
               Kembalikan ke Procurement
             </Button>
           </div>
@@ -1163,9 +1469,13 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
           style={{ marginBottom: 16, borderRadius: 6 }}
         />
         <Descriptions size="small" column={1}>
-          <Descriptions.Item label="PR">{prNumber}</Descriptions.Item>
-          <Descriptions.Item label="Total Pengajuan">Rp {Number(totalAmount).toLocaleString('id-ID')}</Descriptions.Item>
-          <Descriptions.Item label="Alokasi Budget WBS">Rp {Number(budgetAllocation || totalAmount).toLocaleString('id-ID')}</Descriptions.Item>
+          <Descriptions.Item label="PR">{infoPresentation.prNumber}</Descriptions.Item>
+          <Descriptions.Item label="Total Pengajuan">
+            {infoPresentation.totalAmountText}
+          </Descriptions.Item>
+          <Descriptions.Item label="Alokasi Budget WBS">
+            {infoPresentation.budgetAllocationText}
+          </Descriptions.Item>
         </Descriptions>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <Button onClick={() => setFinancePassOpen(false)}>Batal</Button>
@@ -1173,6 +1483,7 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
             type="primary"
             icon={<ArrowRightOutlined />}
             onClick={handleFinancePass}
+            loading={submitting}
             style={{ backgroundColor: '#7c3aed', borderColor: '#7c3aed' }}
           >
             Konfirmasi — Lanjutkan ke Director
@@ -1200,9 +1511,13 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
           style={{ marginBottom: 16, borderRadius: 6 }}
         />
         <Descriptions size="small" column={1}>
-          <Descriptions.Item label="PR">{prNumber}</Descriptions.Item>
-          <Descriptions.Item label="Total PR">Rp {Number(totalAmount).toLocaleString('id-ID')}</Descriptions.Item>
-          <Descriptions.Item label="Diverifikasi Finance">{state.financeReviewedBy || currentUserName}</Descriptions.Item>
+          <Descriptions.Item label="PR">{infoPresentation.prNumber}</Descriptions.Item>
+          <Descriptions.Item label="Total PR">
+            {infoPresentation.totalAmountText}
+          </Descriptions.Item>
+          <Descriptions.Item label="Diverifikasi Finance">
+            {state.financeReviewedBy || currentUserName || 'N/A'}
+          </Descriptions.Item>
         </Descriptions>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
           <Button onClick={() => setDirApproveOpen(false)}>Batal</Button>
@@ -1210,6 +1525,7 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
             type="primary"
             icon={<SafetyCertificateOutlined />}
             onClick={handleDirectorApprove}
+            loading={submitting}
             style={{ backgroundColor: '#059669', borderColor: '#059669' }}
           >
             Approve PR
