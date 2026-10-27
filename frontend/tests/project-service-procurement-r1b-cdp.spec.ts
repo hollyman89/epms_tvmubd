@@ -1,8 +1,23 @@
 import { test, expect, chromium } from '@playwright/test';
+import * as path from 'path';
+import * as fs from 'fs';
+
+try {
+  const envPath = path.resolve(__dirname, '../.env.local');
+  if (fs.existsSync(envPath)) {
+    const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+    for (const l of lines) {
+      const m = l.match(/^\s*([\w.-]+)\s*=\s*(.*)?\s*$/);
+      if (m && !process.env[m[1]]) {
+        process.env[m[1]] = (m[2] || '').trim().replace(/^['"]|['"]$/g, '');
+      }
+    }
+  }
+} catch (_) {}
 
 const BASE_URL = 'http://localhost:3000';
 const CDP_URL = 'http://127.0.0.1:9222';
-const PASSWORD = process.env.E2E_TEST_PASSWORD || '123456';
+const PASSWORD = process.env.E2E_TEST_PASSWORD || '';
 
 test.describe.serial('EPMS — PROJECT-SERVICE-ENTRY-R1B: Live Edge CDP Validation', () => {
   test.setTimeout(180000);

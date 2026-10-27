@@ -187,7 +187,7 @@ describe('EPMS — PR APPROVED → PROCUREMENT RFQ HANDOFF (Focused Unit Tests)'
       const module = await setupInboxService([pr1]);
       inboxService = module.get<InboxService>(InboxService);
 
-      // Project Manager / Finance / Director should NOT see CREATE_RFQ To-Do
+      // Project Manager / Finance / Director / SUPER_ADMIN should NOT see CREATE_RFQ To-Do
       const pmTodos = await inboxService.getTodos(2, ['PROJECT_MANAGER']);
       expect(pmTodos.filter((t) => t.actionType === 'CREATE_RFQ')).toHaveLength(0);
 
@@ -196,6 +196,9 @@ describe('EPMS — PR APPROVED → PROCUREMENT RFQ HANDOFF (Focused Unit Tests)'
 
       const dirTodos = await inboxService.getTodos(4, ['DIRECTOR']);
       expect(dirTodos.filter((t) => t.actionType === 'CREATE_RFQ')).toHaveLength(0);
+
+      const adminTodos = await inboxService.getTodos(1, ['SUPER_ADMIN']);
+      expect(adminTodos.filter((t) => t.actionType === 'CREATE_RFQ')).toHaveLength(0);
 
       // Ensure mock query builder was never called for non-procurement roles
       expect(mockPrRepo.createQueryBuilder).not.toHaveBeenCalled();

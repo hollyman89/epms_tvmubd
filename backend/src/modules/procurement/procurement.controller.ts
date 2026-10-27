@@ -66,7 +66,7 @@ export class ProcurementController {
   }
 
   @Post('pr')
-  @Roles('PROJECT_MANAGER', 'PMO', 'PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN', 'ADMIN', 'HEAD_OF_OPERATIONS')
+  @Roles('PROJECT_MANAGER', 'PMO', 'PROCUREMENT', 'PURCHASING', 'HEAD_OF_OPERATIONS')
   @ApiOperation({ summary: 'Create a new Purchase Request and Submit to Workflow' })
   async createAndSubmitPurchaseRequest(@Request() req, @Body() dto: CreatePurchaseRequestDto) {
     const userId = req.user.userId;
@@ -74,7 +74,7 @@ export class ProcurementController {
   }
 
   @Post('pr/:id/cancel')
-  @Roles('PURCHASING', 'PROCUREMENT', 'SUPER_ADMIN', 'ADMIN', 'HEAD_OF_OPERATIONS')
+  @Roles('PURCHASING', 'PROCUREMENT', 'HEAD_OF_OPERATIONS')
   @ApiOperation({ summary: 'Cancel a Purchase Request and synchronize linked package' })
   async cancelPurchaseRequest(
     @Request() req,
@@ -194,7 +194,7 @@ export class ProcurementController {
   }
 
   @Post('rfqs')
-  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN', 'ADMIN')
+  @Roles('PROCUREMENT', 'PURCHASING')
   @ApiOperation({ summary: 'Create a new RFQ from a Purchase Request' })
   async createRfq(@Request() req, @Body() dto: CreateRfqDto) {
     return this.procurementService.createRfq(dto);
@@ -202,7 +202,7 @@ export class ProcurementController {
 
 
   @Post('vendor-comparison')
-  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN', 'ADMIN')
+  @Roles('PROCUREMENT', 'PURCHASING')
   @ApiOperation({ summary: 'Submit vendor comparison for an RFQ (min 3 vendors)' })
   async submitVendorComparison(@Body() dto: SubmitVendorComparisonDto) {
     return this.procurementService.submitVendorComparison(dto.rfqId, dto.vendors);
@@ -216,7 +216,7 @@ export class ProcurementController {
   }
 
   @Post('purchase-orders')
-  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN', 'ADMIN')
+  @Roles('PROCUREMENT', 'PURCHASING')
   @ApiOperation({ summary: 'Create a new Purchase Order' })
   async createPurchaseOrder(@Request() req, @Body() dto: CreatePurchaseOrderDto) {
     const userId = req.user.userId;
@@ -484,7 +484,7 @@ export class ProcurementController {
   }
 
   @Post('service-claims/:id/cancel')
-  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN')
+  @Roles('PROCUREMENT', 'PURCHASING')
   @ApiOperation({ summary: 'Cancel a Service Claim' })
   async cancelServiceClaim(
     @Request() req,
@@ -500,7 +500,7 @@ export class ProcurementController {
   // =============================================================
 
   @Post('service-orders')
-  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN')
+  @Roles('PROCUREMENT', 'PURCHASING')
   @ApiOperation({ summary: 'Create a new Service Order (SPK / Work Order) draft' })
   async createServiceOrder(@Request() req, @Body() dto: CreateServiceOrderDto) {
     const userId = Number(req.user?.userId || req.user?.id || req.user?.sub);
@@ -529,7 +529,7 @@ export class ProcurementController {
   }
 
   @Patch('service-orders/:id')
-  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN')
+  @Roles('PROCUREMENT', 'PURCHASING')
   @ApiOperation({ summary: 'Update a draft Service Order' })
   async updateServiceOrder(
     @Request() req,
@@ -541,7 +541,7 @@ export class ProcurementController {
   }
 
   @Post('service-orders/:id/issue')
-  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN')
+  @Roles('PROCUREMENT', 'PURCHASING')
   @ApiOperation({ summary: 'Issue a draft Service Order' })
   async issueServiceOrder(@Request() req, @Param('id', ParseIntPipe) id: number) {
     const userId = Number(req.user?.userId || req.user?.id || req.user?.sub);
@@ -549,7 +549,7 @@ export class ProcurementController {
   }
 
   @Post('service-orders/:id/cancel')
-  @Roles('PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN')
+  @Roles('PROCUREMENT', 'PURCHASING')
   @ApiOperation({ summary: 'Cancel a Service Order' })
   async cancelServiceOrder(
     @Request() req,

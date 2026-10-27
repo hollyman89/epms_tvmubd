@@ -17,6 +17,7 @@ import {
   getEntityTagColor,
   formatRoleName,
   formatTaskTitle,
+  formatTaskDescription,
   formatNotificationTitle,
   formatNotificationMessage,
   formatContextualCta,
@@ -254,16 +255,11 @@ export const NotificationBell: React.FC = () => {
 
   const renderCategoryTag = (category?: string) => {
     if (!category) return null;
-    switch (String(category).toUpperCase()) {
-      case 'LEGAL':
-        return <Tag color="purple" style={{ marginRight: '4px', fontSize: '10px' }}>LEGAL</Tag>;
-      case 'PMO':
-        return <Tag color="cyan" style={{ marginRight: '4px', fontSize: '10px' }}>PMO</Tag>;
-      case 'SALES':
-        return <Tag color="green" style={{ marginRight: '4px', fontSize: '10px' }}>SALES</Tag>;
-      default:
-        return <Tag color="blue" style={{ marginRight: '4px', fontSize: '10px' }}>{String(category).toUpperCase()}</Tag>;
-    }
+    return (
+      <Tag color={getEntityTagColor(category)} style={{ marginRight: '4px', fontSize: '10px' }}>
+        {formatEntityLabel(category)}
+      </Tag>
+    );
   };
 
   const renderPriorityBadge = (priority?: string) => {
@@ -389,6 +385,11 @@ export const NotificationBell: React.FC = () => {
       const isOverdue = dueTime !== null && dueTime < Date.now();
       const isGoNoGoApproval = item.actionType === 'GO_NOGO_APPROVAL';
       const isGoNoGoRevision = item.actionType === 'GO_NOGO_REVISION';
+      const isClosureTask =
+        item.entityType === 'PROJECT_CLOSURE' ||
+        item.entityType === 'PENUTUPAN PROYEK' ||
+        item.sourceType === 'DOMAIN_PROJECT_CLOSURE' ||
+        String(item.actionType || '').startsWith('PROJECT_CLOSURE');
 
       return (
         <List.Item
@@ -431,6 +432,15 @@ export const NotificationBell: React.FC = () => {
                   <Tag color="green" style={{ fontSize: '10px' }}>TENDER</Tag>
                   <Tag color="gold" style={{ fontSize: '10px' }}>Marketing</Tag>
                 </div>
+              ) : isClosureTask ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
+                  <Tag color="purple" style={{ fontSize: '10px' }}>Penutupan Proyek</Tag>
+                  {item.assignedRole && (
+                    <Tag color="gold" style={{ fontSize: '10px' }}>
+                      {formatRoleName(item.assignedRole)}
+                    </Tag>
+                  )}
+                </div>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
                   <Tag color={getEntityTagColor(item.entityType)} style={{ fontSize: '10px' }}>
@@ -459,7 +469,13 @@ export const NotificationBell: React.FC = () => {
                 </Text>
               </div>
 
-              {renderBellBusinessContextBlock(item)}
+              {isClosureTask ? (
+                <div style={{ marginBottom: '4px', fontSize: '12px', color: '#334155', lineHeight: '1.4' }}>
+                  {formatTaskDescription(item)}
+                </div>
+              ) : (
+                renderBellBusinessContextBlock(item)
+              )}
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
               <Text type="secondary" style={{ fontSize: '10px', color: '#94a3b8' }}>

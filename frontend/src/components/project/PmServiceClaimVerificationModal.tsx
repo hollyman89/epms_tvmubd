@@ -30,6 +30,7 @@ import {
   ServiceClaimRecord,
 } from '@/services/procurement.service';
 import { formatNumber } from '@/lib/formatters';
+import styles from './PmServiceClaimVerificationModal.module.css';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -349,26 +350,14 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
     <Modal
       open={open}
       onCancel={onClose}
-      width={1040}
+      width="min(1040px, 96vw)"
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              backgroundColor: '#eff6ff',
-              border: '1px solid #dbeafe',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
+        <div className={styles.modalHeader}>
+          <div className={styles.modalHeaderIcon}>
             <SafetyCertificateOutlined style={{ color: '#2563EB', fontSize: 18 }} />
           </div>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', lineHeight: 1.25 }}>
+            <div className={styles.modalHeaderTitle}>
               Verifikasi Teknis Klaim Jasa (Project Manager)
             </div>
           </div>
@@ -430,24 +419,14 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
         ) : claim ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 4 }}>
             {projectClaims.length > 1 && (
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 12,
-                  background: '#f8fafc',
-                  padding: '10px 14px',
-                  borderRadius: 8,
-                  border: '1px solid #e2e8f0',
-                }}
-              >
-                <Text strong style={{ color: '#0f172a', fontSize: 13 }}>
+              <div className={styles.claimSelectWrapper}>
+                <Text strong className={styles.claimSelectLabel}>
                   Pilih Klaim Jasa Proyek:
                 </Text>
                 <Select
                   value={claim.id}
                   onChange={(id) => void loadClaimDetail(id)}
-                  style={{ minWidth: 340 }}
+                  className={styles.claimSelectDropdown}
                   options={projectClaims.map((c) => ({
                     value: c.id,
                     label: `${c.claimNumber} (${c.status}) — ${formatNumber(c.totalClaimAmount || 0)} IDR`,
@@ -517,13 +496,7 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
                 </span>
               </div>
               <div style={{ padding: '14px 16px' }}>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(2, 1fr)',
-                    gap: '12px 24px',
-                  }}
-                >
+                <div className={styles.infoGrid}>
                   {/* Row 1: Nomor Klaim | Status Saat Ini */}
                   <div>
                     <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 4 }}>
@@ -680,7 +653,7 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
                   Daftar Volume Fisik yang Diajukan
                 </span>
               </div>
-              <div style={{ padding: 0 }}>
+              <div className={styles.tableWrapper}>
                 <Table
                   className="service-claim-navy-table"
                   size="small"
@@ -710,9 +683,10 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
                     <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>
                       Keputusan Verifikasi Teknis
                     </div>
-                    <Space size={10}>
+                    <div className={styles.decisionButtonGroup}>
                       <Button
                         type={decisionAction === 'APPROVE' ? 'primary' : 'default'}
+                        className={styles.decisionButton}
                         style={
                           decisionAction === 'APPROVE'
                             ? { backgroundColor: '#2563EB', borderColor: '#2563EB', fontWeight: 500, borderRadius: 6 }
@@ -725,6 +699,7 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
                       </Button>
                       <Button
                         type={decisionAction === 'RETURN' ? 'primary' : 'default'}
+                        className={styles.decisionButton}
                         style={
                           decisionAction === 'RETURN'
                             ? { backgroundColor: '#D97706', borderColor: '#D97706', fontWeight: 500, borderRadius: 6 }
@@ -738,13 +713,14 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
                       <Button
                         danger
                         type={decisionAction === 'REJECT' ? 'primary' : 'default'}
+                        className={styles.decisionButton}
                         style={{ borderRadius: 6, fontWeight: 500 }}
                         onClick={() => setDecisionAction('REJECT')}
                         icon={<CloseCircleOutlined />}
                       >
                         Tolak
                       </Button>
-                    </Space>
+                    </div>
                   </div>
 
                   {decisionAction !== 'APPROVE' && (
@@ -770,31 +746,15 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
                     </Form.Item>
                   )}
 
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'flex-end',
-                      alignItems: 'center',
-                      gap: 12,
-                      paddingTop: 12,
-                      borderTop: '1px solid #f1f5f9',
-                    }}
-                  >
-                    <Button onClick={onClose} style={{ borderRadius: 6, height: 36, padding: '0 16px' }}>
+                  <div className={styles.modalFooterActions}>
+                    <Button onClick={onClose} className={styles.secondaryActionBtn}>
                       Tutup
                     </Button>
                     <Button
                       type="primary"
                       onClick={handleExecuteDecision}
                       loading={isSubmitting}
-                      style={{
-                        backgroundColor: '#2563EB',
-                        borderColor: '#2563EB',
-                        borderRadius: 6,
-                        fontWeight: 500,
-                        height: 36,
-                        padding: '0 20px',
-                      }}
+                      className={styles.primaryActionBtn}
                     >
                       Simpan Verifikasi Teknis
                     </Button>

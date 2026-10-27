@@ -376,7 +376,7 @@ export class ProjectController {
   }
 
   @Put(':projectId/schedule')
-  @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
+  @Roles('PROJECT_MANAGER')
   @ApiOperation({ summary: 'Save atomic Project Schedule & Gantt data' })
   async saveProjectSchedule(
     @Param('projectId') projectId: number,
@@ -405,7 +405,7 @@ export class ProjectController {
   }
 
   @Post('tasks')
-  @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
+  @Roles('PROJECT_MANAGER')
   @ApiOperation({ summary: 'Legacy: Create a single Task under a WBS' })
   async createTask(@Body() createTaskDto: CreateTaskDto, @Req() req: any) {
     const userId = req?.user?.userId || req?.user?.id || req?.user?.sub;
@@ -417,7 +417,7 @@ export class ProjectController {
   }
 
   @Post(':projectId/kickoff')
-  @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
+  @Roles('PROJECT_MANAGER')
   @ApiOperation({ summary: 'Formal Kick-off: Transition project from PLANNING to IN_PROGRESS' })
   async formalKickoff(
     @Param('projectId') projectId: number,
@@ -524,7 +524,7 @@ export class ProjectController {
   }
 
   @Put(':projectId/initial-condition')
-  @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
+  @Roles('PROJECT_MANAGER')
   @ApiOperation({ summary: 'Save or update canonical Initial Condition baseline for a project' })
   async saveInitialCondition(
     @Param('projectId') projectId: number,
@@ -553,7 +553,7 @@ export class ProjectController {
   }
 
   @Post(':projectId/management-review/submit')
-  @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
+  @Roles('PROJECT_MANAGER')
   @ApiOperation({ summary: 'Submit Project Operational Plan for Management Review (Requires 4/4 Technical Pillars READY)' })
   async submitManagementReview(
     @Param('projectId') projectId: number,
@@ -572,7 +572,7 @@ export class ProjectController {
   }
 
   @Post(':projectId/management-review/decide')
-  @Roles('HEAD_OF_OPERATIONS', 'GENERAL_MANAGER', 'DIRECTOR', 'SUPER_ADMIN')
+  @Roles('HEAD_OF_OPERATIONS', 'GENERAL_MANAGER', 'DIRECTOR')
   @ApiOperation({ summary: 'Decide Management Review: Approve (READY_FOR_PROCUREMENT) or Request Revision (NEEDS_REVISION)' })
   async decideManagementReview(
     @Param('projectId') projectId: number,

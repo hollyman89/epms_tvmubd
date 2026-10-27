@@ -16,8 +16,8 @@ import { Rfq } from '../../entities/rfq.entity';
 import { TodoReadModelDto, InboxSummaryDto, HistoryItemDto } from './inbox.dto';
 import { evaluateMarketingActionItem } from '../marketing/marketing-action-item.predicate';
 
-const LEGAL_REVIEW_ROLES = ['LEGAL', 'SUPER_ADMIN', 'ADMIN'];
-const TENDER_GO_NOGO_ROLES = ['DIRECTOR', 'GENERAL_MANAGER', 'SUPER_ADMIN'];
+const LEGAL_REVIEW_ROLES = ['LEGAL'];
+const TENDER_GO_NOGO_ROLES = ['DIRECTOR', 'GENERAL_MANAGER'];
 
 export const GOVERNANCE_MANAGEMENT_REVIEW_NODES = [
   'node_hops_review',
@@ -291,7 +291,7 @@ export class InboxService {
           actionTarget = null;
         }
 
-        todos.push({
+        const wfTodo: TodoReadModelDto = {
           todoId: `wf-${task.id}`,
           sourceType: 'WORKFLOW_TASK',
           sourceId: String(task.id),
@@ -305,17 +305,22 @@ export class InboxService {
           actionTarget,
           title,
           description: description || task.comments || undefined,
-          ctaLabel,
           status: task.status,
           dueAt: task.dueAt ? new Date(task.dueAt).toISOString() : undefined,
           createdAt: task.createdAt ? new Date(task.createdAt).toISOString() : new Date().toISOString(),
           updatedAt: task.updatedAt ? new Date(task.updatedAt).toISOString() : undefined,
-          projectName,
-          customerName,
-          submittedByName,
-          returnedByName,
-          returnReason,
-        });
+        };
+        if (ctaLabel) wfTodo.ctaLabel = ctaLabel;
+        if (projectName) {
+          wfTodo.projectName = projectName;
+          wfTodo.businessReference = projectName;
+        }
+        if (customerName) wfTodo.customerName = customerName;
+        if (submittedByName) wfTodo.submittedByName = submittedByName;
+        if (returnedByName) wfTodo.returnedByName = returnedByName;
+        if (returnReason) wfTodo.returnReason = returnReason;
+
+        todos.push(wfTodo);
       }
     } catch (err: any) {
       this.logger.error(`Failed to fetch workflow tasks: ${err.message}`, err.stack);
@@ -350,6 +355,9 @@ export class InboxService {
             dueAt: contract.grace_deadline ? new Date(contract.grace_deadline).toISOString() : undefined,
             createdAt: contract.created_at ? new Date(contract.created_at).toISOString() : new Date().toISOString(),
             updatedAt: contract.updated_at ? new Date(contract.updated_at).toISOString() : undefined,
+            monetaryExposure: contract.contract_value ? Number(contract.contract_value) : undefined,
+            businessReference: contract.contract_number || `Kontrak #${contract.id}`,
+            ctaLabel: 'Tinjau Kontrak',
           });
         }
       } catch (err: any) {
@@ -401,6 +409,13 @@ export class InboxService {
             projectName: context.projectName || tender.title || undefined,
             customerName: context.customerName || tender.customer?.name || undefined,
             submittedByName: context.submittedByName,
+            monetaryExposure: tender.negotiated_price
+              ? Number(tender.negotiated_price)
+              : tender.estimated_budget
+                ? Number(tender.estimated_budget)
+                : undefined,
+            businessReference: tender.title || `Tender #${tender.id}`,
+            ctaLabel: 'Putuskan GO / NO-GO',
           });
         }
       } catch (err: any) {
@@ -409,8 +424,8 @@ export class InboxService {
     }
 
     // 4. Authoritative Domain Queue: Payment Requests (Finance & Director)
-    const isDirector = normalizedRoles.some((r) => r === 'DIRECTOR' || r === 'SUPER_ADMIN');
-    const isFinance = normalizedRoles.some((r) => r === 'FINANCE' || r === 'SUPER_ADMIN');
+    const isDirector = normalizedRoles.some((r) => r === 'DIRECTOR');
+    const isFinance = normalizedRoles.some((r) => r === 'FINANCE');
 
     if (isDirector) {
       try {
@@ -437,6 +452,9 @@ export class InboxService {
             projectName: prq.invoice?.purchaseOrder?.poNumber || undefined,
             customerName: prq.invoice?.purchaseOrder?.vendor?.name || undefined,
             submittedByName: prq.requester?.fullName || 'Finance User',
+            monetaryExposure: prq.requestedAmount ? Number(prq.requestedAmount) : undefined,
+            businessReference: prq.requestNumber || (prq.invoice?.invoiceNumber ? `Invoice ${prq.invoice.invoiceNumber}` : undefined),
+            ctaLabel: 'Setujui / Tolak',
           });
         }
       } catch (err: any) {
@@ -555,7 +573,7 @@ export class InboxService {
 
     // 5. Authoritative Domain Queue: Project Progress Claim Verification (HEAD_OF_OPERATIONS & PMO)
     const isProgressReviewer = normalizedRoles.some((role) =>
-      ['HEAD_OF_OPERATIONS', 'PMO', 'SUPER_ADMIN'].includes(role),
+      ['HEAD_OF_OPERATIONS', 'PMO'].includes(role),
     );
     if (isProgressReviewer && this.progressLogRepo) {
       try {
@@ -606,7 +624,7 @@ export class InboxService {
 
     // 6. Authoritative Domain Queue: Service Claims (PM Technical Verification & Procurement Commercial Approval)
     const isProcurementRole = normalizedRoles.some((role) =>
-      ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'].includes(role),
+      ['PROCUREMENT', 'PURCHASING'].includes(role),
     );
 
     if (this.claimRepo) {
@@ -636,14 +654,14 @@ export class InboxService {
           const projectName = claim.project?.name || undefined;
           const poNumber = claim.purchaseOrder?.poNumber || String(claim.poId);
 
-          // 6.1 SUBMITTED -> PM Technical Verification (assigned PM or SUPER_ADMIN)
+          // 6.1 SUBMITTED -> PM Technical Verification (assigned PM only)
           if (claim.status === ServiceClaimStatus.SUBMITTED) {
             const isAssignedPm =
               claim.project?.managerId !== undefined &&
               claim.project?.managerId !== null &&
               Number(claim.project.managerId) === Number(userId);
 
-            if (isAssignedPm || normalizedRoles.includes('SUPER_ADMIN')) {
+            if (isAssignedPm) {
               todos.push({
                 todoId: `service-claim-${claim.id}`,
                 sourceType: 'DOMAIN_SERVICE_CLAIM',
@@ -665,7 +683,7 @@ export class InboxService {
             }
           }
 
-          // 6.2 PM_VERIFIED -> Procurement Commercial Approval (PROCUREMENT / PURCHASING / SUPER_ADMIN)
+          // 6.2 PM_VERIFIED -> Procurement Commercial Approval (PROCUREMENT / PURCHASING)
           if (claim.status === ServiceClaimStatus.PM_VERIFIED && isProcurementRole) {
             todos.push({
               todoId: `service-claim-comm-${claim.id}`,
@@ -689,7 +707,7 @@ export class InboxService {
           // 6.3 NEEDS_REVISION -> Submitter revision
           if (claim.status === ServiceClaimStatus.NEEDS_REVISION) {
             const isSubmitter = Number(claim.submittedBy) === Number(userId);
-            if (isSubmitter || normalizedRoles.includes('SUPER_ADMIN')) {
+            if (isSubmitter) {
               todos.push({
                 todoId: `service-claim-rev-${claim.id}`,
                 sourceType: 'DOMAIN_SERVICE_CLAIM',
@@ -717,10 +735,10 @@ export class InboxService {
 
     // 7. Authoritative Domain Queue: Project Closures (HOO Review, Director Approval, PM Revision)
     const isHooRole = normalizedRoles.some((role) =>
-      ['HEAD_OF_OPERATIONS', 'SUPER_ADMIN'].includes(role),
+      ['HEAD_OF_OPERATIONS'].includes(role),
     );
     const isDirectorApprovalRole = normalizedRoles.some((role) =>
-      ['DIRECTOR', 'SUPER_ADMIN'].includes(role),
+      ['DIRECTOR'].includes(role),
     );
 
     if (this.closureRepo) {
@@ -801,7 +819,7 @@ export class InboxService {
           const projectName = safeProjectName;
           const displayProjectName = safeProjectName || 'proyek ini';
 
-          // 7.1 PENDING_HOO_REVIEW -> HEAD_OF_OPERATIONS / SUPER_ADMIN
+          // 7.1 PENDING_HOO_REVIEW -> HEAD_OF_OPERATIONS
           if (closure.status === ProjectClosureStatus.PENDING_HOO_REVIEW && isHooRole) {
             todos.push({
               todoId: `closure-hoo-${closure.id}`,
@@ -824,7 +842,7 @@ export class InboxService {
             });
           }
 
-          // 7.2 PENDING_DIRECTOR_APPROVAL -> DIRECTOR / SUPER_ADMIN
+          // 7.2 PENDING_DIRECTOR_APPROVAL -> DIRECTOR
           if (closure.status === ProjectClosureStatus.PENDING_DIRECTOR_APPROVAL && isDirectorApprovalRole) {
             todos.push({
               todoId: `closure-dir-${closure.id}`,
@@ -847,7 +865,7 @@ export class InboxService {
             });
           }
 
-          // 7.3 RETURNED -> PM Revision (assigned PM of project, or submitter, or SUPER_ADMIN)
+          // 7.3 RETURNED -> PM Revision (assigned PM of project, or submitter)
           if (closure.status === ProjectClosureStatus.RETURNED) {
             const isAssignedPm =
               closure.project?.managerId !== undefined &&
@@ -855,7 +873,7 @@ export class InboxService {
               Number(closure.project.managerId) === Number(userId);
             const isSubmitter = Number(closure.submittedById) === Number(userId);
 
-            if (isAssignedPm || isSubmitter || normalizedRoles.includes('SUPER_ADMIN')) {
+            if (isAssignedPm || isSubmitter) {
               const reviewerRoleOrName = closure.returnActor?.fullName || 'Head of Operations';
               const returnDesc = closure.returnReason
                 ? `${reviewerRoleOrName} mengembalikan pengajuan penutupan proyek "${displayProjectName}" untuk diperbaiki. Catatan: ${closure.returnReason}`
@@ -891,7 +909,7 @@ export class InboxService {
     }
 
     // 8. Authoritative Domain Queue: Marketing Tender Follow-Up
-    const isMarketingRole = normalizedRoles.some((role) => role === 'MARKETING' || role === 'SUPER_ADMIN');
+    const isMarketingRole = normalizedRoles.some((role) => role === 'MARKETING');
     if (isMarketingRole) {
       try {
         const actionableTenders = await this.tenderRepo
@@ -939,9 +957,9 @@ export class InboxService {
       }
     }
 
-    // 9. Authoritative Domain Queue: Purchase Requests Ready for RFQ Creation (PROCUREMENT / PURCHASING / SUPER_ADMIN)
+    // 9. Authoritative Domain Queue: Purchase Requests Ready for RFQ Creation (PROCUREMENT / PURCHASING)
     const isProcurementUser = normalizedRoles.some((role) =>
-      ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'].includes(role),
+      ['PROCUREMENT', 'PURCHASING'].includes(role),
     );
     if (isProcurementUser) {
       try {
@@ -1180,8 +1198,8 @@ export class InboxService {
     }
 
     // 2. Authoritative Domain Completed Tasks: Payment Requests (for Finance & Director)
-    const isDirector = normalizedRoles.some((r) => r === 'DIRECTOR' || r === 'SUPER_ADMIN');
-    const isFinance = normalizedRoles.some((r) => r === 'FINANCE' || r === 'SUPER_ADMIN');
+    const isDirector = normalizedRoles.some((r) => r === 'DIRECTOR');
+    const isFinance = normalizedRoles.some((r) => r === 'FINANCE');
     if (this.paymentRequestRepo && (isDirector || isFinance)) {
       try {
         const decidedPaymentRequests = await this.paymentRequestRepo.find({
@@ -1228,7 +1246,7 @@ export class InboxService {
 
     // 3. Authoritative Domain Completed Tasks: Project Closures (for HOO, Director, PM)
     const isHooOrDirector = normalizedRoles.some((r) =>
-      ['HEAD_OF_OPERATIONS', 'DIRECTOR', 'PMO', 'SUPER_ADMIN'].includes(r),
+      ['HEAD_OF_OPERATIONS', 'DIRECTOR', 'PMO'].includes(r),
     );
     if (this.closureRepo && (isHooOrDirector || normalizedRoles.includes('PROJECT_MANAGER'))) {
       try {

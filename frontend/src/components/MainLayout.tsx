@@ -34,6 +34,7 @@ import { useAuth } from '../context/AuthContext';
 import { NotificationBell } from './NotificationBell';
 
 import { MENU_GROUPS } from '@/constants/menuConfig';
+import { GlobalUploadStatus } from '@/components/common/GlobalUploadStatus';
 
 const ICON_MAP: Record<string, React.ReactNode> = {
   DashboardOutlined: <DashboardOutlined />,
@@ -376,7 +377,7 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
         <Content style={{ 
           margin: isMobile ? '12px 8px' : (pathname === '/' || pathname === '/dashboard' ? '0' : '24px 16px'), 
           minHeight: 280,
-          background: pathname === '/' || pathname === '/dashboard' ? '#F0F4F8' : undefined,
+          background: pathname === '/' || pathname === '/dashboard' ? '#F8FAFC' : undefined,
         }}>
           {children}
         </Content>
@@ -384,6 +385,7 @@ const MainLayoutContent: React.FC<MainLayoutProps> = ({ children }) => {
         <Suspense fallback={null}>
           <TabKeyUpdater onKeyChange={setCurrentKey} />
         </Suspense>
+        <GlobalUploadStatus />
       </Layout>
     </Layout>
   );

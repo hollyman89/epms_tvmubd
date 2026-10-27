@@ -100,16 +100,17 @@ describe('SEC-01 & SEC-11: Contract Mutation Authorization & Canonical Governanc
   });
 
   describe('1. Controller RBAC Guard Verification', () => {
-    it('should have @Roles metadata specifying SUPER_ADMIN, LEGAL, and DIRECTOR only', () => {
+    it('should have @Roles metadata specifying LEGAL and DIRECTOR only (no SUPER_ADMIN wildcard)', () => {
       const roles = reflector.get<string[]>('roles', ContractController.prototype.update);
       expect(roles).toBeDefined();
-      expect(roles).toEqual(['SUPER_ADMIN', 'LEGAL', 'DIRECTOR']);
+      expect(roles).toEqual(['LEGAL', 'DIRECTOR']);
+      expect(roles).not.toContain('SUPER_ADMIN');
       expect(roles).not.toContain('PROJECT_MANAGER');
       expect(roles).not.toContain('FINANCE');
       expect(roles).not.toContain('MARKETING');
     });
 
-    it('RolesGuard should REJECT user with unauthorized roles (e.g. PROJECT_MANAGER, FINANCE)', () => {
+    it('RolesGuard should REJECT user with unauthorized roles (e.g. SUPER_ADMIN, PROJECT_MANAGER, FINANCE)', () => {
       const mockExecutionContext = (roles: string[]): ExecutionContext =>
         ({
           getHandler: () => ContractController.prototype.update,
@@ -121,13 +122,14 @@ describe('SEC-01 & SEC-11: Contract Mutation Authorization & Canonical Governanc
           }),
         } as any);
 
+      expect(rolesGuard.canActivate(mockExecutionContext(['SUPER_ADMIN']))).toBe(false);
       expect(rolesGuard.canActivate(mockExecutionContext(['PROJECT_MANAGER']))).toBe(false);
       expect(rolesGuard.canActivate(mockExecutionContext(['FINANCE']))).toBe(false);
       expect(rolesGuard.canActivate(mockExecutionContext(['MARKETING']))).toBe(false);
       expect(rolesGuard.canActivate(mockExecutionContext([]))).toBe(false);
     });
 
-    it('RolesGuard should ALLOW authorized roles (SUPER_ADMIN, LEGAL, DIRECTOR)', () => {
+    it('RolesGuard should ALLOW authorized roles (LEGAL, DIRECTOR)', () => {
       const mockExecutionContext = (roles: string[]): ExecutionContext =>
         ({
           getHandler: () => ContractController.prototype.update,
@@ -140,7 +142,6 @@ describe('SEC-01 & SEC-11: Contract Mutation Authorization & Canonical Governanc
         } as any);
 
       expect(rolesGuard.canActivate(mockExecutionContext(['LEGAL']))).toBe(true);
-      expect(rolesGuard.canActivate(mockExecutionContext(['SUPER_ADMIN']))).toBe(true);
       expect(rolesGuard.canActivate(mockExecutionContext(['DIRECTOR']))).toBe(true);
     });
   });
@@ -258,16 +259,17 @@ describe('SEC-01 & SEC-11: Contract Mutation Authorization & Canonical Governanc
 
   // 5. P0-4E1: ELIMINATION OF SHADOW APPROVAL & CANONICAL DELEGATION (SEC-11-01)
   describe('5. P0-4E1: Elimination of Shadow Approval & Delegation to Canonical Legal Review (SEC-11-01)', () => {
-    it('Controller approve endpoint requires SUPER_ADMIN, LEGAL, or DIRECTOR roles', () => {
+    it('Controller approve endpoint requires LEGAL or DIRECTOR roles (no SUPER_ADMIN wildcard)', () => {
       const roles = reflector.get<string[]>('roles', ContractController.prototype.approve);
       expect(roles).toBeDefined();
-      expect(roles).toEqual(['SUPER_ADMIN', 'LEGAL', 'DIRECTOR']);
+      expect(roles).toEqual(['LEGAL', 'DIRECTOR']);
+      expect(roles).not.toContain('SUPER_ADMIN');
       expect(roles).not.toContain('PROJECT_MANAGER');
       expect(roles).not.toContain('FINANCE');
       expect(roles).not.toContain('MARKETING');
     });
 
-    it('RolesGuard rejects unauthorized roles (e.g. PROJECT_MANAGER, MARKETING) on approve endpoint', () => {
+    it('RolesGuard rejects unauthorized roles (e.g. SUPER_ADMIN, PROJECT_MANAGER, MARKETING) on approve endpoint', () => {
       const mockExecutionContext = (roles: string[]): ExecutionContext =>
         ({
           getHandler: () => ContractController.prototype.approve,
@@ -279,13 +281,14 @@ describe('SEC-01 & SEC-11: Contract Mutation Authorization & Canonical Governanc
           }),
         } as any);
 
+      expect(rolesGuard.canActivate(mockExecutionContext(['SUPER_ADMIN']))).toBe(false);
       expect(rolesGuard.canActivate(mockExecutionContext(['PROJECT_MANAGER']))).toBe(false);
       expect(rolesGuard.canActivate(mockExecutionContext(['MARKETING']))).toBe(false);
       expect(rolesGuard.canActivate(mockExecutionContext(['FINANCE']))).toBe(false);
       expect(rolesGuard.canActivate(mockExecutionContext([]))).toBe(false);
     });
 
-    it('RolesGuard allows authorized roles (SUPER_ADMIN, LEGAL, DIRECTOR) on approve endpoint', () => {
+    it('RolesGuard allows authorized roles (LEGAL, DIRECTOR) on approve endpoint', () => {
       const mockExecutionContext = (roles: string[]): ExecutionContext =>
         ({
           getHandler: () => ContractController.prototype.approve,
@@ -298,7 +301,6 @@ describe('SEC-01 & SEC-11: Contract Mutation Authorization & Canonical Governanc
         } as any);
 
       expect(rolesGuard.canActivate(mockExecutionContext(['LEGAL']))).toBe(true);
-      expect(rolesGuard.canActivate(mockExecutionContext(['SUPER_ADMIN']))).toBe(true);
       expect(rolesGuard.canActivate(mockExecutionContext(['DIRECTOR']))).toBe(true);
     });
 

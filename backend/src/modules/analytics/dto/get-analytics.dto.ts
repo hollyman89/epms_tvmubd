@@ -8,6 +8,7 @@ export enum DashboardPeriod {
   LAST_MONTH = 'LAST_MONTH',
   THIS_QUARTER = 'THIS_QUARTER',
   CUSTOM = 'CUSTOM',
+  ALL_TIME = 'ALL_TIME',
 }
 
 export class GetAnalyticsQueryDto {

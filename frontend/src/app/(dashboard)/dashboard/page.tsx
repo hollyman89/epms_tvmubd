@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect } from 'react';
-import { DashboardPage as DashboardComponent } from '@/components/DashboardPage';
+import { ExecutiveDashboardPreview } from '@/components/dashboard-preview/ExecutiveDashboardPreview';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Spin } from 'antd';
@@ -30,6 +30,6 @@ export default function DashboardRoutePage() {
     return <Spin size="large" style={{ display: 'block', margin: 'auto', marginTop: '20vh' }} />;
   }
 
-  return <DashboardComponent />;
+  return <ExecutiveDashboardPreview />;
 }
 

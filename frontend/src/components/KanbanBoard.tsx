@@ -8,6 +8,8 @@ import { TenderDetailDrawer } from './TenderDetailDrawer';
 import dayjs from 'dayjs';
 import { useAuth } from '../context/AuthContext';
 import { apiClient } from '@/lib/axios';
+import { executeUpload, DEFAULT_MAX_FILE_SIZE_BYTES } from '@/lib/uploadTransport';
+import { uploadTaskManager } from '@/lib/uploadTaskManager';
 import { queryClient, updateAllTenderCaches, removeTenderFromCache } from '../lib/queryClient';
 import { consumePendingSalesDrawerRequest, clearPendingSalesDrawerRequest } from '@/lib/salesNavigation';
 import { WorkflowEngineService } from '@/services/workflowEngine.service';
@@ -1042,26 +1044,52 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       message.error('Silakan unggah dokumen penawaran terlebih dahulu.');
       return;
     }
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', selectedFile);
-      
-      await apiClient.post(`/marketing/tenders/${pendingMove.movedItem.id}/upload-proposal`, formData);
-      message.success('Dokumen proposal berhasil diunggah!');
-      
-      executeMove(pendingMove.source.droppableId, pendingMove.destination.droppableId, pendingMove.source.index, pendingMove.destination.index, pendingMove.movedItem);
-      
-      setIsModalVisible(false);
-      setSelectedFile(null);
-      setPendingMove(null);
-    } catch (error: any) {
-      console.error('Upload Error:', error);
-      const errMsg = error.response?.data?.message || error.message || 'Gagal mengunggah dokumen proposal.';
-      message.error(`Gagal: ${errMsg}`);
-    } finally {
-      setIsUploading(false);
+    if (!pendingMove || !pendingMove.movedItem) {
+      return;
     }
+    if (isUploading) return;
+
+    const fileToUpload = selectedFile;
+    const currentMove = pendingMove;
+
+    // Fast non-blocking UI: immediately release modal and keep card in original column
+    setIsModalVisible(false);
+    setSelectedFile(null);
+    setPendingMove(null);
+    setIsUploading(false);
+
+    uploadTaskManager.startUploadTask({
+      fileName: fileToUpload.name,
+      fileSize: fileToUpload.size,
+      flowLabel: `Proposal Tender #${currentMove.movedItem.id}`,
+      file: fileToUpload,
+      uploadFn: async (onProgress) => {
+        const formData = new FormData();
+        formData.append('file', fileToUpload);
+        return await executeUpload({
+          url: `/marketing/tenders/${currentMove.movedItem.id}/upload-proposal`,
+          formData,
+          file: fileToUpload,
+          maxSizeBytes: DEFAULT_MAX_FILE_SIZE_BYTES,
+          onProgress,
+        });
+      },
+      onSuccess: async () => {
+        message.success('Dokumen proposal berhasil diunggah!');
+        executeMove(
+          currentMove.source.droppableId,
+          currentMove.destination.droppableId,
+          currentMove.source.index,
+          currentMove.destination.index,
+          currentMove.movedItem,
+        );
+      },
+      onError: (error: any) => {
+        console.error('Upload Error:', error);
+        const errMsg = error.response?.data?.message || error.message || 'Gagal mengunggah dokumen proposal.';
+        message.error(`Gagal: ${errMsg}`);
+      },
+    });
   };
 
   const handleCancelUpload = () => {
@@ -1187,61 +1215,85 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       return;
     }
 
-    setIsUploading(true);
-    try {
-      if (isGracePeriod) {
+    if (isUploading) return;
+
+    if (isGracePeriod) {
+      setIsUploading(true);
+      try {
         await apiClient.patch(`/marketing/tenders/${pendingMove.movedItem.id}/grace-period`, {});
         message.success('Grace period SPK diaktifkan 2x24 jam.');
-      } else if (spkFile) {
-        const formData = new FormData();
-        formData.append('file', spkFile);
-
-        console.log('[FRONTEND] Uploading SPK for tender:', pendingMove.movedItem.id);
-
-        const uploadRes = await apiClient.post(
-          `/marketing/tenders/${pendingMove.movedItem.id}/upload-spk`,
-          formData,
-          {
-            headers: {
-              'Content-Type': 'multipart/form-data',
-            },
-          }
-        );
-
-        console.log('[FRONTEND] Upload success:', uploadRes.data);
-        message.success(uploadRes.data?.message || 'SPK berhasil diupload!');
-
-        const spkKey = uploadRes.data?.fileKey || uploadRes.data?.spk_file_key || `contracts/${spkFile.name}`;
-        const spkUrl = uploadRes.data?.url || uploadRes.data?.spk_url;
-
-        // Update movedItem properties before moving to WON column
-        pendingMove.movedItem.spk_file_key = spkKey;
-        pendingMove.movedItem.spk_verification_status = 'PENDING_REVIEW';
-        if (spkUrl) pendingMove.movedItem.spk_file_url = spkUrl;
-
-        // Sync with global React Query caches
-        updateAllTenderCaches(queryClient, pendingMove.movedItem.id, {
-          spk_file_key: spkKey,
-          spk_verification_status: 'PENDING_REVIEW',
-          spk_file_url: spkUrl,
-        });
+        executeMove(pendingMove.source.droppableId, pendingMove.destination.droppableId, pendingMove.source.index, pendingMove.destination.index, pendingMove.movedItem);
+        setIsWonModalVisible(false);
+        setSpkFile(null);
+        setPendingMove(null);
+      } catch (error: any) {
+        const errorMsg = error?.response?.data?.message || error?.message || 'Gagal mengaktifkan grace period.';
+        message.error(`Gagal: ${errorMsg}`);
+      } finally {
+        setIsUploading(false);
       }
+      return;
+    }
 
-      executeMove(pendingMove.source.droppableId, pendingMove.destination.droppableId, pendingMove.source.index, pendingMove.destination.index, pendingMove.movedItem);
-      
+    if (spkFile) {
+      const fileToUpload = spkFile;
+      const currentMove = pendingMove;
+
+      // Fast non-blocking UI: immediately release modal and keep card in original column
       setIsWonModalVisible(false);
       setSpkFile(null);
       setPendingMove(null);
-    } catch (error: any) {
-      console.error('[FRONTEND] Upload SPK ERROR:');
-      console.error('Status Code:', error?.response?.status);
-      console.error('Response Data:', error?.response?.data);
-      console.error('Full Error:', error);
-
-      const errorMsg = error?.response?.data?.message || error?.message || 'Gagal mengunggah SPK.';
-      message.error(`Gagal upload: ${errorMsg}`);
-    } finally {
       setIsUploading(false);
+
+      uploadTaskManager.startUploadTask({
+        fileName: fileToUpload.name,
+        fileSize: fileToUpload.size,
+        flowLabel: `SPK Tender #${currentMove.movedItem.id}`,
+        file: fileToUpload,
+        uploadFn: async (onProgress) => {
+          const formData = new FormData();
+          formData.append('file', fileToUpload);
+          return await executeUpload({
+            url: `/marketing/tenders/${currentMove.movedItem.id}/upload-spk`,
+            formData,
+            file: fileToUpload,
+            maxSizeBytes: DEFAULT_MAX_FILE_SIZE_BYTES,
+            onProgress,
+          });
+        },
+        onSuccess: async (uploadRes) => {
+          message.success(uploadRes.data?.message || 'SPK berhasil diupload!');
+
+          const spkKey =
+            uploadRes.data?.fileKey || uploadRes.data?.spk_file_key || `contracts/${fileToUpload.name}`;
+          const spkUrl = uploadRes.data?.url || uploadRes.data?.spk_url;
+
+          // Update movedItem properties before moving to WON column
+          currentMove.movedItem.spk_file_key = spkKey;
+          currentMove.movedItem.spk_verification_status = 'PENDING_REVIEW';
+          if (spkUrl) currentMove.movedItem.spk_file_url = spkUrl;
+
+          // Sync with global React Query caches
+          updateAllTenderCaches(queryClient, currentMove.movedItem.id, {
+            spk_file_key: spkKey,
+            spk_verification_status: 'PENDING_REVIEW',
+            spk_file_url: spkUrl,
+          });
+
+          executeMove(
+            currentMove.source.droppableId,
+            currentMove.destination.droppableId,
+            currentMove.source.index,
+            currentMove.destination.index,
+            currentMove.movedItem,
+          );
+        },
+        onError: (error: any) => {
+          console.error('[FRONTEND] Upload SPK ERROR:', error);
+          const errorMsg = error?.response?.data?.message || error?.message || 'Gagal mengunggah SPK.';
+          message.error(`Gagal upload: ${errorMsg}`);
+        },
+      });
     }
   };
 
@@ -1306,42 +1358,53 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       message.error('Ukuran file maksimal adalah 20 MB.');
       return Upload.LIST_IGNORE;
     }
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
+    const targetTenderId = drawerTender.id;
+    const fileToUpload = file;
 
-      console.log('[FRONTEND] Uploading missing SPK for tender:', drawerTender?.id);
-
-      const uploadRes = await apiClient.post(
-        `/marketing/tenders/${drawerTender.id}/upload-spk`,
-        formData,
-        {
-          headers: {
-            'Content-Type': 'multipart/form-data',
-          },
+    uploadTaskManager.startUploadTask({
+      fileName: fileToUpload.name,
+      fileSize: fileToUpload.size,
+      flowLabel: `Revisi SPK #${targetTenderId}`,
+      file: fileToUpload,
+      uploadFn: async (onProgress) => {
+        const formData = new FormData();
+        formData.append('file', fileToUpload);
+        return await executeUpload({
+          url: `/marketing/tenders/${targetTenderId}/upload-spk`,
+          formData,
+          file: fileToUpload,
+          maxSizeBytes: DEFAULT_MAX_FILE_SIZE_BYTES,
+          onProgress,
+        });
+      },
+      onSuccess: async (uploadRes) => {
+        console.log('[FRONTEND] Upload missing SPK success:', uploadRes.data);
+        message.success(uploadRes.data?.message || 'SPK berhasil diupload!');
+        if (drawerTender && drawerTender.id === targetTenderId) {
+          setDrawerTender({
+            ...drawerTender,
+            spk_file_key: fileToUpload.name,
+            spk_file_url: uploadRes.data?.url || uploadRes.data?.spk_url,
+            legal_status: 'DRAFT',
+          });
         }
-      );
 
-      console.log('[FRONTEND] Upload missing SPK success:', uploadRes.data);
-      message.success(uploadRes.data?.message || 'SPK berhasil diupload!');
-      setDrawerTender({ ...drawerTender, spk_file_key: file.name, spk_file_url: uploadRes.data?.url || uploadRes.data?.spk_url, legal_status: 'DRAFT' });
-      
-      // Update data di KanbanBoard agar badge Revisi hilang dari card list
-      updateAllTenderCaches(queryClient, drawerTender.id, { spk_file_key: file.name, legal_status: 'DRAFT' });
+        // Update data di KanbanBoard agar badge Revisi hilang dari card list
+        updateAllTenderCaches(queryClient, targetTenderId, {
+          spk_file_key: fileToUpload.name,
+          legal_status: 'DRAFT',
+          ...(uploadRes.data?.url || uploadRes.data?.spk_url ? { spk_file_url: uploadRes.data?.url || uploadRes.data?.spk_url } : {}),
+        });
 
-      onStageChange(drawerTender.id, 'WON'); // Refresh parent data
-    } catch (error: any) {
-      console.error('[FRONTEND] Upload missing SPK ERROR:');
-      console.error('Status Code:', error?.response?.status);
-      console.error('Response Data:', error?.response?.data);
-      console.error('Full Error:', error);
+        onStageChange(targetTenderId, 'WON'); // Refresh parent data
+      },
+      onError: (error: any) => {
+        console.error('[FRONTEND] Upload missing SPK ERROR:', error);
+        const errorMsg = error?.response?.data?.message || error?.message || 'Gagal mengunggah SPK.';
+        message.error(`Gagal upload: ${errorMsg}`);
+      },
+    });
 
-      const errorMsg = error?.response?.data?.message || error?.message || 'Gagal mengunggah SPK.';
-      message.error(`Gagal upload: ${errorMsg}`);
-    } finally {
-      setIsUploading(false);
-    }
     return false;
   };
 

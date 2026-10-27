@@ -97,6 +97,11 @@ export class AnalyticsService {
       end = new Date(now.getFullYear(), (quarter + 1) * 3, 0, 23, 59, 59, 999);
       prevStart = new Date(now.getFullYear(), (quarter - 1) * 3, 1);
       prevEnd = new Date(now.getFullYear(), quarter * 3, 0, 23, 59, 59, 999);
+    } else if (period === DashboardPeriod.ALL_TIME) {
+      start = new Date('1970-01-01T00:00:00.000Z');
+      end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+      prevStart = new Date('1970-01-01T00:00:00.000Z');
+      prevEnd = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
     } else {
       // YEAR_TO_DATE (Default)
       start = new Date(now.getFullYear(), 0, 1);

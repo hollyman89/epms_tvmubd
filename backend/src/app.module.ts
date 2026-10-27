@@ -20,6 +20,7 @@ import { ContractModule } from './modules/contract/contract.module';
 import { QueueModule } from './modules/queue/queue.module';
 import { SystemModule } from './modules/system/system.module';
 import { InboxModule } from './modules/inbox/inbox.module';
+import { ExecutiveAnalyticsReadModule, ExecutiveAnalyticsWorkerModule } from './modules/executive-analytics/executive-analytics.module';
 
 @Module({
   imports: [
@@ -54,6 +55,8 @@ import { InboxModule } from './modules/inbox/inbox.module';
     AuditModule,
     ContractModule,
     InboxModule,
+    ExecutiveAnalyticsReadModule,
+    ExecutiveAnalyticsWorkerModule,
   ],
   controllers: [],
   providers: [],

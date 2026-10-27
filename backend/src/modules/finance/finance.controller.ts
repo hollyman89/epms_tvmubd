@@ -19,7 +19,7 @@ export class FinanceController {
   constructor(private readonly financeService: FinanceService) {}
 
   @Post('invoices')
-  @Roles('FINANCE', 'SUPER_ADMIN', 'ADMIN')
+  @Roles('FINANCE')
   @ApiOperation({ summary: 'Create a new Invoice (Term-Based or Legacy 3-Way Matching)' })
   @ApiResponse({ status: 201, description: 'Invoice successfully created.' })
   @ApiResponse({ status: 400, description: 'Bad Request (e.g. PO is not COMPLETED or invalid term).' })
@@ -32,7 +32,7 @@ export class FinanceController {
   }
 
   @Post('invoices/:id/verify')
-  @Roles('FINANCE', 'SUPER_ADMIN', 'ADMIN', 'DIRECTOR')
+  @Roles('FINANCE', 'DIRECTOR')
   @ApiOperation({ summary: 'Finance Verification for Invoice (Term-Based or Legacy)' })
   @ApiResponse({ status: 200, description: 'Invoice verification evaluated successfully.' })
   @ApiResponse({ status: 400, description: 'Bad Request (e.g. already verified, invalid term, or missing prerequisite).' })

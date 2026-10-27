@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import { Modal, Form, Input, InputNumber, Button, Upload, message, Typography, Space, Alert } from 'antd';
 import { UploadOutlined } from '@ant-design/icons';
 import { ProjectService } from '@/services';
+import { PROGRESS_EVIDENCE_MAX_FILE_SIZE_BYTES } from '@/lib/uploadTransport';
+import { uploadTaskManager } from '@/lib/uploadTaskManager';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -44,7 +46,7 @@ export const ProgressClaimModal: React.FC<ProgressClaimModalProps> = ({
   };
 
   const beforeUpload = (file: File) => {
-    const isLt10M = file.size / 1024 / 1024 < 10;
+    const isLt10M = file.size <= PROGRESS_EVIDENCE_MAX_FILE_SIZE_BYTES;
     if (!isLt10M) {
       message.error('Ukuran berkas bukti maksimal 10MB.');
       return Upload.LIST_IGNORE;
@@ -70,30 +72,61 @@ export const ProgressClaimModal: React.FC<ProgressClaimModalProps> = ({
         return;
       }
 
-      let documentIds: number[] | undefined = undefined;
-
-      // Real evidence upload via existing Document infrastructure (CP10)
+      // Fast non-blocking UI for evidence upload
       if (fileList.length > 0) {
         const fileObj = fileList[0].originFileObj || fileList[0];
-        try {
-          const uploadedDoc = await ProjectService.uploadEvidence(projectId, fileObj);
-          const docId = uploadedDoc?.id || (uploadedDoc as any)?.data?.id;
-          if (!uploadedDoc || !docId) {
-            throw new Error('Respons upload berkas tidak menyertakan ID dokumen yang valid.');
-          }
-          documentIds = [Number(docId)];
-        } catch (uploadErr: any) {
-          console.error('Evidence upload failed:', uploadErr);
-          const uploadErrMsg = uploadErr?.response?.data?.message || uploadErr?.message || 'Gagal mengunggah berkas bukti';
-          message.error(`Upload bukti gagal: ${uploadErrMsg}`);
-          return;
-        }
+        const payloadProgress = claimedProgress;
+        const payloadReason = values.reason.trim();
+
+        // Immediately close modal and clear input state
+        form.resetFields();
+        setFileList([]);
+        setIsSubmitting(false);
+        onClose();
+
+        uploadTaskManager.startUploadTask({
+          fileName: fileObj.name,
+          fileSize: fileObj.size,
+          flowLabel: 'Bukti Progres',
+          file: fileObj,
+          uploadFn: async (onProgress) => {
+            return await ProjectService.uploadEvidence(
+              projectId,
+              fileObj,
+              undefined,
+              PROGRESS_EVIDENCE_MAX_FILE_SIZE_BYTES,
+              onProgress,
+            );
+          },
+          onSuccess: async (uploadedDoc) => {
+            const docId = uploadedDoc?.id || (uploadedDoc as any)?.data?.id;
+            if (!uploadedDoc || !docId) {
+              throw new Error('Respons upload berkas tidak menyertakan ID dokumen yang valid.');
+            }
+            const payload = {
+              reportedProgress: payloadProgress,
+              reason: payloadReason,
+              documentIds: [Number(docId)],
+            };
+            await ProjectService.createProgressClaim(projectId, taskId, payload);
+            message.success('Klaim progres berhasil diajukan dan tercatat dalam antrean verifikasi PMO / Head of Operations.');
+            onSuccess();
+          },
+          onError: (uploadErr: any) => {
+            console.error('Evidence upload failed:', uploadErr);
+            const uploadErrMsg =
+              uploadErr?.response?.data?.message || uploadErr?.message || 'Gagal mengunggah berkas bukti';
+            message.error(`Upload bukti gagal: ${uploadErrMsg}`);
+          },
+        });
+        return;
       }
 
+      // No file attached: direct submission
       const payload = {
         reportedProgress: claimedProgress,
         reason: values.reason.trim(),
-        documentIds,
+        documentIds: undefined,
       };
 
       await ProjectService.createProgressClaim(projectId, taskId, payload);

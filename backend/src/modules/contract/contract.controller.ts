@@ -165,7 +165,7 @@ export class ContractController {
   }
 
   @Patch(':id')
-  @Roles('SUPER_ADMIN', 'LEGAL', 'DIRECTOR')
+  @Roles('LEGAL', 'DIRECTOR')
   @ApiOperation({ summary: 'Update Contract' })
   async update(@Param('id') id: string, @Body() data: any, @Request() req: any) {
     const userId = req.user?.userId || req.user?.id || req.user?.sub;
@@ -173,7 +173,7 @@ export class ContractController {
   }
 
   @Post(':id/amend')
-  @Roles('SUPER_ADMIN', 'LEGAL')
+  @Roles('LEGAL')
   @HttpCode(202)
   @ApiOperation({ summary: 'Amend Contract' })
   async amend(
@@ -187,7 +187,7 @@ export class ContractController {
   }
 
   @Post(':id/approve')
-  @Roles('SUPER_ADMIN', 'LEGAL', 'DIRECTOR')
+  @Roles('LEGAL', 'DIRECTOR')
   @ApiOperation({ summary: 'Approve Contract (delegates to canonical Legal review pipeline)' })
   async approve(@Param('id') id: string, @Request() req: any) {
     const userId = req.user?.userId ?? req.user?.id ?? req.user?.sub;

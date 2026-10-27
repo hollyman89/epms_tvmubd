@@ -17,6 +17,26 @@ export interface ExecutiveSummaryResponse {
       startDate: string;
       endDate: string;
     };
+    division?: {
+      id: string;
+      name: string;
+      code: string;
+      scope: string;
+      allocationStatus: string;
+      marketingUser?: string;
+      marketingEmail?: string;
+    };
+    unclassified?: {
+      tendersCount: number;
+      tendersValue: number;
+      contractsCount: number;
+      contractsValue: number;
+      projectsCount: number;
+      posCount: number;
+      posValue: number;
+      paymentsCount: number;
+      paymentsValue: number;
+    } | null;
   };
   periodMetrics: {
     marketing: {
@@ -59,6 +79,8 @@ export interface ExecutiveSummaryResponse {
       planningProjects: number;
       inProgressProjects: number;
       completedProjects: number;
+      closedProjectsCount?: number;
+      closedProjectsContractValue?: number;
       onHoldProjects: number;
       cancelledProjects: number;
       readyForKickoff: number; // True Ready Count (0)
@@ -67,6 +89,9 @@ export interface ExecutiveSummaryResponse {
       unassignedProjectManagers: number;
     };
     approvals: {
+      scope?: string;
+      isSharedWorkflow?: boolean;
+      governanceNote?: string;
       totalPendingTasks: number;
       pendingByTaskKey: Array<{ taskKey: string; count: number }>;
       pendingByRole: {
@@ -91,6 +116,17 @@ export interface ExecutiveSummaryResponse {
       totalContracts: number;
     };
   };
+  analyticalCharts?: {
+    contractsWonTrend: Array<{ month: string; monthNum: number; value: number; count: number }>;
+    vendorPaymentsTrend: Array<{ month: string; monthNum: number; value: number; count: number }>;
+    procurementCommitmentsTrend: Array<{ month: string; monthNum: number; value: number; count: number }>;
+  };
+  operationalTables?: {
+    activeProjects: Array<{ id: number; name: string; contractNumber: string; status: string; progress: number }>;
+    recentTenders: Array<{ id: number; title: string; customerName: string; val: number; stage: string }>;
+    recentPurchaseOrders: Array<{ id: number; poNumber: string; vendorName: string; totalAmount: number; status: string }>;
+    recentInvoices: Array<{ id: number; invoiceNumber: string; vendorName: string; totalAmount: number; paymentStatus: string }>;
+  };
 }
 
 export interface RecentActivityItem {
@@ -103,6 +139,21 @@ export interface RecentActivityItem {
   status?: string;
 }
 
+export interface AuthorizedDivision {
+  id: string;
+  name: string;
+  code: string;
+  isDefault?: boolean;
+  scope?: string;
+}
+
+export interface AuthorizedDivisionsResponse {
+  availableDivisions: AuthorizedDivision[];
+  subDivisionEnabled: boolean;
+  governanceStatus: string;
+  message?: string;
+}
+
 export class DashboardService {
   /**
    * Fetches authoritative executive management summary
@@ -111,17 +162,38 @@ export class DashboardService {
     period?: DashboardPeriodType | string;
     startDate?: string;
     endDate?: string;
+    divisionId?: string;
   }): Promise<ExecutiveSummaryResponse> {
     const query = new URLSearchParams();
     if (params?.period) query.append('period', params.period);
     if (params?.startDate) query.append('startDate', params.startDate);
     if (params?.endDate) query.append('endDate', params.endDate);
+    if (params?.divisionId) query.append('divisionId', params.divisionId);
 
     const queryString = query.toString();
     const url = `/dashboard/executive-summary${queryString ? `?${queryString}` : ''}`;
     const res = await apiClient.get(url);
     const data = res.data?.data?.data || res.data?.data || res.data;
     return data;
+  }
+
+  /**
+   * Fetches authorized divisions for executive filtering
+   */
+  static async getAuthorizedDivisions(): Promise<AuthorizedDivisionsResponse> {
+    try {
+      const res = await apiClient.get('/dashboard/divisions');
+      const data = res.data?.data?.data || res.data?.data || res.data;
+      return data;
+    } catch {
+      return {
+        availableDivisions: [
+          { id: 'ALL', name: 'Semua Divisi', code: 'ALL', isDefault: true, scope: 'INSTALLATION' },
+        ],
+        subDivisionEnabled: false,
+        governanceStatus: 'DIVISION ALLOCATION RULE NOT VERIFIED',
+      };
+    }
   }
 
   /**

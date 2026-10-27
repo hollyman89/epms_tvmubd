@@ -254,6 +254,7 @@
 }
 
 /* Dark Navy Header for Management Review Detail Tables (RAB, WBS, Schedule) */
+/* Dark Navy Header for Management Review Detail Tables (RAB, WBS, Schedule) */
 .rabDetailTable :global(.ant-table-thead > tr > th),
 .managementReviewModal :global(.ant-tabs-content .ant-table-thead > tr > th) {
   background: #0f233a !important;
@@ -306,4 +307,486 @@
   padding: 6px 12px !important;
   font-size: 12px !important;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE EXTENSION (Benchmark-Driven, Mobile-First, 360px - 412px)
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* Modal Header Responsive Structure */
+.modalHeaderContent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+  padding-right: 28px; /* space for Ant Design modal close X */
+  box-sizing: border-box;
+}
+
+.modalHeaderIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #f0f9ff;
+  border: 1px solid #e0f2fe;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.modalHeaderText {
+  flex: 1;
+  min-width: 0;
+}
+
+.modalHeaderTitle {
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.modalHeaderSubtitle {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: #64748b;
+  margin-top: 3px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+@media (min-width: 769px) {
+  .modalHeaderTitle {
+    font-size: 18px;
+  }
+  .modalHeaderSubtitle {
+    font-size: 13px;
+  }
+}
+
+/* Mobile Status & Tahap Card (Screen 1 in Benchmark) */
+.mobileStatusTahapCard {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobileStatusTahapCard {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  }
+}
+
+.statusTahapHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.statusTahapBody {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.stageNumberBadge {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #0284c7;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* ROI Strip Responsive Layout */
+.roiMetricBlock {
+  flex: 0 0 38%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.roiDivider {
+  width: 1px;
+  height: 48px;
+  background: #e2e8f0;
+  margin: 0 14px;
+  flex-shrink: 0;
+}
+
+.roiFormulaBlock {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+@media (max-width: 768px) {
+  .roiMetricBlock {
+    flex: 1 1 100% !important;
+  }
+  .roiDivider {
+    display: none !important;
+  }
+  .roiFormulaBlock {
+    display: none !important;
+  }
+}
+
+/* Desktop vs Mobile View Toggles for Tabs */
+.desktopOnlyView {
+  display: block;
+}
+
+.mobileOnlyView {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .desktopOnlyView {
+    display: none !important;
+  }
+  .mobileOnlyView {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px;
+  }
+}
+
+/* Mobile RAB Accordion (Screens 3 & 4 in Benchmark) */
+.mobileRabCategoryCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.mobileRabCategoryCard:hover {
+  border-color: #cbd5e1;
+}
+
+.mobileRabCategoryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  cursor: pointer;
+  background: #ffffff;
+  min-height: 44px;
+  box-sizing: border-box;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  gap: 8px;
+}
+
+.mobileRabCategoryHeader:hover {
+  background: #f8fafc;
+}
+
+.mobileRabCategoryLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.mobileRabChevron {
+  font-size: 11px;
+  color: #64748b;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.mobileRabCategoryTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.mobileRabCategoryAmount {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.mobileRabExpandedContent {
+  background: #f8fafc;
+  padding: 10px 12px;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mobileRabItemCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.mobileRabItemRowTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mobileRabItemName {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.35;
+  word-break: break-word;
+  flex: 1;
+}
+
+.mobileRabItemSubtotal {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.mobileRabItemRowMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.mobileRabItemUnitPrice {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.mobileRabItemDesc {
+  font-size: 11px;
+  color: #64748b;
+  font-style: italic;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* Mobile WBS & Schedule Cards */
+.mobileCardItem {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.mobileCardItemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Responsive Footer Layout */
+.modalFooterResponsive {
+  width: 100%;
+}
+
+.desktopFooterRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.mobileFooterLayout {
+  display: none;
+}
+
+.monitoringFooterLayout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 8px;
+}
+
+.monitoringTagWrapper {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.monitoringCloseBtn {
+  flex-shrink: 0;
+  min-height: 38px;
+}
+
+@media (max-width: 576px) {
+  .desktopFooterRow {
+    display: none !important;
+  }
+
+  .mobileFooterLayout {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .mobilePrimaryApproveBtn {
+    width: 100% !important;
+    min-height: 44px !important;
+    height: 44px !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    background-color: #059669 !important;
+    border-color: #059669 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 6px !important;
+  }
+
+  .mobileSecondaryRow {
+    display: flex !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .mobileCloseBtn {
+    flex: 1 !important;
+    min-height: 40px !important;
+    height: 40px !important;
+    font-size: 13px !important;
+    border-radius: 6px !important;
+  }
+
+  .mobileReturnBtn {
+    flex: 1.6 !important;
+    min-height: 40px !important;
+    height: 40px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    border-radius: 6px !important;
+  }
+
+  .monitoringFooterLayout {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+
+  .monitoringCloseBtn {
+    width: 100% !important;
+    min-height: 42px !important;
+    height: 42px !important;
+  }
+}
+
+/* Modal Shell Responsive Viewport Rules (<= 768px) */
+@media (max-width: 768px) {
+  .managementReviewModal {
+    max-width: calc(100vw - 16px) !important;
+    width: calc(100vw - 16px) !important;
+    margin: 8px auto !important;
+    top: 8px !important;
+    padding-bottom: 8px !important;
+  }
+
+  .managementReviewModal :global(.ant-modal-content) {
+    border-radius: 12px !important;
+    max-height: calc(100vh - 16px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+  }
+
+  .managementReviewModal :global(.ant-modal-header) {
+    padding: 12px 14px 10px 14px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .managementReviewModal :global(.ant-modal-body) {
+    padding: 12px 14px !important;
+    flex: 1 1 auto !important;
+    max-height: calc(100vh - 180px) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .managementReviewModal :global(.ant-modal-footer) {
+    padding: 10px 14px !important;
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 10px)) !important;
+    flex-shrink: 0 !important;
+    background: #ffffff !important;
+  }
+
+  /* Safe horizontal tabs on mobile */
+  .managementReviewModal :global(.ant-tabs-nav) {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .managementReviewModal :global(.ant-tabs-nav-wrap) {
+    overflow-x: auto !important;
+    scrollbar-width: none;
+  }
+
+  .managementReviewModal :global(.ant-tabs-nav-wrap::-webkit-scrollbar) {
+    display: none;
+  }
+
+  .managementReviewModal :global(.ant-tabs-tab) {
+    padding: 8px 10px !important;
+    font-size: 12px !important;
+  }
+
+  /* Description item safe wrapping on mobile */
+  .managementReviewModal :global(.ant-descriptions) {
+    width: 100% !important;
+  }
+
+  .managementReviewModal :global(.ant-descriptions-item-content),
+  .managementReviewModal :global(.ant-descriptions-item-label) {
+    word-break: break-word !important;
+  }
+}
+
 

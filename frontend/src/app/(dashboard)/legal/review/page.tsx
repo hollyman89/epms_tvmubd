@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useRef, Suspense } from 'react';
-import { Card, Typography, Spin, Tag, Space, Alert, Button, message, Tabs, Modal, Input, Collapse, Tooltip } from 'antd';
+import { Card, Typography, Spin, Tag, Space, Alert, Button, message, Tabs, Modal, Input, Collapse, Tooltip, Segmented } from 'antd';
 
-import { FilePdfOutlined, AuditOutlined, CheckCircleOutlined, FileSyncOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, ExpandAltOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
+import { FilePdfOutlined, AuditOutlined, CheckCircleOutlined, FileSyncOutlined, ReloadOutlined, ZoomInOutlined, ZoomOutOutlined, FullscreenOutlined, ExpandAltOutlined, MenuUnfoldOutlined, FileTextOutlined } from '@ant-design/icons';
 
 import { useSearchParams, useRouter } from 'next/navigation';
 import { LegalService } from '@/services';
@@ -16,7 +16,9 @@ import { LegalWorkstationHeader } from '@/components/legal/LegalWorkstationHeade
 import { GroupedLegalChecklist, ChecklistState } from '@/components/legal/GroupedLegalChecklist';
 import { LegalActivityCommentThread } from '@/components/legal/LegalActivityCommentThread';
 import { LegalVersionHistoryAttachments } from '@/components/legal/LegalVersionHistoryAttachments';
+import { StatusBadge } from '@/components/common/StatusBadge';
 import { useAuth } from '@/context/AuthContext';
+import styles from './LegalReview.module.css';
 
 const { Title, Text } = Typography;
 
@@ -41,6 +43,20 @@ function LegalReviewContent() {
   }, [searchParams, router, queryContractId]);
 
   const [isQueueCollapsed, setIsQueueCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileActivePanel, setMobileActivePanel] = useState<'queue' | 'document' | 'checklist'>(
+    queryContractId ? 'document' : 'queue'
+  );
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(typeof window !== 'undefined' && window.innerWidth < 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   const [pendingContracts, setPendingContracts] = useState<TaskQueueItem[]>([]);
   const [selectedContractId, setSelectedContractId] = useState<number | undefined>(
     queryContractId ? Number(queryContractId) : undefined
@@ -497,10 +513,10 @@ function LegalReviewContent() {
 
   return (
     <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'LEGAL', 'DIRECTOR']}>
-      <div style={{ padding: '16px 24px', height: 'calc(100vh - 64px)', overflow: 'hidden', display: 'flex', flexDirection: 'column', backgroundColor: '#f4f6f9' }}>
+      <div className={styles.container}>
         
         {/* Clean Modern Header with Live KPI Summary */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
+        <div className={styles.headerRow}>
           <div>
             <Title level={4} style={{ margin: 0, fontSize: '20px', fontWeight: 600, lineHeight: '28px', color: '#0f172a' }}>
               Legal Review
@@ -511,56 +527,29 @@ function LegalReviewContent() {
           </div>
 
           {/* Real-time Dynamic KPI Summary Cards */}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <div style={{ 
-              background: '#ffffff', 
-              border: '1px solid #e2e8f0', 
-              borderRadius: 8, 
-              padding: '5px 12px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 8,
-              boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-            }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#1677ff' }} />
+          <div className={styles.kpiContainer}>
+            <div className={styles.kpiCard}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#1677ff', flexShrink: 0 }} />
               <div>
                 <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', color: '#64748b', lineHeight: 1.1 }}>
-                  Menunggu Review
+                  Menunggu
                 </Text>
                 <Text strong style={{ fontSize: 15, color: '#0f172a', lineHeight: 1.2 }}>{countWaiting}</Text>
               </div>
             </div>
 
-            <div style={{ 
-              background: '#ffffff', 
-              border: '1px solid #e2e8f0', 
-              borderRadius: 8, 
-              padding: '5px 12px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 8,
-              boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-            }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff8800' }} />
+            <div className={styles.kpiCard}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#ff8800', flexShrink: 0 }} />
               <div>
                 <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', color: '#64748b', lineHeight: 1.1 }}>
-                  Butuh Revisi
+                  Revisi
                 </Text>
                 <Text strong style={{ fontSize: 15, color: '#0f172a', lineHeight: 1.2 }}>{countRevision}</Text>
               </div>
             </div>
 
-            <div style={{ 
-              background: '#ffffff', 
-              border: '1px solid #e2e8f0', 
-              borderRadius: 8, 
-              padding: '5px 12px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 8,
-              boxShadow: '0 1px 2px rgba(0,0,0,0.02)'
-            }}>
-              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#00b578' }} />
+            <div className={styles.kpiCard}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#00b578', flexShrink: 0 }} />
               <div>
                 <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, display: 'block', color: '#64748b', lineHeight: 1.1 }}>
                   Disetujui
@@ -571,9 +560,43 @@ function LegalReviewContent() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: isQueueCollapsed ? '0px' : '16px', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        {/* Mobile Selected Contract Context Header */}
+        {isMobile && selectedContractObj && (
+          <div className={styles.mobileContextBar}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+                <Tag color="blue" style={{ margin: 0, fontWeight: 700, fontSize: 11, flexShrink: 0 }}>
+                  {selectedContractObj.contractNumber}
+                </Tag>
+                <Text style={{ fontSize: 12, fontWeight: 500, color: '#334155' }} ellipsis={{ tooltip: selectedContractObj.customerName }}>
+                  {selectedContractObj.customerName}
+                </Text>
+              </div>
+              <StatusBadge domain="legal" status={selectedContractObj.status} style={{ fontSize: 10, flexShrink: 0 }} />
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Workspace Segmented Control (Tabs) */}
+        {isMobile && (
+          <div className={styles.mobileSegmentedWrapper}>
+            <Segmented
+              block
+              size="middle"
+              value={mobileActivePanel}
+              onChange={(val) => setMobileActivePanel(val as 'queue' | 'document' | 'checklist')}
+              options={[
+                { label: 'Daftar Tugas', value: 'queue', icon: <FileTextOutlined /> },
+                { label: 'Dokumen', value: 'document', icon: <FilePdfOutlined /> },
+                { label: 'Checklist & Keputusan', value: 'checklist', icon: <AuditOutlined /> },
+              ]}
+            />
+          </div>
+        )}
+
+        <div className={styles.workspaceRow}>
           
-          {isQueueCollapsed && (
+          {!isMobile && isQueueCollapsed && (
             <Tooltip title="Tampilkan Antrean Legal" placement="right">
               <Button
                 type="primary"
@@ -593,33 +616,47 @@ function LegalReviewContent() {
             </Tooltip>
           )}
 
-          <aside style={{
-            width: isQueueCollapsed ? '0px' : '310px',
-            opacity: isQueueCollapsed ? 0 : 1,
-            pointerEvents: isQueueCollapsed ? 'none' : 'auto',
-            flexShrink: 0,
-            height: '100%',
-            overflowY: 'auto',
-            paddingRight: isQueueCollapsed ? '0px' : '4px',
-            transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)'
-          }}>
+          {/* COLUMN 1: Task Queue */}
+          <aside
+            className={`${styles.queueColumn} ${
+              isMobile
+                ? mobileActivePanel === 'queue'
+                  ? styles.mobileActiveColumn
+                  : styles.mobileHiddenColumn
+                : isQueueCollapsed
+                ? styles.queueCollapsed
+                : ''
+            }`}
+          >
             <LegalTaskQueue
               contracts={pendingContracts}
               selectedContractId={selectedContractId}
-              onSelectContract={(id) => setSelectedContractId(id)}
+              onSelectContract={(id) => {
+                setSelectedContractId(id);
+                if (isMobile) {
+                  setMobileActivePanel('document');
+                }
+              }}
               loading={loadingContracts}
               activeTab={activeTab}
               onTabChange={(key) => setActiveTab(key)}
-              isCollapsed={isQueueCollapsed}
+              isCollapsed={isMobile ? false : isQueueCollapsed}
               onToggleCollapse={() => setIsQueueCollapsed((prev) => !prev)}
             />
           </aside>
 
-          <main style={{ flex: 1, height: '100%', display: 'flex', flexDirection: 'column', transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)' }}>
-            
+          {/* COLUMN 2: Document / PDF Viewer */}
+          <main
+            className={`${styles.documentColumn} ${
+              isMobile
+                ? mobileActivePanel === 'document'
+                  ? styles.mobileActiveColumn
+                  : styles.mobileHiddenColumn
+                : ''
+            }`}
+          >
             {!selectedContractId ? (
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 24px', textAlign: 'center', backgroundColor: '#f8fafc', borderRadius: 16, border: '1px solid #e2e8f0', boxShadow: '0 4px 12px rgba(0,0,0,0.02)' }}>
-                
                 <div style={{ width: 72, height: 72, borderRadius: '50%', backgroundColor: '#e0f2fe', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 20, boxShadow: '0 4px 12px rgba(14, 165, 233, 0.15)' }}>
                   <AuditOutlined style={{ fontSize: 36, color: '#0284c7' }} />
                 </div>
@@ -629,26 +666,34 @@ function LegalReviewContent() {
                 </Title>
 
                 <Text style={{ fontSize: 14, color: '#64748b', maxWidth: 480, display: 'block', marginBottom: 28, lineHeight: 1.7 }}>
-                  Silakan pilih kontrak dari antrean di sebelah kiri untuk menampilkannya di sini.
+                  Silakan pilih kontrak dari antrean {isMobile ? 'di tab Daftar Tugas' : 'di sebelah kiri'} untuk menampilkannya di sini.
                 </Text>
+                {isMobile && (
+                  <Button type="primary" onClick={() => setMobileActivePanel('queue')}>
+                    Buka Daftar Tugas
+                  </Button>
+                )}
               </div>
             ) : (
-
               <Card
                 title={
-                  <Space>
+                  <Space style={{ maxWidth: isMobile ? 180 : 'auto', overflow: 'hidden' }}>
                     <FilePdfOutlined style={{ color: '#ff4d4f', fontSize: 16 }} />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       Pratinjau Dokumen — {selectedContractObj?.contractNumber || `CONT-${String(selectedContractId || 1).padStart(4, '0')}`}
                     </span>
                   </Space>
                 }
                 extra={
-                  <Space size={6}>
-                    <Tooltip title="Zoom Out"><Button size="small" icon={<ZoomOutOutlined />} /></Tooltip>
-                    <Tooltip title="Zoom In"><Button size="small" icon={<ZoomInOutlined />} /></Tooltip>
-                    <Tooltip title="Fit Width"><Button size="small" icon={<ExpandAltOutlined />} /></Tooltip>
-                    <Tooltip title="Fullscreen"><Button size="small" icon={<FullscreenOutlined />} /></Tooltip>
+                  <Space size={4} wrap>
+                    {!isMobile && (
+                      <>
+                        <Tooltip title="Zoom Out"><Button size="small" icon={<ZoomOutOutlined />} /></Tooltip>
+                        <Tooltip title="Zoom In"><Button size="small" icon={<ZoomInOutlined />} /></Tooltip>
+                        <Tooltip title="Fit Width"><Button size="small" icon={<ExpandAltOutlined />} /></Tooltip>
+                        <Tooltip title="Fullscreen"><Button size="small" icon={<FullscreenOutlined />} /></Tooltip>
+                      </>
+                    )}
                     {pdfReady ? (
                       <Tag color="success" icon={<CheckCircleOutlined />} style={{ margin: 0, fontWeight: 600, borderRadius: 6 }}>PDF Ready</Tag>
                     ) : (
@@ -658,11 +703,12 @@ function LegalReviewContent() {
                 }
                 headStyle={{
                   backgroundColor: '#ffffff',
-                  padding: '10px 16px',
+                  padding: isMobile ? '8px 12px' : '10px 16px',
                   borderTopLeftRadius: 10,
                   borderTopRightRadius: 10,
                   borderBottom: '1px solid #e2e8f0',
-                  minHeight: 'auto'
+                  minHeight: 'auto',
+                  flexWrap: 'wrap',
                 }}
                 style={{ borderRadius: 10, border: '1px solid #dee0e3', boxShadow: '0 2px 8px rgba(0,0,0,0.02)', display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}
                 bodyStyle={{ padding: 0, flex: 1, overflow: 'hidden', backgroundColor: '#ffffff', position: 'relative' }}
@@ -692,7 +738,7 @@ function LegalReviewContent() {
                     title="PDF Viewer"
                     width="100%"
                     height="100%"
-                    style={{ border: 'none' }}
+                    style={{ border: 'none', minHeight: isMobile ? '450px' : 'auto' }}
                     className="border rounded-lg"
                     onLoad={() => {
                       setPdfReady(true);
@@ -717,8 +763,17 @@ function LegalReviewContent() {
             )}
           </main>
 
-          <aside style={{ width: '370px', flexShrink: 0, height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', paddingLeft: 4 }}>
-            {selectedContractId && (
+          {/* COLUMN 3: Checklist & Keputusan */}
+          <aside
+            className={`${styles.checklistColumn} ${
+              isMobile
+                ? mobileActivePanel === 'checklist'
+                  ? styles.mobileActiveColumn
+                  : styles.mobileHiddenColumn
+                : ''
+            }`}
+          >
+            {selectedContractId ? (
               <>
                 {/* 1. RINGKASAN KONTRAK & 2. AKSI REVIEW */}
                 <LegalWorkstationHeader
@@ -773,6 +828,19 @@ function LegalReviewContent() {
                   </Collapse.Panel>
                 </Collapse>
               </>
+            ) : (
+              <div style={{ padding: '32px 16px', textAlign: 'center', background: '#ffffff', borderRadius: 10, border: '1px solid #dee0e3' }}>
+                <AuditOutlined style={{ fontSize: 32, color: '#1677ff', marginBottom: 12 }} />
+                <Title level={5} style={{ margin: 0, color: '#0f172a' }}>Belum Ada Kontrak Terpilih</Title>
+                <Text type="secondary" style={{ fontSize: 13, display: 'block', marginTop: 4, marginBottom: 16 }}>
+                  Silakan pilih dokumen kontrak dari tab Daftar Tugas untuk memulai review dan keputusan.
+                </Text>
+                {isMobile && (
+                  <Button type="primary" onClick={() => setMobileActivePanel('queue')}>
+                    Buka Daftar Tugas
+                  </Button>
+                )}
+              </div>
             )}
           </aside>
         </div>
@@ -789,6 +857,7 @@ function LegalReviewContent() {
           okText="Kirim Catatan Revisi"
           cancelText="Batal"
           confirmLoading={isSubmittingRevision}
+          width="min(520px, 94vw)"
           okButtonProps={{ style: { backgroundColor: '#d97706', borderColor: '#d97706' } }}
         >
           <div style={{ padding: '8px 0' }}>

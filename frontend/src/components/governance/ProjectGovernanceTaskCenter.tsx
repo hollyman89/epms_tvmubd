@@ -47,6 +47,9 @@ import {
   WalletOutlined,
   PieChartOutlined,
   InfoCircleOutlined,
+  DownOutlined,
+  RightOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import 'dayjs/locale/id';
@@ -237,6 +240,30 @@ export function formatWorkflowNodeLabel(nodeId?: string | null): string {
   if (closure) return closure.shortLabel || closure.label;
 
   return nodeId.replace(/^node_/, '').replace(/_/g, ' ');
+}
+
+/**
+ * Derives canonical numerical stage for mobile header/status presentation.
+ * Management Review: 2 (HOO), 3 (Procurement), 4 (Finance), 5 (Director).
+ * Project Closure: 1 (HOO), 2 (Director).
+ */
+export function getStageNumber(nodeId?: string | null, isClosure?: boolean): number {
+  if (!nodeId) return 1;
+  if (isClosure) {
+    return nodeId === 'node_director_approval' || nodeId === 'node_closure_director_approval' ? 2 : 1;
+  }
+  switch (nodeId) {
+    case 'node_hops_review':
+      return 2;
+    case 'node_procurement_review':
+      return 3;
+    case 'node_finance_review':
+      return 4;
+    case 'node_director_approval':
+      return 5;
+    default:
+      return 1;
+  }
 }
 
 export interface CanonicalContractSummary {
@@ -618,6 +645,16 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
   const [workflowTransitions, setWorkflowTransitions] = useState<WorkflowTransition[]>([]);
   const [workflowHistoryExpanded, setWorkflowHistoryExpanded] = useState<boolean>(false);
 
+  // Mobile RAB Category Accordion State
+  const [expandedRabCategories, setExpandedRabCategories] = useState<Record<string, boolean>>({});
+
+  const toggleRabCategory = (categoryKey: string) => {
+    setExpandedRabCategories((prev) => ({
+      ...prev,
+      [categoryKey]: !prev[categoryKey],
+    }));
+  };
+
   // Project Closure Data States
   const [closureData, setClosureData] = useState<any>(null);
   const [closureReadinessData, setClosureReadinessData] = useState<any>(null);
@@ -718,6 +755,12 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                   subByName = cData.submittedBy?.name || cData.submittedByName || subByName;
                   subAt = cData.submittedAt || subAt;
                   subNotes = cData.submissionNotes || null;
+                  if (cData.project?.name) {
+                    pName = cData.project.name;
+                  }
+                  if (cData.project?.code) {
+                    pCode = cData.project.code;
+                  }
                 }
                 if (readinessRes.status === 'fulfilled' && readinessRes.value) {
                   rData = readinessRes.value;
@@ -737,11 +780,16 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                 0,
             );
 
+            const safeProjectName =
+              pName && !pName.toLowerCase().startsWith('proyek #')
+                ? pName
+                : 'proyek ini';
+
             return {
               ...t,
               projectId: pid,
-              projectName: pName || `Proyek #${pid}`,
-              projectCode: pCode || `PRJ-${pid}`,
+              projectName: safeProjectName,
+              projectCode: pCode || (pid > 0 ? `PRJ-${pid}` : ''),
               isClosure: true,
               closureId: closureId > 0 ? closureId : undefined,
               cycleNumber: cycleNum,
@@ -794,11 +842,16 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
             }
           }
 
+          const safeProjectName =
+            pName && !pName.toLowerCase().startsWith('proyek #')
+              ? pName
+              : 'proyek ini';
+
           return {
             ...t,
             projectId: pid,
-            projectName: pName || `Proyek #${pid}`,
-            projectCode: pCode || `PRJ-${pid}`,
+            projectName: safeProjectName,
+            projectCode: pCode || (pid > 0 ? `PRJ-${pid}` : ''),
             contractNumber: cNumber,
             contract: contractObj,
             submittedByName:
@@ -926,11 +979,17 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
     return false;
   }, [selectedTask, user, userRoles, closureActionEval]);
 
+  // Canonical stage number for mobile presentation (Screen 1 in Benchmark)
+  const stageNumber = useMemo(() => {
+    return getStageNumber(selectedTask?.nodeId, selectedTask?.isClosure);
+  }, [selectedTask]);
+
   // ── 2. Open Review Workspace Modal ─────────────────────────────────────────
   const handleOpenReview = async (task: EnrichedGovernanceTask) => {
     setSelectedTask(task);
     setIsReviewModalOpen(true);
     setWorkflowHistoryExpanded(false);
+    setExpandedRabCategories({});
     setModalLoading(true);
 
     try {
@@ -960,7 +1019,16 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                 : Promise.resolve([]),
             ]);
 
-          if (costRes.status === 'fulfilled') setCostData(costRes.value);
+          if (costRes.status === 'fulfilled') {
+            setCostData(costRes.value);
+            const initialExpanded: Record<string, boolean> = {};
+            if (costRes.value?.categories && Array.isArray(costRes.value.categories)) {
+              costRes.value.categories.forEach((cat: any, idx: number) => {
+                if (idx === 0) initialExpanded[cat.categoryKey] = true;
+              });
+            }
+            setExpandedRabCategories(initialExpanded);
+          }
           if (wbsRes.status === 'fulfilled')
             setWbsData(Array.isArray(wbsRes.value) ? wbsRes.value : []);
           if (schedRes.status === 'fulfilled') setScheduleData(schedRes.value);
@@ -985,30 +1053,48 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
     setInitialConditionData(null);
     setWorkflowTransitions([]);
     setWorkflowHistoryExpanded(false);
+    setExpandedRabCategories({});
     setClosureData(null);
     setClosureReadinessData(null);
     setApproveNotes('');
   };
 
-  // Deep-link support: auto open review modal if taskId is present
+  // Deep-link support: auto open review modal if taskId is present, or unique actionable Project Closure task for projectId
   useEffect(() => {
-    if (!taskIdParam || loading) return;
-    if (autoOpenedTaskRef.current === taskIdParam) return;
+    if ((!taskIdParam && !projectIdParam) || loading) return;
+    const trackingKey = taskIdParam ? `task-${taskIdParam}` : `proj-${projectIdParam}`;
+    if (autoOpenedTaskRef.current === trackingKey) return;
 
-    const matchingTask = tasks.find((t) => {
-      const matchTaskId = String(t.id) === String(taskIdParam);
-      if (!matchTaskId) return false;
-      if (projectIdParam && String(t.projectId) !== String(projectIdParam)) {
-        return false;
+    let matchingTask: EnrichedGovernanceTask | undefined;
+
+    if (taskIdParam) {
+      matchingTask = tasks.find((t) => {
+        const matchTaskId = String(t.id) === String(taskIdParam);
+        if (!matchTaskId) return false;
+        if (projectIdParam && String(t.projectId) !== String(projectIdParam)) {
+          return false;
+        }
+        return true;
+      });
+    } else if (projectIdParam) {
+      // Notification fallback: resolve unique authorized active Project Closure task for this project
+      const candidateClosureTasks = tasks.filter((t) => {
+        if (String(t.projectId) !== String(projectIdParam)) return false;
+        if (!t.isClosure && !isClosureTask(t)) return false;
+        const evalResult = evaluateClosureTaskActionability(t, userRoles);
+        return !evalResult.isReadOnly && (evalResult.canApprove || evalResult.canReturn);
+      });
+
+      if (candidateClosureTasks.length === 1) {
+        matchingTask = candidateClosureTasks[0];
       }
-      return true;
-    });
+    }
 
     if (matchingTask) {
-      autoOpenedTaskRef.current = taskIdParam;
+      autoOpenedTaskRef.current = trackingKey;
       handleOpenReview(matchingTask);
     }
-  }, [taskIdParam, projectIdParam, tasks, loading]);
+  }, [taskIdParam, projectIdParam, tasks, loading, userRoles]);
 
   // ── Action Modal Open/Close Helpers (Snapshotting Immutable Action Context) ──
   const handleOpenApproveConfirm = () => {
@@ -1287,20 +1373,38 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
         key: 'project',
         render: (_: any, record: EnrichedGovernanceTask) => {
           if (record.isClosure) {
+            const displayCode = record.projectCode?.startsWith('CONT-')
+              ? `Kontrak: ${record.projectCode}`
+              : record.projectCode?.startsWith('PRJ-')
+              ? `Kode: ${record.projectCode}`
+              : record.projectCode;
+
             return (
               <div>
+                <div
+                  style={{
+                    fontWeight: 600,
+                    fontSize: 13,
+                    color: '#0f172a',
+                    marginBottom: 4,
+                  }}
+                >
+                  {record.projectName || 'proyek ini'}
+                </div>
                 <Space size={6} wrap>
-                  <Tag
-                    color="blue"
-                    style={{
-                      fontFamily: 'monospace',
-                      fontWeight: 600,
-                      fontSize: 11,
-                      margin: 0,
-                    }}
-                  >
-                    Proyek: {record.projectCode}
-                  </Tag>
+                  {displayCode && (
+                    <Tag
+                      color="blue"
+                      style={{
+                        fontFamily: 'monospace',
+                        fontWeight: 600,
+                        fontSize: 11,
+                        margin: 0,
+                      }}
+                    >
+                      {displayCode}
+                    </Tag>
+                  )}
                   <Tag
                     color="cyan"
                     style={{
@@ -1323,16 +1427,6 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                     </Tag>
                   )}
                 </Space>
-                <div
-                  style={{
-                    fontWeight: 600,
-                    fontSize: 13,
-                    color: '#0f172a',
-                    marginTop: 4,
-                  }}
-                >
-                  {record.projectName}
-                </div>
               </div>
             );
           }
@@ -1650,22 +1744,28 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                 <div key={record.id} className={styles.mobileCard}>
                   <div className={styles.mobileCardHeader}>
                     <div className={styles.mobileProjectName}>
-                      {record.projectName}
+                      {record.projectName || 'proyek ini'}
                     </div>
                     <div>
                       {record.isClosure ? (
                         <Space size={4} wrap>
-                          <Tag
-                            color="blue"
-                            style={{
-                              fontFamily: 'monospace',
-                              fontWeight: 600,
-                              fontSize: 10.5,
-                              margin: 0,
-                            }}
-                          >
-                            {record.projectCode}
-                          </Tag>
+                          {record.projectCode && (
+                            <Tag
+                              color="blue"
+                              style={{
+                                fontFamily: 'monospace',
+                                fontWeight: 600,
+                                fontSize: 10.5,
+                                margin: 0,
+                              }}
+                            >
+                              {record.projectCode.startsWith('CONT-')
+                                ? `Kontrak: ${record.projectCode}`
+                                : record.projectCode.startsWith('PRJ-')
+                                ? `Kode: ${record.projectCode}`
+                                : record.projectCode}
+                            </Tag>
+                          )}
                           <Tag
                             color="cyan"
                             style={{
@@ -1757,14 +1857,16 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
       {/* ── GOVERNANCE REVIEW WORKSPACE MODAL ───────────────────────────────── */}
       <Modal
         title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <SafetyCertificateOutlined style={{ color: '#0284c7', fontSize: 24 }} />
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 600, color: '#0f172a', lineHeight: 1.3 }}>
+          <div className={styles.modalHeaderContent}>
+            <div className={styles.modalHeaderIcon}>
+              <SafetyCertificateOutlined style={{ color: '#0284c7', fontSize: 20 }} />
+            </div>
+            <div className={styles.modalHeaderText}>
+              <div className={styles.modalHeaderTitle}>
                 Approval Center — {currentStageInfo?.label || 'Review'}
               </div>
-              <div style={{ fontSize: 13, fontWeight: 400, color: '#64748b', marginTop: 2 }}>
-                {selectedTask?.projectName}
+              <div className={styles.modalHeaderSubtitle}>
+                <span>{selectedTask?.projectName}</span>
                 {selectedTask?.projectCode && ` | ${selectedTask.projectCode}`}
                 {selectedTask?.isClosure && (
                   <span> • Penutupan Siklus #{selectedTask?.cycleNumber || 1}</span>
@@ -1780,65 +1882,103 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
         open={isReviewModalOpen}
         onCancel={handleCloseReview}
         footer={
-          canUserDecideTask
-            ? [
-                <Button key="cancel" onClick={handleCloseReview}>
-                  Tutup
-                </Button>,
-                <Button
-                  key="return"
-                  danger
-                  icon={<EditOutlined />}
-                  onClick={handleOpenReturnModal}
-                  style={{ fontWeight: 600 }}
-                >
-                  {selectedTask?.isClosure ? 'Kembalikan' : 'Minta Perbaikan'}
-                </Button>,
-                <Button
-                  key="approve"
-                  type="primary"
-                  icon={<CheckOutlined />}
-                  onClick={handleOpenApproveConfirm}
-                  style={{
-                    backgroundColor: '#059669',
-                    borderColor: '#059669',
-                    fontWeight: 600,
-                  }}
-                >
-                  {selectedTask?.isClosure &&
-                  selectedTask.nodeId === 'node_director_approval'
-                    ? 'Setujui Final'
-                    : 'Setujui & Lanjutkan'}
-                </Button>,
-              ]
-            : [
-                <div
-                  key="monitoring-indicator"
-                  style={{
-                    float: 'left',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                  }}
-                >
+          <div className={styles.modalFooterResponsive}>
+            {canUserDecideTask ? (
+              <>
+                {/* Desktop Footer View (>= 576px) */}
+                <div className={styles.desktopFooterRow}>
+                  <Button key="cancel" onClick={handleCloseReview}>
+                    Tutup
+                  </Button>
+                  <Space size={8}>
+                    <Button
+                      key="return"
+                      danger
+                      icon={<EditOutlined />}
+                      onClick={handleOpenReturnModal}
+                      style={{ fontWeight: 600 }}
+                    >
+                      {selectedTask?.isClosure ? 'Kembalikan' : 'Minta Perbaikan'}
+                    </Button>
+                    <Button
+                      key="approve"
+                      type="primary"
+                      icon={<CheckOutlined />}
+                      onClick={handleOpenApproveConfirm}
+                      style={{
+                        backgroundColor: '#059669',
+                        borderColor: '#059669',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {selectedTask?.isClosure &&
+                      selectedTask.nodeId === 'node_director_approval'
+                        ? 'Setujui Final'
+                        : 'Setujui & Lanjutkan'}
+                    </Button>
+                  </Space>
+                </div>
+
+                {/* Mobile Footer View (< 576px) */}
+                <div className={styles.mobileFooterLayout}>
+                  <Button
+                    type="primary"
+                    icon={<CheckOutlined />}
+                    onClick={handleOpenApproveConfirm}
+                    className={styles.mobilePrimaryApproveBtn}
+                  >
+                    {selectedTask?.isClosure &&
+                    selectedTask.nodeId === 'node_director_approval'
+                      ? 'Setujui Final'
+                      : 'Setujui & Lanjutkan'}
+                  </Button>
+                  <div className={styles.mobileSecondaryRow}>
+                    <Button
+                      onClick={handleCloseReview}
+                      className={styles.mobileCloseBtn}
+                    >
+                      Tutup
+                    </Button>
+                    <Button
+                      danger
+                      icon={<EditOutlined />}
+                      onClick={handleOpenReturnModal}
+                      className={styles.mobileReturnBtn}
+                    >
+                      {selectedTask?.isClosure ? 'Kembalikan' : 'Minta Perbaikan'}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className={styles.monitoringFooterLayout}>
+                <div className={styles.monitoringTagWrapper}>
                   <Tag
                     color="default"
                     icon={<EyeOutlined />}
                     style={{
-                      padding: '3px 8px',
+                      padding: '4px 8px',
                       fontSize: 11.5,
                       fontWeight: 500,
+                      whiteSpace: 'normal',
+                      lineHeight: 1.4,
                     }}
                   >
                     Mode Pemantauan (Hanya Peran{' '}
                     <strong>{currentStageInfo?.requiredRoleLabel}</strong> yang
                     Berwenang Memutuskan)
                   </Tag>
-                </div>,
-                <Button key="cancel" type="primary" onClick={handleCloseReview}>
+                </div>
+                <Button
+                  type="primary"
+                  onClick={handleCloseReview}
+                  className={styles.monitoringCloseBtn}
+                >
                   Tutup
-                </Button>,
-              ]
+                </Button>
+              </div>
+            )}
+          </div>
         }
         width={1220}
         centered
@@ -1897,6 +2037,47 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                 style={{ borderRadius: 6 }}
               />
             )}
+
+            {/* ── MOBILE STATUS & TAHAP CARD (Screen 1 in Benchmark) ── */}
+            <div className={styles.mobileStatusTahapCard}>
+              <div className={styles.statusTahapHeader}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>
+                  Status &amp; Tahap
+                </span>
+                <Tag
+                  color={canUserDecideTask ? 'processing' : 'default'}
+                  style={{
+                    borderRadius: 12,
+                    padding: '2px 10px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    margin: 0,
+                  }}
+                >
+                  {canUserDecideTask
+                    ? 'Menunggu Persetujuan Anda'
+                    : `Menunggu Review ${currentStageInfo?.requiredRoleLabel || ''}`}
+                </Tag>
+              </div>
+              <div className={styles.statusTahapBody}>
+                <div className={styles.stageNumberBadge}>
+                  {stageNumber}
+                </div>
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>
+                    Tahap {stageNumber} dari {selectedTask?.isClosure ? 2 : 5}
+                  </div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>
+                    {currentStageInfo?.label || selectedTask?.nodeId}
+                  </div>
+                  {currentStageInfo?.nextNodeLabel && (
+                    <div style={{ fontSize: 11, color: '#0284c7', marginTop: 1, fontWeight: 500 }}>
+                      Berikutnya: {currentStageInfo.nextNodeLabel}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
 
             {/* ── TOP SECTION: Management Summary (Workflow History + Financial Summary) ── */}
             <div className={styles.executiveSummaryGrid}>
@@ -2664,15 +2845,7 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                     }}
                   >
                     {/* Left ~38%: ROI */}
-                    <div
-                      style={{
-                        flex: '0 0 38%',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        minWidth: 0,
-                      }}
-                    >
+                    <div className={styles.roiMetricBlock}>
                       <div
                         style={{
                           width: 32,
@@ -2739,27 +2912,11 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Subtle Divider */}
-                    <div
-                      style={{
-                        width: 1,
-                        height: 48,
-                        background: '#e2e8f0',
-                        margin: '0 14px',
-                        flexShrink: 0,
-                      }}
-                    />
+                    {/* Subtle Divider (Desktop only) */}
+                    <div className={styles.roiDivider} />
 
-                    {/* Right ~62%: Formula Block */}
-                    <div
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        fontSize: 10,
-                        color: '#64748b',
-                        lineHeight: 1.45,
-                      }}
-                    >
+                    {/* Right ~62%: Formula Block (Desktop only) */}
+                    <div className={styles.roiFormulaBlock}>
                       <div
                         style={{
                           fontWeight: 600,
@@ -2968,177 +3125,298 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                           }}
                         />
                       )}
-                      <Table
-                        className={styles.rabDetailTable}
-                        dataSource={costData?.categories || []}
-                        rowKey="categoryKey"
-                        pagination={false}
-                        expandable={{
-                          rowExpandable: (r: any) =>
-                            r.mode === 'ITEMIZED' &&
-                            Array.isArray(r.items) &&
-                            r.items.length > 0,
-                          expandedRowRender: (r: any) => (
-                            <div
-                              style={{
-                                margin: '4px 0 12px 16px',
-                                background: '#f8fafc',
-                                padding: 12,
-                                borderRadius: 6,
-                                border: '1px solid #e2e8f0',
-                              }}
-                            >
+                      {/* Desktop Table View (>= 768px) */}
+                      <div className={styles.desktopOnlyView}>
+                        <Table
+                          className={styles.rabDetailTable}
+                          dataSource={costData?.categories || []}
+                          rowKey="categoryKey"
+                          pagination={false}
+                          expandable={{
+                            rowExpandable: (r: any) =>
+                              r.mode === 'ITEMIZED' &&
+                              Array.isArray(r.items) &&
+                              r.items.length > 0,
+                            expandedRowRender: (r: any) => (
                               <div
                                 style={{
-                                  marginBottom: 8,
-                                  fontWeight: 600,
-                                  fontSize: 12,
-                                  color: '#334155',
+                                  margin: '4px 0 12px 16px',
+                                  background: '#f8fafc',
+                                  padding: 12,
+                                  borderRadius: 6,
+                                  border: '1px solid #e2e8f0',
                                 }}
                               >
-                                Rincian Item: {r.categoryLabel} ({r.items.length} item)
-                              </div>
-                              <Table
-                                size="small"
-                                dataSource={r.items}
-                                rowKey="id"
-                                pagination={false}
-                                columns={[
-                                  {
-                                    title: 'Nama Item',
-                                    dataIndex: 'itemName',
-                                    key: 'itemName',
-                                    render: (name: string) => (
-                                      <strong style={{ color: '#0f172a' }}>{name}</strong>
-                                    ),
-                                  },
-                                  {
-                                    title: 'Deskripsi / Spesifikasi',
-                                    dataIndex: 'description',
-                                    key: 'description',
-                                    render: (desc: string) =>
-                                      desc || <Text type="secondary">—</Text>,
-                                  },
-                                  {
-                                    title: 'Qty',
-                                    dataIndex: 'quantity',
-                                    key: 'quantity',
-                                    width: 70,
-                                    align: 'right',
-                                    render: (qty: number) =>
-                                      Number(qty || 0).toLocaleString('id-ID'),
-                                  },
-                                  {
-                                    title: 'UOM',
-                                    dataIndex: 'uom',
-                                    key: 'uom',
-                                    width: 70,
-                                  },
-                                  {
-                                    title: 'Harga Satuan',
-                                    dataIndex: 'unitPrice',
-                                    key: 'unitPrice',
-                                    width: 140,
-                                    align: 'right',
-                                    render: (p: number) =>
-                                      `Rp ${Number(p || 0).toLocaleString('id-ID')}`,
-                                  },
-                                  {
-                                    title: 'Subtotal',
-                                    dataIndex: 'subtotal',
-                                    key: 'subtotal',
-                                    width: 150,
-                                    align: 'right',
-                                    render: (sub: number) => (
-                                      <strong style={{ color: '#0f172a' }}>
-                                        Rp {Number(sub || 0).toLocaleString('id-ID')}
-                                      </strong>
-                                    ),
-                                  },
-                                  {
-                                    title: 'WBS / Scope',
-                                    key: 'scope',
-                                    width: 140,
-                                    render: (_: any, it: any) => {
-                                      if (it.assignmentScope === 'WBS' && it.wbsId) {
-                                        const matchedWbs = wbsData?.find(
-                                          (w: any) => Number(w.id) === Number(it.wbsId),
-                                        );
+                                <div
+                                  style={{
+                                    marginBottom: 8,
+                                    fontWeight: 600,
+                                    fontSize: 12,
+                                    color: '#334155',
+                                  }}
+                                >
+                                  Rincian Item: {r.categoryLabel} ({r.items.length} item)
+                                </div>
+                                <Table
+                                  size="small"
+                                  dataSource={r.items}
+                                  rowKey="id"
+                                  pagination={false}
+                                  columns={[
+                                    {
+                                      title: 'Nama Item',
+                                      dataIndex: 'itemName',
+                                      key: 'itemName',
+                                      render: (name: string) => (
+                                        <strong style={{ color: '#0f172a' }}>{name}</strong>
+                                      ),
+                                    },
+                                    {
+                                      title: 'Deskripsi / Spesifikasi',
+                                      dataIndex: 'description',
+                                      key: 'description',
+                                      render: (desc: string) =>
+                                        desc || <Text type="secondary">—</Text>,
+                                    },
+                                    {
+                                      title: 'Qty',
+                                      dataIndex: 'quantity',
+                                      key: 'quantity',
+                                      width: 70,
+                                      align: 'right',
+                                      render: (qty: number) =>
+                                        Number(qty || 0).toLocaleString('id-ID'),
+                                    },
+                                    {
+                                      title: 'UOM',
+                                      dataIndex: 'uom',
+                                      key: 'uom',
+                                      width: 70,
+                                    },
+                                    {
+                                      title: 'Harga Satuan',
+                                      dataIndex: 'unitPrice',
+                                      key: 'unitPrice',
+                                      width: 140,
+                                      align: 'right',
+                                      render: (p: number) =>
+                                        `Rp ${Number(p || 0).toLocaleString('id-ID')}`,
+                                    },
+                                    {
+                                      title: 'Subtotal',
+                                      dataIndex: 'subtotal',
+                                      key: 'subtotal',
+                                      width: 150,
+                                      align: 'right',
+                                      render: (sub: number) => (
+                                        <strong style={{ color: '#0f172a' }}>
+                                          Rp {Number(sub || 0).toLocaleString('id-ID')}
+                                        </strong>
+                                      ),
+                                    },
+                                    {
+                                      title: 'WBS / Scope',
+                                      key: 'scope',
+                                      width: 140,
+                                      render: (_: any, it: any) => {
+                                        if (it.assignmentScope === 'WBS' && it.wbsId) {
+                                          const matchedWbs = wbsData?.find(
+                                            (w: any) => Number(w.id) === Number(it.wbsId),
+                                          );
+                                          return (
+                                            <Tag
+                                              color="geekblue"
+                                              style={{ fontSize: 10.5, margin: 0 }}
+                                            >
+                                              {matchedWbs?.code || `WBS #${it.wbsId}`}
+                                            </Tag>
+                                          );
+                                        }
                                         return (
-                                          <Tag
-                                            color="geekblue"
-                                            style={{ fontSize: 10.5, margin: 0 }}
-                                          >
-                                            {matchedWbs?.code || `WBS #${it.wbsId}`}
+                                          <Tag style={{ fontSize: 10.5, margin: 0 }}>
+                                            {it.assignmentScope || 'PROJECT'}
                                           </Tag>
                                         );
-                                      }
-                                      return (
-                                        <Tag style={{ fontSize: 10.5, margin: 0 }}>
-                                          {it.assignmentScope || 'PROJECT'}
-                                        </Tag>
-                                      );
+                                      },
                                     },
-                                  },
-                                ]}
-                              />
-                            </div>
-                          ),
-                        }}
-                        columns={[
-                          {
-                            title: 'Kategori Biaya',
-                            dataIndex: 'categoryLabel',
-                            key: 'categoryLabel',
-                            render: (text: string, record: any) => (
-                              <strong>
-                                {text || record.categoryKey || '—'}
-                              </strong>
+                                  ]}
+                                />
+                              </div>
                             ),
-                          },
-                          {
-                            title: 'Mode / Rincian Item',
-                            key: 'itemsCount',
-                            width: 220,
-                            render: (_: any, r: any) => {
-                              if (r.mode === 'DIRECT') {
-                                return (
-                                  <Tag color="default" style={{ margin: 0 }}>
-                                    Lump Sum / Direct
-                                  </Tag>
-                                );
-                              }
-                              return (
-                                <Space size={6}>
-                                  <Tag color="blue" style={{ margin: 0 }}>
-                                    Itemized
-                                  </Tag>
-                                  <span style={{ fontSize: 12, fontWeight: 500 }}>
-                                    {r.items?.length || 0} item
-                                  </span>
-                                </Space>
-                              );
+                          }}
+                          columns={[
+                            {
+                              title: 'Kategori Biaya',
+                              dataIndex: 'categoryLabel',
+                              key: 'categoryLabel',
+                              render: (text: string, record: any) => (
+                                <strong>
+                                  {text || record.categoryKey || '—'}
+                                </strong>
+                              ),
                             },
-                          },
-                          {
-                            title: 'Subtotal Kategori',
-                            dataIndex: 'categoryTotal',
-                            key: 'categoryTotal',
-                            width: 180,
-                            align: 'right',
-                            render: (val: number) => (
-                              <span
-                                style={{
-                                  fontWeight: 700,
-                                  color: '#0f172a',
-                                }}
-                              >
-                                Rp {Number(val || 0).toLocaleString('id-ID')}
-                              </span>
-                            ),
-                          },
-                        ]}
-                      />
+                            {
+                              title: 'Mode / Rincian Item',
+                              key: 'itemsCount',
+                              width: 220,
+                              render: (_: any, r: any) => {
+                                if (r.mode === 'DIRECT') {
+                                  return (
+                                    <Tag color="default" style={{ margin: 0 }}>
+                                      Lump Sum / Direct
+                                    </Tag>
+                                  );
+                                }
+                                return (
+                                  <Space size={6}>
+                                    <Tag color="blue" style={{ margin: 0 }}>
+                                      Itemized
+                                    </Tag>
+                                    <span style={{ fontSize: 12, fontWeight: 500 }}>
+                                      {r.items?.length || 0} item
+                                    </span>
+                                  </Space>
+                                );
+                              },
+                            },
+                            {
+                              title: 'Subtotal Kategori',
+                              dataIndex: 'categoryTotal',
+                              key: 'categoryTotal',
+                              width: 180,
+                              align: 'right',
+                              render: (val: number) => (
+                                <span
+                                  style={{
+                                    fontWeight: 700,
+                                    color: '#0f172a',
+                                  }}
+                                >
+                                  Rp {Number(val || 0).toLocaleString('id-ID')}
+                                </span>
+                              ),
+                            },
+                          ]}
+                        />
+                      </div>
+
+                      {/* Mobile Accordion & Item Cards View (< 768px, Screens 3 & 4 in Benchmark) */}
+                      <div className={styles.mobileOnlyView}>
+                        {(!costData?.categories || costData.categories.length === 0) ? (
+                          <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 12 }}>
+                            Belum ada data rincian estimasi biaya (RAB).
+                          </div>
+                        ) : (
+                          costData.categories.map((cat: any) => {
+                            const isExpanded = Boolean(expandedRabCategories[cat.categoryKey]);
+                            const hasItems =
+                              cat.mode === 'ITEMIZED' &&
+                              Array.isArray(cat.items) &&
+                              cat.items.length > 0;
+                            const itemCount = cat.mode === 'DIRECT' ? 0 : (cat.items?.length || 0);
+
+                            return (
+                              <div key={cat.categoryKey} className={styles.mobileRabCategoryCard}>
+                                <div
+                                  className={styles.mobileRabCategoryHeader}
+                                  onClick={() => toggleRabCategory(cat.categoryKey)}
+                                  role="button"
+                                  tabIndex={0}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      toggleRabCategory(cat.categoryKey);
+                                    }
+                                  }}
+                                  aria-expanded={isExpanded}
+                                >
+                                  <div className={styles.mobileRabCategoryLeft}>
+                                    <span className={styles.mobileRabChevron}>
+                                      {isExpanded ? <DownOutlined /> : <RightOutlined />}
+                                    </span>
+                                    <div>
+                                      <div className={styles.mobileRabCategoryTitle}>
+                                        {cat.categoryLabel || cat.categoryKey}
+                                      </div>
+                                      <div style={{ marginTop: 2 }}>
+                                        {cat.mode === 'DIRECT' ? (
+                                          <Tag color="default" style={{ margin: 0, fontSize: 10 }}>
+                                            Lump Sum / Direct
+                                          </Tag>
+                                        ) : (
+                                          <Tag color="blue" style={{ margin: 0, fontSize: 10 }}>
+                                            {itemCount} item
+                                          </Tag>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div className={styles.mobileRabCategoryAmount}>
+                                    Rp {Number(cat.categoryTotal || 0).toLocaleString('id-ID')}
+                                  </div>
+                                </div>
+
+                                {/* Expanded Item List (Screen 4 in Benchmark) */}
+                                {isExpanded && (
+                                  <div className={styles.mobileRabExpandedContent}>
+                                    {cat.mode === 'DIRECT' ? (
+                                      <div style={{ fontSize: 11.5, color: '#64748b', fontStyle: 'italic', padding: '4px 0' }}>
+                                        Kategori ini menggunakan estimasi Lump Sum / Direct. Tidak ada rincian item per baris.
+                                      </div>
+                                    ) : !hasItems ? (
+                                      <div style={{ fontSize: 11.5, color: '#94a3b8', fontStyle: 'italic', padding: '4px 0' }}>
+                                        Belum ada rincian item untuk kategori ini.
+                                      </div>
+                                    ) : (
+                                      cat.items.map((item: any, itemIdx: number) => {
+                                        const matchedWbs =
+                                          item.assignmentScope === 'WBS' && item.wbsId
+                                            ? wbsData?.find((w: any) => Number(w.id) === Number(item.wbsId))
+                                            : null;
+
+                                        return (
+                                          <div key={item.id || itemIdx} className={styles.mobileRabItemCard}>
+                                            <div className={styles.mobileRabItemRowTop}>
+                                              <div className={styles.mobileRabItemName}>
+                                                {itemIdx + 1}. {item.itemName}
+                                              </div>
+                                              <div className={styles.mobileRabItemSubtotal}>
+                                                Rp {Number(item.subtotal || 0).toLocaleString('id-ID')}
+                                              </div>
+                                            </div>
+
+                                            <div className={styles.mobileRabItemRowMeta}>
+                                              <Space size={4}>
+                                                <Tag color="cyan" style={{ margin: 0, fontSize: 10, fontWeight: 600 }}>
+                                                  {Number(item.quantity || 0).toLocaleString('id-ID')} {item.uom || 'unit'}
+                                                </Tag>
+                                                {matchedWbs && (
+                                                  <Tag color="geekblue" style={{ margin: 0, fontSize: 10 }}>
+                                                    {matchedWbs.code || `WBS #${item.wbsId}`}
+                                                  </Tag>
+                                                )}
+                                              </Space>
+                                              <div className={styles.mobileRabItemUnitPrice}>
+                                                @ Rp {Number(item.unitPrice || 0).toLocaleString('id-ID')}
+                                              </div>
+                                            </div>
+
+                                            {item.description && (
+                                              <div className={styles.mobileRabItemDesc}>
+                                                {item.description}
+                                              </div>
+                                            )}
+                                          </div>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     </div>
                   ),
                 },
@@ -3150,71 +3428,128 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                     </span>
                   ),
                   children: (
-                    <Table
-                      className={styles.rabDetailTable}
-                      dataSource={wbsTreeData.tree}
-                      pagination={false}
-                      columns={[
-                        {
-                          title: 'Kode WBS',
-                          dataIndex: 'code',
-                          key: 'code',
-                          width: 140,
-                          render: (code: string) => (
-                            <Tag
-                              color="geekblue"
-                              style={{
-                                fontFamily: 'monospace',
-                                fontWeight: 600,
-                              }}
-                            >
-                              {code}
-                            </Tag>
-                          ),
-                        },
-                        {
-                          title: 'Nama Deliverable / Task',
-                          dataIndex: 'name',
-                          key: 'name',
-                          render: (name: string, record: WbsTreeNode) => (
-                            <span
-                              style={{
-                                fontWeight: record.isLeaf ? 400 : 700,
-                              }}
-                            >
-                              {name}
-                            </span>
-                          ),
-                        },
-                        {
-                          title: 'Level',
-                          dataIndex: 'level',
-                          key: 'level',
-                          width: 80,
-                          align: 'center',
-                          render: (lvl: number) => (
-                            <Tag style={{ fontSize: 10 }}>L{lvl}</Tag>
-                          ),
-                        },
-                        {
-                          title: 'Bobot',
-                          dataIndex: 'weightPercentage',
-                          key: 'weightPercentage',
-                          width: 100,
-                          align: 'right',
-                          render: (w: number) => (
-                            <span
-                              style={{
-                                fontWeight: 600,
-                                color: '#0f172a',
-                              }}
-                            >
-                              {Number(w || 0).toFixed(1)}%
-                            </span>
-                          ),
-                        },
-                      ]}
-                    />
+                    <div>
+                      {/* Desktop WBS Table (>= 768px) */}
+                      <div className={styles.desktopOnlyView}>
+                        <Table
+                          className={styles.rabDetailTable}
+                          dataSource={wbsTreeData.tree}
+                          pagination={false}
+                          columns={[
+                            {
+                              title: 'Kode WBS',
+                              dataIndex: 'code',
+                              key: 'code',
+                              width: 140,
+                              render: (code: string) => (
+                                <Tag
+                                  color="geekblue"
+                                  style={{
+                                    fontFamily: 'monospace',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {code}
+                                </Tag>
+                              ),
+                            },
+                            {
+                              title: 'Nama Deliverable / Task',
+                              dataIndex: 'name',
+                              key: 'name',
+                              render: (name: string, record: WbsTreeNode) => (
+                                <span
+                                  style={{
+                                    fontWeight: record.isLeaf ? 400 : 700,
+                                  }}
+                                >
+                                  {name}
+                                </span>
+                              ),
+                            },
+                            {
+                              title: 'Level',
+                              dataIndex: 'level',
+                              key: 'level',
+                              width: 80,
+                              align: 'center',
+                              render: (lvl: number) => (
+                                <Tag style={{ fontSize: 10 }}>L{lvl}</Tag>
+                              ),
+                            },
+                            {
+                              title: 'Bobot',
+                              dataIndex: 'weightPercentage',
+                              key: 'weightPercentage',
+                              width: 100,
+                              align: 'right',
+                              render: (w: number) => (
+                                <span
+                                  style={{
+                                    fontWeight: 600,
+                                    color: '#0f172a',
+                                  }}
+                                >
+                                  {Number(w || 0).toFixed(1)}%
+                                </span>
+                              ),
+                            },
+                          ]}
+                        />
+                      </div>
+
+                      {/* Mobile WBS Card List (< 768px) */}
+                      <div className={styles.mobileOnlyView}>
+                        {(!wbsTreeData.tree || wbsTreeData.tree.length === 0) ? (
+                          <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 12 }}>
+                            Belum ada data struktur WBS.
+                          </div>
+                        ) : (
+                          (() => {
+                            const flattenTree = (nodes: WbsTreeNode[]): WbsTreeNode[] => {
+                              const result: WbsTreeNode[] = [];
+                              const traverse = (list: WbsTreeNode[]) => {
+                                for (const node of list) {
+                                  result.push(node);
+                                  if (node.children && node.children.length > 0) {
+                                    traverse(node.children);
+                                  }
+                                }
+                              };
+                              traverse(nodes);
+                              return result;
+                            };
+                            const flatNodes = flattenTree(wbsTreeData.tree);
+
+                            return flatNodes.map((node) => (
+                              <div
+                                key={node.id || node.code}
+                                className={styles.mobileCardItem}
+                                style={{
+                                  marginLeft: Math.min((node.level - 1) * 8, 24),
+                                  borderLeft: node.level > 1 ? '3px solid #0284c7' : '1px solid #e2e8f0',
+                                }}
+                              >
+                                <div className={styles.mobileCardItemHeader}>
+                                  <Space size={6}>
+                                    <Tag color="geekblue" style={{ fontFamily: 'monospace', fontWeight: 600, margin: 0, fontSize: 11 }}>
+                                      {node.code}
+                                    </Tag>
+                                    <Tag style={{ margin: 0, fontSize: 10 }}>L{node.level}</Tag>
+                                  </Space>
+                                  <span style={{ fontWeight: 700, color: '#0f172a', fontSize: 12 }}>
+                                    {Number(node.weightPercentage || 0).toFixed(1)}%
+                                  </span>
+                                </div>
+                                <div style={{ fontSize: 12.5, fontWeight: node.isLeaf ? 500 : 700, color: '#0f172a', lineHeight: 1.35 }}>
+                                  {node.name}
+                                </div>
+                              </div>
+                            ));
+                          })()
+                        )}
+                      </div>
+                    </div>
                   ),
                 },
                 {
@@ -3225,50 +3560,91 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                     </span>
                   ),
                   children: (
-                    <Table
-                      className={styles.rabDetailTable}
-                      dataSource={scheduleData?.tasks || []}
-                      rowKey="id"
-                      pagination={false}
-                      columns={[
-                        {
-                          title: 'Tugas / Milestone',
-                          dataIndex: 'name',
-                          key: 'name',
-                          render: (text: string, record: any) => (
-                            <Space>
-                              {record.isMilestone && (
-                                <Tag color="purple">Milestone</Tag>
-                              )}
-                              <span>{text}</span>
-                            </Space>
-                          ),
-                        },
-                        {
-                          title: 'Mulai',
-                          dataIndex: 'startDate',
-                          key: 'startDate',
-                          width: 130,
-                          render: (d: string) =>
-                            d ? dayjs(d).format('DD/MM/YYYY') : '—',
-                        },
-                        {
-                          title: 'Selesai',
-                          dataIndex: 'endDate',
-                          key: 'endDate',
-                          width: 130,
-                          render: (d: string) =>
-                            d ? dayjs(d).format('DD/MM/YYYY') : '—',
-                        },
-                        {
-                          title: 'Durasi',
-                          key: 'duration',
-                          width: 100,
-                          render: (_: any, record: any) =>
-                            calculateScheduleDuration(record),
-                        },
-                      ]}
-                    />
+                    <div>
+                      {/* Desktop Schedule Table (>= 768px) */}
+                      <div className={styles.desktopOnlyView}>
+                        <Table
+                          className={styles.rabDetailTable}
+                          dataSource={scheduleData?.tasks || []}
+                          rowKey="id"
+                          pagination={false}
+                          columns={[
+                            {
+                              title: 'Tugas / Milestone',
+                              dataIndex: 'name',
+                              key: 'name',
+                              render: (text: string, record: any) => (
+                                <Space>
+                                  {record.isMilestone && (
+                                    <Tag color="purple">Milestone</Tag>
+                                  )}
+                                  <span>{text}</span>
+                                </Space>
+                              ),
+                            },
+                            {
+                              title: 'Mulai',
+                              dataIndex: 'startDate',
+                              key: 'startDate',
+                              width: 130,
+                              render: (d: string) =>
+                                d ? dayjs(d).format('DD/MM/YYYY') : '—',
+                            },
+                            {
+                              title: 'Selesai',
+                              dataIndex: 'endDate',
+                              key: 'endDate',
+                              width: 130,
+                              render: (d: string) =>
+                                d ? dayjs(d).format('DD/MM/YYYY') : '—',
+                            },
+                            {
+                              title: 'Durasi',
+                              key: 'duration',
+                              width: 100,
+                              render: (_: any, record: any) =>
+                                calculateScheduleDuration(record),
+                            },
+                          ]}
+                        />
+                      </div>
+
+                      {/* Mobile Schedule Card List (< 768px) */}
+                      <div className={styles.mobileOnlyView}>
+                        {(!scheduleData?.tasks || scheduleData.tasks.length === 0) ? (
+                          <div style={{ textAlign: 'center', padding: '24px 0', color: '#94a3b8', fontSize: 12 }}>
+                            Belum ada data jadwal tugas & milestones.
+                          </div>
+                        ) : (
+                          scheduleData.tasks.map((task: any, idx: number) => (
+                            <div key={task.id || idx} className={styles.mobileCardItem}>
+                              <div className={styles.mobileCardItemHeader}>
+                                <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0f172a', flex: 1, wordBreak: 'break-word' }}>
+                                  {task.name}
+                                </div>
+                                {task.isMilestone && (
+                                  <Tag color="purple" style={{ margin: 0, fontSize: 10, flexShrink: 0 }}>
+                                    Milestone
+                                  </Tag>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 6, fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                                <Space size={4}>
+                                  <CalendarOutlined style={{ fontSize: 11 }} />
+                                  <span>
+                                    {task.startDate ? dayjs(task.startDate).format('DD/MM/YYYY') : '—'} –{' '}
+                                    {task.endDate ? dayjs(task.endDate).format('DD/MM/YYYY') : '—'}
+                                  </span>
+                                </Space>
+                                <Tag color="default" style={{ margin: 0, fontSize: 10 }}>
+                                  {calculateScheduleDuration(task)}
+                                </Tag>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
                   ),
                 },
                 {
@@ -3382,6 +3758,7 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
           },
         }}
         width={520}
+        style={{ maxWidth: 'calc(100vw - 24px)', margin: '12px auto' }}
       >
         {!approvalActionContext || !approvalActionContext.projectId || !approvalActionContext.taskId ? (
           <Alert
@@ -3466,6 +3843,7 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
           style: { fontWeight: 600 },
         }}
         width={520}
+        style={{ maxWidth: 'calc(100vw - 24px)', margin: '12px auto' }}
       >
         {!returnActionContext || !returnActionContext.projectId || !returnActionContext.taskId ? (
           <Alert

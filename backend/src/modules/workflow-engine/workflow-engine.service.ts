@@ -1251,12 +1251,7 @@ export class WorkflowEngineService {
     actorRoles: string[],
     candidateRoles?: string[],
   ): void {
-    // 1. Super admin can always perform any action
-    if (actorRoles.includes('SUPER_ADMIN')) {
-      return;
-    }
-
-    // 2. If specific user assigned
+    // 1. If specific user assigned
     if (task.assigneeUserId && task.assigneeUserId === actorId) {
       return;
     }
@@ -1287,6 +1282,7 @@ export class WorkflowEngineService {
 
     // 5. If no specific assignment on task and no candidate roles, default to authorized
     if (
+      !task.assigneeRole &&
       !task.assigneeRoleId &&
       !task.assigneeUserId &&
       resolvedCandidateRoles.length === 0
@@ -1447,18 +1443,12 @@ export class WorkflowEngineService {
       .leftJoinAndSelect('task.assigneeRole', 'role')
       .where('task.status = :status', { status: WorkflowTaskStatus.PENDING });
 
-    if (!roles.includes('SUPER_ADMIN')) {
-      query.andWhere(
-        '(task.assignee_user_id = :userId OR role.name IN (:...roles) OR (task.assignee_role_id IS NULL AND task.assignee_user_id IS NULL))',
-        { userId, roles: roles.length > 0 ? roles : ['__NONE__'] },
-      );
-    }
+    query.andWhere(
+      '(task.assignee_user_id = :userId OR role.name IN (:...roles) OR (task.assignee_role_id IS NULL AND task.assignee_user_id IS NULL))',
+      { userId, roles: roles.length > 0 ? roles : ['__NONE__'] },
+    );
 
     const primaryTasks = await query.orderBy('task.createdAt', 'DESC').getMany();
-
-    if (roles.includes('SUPER_ADMIN')) {
-      return primaryTasks;
-    }
 
     // Candidate-roles resolution: discover pending tasks where node.data.candidateRoles contains actor's roles
     const candidateQuery = this.taskRepo

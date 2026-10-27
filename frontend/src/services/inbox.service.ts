@@ -36,6 +36,9 @@ export interface TodoItem {
   submittedByName?: string;
   returnedByName?: string;
   returnReason?: string;
+  ctaLabel?: string;
+  monetaryExposure?: number;
+  businessReference?: string;
 }
 
 export interface InboxSummary {

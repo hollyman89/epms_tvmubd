@@ -1,4 +1,9 @@
 import { apiClient } from '@/lib/axios';
+import {
+  executeUpload,
+  UPLOAD_REQUEST_TIMEOUT_MS,
+  DEFAULT_MAX_FILE_SIZE_BYTES,
+} from '@/lib/uploadTransport';
 
 // --- DTOs & INTERFACES ---
 
@@ -386,7 +391,23 @@ export interface ReturnClosureDto {
 
 // --- PROJECT SERVICE SSOT ---
 
+/**
+ * Canonical technical file size limit for documents (20 MB).
+ * Replicated from backend Multer limits to guarantee client-side pre-flight rejection.
+ */
+export const MAX_DOCUMENT_FILE_SIZE_BYTES = DEFAULT_MAX_FILE_SIZE_BYTES;
+
+/**
+ * Operational timeout for evidence/document uploads (60,000 ms / 60 seconds).
+ * Provides sufficient transmission window for up to 20MB multipart payloads under
+ * enterprise network conditions without altering the global 15-second REST timeout.
+ * NOTE: This is an operational timeout safeguard, not proof of historical incident threshold.
+ */
+export const UPLOAD_DOCUMENT_TIMEOUT_MS = UPLOAD_REQUEST_TIMEOUT_MS;
+
 export class ProjectService {
+  static readonly MAX_FILE_SIZE = MAX_DOCUMENT_FILE_SIZE_BYTES;
+  static readonly UPLOAD_TIMEOUT_MS = UPLOAD_DOCUMENT_TIMEOUT_MS;
   // --- OPERATIONAL BOARD ---
   /**
    * Fetches operational board data (pending kickoff charters & active projects).
@@ -645,12 +666,19 @@ export class ProjectService {
 
   /**
    * Uploads real progress evidence document attached to the project (CP10).
+   * Implements pre-flight size gating (<= 20MB or caller-specified limit) and operational upload timeout (60s) via shared transport.
    */
   static async uploadEvidence(
     projectId: number,
     file: File,
     category?: string,
+    maxSizeBytes?: number,
+    onProgress?: (progressEvent: any) => void,
   ): Promise<{ id: number; fileName: string; filePath?: string; category?: string }> {
+    if (!file) {
+      throw new Error('Berkas tidak ditemukan. Silakan pilih berkas dokumen.');
+    }
+
     const formData = new FormData();
     formData.append('file', file);
     formData.append('entityType', 'PROJECT');
@@ -658,9 +686,15 @@ export class ProjectService {
     if (category) {
       formData.append('category', category);
     }
-    const res = await apiClient.post('/documents/upload', formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+
+    const res = await executeUpload({
+      url: '/documents/upload',
+      formData,
+      file,
+      maxSizeBytes: maxSizeBytes ?? MAX_DOCUMENT_FILE_SIZE_BYTES,
+      onProgress,
     });
+
     const body = res.data;
     const documentRecord = body?.data?.data || body?.data || body;
     return documentRecord;

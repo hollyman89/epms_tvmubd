@@ -102,7 +102,7 @@ describe('EPMS — MOBILE-UX-R1 Strict Benchmark Implementation Verification', (
       expect(dashboardPageContent).toContain('{pendingTasksCount}');
       expect(dashboardPageContent).toContain('Proyek Aktif');
       expect(dashboardPageContent).toContain('{activeProjectsCount}');
-      expect(dashboardPageContent).toContain('Nilai Proyek');
+      expect(dashboardPageContent).toContain('Nilai Pipeline');
       expect(dashboardPageContent).toContain('{portfolioValueText}');
     });
 

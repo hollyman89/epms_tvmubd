@@ -147,7 +147,7 @@ describe('EPMS — PURCHASING → FINANCE TO-DO HANDOFF (Unit Tests)', () => {
       expect(mockFinanceService.getEligibleInvoiceObligations).not.toHaveBeenCalled();
     });
 
-    it('5. SUPER_ADMIN also receives CREATE_INVOICE To-Do', async () => {
+    it('5. SUPER_ADMIN without FINANCE receives 0 CREATE_INVOICE To-Dos (SoD); multi-role SUPER_ADMIN+FINANCE receives it', async () => {
       const materialObligation: EligibleInvoiceObligation = {
         obligationId: 'mat-po-11-term-11',
         orderType: 'MATERIAL',
@@ -160,8 +160,13 @@ describe('EPMS — PURCHASING → FINANCE TO-DO HANDOFF (Unit Tests)', () => {
       };
       mockFinanceService.getEligibleInvoiceObligations.mockResolvedValue([materialObligation]);
 
-      const adminTodos = await inboxService.getTodos(1, ['SUPER_ADMIN']);
-      expect(adminTodos.filter((t) => t.actionType === 'CREATE_INVOICE')).toHaveLength(1);
+      // SUPER_ADMIN alone: SoD enforced -> 0 invoice todos
+      const adminOnlyTodos = await inboxService.getTodos(1, ['SUPER_ADMIN']);
+      expect(adminOnlyTodos.filter((t) => t.actionType === 'CREATE_INVOICE')).toHaveLength(0);
+
+      // Multi-role: SUPER_ADMIN + FINANCE -> authorized via legitimate FINANCE role
+      const multiRoleTodos = await inboxService.getTodos(1, ['SUPER_ADMIN', 'FINANCE']);
+      expect(multiRoleTodos.filter((t) => t.actionType === 'CREATE_INVOICE')).toHaveLength(1);
     });
 
     it('6. Multiple eligible payment terms on same PO -> separate distinct obligations', async () => {

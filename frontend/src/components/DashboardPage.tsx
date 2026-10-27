@@ -1861,11 +1861,15 @@ export const DashboardPage: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <SafetyCertificateOutlined style={{ color: (pMetrics?.vendorPayments?.paymentCount ?? 0) > 0 ? '#16a34a' : '#94a3b8', fontSize: 14 }} />
                 <span style={{ fontWeight: 600, color: (pMetrics?.vendorPayments?.paymentCount ?? 0) > 0 ? '#16a34a' : '#94a3b8' }}>
-                  {(pMetrics as any)?.vendorPayments?.completionRate !== undefined
-                    ? `${formatPercentage((pMetrics as any).vendorPayments.completionRate)} Selesai`
-                    : (pMetrics?.vendorPayments?.paymentCount ?? 0) > 0
-                    ? `${renderStaticNumber(pMetrics?.vendorPayments?.paymentCount)} Transaksi Selesai`
-                    : 'Belum ada data'}
+                  {(pMetrics as any)?.vendorPayments?.completionRate !== undefined ? (
+                    `${formatPercentage((pMetrics as any).vendorPayments.completionRate)} Selesai`
+                  ) : (pMetrics?.vendorPayments?.paymentCount ?? 0) > 0 ? (
+                    <>
+                      {renderStaticNumber(pMetrics?.vendorPayments?.paymentCount)} Transaksi Selesai
+                    </>
+                  ) : (
+                    'Belum ada data'
+                  )}
                 </span>
               </div>
             </div>

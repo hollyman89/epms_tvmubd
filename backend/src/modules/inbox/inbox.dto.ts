@@ -33,6 +33,8 @@ export class TodoReadModelDto {
   returnedByName?: string;
   returnReason?: string;
   ctaLabel?: string;
+  monetaryExposure?: number;
+  businessReference?: string;
 }
 
 export class InboxSummaryDto {

@@ -171,20 +171,42 @@ describe('PRE-W10 DASHBOARD-ACCESS-F1: Role Access Correction & Canonical Routin
     });
   });
 
-  describe('4. Source Verification: Canonical Dashboard Page Authorization', () => {
+  describe('4. Source Verification: Canonical Dashboard Page Authorization & Component Binding', () => {
     const dashboardPagePath = path.resolve(
       process.cwd(),
       'src/app/(dashboard)/dashboard/page.tsx',
     );
+    const dashboardPreviewPagePath = path.resolve(
+      process.cwd(),
+      'src/app/(dashboard)/dashboard-preview/page.tsx',
+    );
+    const dashboardLayoutPath = path.resolve(
+      process.cwd(),
+      'src/app/(dashboard)/layout.tsx',
+    );
     let dashboardPageContent: string;
+    let dashboardPreviewContent: string;
+    let dashboardLayoutContent: string;
 
     beforeAll(() => {
       dashboardPageContent = fs.readFileSync(dashboardPagePath, 'utf8');
+      dashboardPreviewContent = fs.readFileSync(dashboardPreviewPagePath, 'utf8');
+      dashboardLayoutContent = fs.readFileSync(dashboardLayoutPath, 'utf8');
     });
 
-    it('exists at app/(dashboard)/dashboard/page.tsx and renders DashboardComponent', () => {
-      expect(dashboardPageContent).toContain("import { DashboardPage as DashboardComponent } from '@/components/DashboardPage'");
-      expect(dashboardPageContent).toContain('<DashboardComponent />');
+    it('exists at app/(dashboard)/dashboard/page.tsx and renders ExecutiveDashboardPreview', () => {
+      expect(dashboardPageContent).toContain("import { ExecutiveDashboardPreview } from '@/components/dashboard-preview/ExecutiveDashboardPreview'");
+      expect(dashboardPageContent).toContain('<ExecutiveDashboardPreview />');
+    });
+
+    it('retains app/(dashboard)/dashboard-preview/page.tsx rendering ExecutiveDashboardPreview', () => {
+      expect(dashboardPreviewContent).toContain("import { ExecutiveDashboardPreview } from '@/components/dashboard-preview/ExecutiveDashboardPreview'");
+      expect(dashboardPreviewContent).toContain('<ExecutiveDashboardPreview />');
+    });
+
+    it('confirms app/(dashboard)/layout.tsx wraps children in ProtectedRoute and MainLayout', () => {
+      expect(dashboardLayoutContent).toContain('<ProtectedRoute>');
+      expect(dashboardLayoutContent).toContain('<MainLayout>{children}</MainLayout>');
     });
 
     it('guards /dashboard using isRoleAllowedForRoute and redirects unauthorized roles', () => {

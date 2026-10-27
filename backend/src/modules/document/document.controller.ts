@@ -13,22 +13,73 @@ import {
   UnauthorizedException,
   StreamableFile,
   ParseIntPipe,
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpStatus,
+  Logger,
+  UseFilters,
+  PayloadTooLargeException,
 } from '@nestjs/common';
-import type { Response } from 'express';
+import type { Response, Request } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
-import { memoryStorage } from 'multer';
+import { memoryStorage, MulterError } from 'multer';
 import { DocumentService } from './document.service';
 
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 
+/**
+ * Route-scoped exception filter for Document Upload endpoint.
+ * Catches Multer errors (such as LIMIT_FILE_SIZE) and PayloadTooLargeException,
+ * normalizing them into controlled HTTP 413 / 400 responses without leaking Multer internals.
+ */
+@Catch(MulterError, PayloadTooLargeException)
+export class DocumentUploadExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(DocumentUploadExceptionFilter.name);
+
+  catch(exception: MulterError | PayloadTooLargeException, host: ArgumentsHost) {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<any>();
+    const correlationId = request?.correlationId || (request?.headers?.['x-correlation-id'] as string) || 'N/A';
+
+    const isOversize =
+      (exception instanceof MulterError && exception.code === 'LIMIT_FILE_SIZE') ||
+      exception instanceof PayloadTooLargeException ||
+      (exception as any)?.status === 413;
+
+    if (isOversize) {
+      this.logger.warn(
+        `[DocumentUpload] File size limit exceeded (>20MB) on ${request?.method || 'POST'} ${request?.url || '/api/v1/documents/upload'}. correlationId=${correlationId}`,
+      );
+      return response.status(HttpStatus.PAYLOAD_TOO_LARGE).json({
+        statusCode: HttpStatus.PAYLOAD_TOO_LARGE,
+        error: 'Payload Too Large',
+        message: 'Ukuran berkas melebihi batas maksimal 20 MB.',
+      });
+    }
+
+    this.logger.warn(
+      `[DocumentUpload] Multer error [${(exception as any).code || 'UPLOAD_ERROR'}]: ${exception.message}. correlationId=${correlationId}`,
+    );
+    return response.status(HttpStatus.BAD_REQUEST).json({
+      statusCode: HttpStatus.BAD_REQUEST,
+      error: 'Bad Request',
+      message: 'Format atau parameter berkas tidak valid.',
+    });
+  }
+}
+
 @ApiTags('Documents')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('documents')
 export class DocumentController {
+  private readonly logger = new Logger(DocumentController.name);
+
   constructor(private readonly documentService: DocumentService) {}
 
   @Post('upload')
@@ -51,6 +102,7 @@ export class DocumentController {
     storage: memoryStorage(),
     limits: { fileSize: 20 * 1024 * 1024 }, // 20MB limit
   }))
+  @UseFilters(DocumentUploadExceptionFilter)
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
     @Body('entityType') entityType: string,
@@ -58,7 +110,21 @@ export class DocumentController {
     @Req() req: any,
     @Body('category') category?: string,
   ) {
+    const correlationId = req?.correlationId || (req?.headers?.['x-correlation-id'] as string) || 'N/A';
+
+    // Diagnostic observability: Detect premature client connection termination
+    req?.on?.('close', () => {
+      if (!req.complete && !req.res?.writableEnded) {
+        this.logger.warn(
+          `[DocumentUpload] Request aborted/closed prematurely by client: entityType=${entityType}, entityId=${entityId}, correlationId=${correlationId}`,
+        );
+      }
+    });
+
     if (!file) {
+      this.logger.warn(
+        `[DocumentUpload] Rejected: file is required. correlationId=${correlationId}`,
+      );
       throw new BadRequestException('File is required');
     }
 
@@ -67,6 +133,10 @@ export class DocumentController {
       throw new UnauthorizedException('Identitas pengguna tidak ditemukan pada token');
     }
     const userRoles: string[] = req.user?.roles || (req.user?.role ? [req.user.role] : []);
+
+    this.logger.log(
+      `[DocumentUpload] Upload started: entityType=${entityType}, entityId=${entityId}, category=${category || 'NONE'}, fileName=${file.originalname}, fileSize=${file.size}, mimeType=${file.mimetype}, correlationId=${correlationId}`,
+    );
 
     const uploadArgs: any[] = [
       entityType,
@@ -79,12 +149,33 @@ export class DocumentController {
       uploadArgs.push(category);
     }
 
-    const document = await (this.documentService as any).uploadFile(...uploadArgs);
-    
-    return {
-      message: 'Document uploaded successfully',
-      data: document
-    };
+    try {
+      const document = await (this.documentService as any).uploadFile(...uploadArgs);
+      
+      this.logger.log(
+        `[DocumentUpload] Upload succeeded: documentId=${document?.id}, entityType=${entityType}, entityId=${entityId}, correlationId=${correlationId}`,
+      );
+
+      return {
+        message: 'Document uploaded successfully',
+        data: document,
+      };
+    } catch (err: any) {
+      const errName = err?.name || 'Error';
+      const errMsg = err?.message || 'Unknown error';
+      const isDbError =
+        errName.includes('QueryFailed') ||
+        errName.includes('TypeORM') ||
+        err?.code === 'ER_DUP_ENTRY';
+      const failureType = isDbError
+        ? 'DB_PERSISTENCE_FAILURE'
+        : 'SERVICE_STORAGE_FAILURE';
+
+      this.logger.error(
+        `[DocumentUpload] Failed (${failureType}): entityType=${entityType}, entityId=${entityId}, fileSize=${file?.size}, errorClass=${errName}, message=${errMsg}, correlationId=${correlationId}`,
+      );
+      throw err;
+    }
   }
 
   @Post('presigned-url')

@@ -28,6 +28,7 @@ import {
   streamSecureContractSpk,
   downloadSecureContractSpk,
 } from '@/lib/fileDelivery';
+import { uploadTaskManager } from '@/lib/uploadTaskManager';
 import {
   ProjectOutlined,
   FilePdfOutlined,
@@ -180,25 +181,46 @@ export const ProjectDetailDrawer: React.FC<ProjectDetailDrawerProps> = ({
       return;
     }
 
-    setUploading(true);
-    try {
-      await ProjectService.uploadEvidence(targetProjectId, uploadFileObj, uploadCategory);
-      message.success('Dokumen proyek berhasil diunggah.');
-      setIsUploadModalOpen(false);
-      setUploadFileObj(null);
-      setUploadCategory('CUSTOMER_BAST');
-      if (project) {
-        await fetchProjectDocuments(project);
-      }
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('epms:refetch_all'));
-      }
-    } catch (err: any) {
-      const errMsg = err?.response?.data?.message || err?.message || 'Gagal mengunggah dokumen.';
-      message.error(errMsg);
-    } finally {
-      setUploading(false);
-    }
+    if (uploading) return; // Prevent double submit
+
+    const fileToUpload = uploadFileObj;
+    const categoryToUpload = uploadCategory;
+    const currentProject = project;
+
+    // Fast non-blocking UI: immediately release modal
+    setIsUploadModalOpen(false);
+    setUploadFileObj(null);
+    setUploadCategory('CUSTOMER_BAST');
+    setUploading(false);
+
+    uploadTaskManager.startUploadTask({
+      fileName: fileToUpload.name,
+      fileSize: fileToUpload.size,
+      flowLabel: 'Dokumen Proyek',
+      file: fileToUpload,
+      uploadFn: async (onProgress) => {
+        return await ProjectService.uploadEvidence(
+          targetProjectId,
+          fileToUpload,
+          categoryToUpload,
+          undefined,
+          onProgress,
+        );
+      },
+      onSuccess: async () => {
+        message.success('Dokumen proyek berhasil diunggah.');
+        if (currentProject) {
+          await fetchProjectDocuments(currentProject);
+        }
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('epms:refetch_all'));
+        }
+      },
+      onError: (err: any) => {
+        const errMsg = err?.response?.data?.message || err?.message || 'Gagal mengunggah dokumen.';
+        message.error(errMsg);
+      },
+    });
   };
 
   // Canonical Schedule, Operational Readiness & Procurement SSOT State
