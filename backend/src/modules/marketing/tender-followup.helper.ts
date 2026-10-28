@@ -131,3 +131,37 @@ export function calculateInactivityReferenceDate(
       return null;
   }
 }
+
+/**
+ * Calculates deterministic 2-calendar-day reminder cycle index for Director escalation.
+ * Before 2 calendar days: null (not eligible).
+ * Day 2 & 3: cycleIndex = 0
+ * Day 4 & 5: cycleIndex = 1
+ * Day 6 & 7: cycleIndex = 2
+ * Formula: Math.floor((calendarDaysInactive - 2) / 2)
+ */
+export function calculateEscalationCycleIndex(calendarDaysInactive: number): number | null {
+  if (calendarDaysInactive < 2) {
+    return null;
+  }
+  return Math.floor((calendarDaysInactive - 2) / 2);
+}
+
+/**
+ * Generates a stable, collision-resistant string representation of the inactivity episode reference.
+ * If time precision is present (meaningful activity timestamp), includes hour/minute/second.
+ * If date-only (or midnight UTC/Jakarta), formats as YYYY-MM-DD.
+ */
+export function formatInactivityEpisodeRef(inactivityRef: Date): string {
+  const dateStr = toJakartaDateString(inactivityRef);
+  const d = new Date(inactivityRef.getTime());
+  const hours = d.getUTCHours();
+  const minutes = d.getUTCMinutes();
+  const seconds = d.getUTCSeconds();
+  if (hours === 0 && minutes === 0 && seconds === 0) {
+    return dateStr;
+  }
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${dateStr}T${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}`;
+}
+

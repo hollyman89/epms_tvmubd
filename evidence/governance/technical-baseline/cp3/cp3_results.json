@@ -1,0 +1,485 @@
+{
+  "allCards": [
+    {
+      "title": "Total Pipeline Value",
+      "value": "Rp 105.569.765.920",
+      "subtext": "163 Tender • 9 Menang",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Proyek Aktif",
+      "value": "4",
+      "subtext": "0 Perencanaan • 4 Eksekusi",
+      "badge": "Status Saat Ini"
+    },
+    {
+      "title": "Komitmen Pengadaan",
+      "value": "Rp 807.953.707",
+      "subtext": "12 PO Diterbitkan • 7 Selesai",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Pembayaran Vendor",
+      "value": "Rp 560.782.457",
+      "subtext": "10 Transaksi Lunas",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Invoice Outstanding",
+      "value": "Rp 0",
+      "subtext": "0 Tagihan Belum Lunas",
+      "badge": "Status Saat Ini"
+    },
+    {
+      "title": "Antrean Persetujuan",
+      "value": "0",
+      "subtext": "Tugas Manajemen",
+      "badge": "Status Saat Ini"
+    }
+  ],
+  "allSecondaryCharts": [
+    {
+      "title": "Nilai Kontrak (Won)Tren kontrak dimenangkan",
+      "emptyState": "",
+      "rectCount": 12,
+      "coloredBars": 1
+    },
+    {
+      "title": "Pembayaran VendorRealisasi pembayaran per bulan",
+      "emptyState": "",
+      "rectCount": 12,
+      "coloredBars": 1
+    },
+    {
+      "title": "Komitmen PengadaanNilai PO diterbitkan per bulan",
+      "emptyState": "",
+      "rectCount": 12,
+      "coloredBars": 1
+    }
+  ],
+  "allTables": [
+    {
+      "title": "Proyek Aktif",
+      "emptyState": "",
+      "rowCount": 4
+    },
+    {
+      "title": "Proyek Aktif",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Proyek Aktif",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Tender & Peluang Bisnis",
+      "emptyState": "",
+      "rowCount": 4
+    },
+    {
+      "title": "Tender & Peluang Bisnis",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Tender & Peluang Bisnis",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pengadaan (PO)",
+      "emptyState": "",
+      "rowCount": 4
+    },
+    {
+      "title": "Pengadaan (PO)",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pengadaan (PO)",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pembayaran & Tagihan",
+      "emptyState": "",
+      "rowCount": 4
+    },
+    {
+      "title": "Pembayaran & Tagihan",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pembayaran & Tagihan",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    }
+  ],
+  "allBanner": "Data Konsolidasian:Total mencakup 113 tender (estimasi Rp 103.979.900.005), 7 kontrak, dan 9 PO yang belum terklasifikasi ke UBD (Ragiel) atau TVM (Lukas).",
+  "ubdCards": [
+    {
+      "title": "Total Pipeline Value",
+      "value": "Rp 105.569.765.920",
+      "subtext": "163 Tender • 9 Menang",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Proyek Aktif",
+      "value": "4",
+      "subtext": "0 Perencanaan • 4 Eksekusi",
+      "badge": "Status Saat Ini"
+    },
+    {
+      "title": "Komitmen Pengadaan",
+      "value": "Rp 807.953.707",
+      "subtext": "12 PO Diterbitkan • 7 Selesai",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Pembayaran Vendor",
+      "value": "Rp 560.782.457",
+      "subtext": "10 Transaksi Lunas",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Invoice Outstanding",
+      "value": "Rp 0",
+      "subtext": "0 Tagihan Belum Lunas",
+      "badge": "Status Saat Ini"
+    },
+    {
+      "title": "Antrean Persetujuan",
+      "value": "0",
+      "subtext": "Tugas Manajemen",
+      "badge": "Status Saat Ini"
+    }
+  ],
+  "ubdSecondaryCharts": [
+    {
+      "title": "Nilai Kontrak (Won)Tren kontrak dimenangkan",
+      "emptyState": "",
+      "rectCount": 12,
+      "coloredBars": 1
+    },
+    {
+      "title": "Pembayaran VendorRealisasi pembayaran per bulan",
+      "emptyState": "",
+      "rectCount": 12,
+      "coloredBars": 1
+    },
+    {
+      "title": "Komitmen PengadaanNilai PO diterbitkan per bulan",
+      "emptyState": "",
+      "rectCount": 12,
+      "coloredBars": 1
+    }
+  ],
+  "ubdTables": [
+    {
+      "title": "Proyek Aktif",
+      "emptyState": "",
+      "rowCount": 4
+    },
+    {
+      "title": "Proyek Aktif",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Proyek Aktif",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Tender & Peluang Bisnis",
+      "emptyState": "",
+      "rowCount": 4
+    },
+    {
+      "title": "Tender & Peluang Bisnis",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Tender & Peluang Bisnis",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pengadaan (PO)",
+      "emptyState": "",
+      "rowCount": 4
+    },
+    {
+      "title": "Pengadaan (PO)",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pengadaan (PO)",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pembayaran & Tagihan",
+      "emptyState": "",
+      "rowCount": 4
+    },
+    {
+      "title": "Pembayaran & Tagihan",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pembayaran & Tagihan",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    }
+  ],
+  "ubdBanner": null,
+  "tvmCards": [
+    {
+      "title": "Total Pipeline Value",
+      "value": "Rp 0",
+      "subtext": "0 Tender • 0 Menang",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Proyek Aktif",
+      "value": "0",
+      "subtext": "0 Perencanaan • 0 Eksekusi",
+      "badge": "Status Saat Ini"
+    },
+    {
+      "title": "Komitmen Pengadaan",
+      "value": "Rp 0",
+      "subtext": "0 PO Diterbitkan • 0 Selesai",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Pembayaran Vendor",
+      "value": "Rp 0",
+      "subtext": "0 Transaksi Lunas",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Invoice Outstanding",
+      "value": "Rp 0",
+      "subtext": "0 Tagihan Belum Lunas",
+      "badge": "Status Saat Ini"
+    },
+    {
+      "title": "Antrean Persetujuan",
+      "value": "0",
+      "subtext": "Tugas Manajemen",
+      "badge": "Status Saat Ini"
+    }
+  ],
+  "tvmSecondaryCharts": [
+    {
+      "title": "Nilai Kontrak (Won)Tren kontrak dimenangkan",
+      "emptyState": "Belum ada data",
+      "rectCount": 0,
+      "coloredBars": 0
+    },
+    {
+      "title": "Pembayaran VendorRealisasi pembayaran per bulan",
+      "emptyState": "Belum ada data",
+      "rectCount": 0,
+      "coloredBars": 0
+    },
+    {
+      "title": "Komitmen PengadaanNilai PO diterbitkan per bulan",
+      "emptyState": "Belum ada data",
+      "rectCount": 0,
+      "coloredBars": 0
+    }
+  ],
+  "tvmTables": [
+    {
+      "title": "Proyek Aktif",
+      "emptyState": "Belum ada data proyek aktif",
+      "rowCount": 0
+    },
+    {
+      "title": "Proyek Aktif",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Proyek Aktif",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Tender & Peluang Bisnis",
+      "emptyState": "Belum ada data tender",
+      "rowCount": 0
+    },
+    {
+      "title": "Tender & Peluang Bisnis",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Tender & Peluang Bisnis",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pengadaan (PO)",
+      "emptyState": "Belum ada data pengadaan",
+      "rowCount": 0
+    },
+    {
+      "title": "Pengadaan (PO)",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pengadaan (PO)",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pembayaran & Tagihan",
+      "emptyState": "Belum ada data invoice",
+      "rowCount": 0
+    },
+    {
+      "title": "Pembayaran & Tagihan",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "Pembayaran & Tagihan",
+      "emptyState": "",
+      "rowCount": 0
+    },
+    {
+      "title": "",
+      "emptyState": "",
+      "rowCount": 0
+    }
+  ],
+  "tvmBanner": null,
+  "rapidCards": [
+    {
+      "title": "Total Pipeline Value",
+      "value": "Rp 0",
+      "subtext": "0 Tender • 0 Menang",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Proyek Aktif",
+      "value": "0",
+      "subtext": "0 Perencanaan • 0 Eksekusi",
+      "badge": "Status Saat Ini"
+    },
+    {
+      "title": "Komitmen Pengadaan",
+      "value": "Rp 0",
+      "subtext": "0 PO Diterbitkan • 0 Selesai",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Pembayaran Vendor",
+      "value": "Rp 0",
+      "subtext": "0 Transaksi Lunas",
+      "badge": "YTD 2026"
+    },
+    {
+      "title": "Invoice Outstanding",
+      "value": "Rp 0",
+      "subtext": "0 Tagihan Belum Lunas",
+      "badge": "Status Saat Ini"
+    },
+    {
+      "title": "Antrean Persetujuan",
+      "value": "0",
+      "subtext": "Tugas Manajemen",
+      "badge": "Status Saat Ini"
+    }
+  ],
+  "rapidSecondary": [
+    {
+      "title": "Nilai Kontrak (Won)Tren kontrak dimenangkan",
+      "emptyState": "Belum ada data",
+      "rectCount": 0,
+      "coloredBars": 0
+    },
+    {
+      "title": "Pembayaran VendorRealisasi pembayaran per bulan",
+      "emptyState": "Belum ada data",
+      "rectCount": 0,
+      "coloredBars": 0
+    },
+    {
+      "title": "Komitmen PengadaanNilai PO diterbitkan per bulan",
+      "emptyState": "Belum ada data",
+      "rectCount": 0,
+      "coloredBars": 0
+    }
+  ],
+  "legacyTitle": "EPMS UBD & TVM",
+  "consoleErrorsCount": 7
+}

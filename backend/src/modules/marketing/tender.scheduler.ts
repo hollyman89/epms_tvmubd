@@ -17,6 +17,8 @@ import {
   toJakartaDateString,
   diffInJakartaCalendarDays,
   calculateInactivityReferenceDate,
+  calculateEscalationCycleIndex,
+  formatInactivityEpisodeRef,
 } from './tender-followup.helper';
 
 @Injectable()
@@ -846,53 +848,151 @@ export class TenderScheduler {
               const calendarDaysInactive = diffInJakartaCalendarDays(new Date(), inactivityRef);
               if (calendarDaysInactive >= 2 && directorIds.length > 0) {
                 const cycleRefDateStr = toJakartaDateString(inactivityRef);
-                const escalationEventId = `marketing-escalation:${tender.id}:${cycleRefDateStr}`;
+                const episodeRefStr = formatInactivityEpisodeRef(inactivityRef);
+                const cycleIndex = calculateEscalationCycleIndex(calendarDaysInactive);
 
-                const existingEscalation = await manager.query(
-                  `SELECT id FROM outbox_events WHERE event_id = ? LIMIT 1`,
-                  [escalationEventId]
-                );
+                if (cycleIndex !== null) {
+                  const escalationEventId = `marketing-escalation:${tender.id}:${episodeRefStr}:cycle-${cycleIndex}`;
 
-                if (existingEscalation && existingEscalation.length > 0) {
-                  this.logger.debug(
-                    `[FOLLOWUP_ESCALATION_DUPLICATE_SKIPPED] Escalation event ${escalationEventId} already exists for cycle ${cycleRefDateStr}.`
+                  // 1. Check if the cycle-specific event already exists in outbox
+                  const existingEscalation = await manager.query(
+                    `SELECT id FROM outbox_events WHERE event_id = ? LIMIT 1`,
+                    [escalationEventId]
                   );
-                } else {
-                  const picUser = await manager.query(
-                    `SELECT full_name FROM users WHERE id = ? LIMIT 1`,
-                    [responsibleUserId]
-                  );
-                  const picFullName =
-                    picUser && picUser[0]?.full_name ? picUser[0].full_name : `User #${responsibleUserId}`;
 
-                  const escalationEvent: BusinessEvent = {
-                    eventId: escalationEventId,
-                    eventName: 'marketing.tender.director_escalation',
-                    eventVersion: 1,
-                    occurredAt: new Date().toISOString(),
-                    aggregateType: 'Tender',
-                    aggregateId: tender.id,
-                    actor: { userId: null, roles: ['SYSTEM'] },
-                    routing: { userIds: directorIds },
-                    payload: {
-                      tenderId: tender.id,
-                      title: tender.title,
-                      customerName: tender.customer?.name || 'N/A',
-                      picUserId: responsibleUserId,
-                      picFullName,
-                      stage: tender.stage,
-                      conditionType: currentEval.conditionType,
-                      reason: currentEval.reason,
-                      bidSubmissionDeadline: tender.bid_submission_deadline,
-                      lastMeaningfulFollowUp: latestMeaningfulDate ? latestMeaningfulDate.toISOString() : null,
-                      calendarDaysInactive,
-                      inactivityReferenceDate: cycleRefDateStr,
-                    },
-                  };
-                  await this.saveOutboxEvent(manager, escalationEvent);
-                  this.logger.log(
-                    `[FOLLOWUP_ESCALATION_EMITTED] Emitted Director escalation for Tender #${tender.id} (${calendarDaysInactive} days inactive).`
-                  );
+                  let shouldSkip = Boolean(existingEscalation && existingEscalation.length > 0);
+
+                  // 2. Legacy event compatibility check
+                  if (!shouldSkip) {
+                    const legacyEventId = `marketing-escalation:${tender.id}:${cycleRefDateStr}`;
+                    const legacyEvents = await manager.query(
+                      `SELECT id, created_at, payload FROM outbox_events WHERE event_id = ? LIMIT 1`,
+                      [legacyEventId]
+                    );
+
+                    if (legacyEvents && legacyEvents.length > 0) {
+                      const legacy = legacyEvents[0];
+                      
+                      // 1. Parse legacy.payload before extracting occurredAt or businessPayload
+                      let legacyPayload = legacy.payload;
+                      if (typeof legacyPayload === 'string') {
+                        try {
+                          legacyPayload = JSON.parse(legacyPayload);
+                        } catch {
+                          legacyPayload = null;
+                        }
+                      }
+                      const legacyBusinessPayload = legacyPayload?.businessPayload || legacyPayload;
+                      const legacyTimestamp = legacy.created_at || legacyPayload?.occurredAt;
+                      const currentFollowUpStr = latestMeaningfulDate ? latestMeaningfulDate.toISOString() : null;
+
+                      // Check if legacy event has explicit episode evidence (lastMeaningfulFollowUp)
+                      const hasLegacyFollowUpEvidence = Boolean(
+                        legacyBusinessPayload && 'lastMeaningfulFollowUp' in legacyBusinessPayload
+                      );
+
+                      if (hasLegacyFollowUpEvidence) {
+                        // A. Explicit evidence exists: compare follow-up timestamps
+                        if (legacyBusinessPayload.lastMeaningfulFollowUp !== currentFollowUpStr) {
+                          // Proven different episode
+                          this.logger.debug(
+                            `[FOLLOWUP_ESCALATION_LEGACY_DIFF_EPISODE] Legacy event ${legacyEventId} follow-up (${legacyBusinessPayload.lastMeaningfulFollowUp}) differs from current (${currentFollowUpStr}). Not suppressing.`
+                          );
+                        } else if (legacyTimestamp) {
+                          // Proven same episode with timestamp
+                          const legacyDaysInactive = diffInJakartaCalendarDays(legacyTimestamp, inactivityRef);
+                          const legacyCycleIndex = calculateEscalationCycleIndex(legacyDaysInactive);
+                          if (legacyCycleIndex !== null && legacyCycleIndex === cycleIndex) {
+                            shouldSkip = true;
+                            this.logger.debug(
+                              `[FOLLOWUP_ESCALATION_LEGACY_COVERED] Legacy event ${legacyEventId} (created ${legacyTimestamp}) already covered cycle ${cycleIndex}. Suppressing duplicate.`
+                            );
+                          }
+                        } else if (cycleIndex === 0) {
+                          // Proven same episode, untimed: conservatively suppress cycle 0 only
+                          shouldSkip = true;
+                          this.logger.debug(
+                            `[FOLLOWUP_ESCALATION_LEGACY_COVERED] Legacy event ${legacyEventId} same episode without timestamp assumed covering cycle 0. Suppressing duplicate.`
+                          );
+                        }
+                      } else if (currentFollowUpStr === null) {
+                        // B. Both current and legacy are deadline-based (no meaningful activity on this date)
+                        if (legacyTimestamp) {
+                          const legacyDate = new Date(legacyTimestamp);
+                          if (legacyDate.getTime() < inactivityRef.getTime()) {
+                            this.logger.debug(
+                              `[FOLLOWUP_ESCALATION_LEGACY_PRIOR] Legacy event ${legacyEventId} created at ${legacyTimestamp} before deadline reference ${inactivityRef.toISOString()}. Not suppressing.`
+                            );
+                          } else {
+                            const legacyDaysInactive = diffInJakartaCalendarDays(legacyTimestamp, inactivityRef);
+                            const legacyCycleIndex = calculateEscalationCycleIndex(legacyDaysInactive);
+                            if (legacyCycleIndex !== null && legacyCycleIndex === cycleIndex) {
+                              shouldSkip = true;
+                              this.logger.debug(
+                                `[FOLLOWUP_ESCALATION_LEGACY_COVERED] Legacy event ${legacyEventId} (created ${legacyTimestamp}) already covered deadline cycle ${cycleIndex}. Suppressing duplicate.`
+                              );
+                            }
+                          }
+                        } else if (cycleIndex === 0) {
+                          shouldSkip = true;
+                          this.logger.debug(
+                            `[FOLLOWUP_ESCALATION_LEGACY_COVERED] Legacy event ${legacyEventId} deadline without timestamp assumed covering cycle 0. Suppressing duplicate.`
+                          );
+                        }
+                      } else {
+                        // C. Ambiguous: Current episode has a specific activity (currentFollowUpStr !== null),
+                        // but legacy record lacks lastMeaningfulFollowUp evidence.
+                        // created_at alone CANNOT prove which episode it belongs to.
+                        // Do not silently classify as covering current cycle; log warning and do not suppress.
+                        this.logger.warn(
+                          `[FOLLOWUP_ESCALATION_LEGACY_AMBIGUOUS] Legacy event ${legacyEventId} lacks lastMeaningfulFollowUp evidence to correlate with activity at ${currentFollowUpStr}. Timestamp: ${legacyTimestamp || 'none'}. Ambiguous episode: not suppressing to ensure escalation is not silently lost.`
+                        );
+                      }
+                    }
+                  }
+
+                  if (shouldSkip) {
+                    this.logger.debug(
+                      `[FOLLOWUP_ESCALATION_DUPLICATE_SKIPPED] Escalation event ${escalationEventId} already exists or covered for cycle ${cycleIndex}.`
+                    );
+                  } else {
+                    const picUser = await manager.query(
+                      `SELECT full_name FROM users WHERE id = ? LIMIT 1`,
+                      [responsibleUserId]
+                    );
+                    const picFullName =
+                      picUser && picUser[0]?.full_name ? picUser[0].full_name : `User #${responsibleUserId}`;
+
+                    const escalationEvent: BusinessEvent = {
+                      eventId: escalationEventId,
+                      eventName: 'marketing.tender.director_escalation',
+                      eventVersion: 1,
+                      occurredAt: new Date().toISOString(),
+                      aggregateType: 'Tender',
+                      aggregateId: tender.id,
+                      actor: { userId: null, roles: ['SYSTEM'] },
+                      routing: { userIds: directorIds },
+                      payload: {
+                        tenderId: tender.id,
+                        title: tender.title,
+                        customerName: tender.customer?.name || 'N/A',
+                        picUserId: responsibleUserId,
+                        picFullName,
+                        stage: tender.stage,
+                        conditionType: currentEval.conditionType,
+                        reason: currentEval.reason,
+                        bidSubmissionDeadline: tender.bid_submission_deadline,
+                        lastMeaningfulFollowUp: latestMeaningfulDate ? latestMeaningfulDate.toISOString() : null,
+                        calendarDaysInactive,
+                        inactivityReferenceDate: cycleRefDateStr,
+                        cycleIndex,
+                      },
+                    };
+                    await this.saveOutboxEvent(manager, escalationEvent);
+                    this.logger.log(
+                      `[FOLLOWUP_ESCALATION_EMITTED] Emitted Director escalation for Tender #${tender.id} (cycle ${cycleIndex}, ${calendarDaysInactive} days inactive).`
+                    );
+                  }
                 }
               }
             }

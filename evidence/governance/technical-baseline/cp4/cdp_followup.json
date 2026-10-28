@@ -1,0 +1,250 @@
+{
+  "reload404": [],
+  "scopes": {
+    "ALL": {
+      "legendOk": true,
+      "pctOk": true,
+      "sumOk": true,
+      "legendUI": [
+        "Perencanaan=0(0%)",
+        "Sedang Eksekusi=4(44%)",
+        "Selesai=5(56%)",
+        "Ditunda=0(0%)",
+        "Dibatalkan=0(0%)"
+      ],
+      "donut": "9",
+      "apiTotal": 9,
+      "geo": {
+        "Pembayaran Vendor": {
+          "bars": 12,
+          "months": "Jan,Feb,Mar,Apr,Mei,Jun,Jul,Agu,Sep,Okt,Nov,Des",
+          "colorOk": true,
+          "heightOk": false,
+          "yTop": "701 jt",
+          "apiMax": 560782457,
+          "pass": false
+        },
+        "Komitmen Pengadaan": {
+          "bars": 12,
+          "months": "Jan,Feb,Mar,Apr,Mei,Jun,Jul,Agu,Sep,Okt,Nov,Des",
+          "colorOk": true,
+          "heightOk": false,
+          "yTop": "1010 jt",
+          "apiMax": 807953707,
+          "pass": false
+        },
+        "Nilai Kontrak (Won)": {
+          "bars": 12,
+          "months": "Jan,Feb,Mar,Apr,Mei,Jun,Jul,Agu,Sep,Okt,Nov,Des",
+          "colorOk": true,
+          "heightOk": false,
+          "yTop": "127.0 M",
+          "apiMax": 101578875322,
+          "pass": false
+        }
+      }
+    },
+    "UBD": {
+      "legendOk": true,
+      "pctOk": true,
+      "sumOk": true,
+      "legendUI": [
+        "Perencanaan=0(0%)",
+        "Sedang Eksekusi=0(0%)",
+        "Selesai=2(100%)",
+        "Ditunda=0(0%)",
+        "Dibatalkan=0(0%)"
+      ],
+      "donut": "2",
+      "apiTotal": 2,
+      "geo": {
+        "Pembayaran Vendor": {
+          "bars": 12,
+          "months": "Jan,Feb,Mar,Apr,Mei,Jun,Jul,Agu,Sep,Okt,Nov,Des",
+          "colorOk": true,
+          "heightOk": false,
+          "yTop": "262 jt",
+          "apiMax": 209483500,
+          "pass": false
+        },
+        "Komitmen Pengadaan": {
+          "bars": 12,
+          "months": "Jan,Feb,Mar,Apr,Mei,Jun,Jul,Agu,Sep,Okt,Nov,Des",
+          "colorOk": true,
+          "heightOk": false,
+          "yTop": "262 jt",
+          "apiMax": 209483500,
+          "pass": false
+        },
+        "Nilai Kontrak (Won)": {
+          "bars": 12,
+          "months": "Jan,Feb,Mar,Apr,Mei,Jun,Jul,Agu,Sep,Okt,Nov,Des",
+          "colorOk": true,
+          "heightOk": false,
+          "yTop": "497 jt",
+          "apiMax": 397805463,
+          "pass": false
+        }
+      }
+    },
+    "TVM": {
+      "legendOk": true,
+      "pctOk": true,
+      "sumOk": true,
+      "legendUI": [
+        "Perencanaan=0(0%)",
+        "Sedang Eksekusi=0(0%)",
+        "Selesai=0(0%)",
+        "Ditunda=0(0%)",
+        "Dibatalkan=0(0%)"
+      ],
+      "donut": "0",
+      "apiTotal": 0,
+      "geo": {
+        "Pembayaran Vendor": {
+          "expected": "EMPTY_STATE",
+          "actual": "EMPTY_STATE",
+          "pass": true
+        },
+        "Komitmen Pengadaan": {
+          "expected": "EMPTY_STATE",
+          "actual": "EMPTY_STATE",
+          "pass": true
+        },
+        "Nilai Kontrak (Won)": {
+          "expected": "EMPTY_STATE",
+          "actual": "EMPTY_STATE",
+          "pass": true
+        }
+      }
+    }
+  },
+  "allTime": {
+    "selectorState": [
+      "UBD",
+      "ALL_TIME"
+    ],
+    "http": 400,
+    "apiMessage": [
+      "period must be one of the following values: THIS_MONTH, LAST_QUARTER, YEAR_TO_DATE, LAST_MONTH, THIS_QUARTER, CUSTOM"
+    ],
+    "requests": [
+      "GET /api/v1/dashboard/executive-summary?period=ALL_TIME&divisionId=UBD -> 400",
+      "GET /api/v1/inbox/todos -> 200",
+      "GET /api/v1/inbox/history -> 200",
+      "GET /api/v1/procurement/purchase-orders -> 200",
+      "GET /api/v1/finance/invoices?limit=4 -> 200",
+      "GET /api/v1/finance/payments -> 200",
+      "GET /api/v1/contracts -> 200",
+      "GET /api/v1/marketing/tenders?limit=4 -> 200",
+      "GET /api/v1/project/operational-board -> 200"
+    ],
+    "cardsBefore_UBD_YTD": [
+      "Total Pipeline Value=Rp 1.589.865.915",
+      "Proyek Aktif=0",
+      "Komitmen Pengadaan=Rp 209.483.500",
+      "Pembayaran Vendor=Rp 209.483.500",
+      "Invoice Outstanding=Rp 0",
+      "Antrean Persetujuan=0"
+    ],
+    "cardsAfter_UBD_ALLTIME": [
+      "Total Pipeline Value=Rp 0",
+      "Proyek Aktif=0",
+      "Komitmen Pengadaan=Rp 0",
+      "Pembayaran Vendor=Rp 0",
+      "Invoice Outstanding=Rp 0",
+      "Antrean Persetujuan=0"
+    ],
+    "donutAfter": "0",
+    "closedAfter": [
+      "0",
+      "Rp 0"
+    ],
+    "tablesBefore": [
+      {
+        "title": "Proyek Aktif",
+        "rows": [
+          "Belum ada data proyek aktif"
+        ]
+      },
+      {
+        "title": "Tender & Peluang Bisnis",
+        "rows": [
+          "Sewa Core_Fiberization_ Program New and Additional Q2 Capacity Expansion AOP 2025_JB_TSK_RG0011 JB_TSK_RG0011Project Sokka Tama Fiber",
+          "Sewa Core_Fiberization_ Program New and Additional Q2 Capacity Expansion AOP 2025_JB_TSK_RG0011 JB_TSK_RG0011Project Sokka Tama Fiber",
+          "Sewa Core_Fiberization_ Program New and Additional Q2 Capacity Expansion AOP 2025_JB_TSK_RG0011 JB_TSK_RG0011Project Sokka Tama Fiber",
+          "Sewa Core Fiberization_Insert Site Rancaupas & Rancabali_JB_SOR_SI0021 JB_SOR_SI0021Project Sokka Tama Fiber"
+        ]
+      },
+      {
+        "title": "Pengadaan (PO)",
+        "rows": [
+          "PO-20261020-001",
+          "PO-20261018-002",
+          "PO-20261018-001"
+        ]
+      },
+      {
+        "title": "Pembayaran & Tagihan",
+        "rows": [
+          "INV-20261021-001",
+          "INV-20261018-002",
+          "INV-20261018-001"
+        ]
+      }
+    ],
+    "tablesAfter": [
+      {
+        "title": "Proyek Aktif",
+        "rows": [
+          "PROJECT SKF BEKASICONT-20261023-0009",
+          "PROJECT SKF BEKASICONT-20261021-0006",
+          "PROJECT SKF BEKASICONT-20261021-0007",
+          "PROJECT PERCOBAAN UNTUK DEBUGCONT-20261022-0008"
+        ]
+      },
+      {
+        "title": "Tender & Peluang Bisnis",
+        "rows": [
+          "PROJECT PERCOBAAN UNTUK DEBUGPROJECT SKF",
+          "PROJECT ASIANET (PR26002041) PERCOBAAN 3Project Sokka Tama Fiber",
+          "PROJECT ASIANET (PR26002041) PERCOBAAN 2Project Sokka Tama Fiber",
+          "PROJECT ASIANET (PR26002041) PERCOBAAN Project Sokka Tama Fiber"
+        ]
+      },
+      {
+        "title": "Pengadaan (PO)",
+        "rows": [
+          "PO-20261023-003",
+          "PO-20261023-002",
+          "PO-20261023-001",
+          "PO-20261021-005"
+        ]
+      },
+      {
+        "title": "Pembayaran & Tagihan",
+        "rows": [
+          "INV-20261018-001",
+          "INV-20261018-002",
+          "INV-20261021-001",
+          "INV-20261021-002"
+        ]
+      }
+    ],
+    "uiErrorsShown": [
+      "Peringatan Filter Divisi: [\"period must be one of the following values: THIS_MONTH, LAST_QUARTER, YEAR_TO_DATE, LAST_MONTH, THIS_QUARTER, CUSTOM\"]Kembali ke Semua Divisi",
+      "Peringatan Filter Divisi: [\"period must be one of the following values: THIS_MONTH, LAST_QUARTER, YEAR_TO_DATE, LAST_MONTH, THIS_QUARTER, CUSTOM\"]"
+    ],
+    "updateBefore": "Update Terakhir: 26 Okt 2026, 20.32",
+    "updateAfter": "Update Terakhir: 26 Okt 2026, 08:30"
+  },
+  "restored": {
+    "division": "ALL",
+    "period": "YEAR_TO_DATE",
+    "pipeline": {
+      "label": "Total Pipeline Value",
+      "value": "Rp 105.569.765.920"
+    }
+  },
+  "all404": []
+}

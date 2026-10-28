@@ -1,0 +1,156 @@
+/* Modal container and responsive overrides */
+.modalHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.modalHeaderIcon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background-color: #eff6ff;
+  border: 1px solid #dbeafe;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.modalHeaderTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.claimSelectWrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f8fafc;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  flex-wrap: wrap;
+}
+
+.claimSelectLabel {
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.claimSelectDropdown {
+  min-width: 280px;
+  flex: 1;
+}
+
+/* Information Grid */
+.infoGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px 24px;
+}
+
+/* Table container */
+.tableWrapper {
+  padding: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Decision Action Buttons (P0 Core) */
+.decisionButtonGroup {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.decisionButton {
+  border-radius: 6px;
+  font-weight: 500;
+}
+
+/* Footer Action Buttons */
+.modalFooterActions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+}
+
+.secondaryActionBtn {
+  border-radius: 6px;
+  height: 36px;
+  padding: 0 16px;
+}
+
+.primaryActionBtn {
+  background-color: #2563eb;
+  border-color: #2563eb;
+  border-radius: 6px;
+  font-weight: 500;
+  height: 36px;
+  padding: 0 20px;
+}
+
+/* Responsive adjustments (< 640px) */
+@media (max-width: 640px) {
+  .modalHeaderTitle {
+    font-size: 14.5px;
+  }
+
+  .claimSelectWrapper {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .claimSelectDropdown {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .infoGrid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .decisionButtonGroup {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .decisionButton {
+    width: 100% !important;
+    height: 38px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 13px !important;
+  }
+
+  .modalFooterActions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .secondaryActionBtn,
+  .primaryActionBtn {
+    width: 100% !important;
+    height: 40px !important;
+  }
+}

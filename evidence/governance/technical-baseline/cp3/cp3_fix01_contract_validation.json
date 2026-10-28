@@ -1,0 +1,405 @@
+{
+  "testTimestamp": "2026-10-26T11:44:30.417Z",
+  "targetUrl": "http://localhost:3000/dashboard-preview",
+  "cdpEndpoint": "http://127.0.0.1:9222",
+  "allState": {
+    "scope": "ALL",
+    "title": "Nilai Kontrak (Won)Tren kontrak dimenangkan",
+    "subtitle": "Tren kontrak dimenangkan",
+    "emptyState": null,
+    "yAxisLabels": [
+      "127.0 M",
+      "63.5 M",
+      "0"
+    ],
+    "coloredBarsCount": 1,
+    "activeBar": {
+      "month": "Okt",
+      "value": 101578875322,
+      "count": 9,
+      "titleText": "Okt: Rp 101.578.875.322 (9 Kontrak)",
+      "fill": "#10B981",
+      "isColored": true
+    },
+    "bars": [
+      {
+        "month": "Jan",
+        "value": 0,
+        "count": 0,
+        "titleText": "Jan: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Feb",
+        "value": 0,
+        "count": 0,
+        "titleText": "Feb: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Mar",
+        "value": 0,
+        "count": 0,
+        "titleText": "Mar: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Apr",
+        "value": 0,
+        "count": 0,
+        "titleText": "Apr: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Mei",
+        "value": 0,
+        "count": 0,
+        "titleText": "Mei: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Jun",
+        "value": 0,
+        "count": 0,
+        "titleText": "Jun: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Jul",
+        "value": 0,
+        "count": 0,
+        "titleText": "Jul: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Agu",
+        "value": 0,
+        "count": 0,
+        "titleText": "Agu: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Sep",
+        "value": 0,
+        "count": 0,
+        "titleText": "Sep: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Okt",
+        "value": 101578875322,
+        "count": 9,
+        "titleText": "Okt: Rp 101.578.875.322 (9 Kontrak)",
+        "fill": "#10B981",
+        "isColored": true
+      },
+      {
+        "month": "Nov",
+        "value": 0,
+        "count": 0,
+        "titleText": "Nov: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Des",
+        "value": 0,
+        "count": 0,
+        "titleText": "Des: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      }
+    ],
+    "apiOctPoint": {
+      "month": "Okt",
+      "monthNum": 9,
+      "value": 101578875322,
+      "count": 9
+    },
+    "pipelineCardVal": "Rp 105.569.765.920"
+  },
+  "ubdState": {
+    "scope": "UBD",
+    "title": "Nilai Kontrak (Won)Tren kontrak dimenangkan",
+    "subtitle": "Tren kontrak dimenangkan",
+    "emptyState": null,
+    "yAxisLabels": [
+      "497 jt",
+      "249 jt",
+      "0"
+    ],
+    "coloredBarsCount": 1,
+    "activeBar": {
+      "month": "Okt",
+      "value": 397805463,
+      "count": 2,
+      "titleText": "Okt: Rp 397.805.463 (2 Kontrak)",
+      "fill": "#10B981",
+      "isColored": true
+    },
+    "bars": [
+      {
+        "month": "Jan",
+        "value": 0,
+        "count": 0,
+        "titleText": "Jan: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Feb",
+        "value": 0,
+        "count": 0,
+        "titleText": "Feb: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Mar",
+        "value": 0,
+        "count": 0,
+        "titleText": "Mar: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Apr",
+        "value": 0,
+        "count": 0,
+        "titleText": "Apr: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Mei",
+        "value": 0,
+        "count": 0,
+        "titleText": "Mei: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Jun",
+        "value": 0,
+        "count": 0,
+        "titleText": "Jun: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Jul",
+        "value": 0,
+        "count": 0,
+        "titleText": "Jul: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Agu",
+        "value": 0,
+        "count": 0,
+        "titleText": "Agu: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Sep",
+        "value": 0,
+        "count": 0,
+        "titleText": "Sep: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Okt",
+        "value": 397805463,
+        "count": 2,
+        "titleText": "Okt: Rp 397.805.463 (2 Kontrak)",
+        "fill": "#10B981",
+        "isColored": true
+      },
+      {
+        "month": "Nov",
+        "value": 0,
+        "count": 0,
+        "titleText": "Nov: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Des",
+        "value": 0,
+        "count": 0,
+        "titleText": "Des: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      }
+    ],
+    "apiOctPoint": {
+      "month": "Okt",
+      "monthNum": 9,
+      "value": 397805463,
+      "count": 2
+    },
+    "pipelineCardVal": "Rp 1.589.865.915"
+  },
+  "tvmState": {
+    "scope": "TVM",
+    "title": "Nilai Kontrak (Won)Tren kontrak dimenangkan",
+    "subtitle": "Tren kontrak dimenangkan",
+    "emptyState": "Belum ada data",
+    "yAxisLabels": [],
+    "coloredBarsCount": 0,
+    "activeBar": null,
+    "bars": [],
+    "apiOctPoint": {
+      "month": "Okt",
+      "monthNum": 9,
+      "value": 0,
+      "count": 0
+    },
+    "pipelineCardVal": "Rp 0"
+  },
+  "finalAllState": {
+    "scope": "ALL",
+    "title": "Nilai Kontrak (Won)Tren kontrak dimenangkan",
+    "subtitle": "Tren kontrak dimenangkan",
+    "emptyState": null,
+    "yAxisLabels": [
+      "127.0 M",
+      "63.5 M",
+      "0"
+    ],
+    "coloredBarsCount": 1,
+    "activeBar": {
+      "month": "Okt",
+      "value": 101578875322,
+      "count": 9,
+      "titleText": "Okt: Rp 101.578.875.322 (9 Kontrak)",
+      "fill": "#10B981",
+      "isColored": true
+    },
+    "bars": [
+      {
+        "month": "Jan",
+        "value": 0,
+        "count": 0,
+        "titleText": "Jan: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Feb",
+        "value": 0,
+        "count": 0,
+        "titleText": "Feb: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Mar",
+        "value": 0,
+        "count": 0,
+        "titleText": "Mar: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Apr",
+        "value": 0,
+        "count": 0,
+        "titleText": "Apr: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Mei",
+        "value": 0,
+        "count": 0,
+        "titleText": "Mei: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Jun",
+        "value": 0,
+        "count": 0,
+        "titleText": "Jun: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Jul",
+        "value": 0,
+        "count": 0,
+        "titleText": "Jul: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Agu",
+        "value": 0,
+        "count": 0,
+        "titleText": "Agu: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Sep",
+        "value": 0,
+        "count": 0,
+        "titleText": "Sep: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Okt",
+        "value": 101578875322,
+        "count": 9,
+        "titleText": "Okt: Rp 101.578.875.322 (9 Kontrak)",
+        "fill": "#10B981",
+        "isColored": true
+      },
+      {
+        "month": "Nov",
+        "value": 0,
+        "count": 0,
+        "titleText": "Nov: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      },
+      {
+        "month": "Des",
+        "value": 0,
+        "count": 0,
+        "titleText": "Des: Rp 0 (0 Kontrak)",
+        "fill": "#E2E8F0",
+        "isColored": false
+      }
+    ],
+    "apiOctPoint": {
+      "month": "Okt",
+      "monthNum": 9,
+      "value": 101578875322,
+      "count": 9
+    },
+    "pipelineCardVal": "Rp 105.569.765.920"
+  },
+  "screenshots": [
+    "CP3_FIX01_ALL_contract.png",
+    "CP3_FIX01_UBD_contract.png",
+    "CP3_FIX01_TVM_contract.png"
+  ],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}

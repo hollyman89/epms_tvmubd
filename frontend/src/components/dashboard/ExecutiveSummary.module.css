@@ -1,0 +1,288 @@
+/* EPMS Executive Dashboard — Executive Summary (Phase 4B / Phase 5B) */
+
+.container {
+  display: grid;
+  grid-template-columns: 1.15fr 2fr 0.85fr;
+  gap: 14px;
+  align-items: stretch;
+  margin-bottom: 16px;
+  box-sizing: border-box;
+}
+
+/* 1. Executive Welcome Hero Banner */
+.welcomeCard {
+  background: linear-gradient(135deg, #0f2d6b 0%, #1e3a8a 100%);
+  border-radius: var(--dash-radius-card, 14px);
+  padding: 20px 22px;
+  color: #ffffff;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-shadow: var(--dash-shadow-card, 0 1px 3px 0 rgba(15, 23, 42, 0.04));
+  min-height: 164px;
+  box-sizing: border-box;
+}
+
+.welcomeCityscape {
+  position: absolute;
+  right: -10px;
+  top: 0;
+  bottom: 0;
+  width: 55%;
+  background-image: url('/epms-cityscape.svg');
+  background-repeat: no-repeat;
+  background-position: right center;
+  background-size: cover;
+  opacity: 0.35;
+  pointer-events: none;
+  mask-image: linear-gradient(to right, transparent 0%, black 50%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 50%);
+}
+
+.welcomeContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+}
+
+.welcomeTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.welcomeSparkle {
+  color: #60a5fa;
+  font-size: 16px;
+}
+
+.welcomeGreeting {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: #93c5fd;
+  margin-bottom: 2px;
+  display: block;
+}
+
+.welcomeName {
+  font-size: 24px;
+  font-weight: 700;
+  color: #ffffff;
+  margin: 0 0 6px 0;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.welcomeSubtitle {
+  font-size: 13px;
+  font-weight: 400;
+  color: #cbd5e1;
+  line-height: 1.45;
+  margin: 0;
+  max-width: 90%;
+}
+
+/* 2. Executive Summary Bullet Card */
+.summaryCard {
+  background-color: var(--dash-surface, #ffffff);
+  border: 1px solid var(--dash-border, #e2e8f0);
+  border-radius: var(--dash-radius-card, 14px);
+  padding: 18px 22px;
+  box-shadow: var(--dash-shadow-card, 0 1px 3px 0 rgba(15, 23, 42, 0.04));
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  min-height: 164px;
+  box-sizing: border-box;
+}
+
+.summaryHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.summaryHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.summaryIconBox {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background-color: var(--dash-primary-blue-subtle, #eff6ff);
+  color: var(--dash-primary-blue, #2563eb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.summaryTitle {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--dash-text-primary, #0f172a);
+  letter-spacing: -0.015em;
+}
+
+.bulletList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bulletItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--dash-text-secondary, #334155);
+  line-height: 1.42;
+}
+
+.bulletDot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--dash-primary-blue, #2563eb);
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.bulletDotAttention {
+  background-color: var(--dash-warning, #f59e0b);
+}
+
+.bulletDotSuccess {
+  background-color: var(--dash-success, #10b981);
+}
+
+.bulletText {
+  font-weight: 500;
+}
+
+.bulletHighlight {
+  font-weight: 700;
+  color: var(--dash-text-primary, #0f172a);
+}
+
+/* 3. Date & Quick Overview Card */
+.dateCard {
+  background-color: var(--dash-surface, #ffffff);
+  border: 1px solid var(--dash-border, #e2e8f0);
+  border-radius: var(--dash-radius-card, 14px);
+  padding: 18px;
+  box-shadow: var(--dash-shadow-card, 0 1px 3px 0 rgba(15, 23, 42, 0.04));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  min-height: 164px;
+  box-sizing: border-box;
+}
+
+.dateDay {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dash-text-muted, #64748b);
+  margin-bottom: 2px;
+}
+
+.dateValue {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--dash-text-primary, #0f172a);
+  margin-bottom: 8px;
+  letter-spacing: -0.02em;
+}
+
+.dateIconBox {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1.5px solid #bfdbfe;
+  background-color: #eff6ff;
+  color: var(--dash-primary-blue, #2563eb);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  transition: transform 0.15s ease;
+}
+
+.dateIconBox:hover {
+  transform: scale(1.05);
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+  .container {
+    grid-template-columns: 1.2fr 1.8fr;
+  }
+  .dateCard {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .container {
+    grid-template-columns: 1fr;
+    display: none; /* Mobile view has its own dedicated mobileHeroSection */
+  }
+}
+
+/* Financial Availability Strip */
+.financialStrip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding-top: 10px;
+  margin-top: 10px;
+  border-top: 1px dashed var(--dash-border, #E2E8F0);
+}
+
+.financialItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 110px;
+}
+
+.financialLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dash-text-muted, #64748B);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.financialValue {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--dash-primary-navy, #0F2D6B);
+  font-variant-numeric: tabular-nums;
+}
+
+.financialMuted {
+  font-size: 12px;
+  font-weight: 500;
+  color: #94A3B8;
+  font-style: italic;
+}
+

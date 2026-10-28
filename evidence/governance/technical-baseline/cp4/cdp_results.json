@@ -1,0 +1,3582 @@
+{
+  "startedAt": "2026-10-26T13:29:16.821Z",
+  "scenarios": {
+    "D_reload_ALL": {
+      "requests": [
+        "GET /api/v1/dashboard/divisions -> 200 (+602ms)",
+        "GET /api/v1/notifications/count/unread -> 200 (+604ms)",
+        "GET /api/v1/dashboard/executive-summary?period=YEAR_TO_DATE -> 200 (+795ms)",
+        "GET /api/v1/notifications/count/unread -> 200 (+823ms)",
+        "GET /api/v1/inbox/todos -> 200 (+881ms)",
+        "GET /api/v1/inbox/todos -> 200 (+981ms)",
+        "GET /api/v1/inbox/history -> 200 (+1307ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "YEAR_TO_DATE",
+      "generatedAt": "2026-10-26T13:29:17.727Z",
+      "windowStart": "2025-12-31T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "YEAR_TO_DATE"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 105569765920,
+          "api": 105569765920,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 807953707,
+          "api": 807953707,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 560782457,
+          "api": 560782457,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ],
+      "browserApiVsDb": [
+        {
+          "metric": "pipelineValue",
+          "browserApi": 105569765920,
+          "db": 105569765920,
+          "pass": true
+        },
+        {
+          "metric": "pipelineCount",
+          "browserApi": 163,
+          "db": 163,
+          "pass": true
+        },
+        {
+          "metric": "active",
+          "browserApi": 4,
+          "db": 4,
+          "pass": true
+        },
+        {
+          "metric": "totalProjects",
+          "browserApi": 9,
+          "db": 9,
+          "pass": true
+        },
+        {
+          "metric": "closedCount",
+          "browserApi": 5,
+          "db": 5,
+          "pass": true
+        },
+        {
+          "metric": "closedValue",
+          "browserApi": 910822821,
+          "db": 910822821,
+          "pass": true
+        },
+        {
+          "metric": "poValue",
+          "browserApi": 807953707,
+          "db": 807953707,
+          "pass": true
+        },
+        {
+          "metric": "poCount",
+          "browserApi": 12,
+          "db": 12,
+          "pass": true
+        },
+        {
+          "metric": "payValue",
+          "browserApi": 560782457,
+          "db": 560782457,
+          "pass": true
+        },
+        {
+          "metric": "payCount",
+          "browserApi": 10,
+          "db": 10,
+          "pass": true
+        },
+        {
+          "metric": "apValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "approvals",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        }
+      ],
+      "dbMismatch": [],
+      "screenshot": "C:\\Users\\UBDOPS3\\Herd\\epms_tvmubd\\scratch\\evidence_cp4\\CP4_ALL.png"
+    },
+    "A_refresh_ALL": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=YEAR_TO_DATE -> 200 (+332ms)",
+        "GET /api/v1/inbox/todos -> 200 (+406ms)",
+        "GET /api/v1/inbox/history -> 200 (+912ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "YEAR_TO_DATE",
+      "generatedAt": "2026-10-26T13:29:20.418Z",
+      "windowStart": "2025-12-31T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "YEAR_TO_DATE"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 105569765920,
+          "api": 105569765920,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 807953707,
+          "api": 807953707,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 560782457,
+          "api": 560782457,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ],
+      "browserApiVsDb": [
+        {
+          "metric": "pipelineValue",
+          "browserApi": 105569765920,
+          "db": 105569765920,
+          "pass": true
+        },
+        {
+          "metric": "pipelineCount",
+          "browserApi": 163,
+          "db": 163,
+          "pass": true
+        },
+        {
+          "metric": "active",
+          "browserApi": 4,
+          "db": 4,
+          "pass": true
+        },
+        {
+          "metric": "totalProjects",
+          "browserApi": 9,
+          "db": 9,
+          "pass": true
+        },
+        {
+          "metric": "closedCount",
+          "browserApi": 5,
+          "db": 5,
+          "pass": true
+        },
+        {
+          "metric": "closedValue",
+          "browserApi": 910822821,
+          "db": 910822821,
+          "pass": true
+        },
+        {
+          "metric": "poValue",
+          "browserApi": 807953707,
+          "db": 807953707,
+          "pass": true
+        },
+        {
+          "metric": "poCount",
+          "browserApi": 12,
+          "db": 12,
+          "pass": true
+        },
+        {
+          "metric": "payValue",
+          "browserApi": 560782457,
+          "db": 560782457,
+          "pass": true
+        },
+        {
+          "metric": "payCount",
+          "browserApi": 10,
+          "db": 10,
+          "pass": true
+        },
+        {
+          "metric": "apValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "approvals",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        }
+      ],
+      "dbMismatch": [],
+      "generatedAtChanged": true
+    },
+    "B_UBD": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=YEAR_TO_DATE&divisionId=UBD -> 200 (+217ms)",
+        "GET /api/v1/inbox/todos -> 200 (+344ms)",
+        "GET /api/v1/inbox/history -> 200 (+863ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "UBD",
+      "apiPeriod": "YEAR_TO_DATE",
+      "generatedAt": "2026-10-26T13:29:22.580Z",
+      "windowStart": "2025-12-31T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "UBD",
+        "YEAR_TO_DATE"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 1589865915,
+          "api": 1589865915,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 209483500,
+          "api": 209483500,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 209483500,
+          "api": 209483500,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 2,
+          "api": 2,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 2,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 2,
+          "api": 2,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 397,81 jt",
+          "api": "Rp 397,81 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "EMPTY_STATE",
+          "api": "EMPTY_STATE",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 2,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ],
+      "browserApiVsDb": [
+        {
+          "metric": "pipelineValue",
+          "browserApi": 1589865915,
+          "db": 1589865915,
+          "pass": true
+        },
+        {
+          "metric": "pipelineCount",
+          "browserApi": 50,
+          "db": 50,
+          "pass": true
+        },
+        {
+          "metric": "active",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "totalProjects",
+          "browserApi": 2,
+          "db": 2,
+          "pass": true
+        },
+        {
+          "metric": "closedCount",
+          "browserApi": 2,
+          "db": 2,
+          "pass": true
+        },
+        {
+          "metric": "closedValue",
+          "browserApi": 397805463,
+          "db": 397805463,
+          "pass": true
+        },
+        {
+          "metric": "poValue",
+          "browserApi": 209483500,
+          "db": 209483500,
+          "pass": true
+        },
+        {
+          "metric": "poCount",
+          "browserApi": 3,
+          "db": 3,
+          "pass": true
+        },
+        {
+          "metric": "payValue",
+          "browserApi": 209483500,
+          "db": 209483500,
+          "pass": true
+        },
+        {
+          "metric": "payCount",
+          "browserApi": 3,
+          "db": 3,
+          "pass": true
+        },
+        {
+          "metric": "apValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "approvals",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        }
+      ],
+      "dbMismatch": [],
+      "screenshot": "C:\\Users\\UBDOPS3\\Herd\\epms_tvmubd\\scratch\\evidence_cp4\\CP4_UBD.png"
+    },
+    "B_TVM": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=YEAR_TO_DATE&divisionId=TVM -> 200 (+280ms)",
+        "GET /api/v1/inbox/todos -> 200 (+394ms)",
+        "GET /api/v1/inbox/history -> 200 (+1325ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "TVM",
+      "apiPeriod": "YEAR_TO_DATE",
+      "generatedAt": "2026-10-26T13:29:24.988Z",
+      "windowStart": "2025-12-31T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "TVM",
+        "YEAR_TO_DATE"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 0",
+          "api": "Rp 0",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "EMPTY_STATE",
+          "api": "EMPTY_STATE",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "EMPTY_STATE",
+          "api": "EMPTY_STATE",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "EMPTY_STATE",
+          "api": "EMPTY_STATE",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "EMPTY_STATE",
+          "api": "EMPTY_STATE",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ],
+      "browserApiVsDb": [
+        {
+          "metric": "pipelineValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "pipelineCount",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "active",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "totalProjects",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "closedCount",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "closedValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "poValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "poCount",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "payValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "payCount",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "apValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "approvals",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        }
+      ],
+      "dbMismatch": [],
+      "screenshot": "C:\\Users\\UBDOPS3\\Herd\\epms_tvmubd\\scratch\\evidence_cp4\\CP4_TVM.png"
+    },
+    "B_ALL_again": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=YEAR_TO_DATE -> 200 (+185ms)",
+        "GET /api/v1/inbox/todos -> 200 (+257ms)",
+        "GET /api/v1/inbox/history -> 200 (+821ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "YEAR_TO_DATE",
+      "generatedAt": "2026-10-26T13:29:27.254Z",
+      "windowStart": "2025-12-31T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "YEAR_TO_DATE"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 105569765920,
+          "api": 105569765920,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 807953707,
+          "api": 807953707,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 560782457,
+          "api": 560782457,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ],
+      "browserApiVsDb": [
+        {
+          "metric": "pipelineValue",
+          "browserApi": 105569765920,
+          "db": 105569765920,
+          "pass": true
+        },
+        {
+          "metric": "pipelineCount",
+          "browserApi": 163,
+          "db": 163,
+          "pass": true
+        },
+        {
+          "metric": "active",
+          "browserApi": 4,
+          "db": 4,
+          "pass": true
+        },
+        {
+          "metric": "totalProjects",
+          "browserApi": 9,
+          "db": 9,
+          "pass": true
+        },
+        {
+          "metric": "closedCount",
+          "browserApi": 5,
+          "db": 5,
+          "pass": true
+        },
+        {
+          "metric": "closedValue",
+          "browserApi": 910822821,
+          "db": 910822821,
+          "pass": true
+        },
+        {
+          "metric": "poValue",
+          "browserApi": 807953707,
+          "db": 807953707,
+          "pass": true
+        },
+        {
+          "metric": "poCount",
+          "browserApi": 12,
+          "db": 12,
+          "pass": true
+        },
+        {
+          "metric": "payValue",
+          "browserApi": 560782457,
+          "db": 560782457,
+          "pass": true
+        },
+        {
+          "metric": "payCount",
+          "browserApi": 10,
+          "db": 10,
+          "pass": true
+        },
+        {
+          "metric": "apValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "approvals",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        }
+      ],
+      "dbMismatch": []
+    },
+    "B_rapid": {
+      "summaryCalls": 3,
+      "finalSelector": "TVM",
+      "uiVsApi": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ],
+      "closed": [
+        "0",
+        "Rp 0"
+      ]
+    },
+    "B_ALL_restore": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=YEAR_TO_DATE -> 200 (+175ms)",
+        "GET /api/v1/inbox/todos -> 200 (+255ms)",
+        "GET /api/v1/inbox/history -> 200 (+784ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "YEAR_TO_DATE",
+      "generatedAt": "2026-10-26T13:29:33.589Z",
+      "windowStart": "2025-12-31T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "YEAR_TO_DATE"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 105569765920,
+          "api": 105569765920,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 807953707,
+          "api": 807953707,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 560782457,
+          "api": 560782457,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ],
+      "browserApiVsDb": [
+        {
+          "metric": "pipelineValue",
+          "browserApi": 105569765920,
+          "db": 105569765920,
+          "pass": true
+        },
+        {
+          "metric": "pipelineCount",
+          "browserApi": 163,
+          "db": 163,
+          "pass": true
+        },
+        {
+          "metric": "active",
+          "browserApi": 4,
+          "db": 4,
+          "pass": true
+        },
+        {
+          "metric": "totalProjects",
+          "browserApi": 9,
+          "db": 9,
+          "pass": true
+        },
+        {
+          "metric": "closedCount",
+          "browserApi": 5,
+          "db": 5,
+          "pass": true
+        },
+        {
+          "metric": "closedValue",
+          "browserApi": 910822821,
+          "db": 910822821,
+          "pass": true
+        },
+        {
+          "metric": "poValue",
+          "browserApi": 807953707,
+          "db": 807953707,
+          "pass": true
+        },
+        {
+          "metric": "poCount",
+          "browserApi": 12,
+          "db": 12,
+          "pass": true
+        },
+        {
+          "metric": "payValue",
+          "browserApi": 560782457,
+          "db": 560782457,
+          "pass": true
+        },
+        {
+          "metric": "payCount",
+          "browserApi": 10,
+          "db": 10,
+          "pass": true
+        },
+        {
+          "metric": "apValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "approvals",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        }
+      ],
+      "dbMismatch": []
+    },
+    "C_period_THIS_MONTH": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=THIS_MONTH -> 200 (+201ms)",
+        "GET /api/v1/inbox/todos -> 200 (+242ms)",
+        "GET /api/v1/inbox/history -> 200 (+789ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "THIS_MONTH",
+      "generatedAt": "2026-10-26T13:29:36.374Z",
+      "windowStart": "2026-09-30T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "THIS_MONTH"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 105569765920,
+          "api": 105569765920,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 807953707,
+          "api": 807953707,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 560782457,
+          "api": 560782457,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ]
+    },
+    "C_period_LAST_MONTH": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=LAST_MONTH -> 200 (+187ms)",
+        "GET /api/v1/inbox/todos -> 200 (+209ms)",
+        "GET /api/v1/inbox/history -> 200 (+781ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "LAST_MONTH",
+      "generatedAt": "2026-10-26T13:29:38.423Z",
+      "windowStart": "2026-08-31T17:00:00.000Z",
+      "windowEnd": "2026-09-30T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "LAST_MONTH"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ]
+    },
+    "C_period_THIS_QUARTER": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=THIS_QUARTER -> 200 (+179ms)",
+        "GET /api/v1/inbox/todos -> 200 (+241ms)",
+        "GET /api/v1/inbox/history -> 200 (+820ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "THIS_QUARTER",
+      "generatedAt": "2026-10-26T13:29:40.436Z",
+      "windowStart": "2026-09-30T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "THIS_QUARTER"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 105569765920,
+          "api": 105569765920,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 807953707,
+          "api": 807953707,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 560782457,
+          "api": 560782457,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ]
+    },
+    "C_period_LAST_QUARTER": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=LAST_QUARTER -> 200 (+175ms)",
+        "GET /api/v1/inbox/todos -> 200 (+250ms)",
+        "GET /api/v1/inbox/history -> 200 (+841ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "LAST_QUARTER",
+      "generatedAt": "2026-10-26T13:29:42.512Z",
+      "windowStart": "2026-06-30T17:00:00.000Z",
+      "windowEnd": "2026-09-30T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "LAST_QUARTER"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ]
+    },
+    "C_period_ALL_TIME": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=ALL_TIME -> 400 (+26ms)",
+        "GET /api/v1/inbox/todos -> 200 (+147ms)",
+        "GET /api/v1/inbox/history -> 200 (+771ms)",
+        "GET /api/v1/procurement/purchase-orders -> 200 (+917ms)",
+        "GET /api/v1/finance/invoices?limit=4 -> 200 (+925ms)",
+        "GET /api/v1/contracts -> 200 (+928ms)",
+        "GET /api/v1/finance/payments -> 200 (+935ms)",
+        "GET /api/v1/marketing/tenders?limit=4 -> 200 (+961ms)",
+        "GET /api/v1/project/operational-board -> 200 (+965ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 400,
+      "apiScope": "ALL",
+      "apiPeriod": "ALL_TIME",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 08:30",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "ALL_TIME"
+      ],
+      "checks": [
+        {
+          "name": "api",
+          "pass": false,
+          "ui": "n/a",
+          "api": "HTTP 400 no payload"
+        }
+      ],
+      "failed": [
+        {
+          "name": "api",
+          "pass": false,
+          "ui": "n/a",
+          "api": "HTTP 400 no payload"
+        }
+      ]
+    },
+    "C_period_YEAR_TO_DATE": {
+      "requests": [
+        "GET /api/v1/dashboard/executive-summary?period=YEAR_TO_DATE -> 200 (+170ms)",
+        "GET /api/v1/inbox/todos -> 200 (+256ms)",
+        "GET /api/v1/inbox/history -> 200 (+838ms)"
+      ],
+      "summaryCalls": 1,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "YEAR_TO_DATE",
+      "generatedAt": "2026-10-26T13:29:46.480Z",
+      "windowStart": "2025-12-31T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "YEAR_TO_DATE"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 105569765920,
+          "api": 105569765920,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 807953707,
+          "api": 807953707,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 560782457,
+          "api": 560782457,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ],
+      "browserApiVsDb": [
+        {
+          "metric": "pipelineValue",
+          "browserApi": 105569765920,
+          "db": 105569765920,
+          "pass": true
+        },
+        {
+          "metric": "pipelineCount",
+          "browserApi": 163,
+          "db": 163,
+          "pass": true
+        },
+        {
+          "metric": "active",
+          "browserApi": 4,
+          "db": 4,
+          "pass": true
+        },
+        {
+          "metric": "totalProjects",
+          "browserApi": 9,
+          "db": 9,
+          "pass": true
+        },
+        {
+          "metric": "closedCount",
+          "browserApi": 5,
+          "db": 5,
+          "pass": true
+        },
+        {
+          "metric": "closedValue",
+          "browserApi": 910822821,
+          "db": 910822821,
+          "pass": true
+        },
+        {
+          "metric": "poValue",
+          "browserApi": 807953707,
+          "db": 807953707,
+          "pass": true
+        },
+        {
+          "metric": "poCount",
+          "browserApi": 12,
+          "db": 12,
+          "pass": true
+        },
+        {
+          "metric": "payValue",
+          "browserApi": 560782457,
+          "db": 560782457,
+          "pass": true
+        },
+        {
+          "metric": "payCount",
+          "browserApi": 10,
+          "db": 10,
+          "pass": true
+        },
+        {
+          "metric": "apValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "approvals",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        }
+      ],
+      "dbMismatch": []
+    },
+    "E_prep_ALL": {
+      "requests": [],
+      "summaryCalls": 0,
+      "apiStatus": 200,
+      "apiScope": "ALL",
+      "apiPeriod": "YEAR_TO_DATE",
+      "generatedAt": "2026-10-26T13:29:46.480Z",
+      "windowStart": "2025-12-31T17:00:00.000Z",
+      "windowEnd": "2026-10-26T16:59:59.999Z",
+      "uiUpdate": "Update Terakhir: 26 Okt 2026, 20.29",
+      "errorText": "",
+      "selectors": [
+        "ALL",
+        "YEAR_TO_DATE"
+      ],
+      "checks": [
+        {
+          "name": "card:Total Pipeline Value",
+          "ui": 105569765920,
+          "api": 105569765920,
+          "pass": true
+        },
+        {
+          "name": "card:Proyek Aktif",
+          "ui": 4,
+          "api": 4,
+          "pass": true
+        },
+        {
+          "name": "card:Komitmen Pengadaan",
+          "ui": 807953707,
+          "api": 807953707,
+          "pass": true
+        },
+        {
+          "name": "card:Pembayaran Vendor",
+          "ui": 560782457,
+          "api": 560782457,
+          "pass": true
+        },
+        {
+          "name": "card:Invoice Outstanding",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "card:Antrean Persetujuan",
+          "ui": 0,
+          "api": 0,
+          "pass": true
+        },
+        {
+          "name": "donut:total",
+          "ui": 9,
+          "api": 9,
+          "pass": true
+        },
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "closed:count",
+          "ui": 5,
+          "api": 5,
+          "pass": true
+        },
+        {
+          "name": "closed:value",
+          "ui": "Rp 910,82 jt",
+          "api": "Rp 910,82 jt",
+          "pass": true
+        },
+        {
+          "name": "chart:Nilai Kontrak (Won)",
+          "ui": "MATCH",
+          "api": "MATCH",
+          "pass": true
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Tren Pipeline Marketing",
+          "ui": true,
+          "api": true,
+          "pass": true
+        },
+        {
+          "name": "table:Proyek Aktif",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Tender",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pengadaan",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        },
+        {
+          "name": "table:Pembayaran",
+          "ui": "ROWS_MATCH_ORDERED",
+          "api": "ROWS_MATCH_ORDERED",
+          "pass": true
+        }
+      ],
+      "failed": [
+        {
+          "name": "legend[0]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[1]",
+          "ui": "NA",
+          "api": 4,
+          "pass": false
+        },
+        {
+          "name": "legend[2]",
+          "ui": "NA",
+          "api": 5,
+          "pass": false
+        },
+        {
+          "name": "legend[3]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "legend[4]",
+          "ui": "NA",
+          "api": 0,
+          "pass": false
+        },
+        {
+          "name": "chart:Pembayaran Vendor",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        },
+        {
+          "name": "chart:Komitmen Pengadaan",
+          "ui": "bars=0",
+          "api": "MATCH",
+          "pass": false
+        }
+      ],
+      "browserApiVsDb": [
+        {
+          "metric": "pipelineValue",
+          "browserApi": 105569765920,
+          "db": 105569765920,
+          "pass": true
+        },
+        {
+          "metric": "pipelineCount",
+          "browserApi": 163,
+          "db": 163,
+          "pass": true
+        },
+        {
+          "metric": "active",
+          "browserApi": 4,
+          "db": 4,
+          "pass": true
+        },
+        {
+          "metric": "totalProjects",
+          "browserApi": 9,
+          "db": 9,
+          "pass": true
+        },
+        {
+          "metric": "closedCount",
+          "browserApi": 5,
+          "db": 5,
+          "pass": true
+        },
+        {
+          "metric": "closedValue",
+          "browserApi": 910822821,
+          "db": 910822821,
+          "pass": true
+        },
+        {
+          "metric": "poValue",
+          "browserApi": 807953707,
+          "db": 807953707,
+          "pass": true
+        },
+        {
+          "metric": "poCount",
+          "browserApi": 12,
+          "db": 12,
+          "pass": true
+        },
+        {
+          "metric": "payValue",
+          "browserApi": 560782457,
+          "db": 560782457,
+          "pass": true
+        },
+        {
+          "metric": "payCount",
+          "browserApi": 10,
+          "db": 10,
+          "pass": true
+        },
+        {
+          "metric": "apValue",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        },
+        {
+          "metric": "approvals",
+          "browserApi": 0,
+          "db": 0,
+          "pass": true
+        }
+      ],
+      "dbMismatch": []
+    },
+    "E_idle": {
+      "idleMs": 70000,
+      "apiRequestsDuringIdle": 0,
+      "summaryCallsDuringIdle": 0,
+      "updateStatusBefore": "Update Terakhir: 26 Okt 2026, 20.29",
+      "updateStatusAfter": "Update Terakhir: 26 Okt 2026, 20.29",
+      "focusEventsDispatched": true
+    }
+  },
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 400 (Bad Request)",
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ],
+  "failedRequests": [],
+  "links": [
+    {
+      "from": "Proyek Aktif",
+      "href": "/project-delivery",
+      "httpStatus": 200,
+      "finalUrl": "/project-delivery",
+      "hasScopeParam": false
+    },
+    {
+      "from": "Tender & Peluang Bisnis",
+      "href": "/sales",
+      "httpStatus": 200,
+      "finalUrl": "/sales",
+      "hasScopeParam": false
+    },
+    {
+      "from": "Pengadaan (PO)",
+      "href": "/procurement",
+      "httpStatus": 200,
+      "finalUrl": "/procurement",
+      "hasScopeParam": false
+    },
+    {
+      "from": "Pembayaran & Tagihan",
+      "href": "/finance",
+      "httpStatus": 404,
+      "finalUrl": "/finance",
+      "hasScopeParam": false
+    },
+    {
+      "from": "Project Status Overview (Lihat Portfolio)",
+      "href": "/project-delivery",
+      "httpStatus": 200,
+      "finalUrl": "/project-delivery",
+      "hasScopeParam": false
+    }
+  ],
+  "legacy": {
+    "httpStatus": 200,
+    "url": "/dashboard",
+    "title": "EPMS UBD & TVM",
+    "bodyChars": 2603,
+    "failedApi": 0
+  },
+  "browserVersion": "156.0.4314.42",
+  "periods": {
+    "THIS_MONTH": {
+      "apiStatus": 200,
+      "window": [
+        "2026-09-30T17:00:00.000Z",
+        "2026-10-26T16:59:59.999Z"
+      ],
+      "uiErr": "",
+      "uiVsApiFailed": [
+        "legend[0]",
+        "legend[1]",
+        "legend[2]",
+        "legend[3]",
+        "legend[4]",
+        "chart:Pembayaran Vendor",
+        "chart:Komitmen Pengadaan"
+      ],
+      "dbWindow": [
+        "2026-10-01 00:00:00",
+        "2026-10-26 23:59:59"
+      ],
+      "pipeline": {
+        "api": [
+          163,
+          105569765920
+        ],
+        "db": [
+          163,
+          105569765920
+        ]
+      },
+      "po": {
+        "api": [
+          12,
+          807953707
+        ],
+        "db": [
+          12,
+          807953707
+        ]
+      },
+      "pay": {
+        "api": [
+          10,
+          560782457
+        ],
+        "db": [
+          10,
+          560782457
+        ]
+      },
+      "dbPass": true,
+      "snapshotInvariant": {
+        "activeProjects": 4,
+        "closedCount": 5,
+        "closedValue": 910822821,
+        "charts2026Sum": 101578875322,
+        "pending": 0,
+        "outstandingAP": 0
+      }
+    },
+    "LAST_MONTH": {
+      "apiStatus": 200,
+      "window": [
+        "2026-08-31T17:00:00.000Z",
+        "2026-09-30T16:59:59.999Z"
+      ],
+      "uiErr": "",
+      "uiVsApiFailed": [
+        "legend[0]",
+        "legend[1]",
+        "legend[2]",
+        "legend[3]",
+        "legend[4]",
+        "chart:Pembayaran Vendor",
+        "chart:Komitmen Pengadaan"
+      ],
+      "dbWindow": [
+        "2026-09-01 00:00:00",
+        "2026-09-30 23:59:59"
+      ],
+      "pipeline": {
+        "api": [
+          0,
+          0
+        ],
+        "db": [
+          0,
+          0
+        ]
+      },
+      "po": {
+        "api": [
+          0,
+          0
+        ],
+        "db": [
+          0,
+          0
+        ]
+      },
+      "pay": {
+        "api": [
+          0,
+          0
+        ],
+        "db": [
+          0,
+          0
+        ]
+      },
+      "dbPass": true,
+      "snapshotInvariant": {
+        "activeProjects": 4,
+        "closedCount": 5,
+        "closedValue": 910822821,
+        "charts2026Sum": 101578875322,
+        "pending": 0,
+        "outstandingAP": 0
+      }
+    },
+    "THIS_QUARTER": {
+      "apiStatus": 200,
+      "window": [
+        "2026-09-30T17:00:00.000Z",
+        "2026-10-26T16:59:59.999Z"
+      ],
+      "uiErr": "",
+      "uiVsApiFailed": [
+        "legend[0]",
+        "legend[1]",
+        "legend[2]",
+        "legend[3]",
+        "legend[4]",
+        "chart:Pembayaran Vendor",
+        "chart:Komitmen Pengadaan"
+      ],
+      "dbWindow": [
+        "2026-10-01 00:00:00",
+        "2026-10-26 23:59:59"
+      ],
+      "pipeline": {
+        "api": [
+          163,
+          105569765920
+        ],
+        "db": [
+          163,
+          105569765920
+        ]
+      },
+      "po": {
+        "api": [
+          12,
+          807953707
+        ],
+        "db": [
+          12,
+          807953707
+        ]
+      },
+      "pay": {
+        "api": [
+          10,
+          560782457
+        ],
+        "db": [
+          10,
+          560782457
+        ]
+      },
+      "dbPass": true,
+      "snapshotInvariant": {
+        "activeProjects": 4,
+        "closedCount": 5,
+        "closedValue": 910822821,
+        "charts2026Sum": 101578875322,
+        "pending": 0,
+        "outstandingAP": 0
+      }
+    },
+    "LAST_QUARTER": {
+      "apiStatus": 200,
+      "window": [
+        "2026-06-30T17:00:00.000Z",
+        "2026-09-30T16:59:59.999Z"
+      ],
+      "uiErr": "",
+      "uiVsApiFailed": [
+        "legend[0]",
+        "legend[1]",
+        "legend[2]",
+        "legend[3]",
+        "legend[4]",
+        "chart:Pembayaran Vendor",
+        "chart:Komitmen Pengadaan"
+      ],
+      "dbWindow": [
+        "2026-07-01 00:00:00",
+        "2026-09-30 23:59:59"
+      ],
+      "pipeline": {
+        "api": [
+          0,
+          0
+        ],
+        "db": [
+          0,
+          0
+        ]
+      },
+      "po": {
+        "api": [
+          0,
+          0
+        ],
+        "db": [
+          0,
+          0
+        ]
+      },
+      "pay": {
+        "api": [
+          0,
+          0
+        ],
+        "db": [
+          0,
+          0
+        ]
+      },
+      "dbPass": true,
+      "snapshotInvariant": {
+        "activeProjects": 4,
+        "closedCount": 5,
+        "closedValue": 910822821,
+        "charts2026Sum": 101578875322,
+        "pending": 0,
+        "outstandingAP": 0
+      }
+    },
+    "ALL_TIME": {
+      "apiStatus": 400,
+      "window": [
+        null,
+        null
+      ],
+      "uiErr": "",
+      "uiVsApiFailed": [
+        "api"
+      ]
+    },
+    "YEAR_TO_DATE": {
+      "apiStatus": 200,
+      "window": [
+        "2025-12-31T17:00:00.000Z",
+        "2026-10-26T16:59:59.999Z"
+      ],
+      "uiErr": "",
+      "uiVsApiFailed": [
+        "legend[0]",
+        "legend[1]",
+        "legend[2]",
+        "legend[3]",
+        "legend[4]",
+        "chart:Pembayaran Vendor",
+        "chart:Komitmen Pengadaan"
+      ],
+      "dbWindow": [
+        "2026-01-01 00:00:00",
+        "2026-10-26 23:59:59"
+      ],
+      "pipeline": {
+        "api": [
+          163,
+          105569765920
+        ],
+        "db": [
+          163,
+          105569765920
+        ]
+      },
+      "po": {
+        "api": [
+          12,
+          807953707
+        ],
+        "db": [
+          12,
+          807953707
+        ]
+      },
+      "pay": {
+        "api": [
+          10,
+          560782457
+        ],
+        "db": [
+          10,
+          560782457
+        ]
+      },
+      "dbPass": true,
+      "snapshotInvariant": {
+        "activeProjects": 4,
+        "closedCount": 5,
+        "closedValue": 910822821,
+        "charts2026Sum": 101578875322,
+        "pending": 0,
+        "outstandingAP": 0
+      }
+    }
+  },
+  "pipelineTrend": {
+    "ALL": {
+      "pass": true,
+      "db": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        105569765920
+      ],
+      "api": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        105569765920
+      ]
+    },
+    "UBD": {
+      "pass": true,
+      "db": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1589865915
+      ],
+      "api": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        1589865915
+      ]
+    },
+    "TVM": {
+      "pass": true,
+      "db": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "api": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "lineageNullable": [
+    {
+      "t": "contracts",
+      "c": "tender_id",
+      "n": "YES"
+    },
+    {
+      "t": "invoices",
+      "c": "po_id",
+      "n": "NO"
+    },
+    {
+      "t": "projects",
+      "c": "contract_id",
+      "n": "YES"
+    },
+    {
+      "t": "purchase_orders",
+      "c": "pr_id",
+      "n": "NO"
+    },
+    {
+      "t": "purchase_requests",
+      "c": "project_id",
+      "n": "NO"
+    }
+  ],
+  "finishedAt": "2026-10-26T13:31:32.162Z"
+}

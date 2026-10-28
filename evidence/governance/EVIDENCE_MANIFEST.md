@@ -1,0 +1,35 @@
+﻿| # | Original Path | Archive Path | Size (Bytes) | SHA-256 | Verification |
+|---|---|---|---|---|---|
+| 1 | `scratch/evidence_cp3/ALL_bottom.png` | `evidence/governance/technical-baseline/cp3/ALL_bottom.png` | 115940 | `F32C145832D8879B3A162C1882F9630BCF25EF0B60E3878D41F3E3B91D21FAC5` | VERIFIED |
+| 2 | `scratch/evidence_cp3/ALL_top.png` | `evidence/governance/technical-baseline/cp3/ALL_top.png` | 133641 | `966AC037D7DAF6C42FD714557B49C0E1C99539724AFEB1D3C7ED25BCC92F0D70` | VERIFIED |
+| 3 | `scratch/evidence_cp3/CLOSED_ALL.png` | `evidence/governance/technical-baseline/cp3/CLOSED_ALL.png` | 162068 | `D7089C32B154A53E909A72BCF6B6F9AC4969361F273E4E5DBD4177C271D3D4AB` | VERIFIED |
+| 4 | `scratch/evidence_cp3/CLOSED_TVM.png` | `evidence/governance/technical-baseline/cp3/CLOSED_TVM.png` | 150036 | `7D08D0BEB776F047CE7406D431C066C78A9441113BDA252BC83D5C7734414ADF` | VERIFIED |
+| 5 | `scratch/evidence_cp3/CLOSED_UBD.png` | `evidence/governance/technical-baseline/cp3/CLOSED_UBD.png` | 156577 | `59CEAA617FD2E1AC1F19E64F3FB54ACAF84039E20B4C8D42AABC31686D878E51` | VERIFIED |
+| 6 | `scratch/evidence_cp3/cp3_final_validation.json` | `evidence/governance/technical-baseline/cp3/cp3_final_validation.json` | 19377 | `7A2EFBB3456D6B52F39A20A74FE7C8DC3EA97E33588B1FA64DAF0A8418DFBB34` | VERIFIED |
+| 7 | `scratch/evidence_cp3/CP3_FIX01_ALL_contract.png` | `evidence/governance/technical-baseline/cp3/CP3_FIX01_ALL_contract.png` | 44724 | `E5AE5FFF91E5F4BE741E09D2D1D3C4E7D21ED05E4FFCCA8B5DAD5DECB29FED00` | VERIFIED |
+| 8 | `scratch/evidence_cp3/cp3_fix01_contract_validation.json` | `evidence/governance/technical-baseline/cp3/cp3_fix01_contract_validation.json` | 9314 | `D3A7F7804887C3FB081718500B9EED89D418C4C1EAB2CFB8EAF06172C1DA6F24` | VERIFIED |
+| 9 | `scratch/evidence_cp3/CP3_FIX01_TVM_contract.png` | `evidence/governance/technical-baseline/cp3/CP3_FIX01_TVM_contract.png` | 30352 | `D4469ACB613E443E289BDF6C6F0CA7DD66A7A0070F96B2D4EDCA906D5B6A859B` | VERIFIED |
+| 10 | `scratch/evidence_cp3/CP3_FIX01_UBD_contract.png` | `evidence/governance/technical-baseline/cp3/CP3_FIX01_UBD_contract.png` | 37149 | `1246569ED7ACAFA05514A68B0A62D1C447274FFAC77289682BCCC1988CBA8133` | VERIFIED |
+| 11 | `scratch/evidence_cp3/cp3_recovery_results.json` | `evidence/governance/technical-baseline/cp3/cp3_recovery_results.json` | 17907 | `B395165A985087F43FAB4C43C5FDCB81917B53AB3603C9D153909F6F59F78DFB` | VERIFIED |
+| 12 | `scratch/evidence_cp3/cp3_results.json` | `evidence/governance/technical-baseline/cp3/cp3_results.json` | 10290 | `9A65195AD5ACDFD0F74AD20724CBAF782E34795302EB2BCA91D90CAE9BC2112C` | VERIFIED |
+| 13 | `scratch/evidence_cp3/LEGACY_dashboard.png` | `evidence/governance/technical-baseline/cp3/LEGACY_dashboard.png` | 198036 | `334C56BA15F3C779FFB6BAC9AAD0458A19B74B00194A600797A5BC22B670202D` | VERIFIED |
+| 14 | `scratch/evidence_cp3/TVM_bottom.png` | `evidence/governance/technical-baseline/cp3/TVM_bottom.png` | 42000 | `ED973C2475A1251BCD9183FB0694029A419912E8437005CE2ED960E9A41A11DC` | VERIFIED |
+| 15 | `scratch/evidence_cp3/TVM_top.png` | `evidence/governance/technical-baseline/cp3/TVM_top.png` | 116364 | `D40B412853C2615C51771D9D063715CD2B98386CCE2B4D3AB10716D62FFD8AD8` | VERIFIED |
+| 16 | `scratch/evidence_cp3/UBD_bottom.png` | `evidence/governance/technical-baseline/cp3/UBD_bottom.png` | 89041 | `9EB797B93AD41DC0BDD1DC975258F2EA63280282098A0C5DA3462DF5B576493E` | VERIFIED |
+| 17 | `scratch/evidence_cp3/UBD_top.png` | `evidence/governance/technical-baseline/cp3/UBD_top.png` | 124183 | `64BA8BE8990FBD16F1DE0FB1BB5E75B8D82739317A7E91F9E44A00269C5B9826` | VERIFIED |
+| 18 | `scratch/evidence_cp4/cdp_followup.json` | `evidence/governance/technical-baseline/cp4/cdp_followup.json` | 7264 | `3A70F22145AF25F3CFEA48D70887B35471C6B070C9871F70940D6D05449C2277` | VERIFIED |
+| 19 | `scratch/evidence_cp4/cdp_results.json` | `evidence/governance/technical-baseline/cp4/cdp_results.json` | 79280 | `78EB98146906C6462346EC8F49726FF295BE17139127E9D508347D7622C6566C` | VERIFIED |
+| 20 | `scratch/evidence_cp4/CP4_ALL.png` | `evidence/governance/technical-baseline/cp4/CP4_ALL.png` | 260760 | `D462B9AF820F49AC0BE13B0EA0044E356005216BB56A24FD5B54556A1D4C61E7` | VERIFIED |
+| 21 | `scratch/evidence_cp4/CP4_ALLTIME_400_UBD.png` | `evidence/governance/technical-baseline/cp4/CP4_ALLTIME_400_UBD.png` | 227706 | `8100212926AB853758DF31DFD9AED6D0D3C154ECB14EA570F8183972D318507E` | VERIFIED |
+| 22 | `scratch/evidence_cp4/CP4_TVM.png` | `evidence/governance/technical-baseline/cp4/CP4_TVM.png` | 145474 | `B7D28213E36A1F66B3B58A59EC7D77E57897518C9C2E9C5ABE2C400DE06D5218` | VERIFIED |
+| 23 | `scratch/evidence_cp4/CP4_UBD.png` | `evidence/governance/technical-baseline/cp4/CP4_UBD.png` | 200707 | `EF639E3BBB1F4CF077E69D1D4AEC47495647E35093DD988D6D443DAAA0AFD44C` | VERIFIED |
+| 24 | `scratch/evidence_cp4/db_vs_api.json` | `evidence/governance/technical-baseline/cp4/db_vs_api.json` | 40201 | `F543C0668B70129898FCFB2A511886EBCCB1C7EAB40B1A29198678CA2201EE8F` | VERIFIED |
+| 25 | `scratch/leads_106_table.md` | `evidence/governance/classification/leads_106_table.md` | 29201 | `CD4F291BD161259D6C98C05EF2ADE48770F5C860B2434F96563B45ABD02B0118` | VERIFIED |
+| 26 | `scratch/leads_106.json` | `evidence/governance/classification/leads_106.json` | 36336 | `A835366909EEBD5ECA6F09AF57BC5A6A43DA80A1157BF923C21711F2CD508805` | VERIFIED |
+| 27 | `frontend/tests/evidence/01_dashboard_preview_real_data_loaded.png` | `evidence/governance/preview-benchmark/01_dashboard_preview_real_data_loaded.png` | 243414 | `DB0E3E7FB229E29A6E15EA5AB19C23F200BF33ACCEAAF7162092DED284FC0F91` | VERIFIED |
+| 28 | `frontend/tests/evidence/02_dashboard_preview_period_filtered.png` | `evidence/governance/preview-benchmark/02_dashboard_preview_period_filtered.png` | 210947 | `9B25D591EA037C252F931F61C739FB6207F119D40E208812F5238921165C23FB` | VERIFIED |
+| 29 | `frontend/tests/evidence/03_dashboard_preview_division_error.png` | `evidence/governance/preview-benchmark/03_dashboard_preview_division_error.png` | 214996 | `F8D6A5208D89F7402B99BB1314A6EA2F78A21C7160082982740667391A7BF0F0` | VERIFIED |
+| 30 | `frontend/tests/evidence/03_dashboard_preview_final_verified.png` | `evidence/governance/preview-benchmark/03_dashboard_preview_final_verified.png` | 215906 | `895CE8F36DC29D54F7C3453F8735151E6F4543879D36BD3E2CE7D5E69F8CD17A` | VERIFIED |
+| 31 | `frontend/tests/evidence/a_wide_high_resolution_ui_dashboard_screenshot_in.png` | `evidence/governance/preview-benchmark/a_wide_high_resolution_ui_dashboard_screenshot_in.png` | 284502 | `4BB63DF5144A652EB70C9A1FA886EF5A2AAF3C4A35ED2F67406074607E8848F3` | VERIFIED |
+| 32 | `frontend/tests/evidence/benchmark_preview_1440_full.png` | `evidence/governance/preview-benchmark/benchmark_preview_1440_full.png` | 217605 | `F19B11CE6E0E8A9CE26FAA52B7F3B871EE27F5BC015B757608BE6508A99A7C38` | VERIFIED |
+| 33 | `frontend/tests/evidence/benchmark_preview_1440_opening.png` | `evidence/governance/preview-benchmark/benchmark_preview_1440_opening.png` | 128316 | `C383CF33660941AF834EE8FDCB3B9F74EE630FC757EFDD6AE2BF8D95B15B5341` | VERIFIED |

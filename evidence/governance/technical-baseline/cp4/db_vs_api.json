@@ -1,0 +1,1752 @@
+{
+  "window": {
+    "START": "2026-01-01 00:00:00",
+    "END": "2026-10-26 23:59:59"
+  },
+  "ids": {
+    "TVM": 7,
+    "UBD": 9
+  },
+  "projStatusDist": [
+    {
+      "status": "CLOSED",
+      "c": 5
+    },
+    {
+      "status": "IN_PROGRESS",
+      "c": 4
+    }
+  ],
+  "sharedContracts": 0,
+  "closedNoContract": 0,
+  "scopes": {
+    "ALL": {
+      "httpStatus": 200,
+      "rows": [
+        {
+          "metric": "pipelineValue",
+          "db": 105569765920,
+          "api": 105569765920,
+          "diff": 0
+        },
+        {
+          "metric": "pipelineCount",
+          "db": 163,
+          "api": 163,
+          "diff": 0
+        },
+        {
+          "metric": "wonValue",
+          "db": 101578875322,
+          "api": 101578875322,
+          "diff": 0
+        },
+        {
+          "metric": "openPipelineValue",
+          "db": 3990890598,
+          "api": 3990890598,
+          "diff": 0
+        },
+        {
+          "metric": "openDealsCount",
+          "db": 154,
+          "api": 154,
+          "diff": 0
+        },
+        {
+          "metric": "totalProjects",
+          "db": 9,
+          "api": 9,
+          "diff": 0
+        },
+        {
+          "metric": "planning",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "inProgress",
+          "db": 4,
+          "api": 4,
+          "diff": 0
+        },
+        {
+          "metric": "active",
+          "db": 4,
+          "api": 4,
+          "diff": 0
+        },
+        {
+          "metric": "completedOrClosed",
+          "db": 5,
+          "api": 5,
+          "diff": 0
+        },
+        {
+          "metric": "onHold",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "cancelled",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "closedCount",
+          "db": 5,
+          "api": 5,
+          "diff": 0
+        },
+        {
+          "metric": "closedValue",
+          "db": 910822821,
+          "api": 910822821,
+          "diff": 0
+        },
+        {
+          "metric": "poCount",
+          "db": 12,
+          "api": 12,
+          "diff": 0
+        },
+        {
+          "metric": "poValue",
+          "db": 807953707,
+          "api": 807953707,
+          "diff": 0
+        },
+        {
+          "metric": "payCount",
+          "db": 10,
+          "api": 10,
+          "diff": 0
+        },
+        {
+          "metric": "payValue",
+          "db": 560782457,
+          "api": 560782457,
+          "diff": 0
+        },
+        {
+          "metric": "apCount",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "apValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "approvals",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "contractAwardedCount",
+          "db": 9,
+          "api": 9,
+          "diff": 0
+        },
+        {
+          "metric": "contractAwardedValue",
+          "db": 101578875322,
+          "api": 101578875322,
+          "diff": 0
+        },
+        {
+          "metric": "chartContracts",
+          "db": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":101578875322,\"count\":9},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "api": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":101578875322,\"count\":9},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "diff": 0
+        },
+        {
+          "metric": "chartPayments",
+          "db": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":560782457,\"count\":10},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "api": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":560782457,\"count\":10},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "diff": 0
+        },
+        {
+          "metric": "chartPos",
+          "db": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":807953707,\"count\":12},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "api": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":807953707,\"count\":12},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "diff": 0
+        },
+        {
+          "metric": "tblProjects",
+          "db": "[9,8,7,6]",
+          "api": "[9,8,7,6]",
+          "diff": 0
+        },
+        {
+          "metric": "tblTenders",
+          "db": "[166,165,164,163]",
+          "api": "[166,165,164,163]",
+          "diff": 0
+        },
+        {
+          "metric": "tblPos",
+          "db": "[12,11,10,9]",
+          "api": "[12,11,10,9]",
+          "diff": 0
+        },
+        {
+          "metric": "tblInvoices",
+          "db": "[10,9,8,7]",
+          "api": "[10,9,8,7]",
+          "diff": 0
+        }
+      ],
+      "mismatches": []
+    },
+    "UBD": {
+      "httpStatus": 200,
+      "rows": [
+        {
+          "metric": "pipelineValue",
+          "db": 1589865915,
+          "api": 1589865915,
+          "diff": 0
+        },
+        {
+          "metric": "pipelineCount",
+          "db": 50,
+          "api": 50,
+          "diff": 0
+        },
+        {
+          "metric": "wonValue",
+          "db": 397805463,
+          "api": 397805463,
+          "diff": 0
+        },
+        {
+          "metric": "openPipelineValue",
+          "db": 1192060452,
+          "api": 1192060452,
+          "diff": 0
+        },
+        {
+          "metric": "openDealsCount",
+          "db": 48,
+          "api": 48,
+          "diff": 0
+        },
+        {
+          "metric": "totalProjects",
+          "db": 2,
+          "api": 2,
+          "diff": 0
+        },
+        {
+          "metric": "planning",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "inProgress",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "active",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "completedOrClosed",
+          "db": 2,
+          "api": 2,
+          "diff": 0
+        },
+        {
+          "metric": "onHold",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "cancelled",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "closedCount",
+          "db": 2,
+          "api": 2,
+          "diff": 0
+        },
+        {
+          "metric": "closedValue",
+          "db": 397805463,
+          "api": 397805463,
+          "diff": 0
+        },
+        {
+          "metric": "poCount",
+          "db": 3,
+          "api": 3,
+          "diff": 0
+        },
+        {
+          "metric": "poValue",
+          "db": 209483500,
+          "api": 209483500,
+          "diff": 0
+        },
+        {
+          "metric": "payCount",
+          "db": 3,
+          "api": 3,
+          "diff": 0
+        },
+        {
+          "metric": "payValue",
+          "db": 209483500,
+          "api": 209483500,
+          "diff": 0
+        },
+        {
+          "metric": "apCount",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "apValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "approvals",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "contractAwardedCount",
+          "db": 2,
+          "api": 2,
+          "diff": 0
+        },
+        {
+          "metric": "contractAwardedValue",
+          "db": 397805463,
+          "api": 397805463,
+          "diff": 0
+        },
+        {
+          "metric": "chartContracts",
+          "db": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":397805463,\"count\":2},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "api": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":397805463,\"count\":2},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "diff": 0
+        },
+        {
+          "metric": "chartPayments",
+          "db": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":209483500,\"count\":3},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "api": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":209483500,\"count\":3},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "diff": 0
+        },
+        {
+          "metric": "chartPos",
+          "db": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":209483500,\"count\":3},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "api": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":209483500,\"count\":3},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "diff": 0
+        },
+        {
+          "metric": "tblProjects",
+          "db": "[]",
+          "api": "[]",
+          "diff": 0
+        },
+        {
+          "metric": "tblTenders",
+          "db": "[133,132,131,130]",
+          "api": "[133,132,131,130]",
+          "diff": 0
+        },
+        {
+          "metric": "tblPos",
+          "db": "[3,2,1]",
+          "api": "[3,2,1]",
+          "diff": 0
+        },
+        {
+          "metric": "tblInvoices",
+          "db": "[3,2,1]",
+          "api": "[3,2,1]",
+          "diff": 0
+        }
+      ],
+      "mismatches": []
+    },
+    "TVM": {
+      "httpStatus": 200,
+      "rows": [
+        {
+          "metric": "pipelineValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "pipelineCount",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "wonValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "openPipelineValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "openDealsCount",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "totalProjects",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "planning",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "inProgress",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "active",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "completedOrClosed",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "onHold",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "cancelled",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "closedCount",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "closedValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "poCount",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "poValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "payCount",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "payValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "apCount",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "apValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "approvals",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "contractAwardedCount",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "contractAwardedValue",
+          "db": 0,
+          "api": 0,
+          "diff": 0
+        },
+        {
+          "metric": "chartContracts",
+          "db": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "api": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "diff": 0
+        },
+        {
+          "metric": "chartPayments",
+          "db": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "api": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "diff": 0
+        },
+        {
+          "metric": "chartPos",
+          "db": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "api": "[{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0},{\"value\":0,\"count\":0}]",
+          "diff": 0
+        },
+        {
+          "metric": "tblProjects",
+          "db": "[]",
+          "api": "[]",
+          "diff": 0
+        },
+        {
+          "metric": "tblTenders",
+          "db": "[]",
+          "api": "[]",
+          "diff": 0
+        },
+        {
+          "metric": "tblPos",
+          "db": "[]",
+          "api": "[]",
+          "diff": 0
+        },
+        {
+          "metric": "tblInvoices",
+          "db": "[]",
+          "api": "[]",
+          "diff": 0
+        }
+      ],
+      "mismatches": []
+    }
+  },
+  "buckets": {
+    "UBD": {
+      "pipelineValue": 1589865915,
+      "pipelineCount": 50,
+      "wonValue": 397805463,
+      "openPipelineValue": 1192060452,
+      "openDealsCount": 48,
+      "totalProjects": 2,
+      "planning": 0,
+      "inProgress": 0,
+      "active": 0,
+      "completedOrClosed": 2,
+      "onHold": 0,
+      "cancelled": 0,
+      "closedCount": 2,
+      "closedValue": 397805463,
+      "poCount": 3,
+      "poValue": 209483500,
+      "payCount": 3,
+      "payValue": 209483500,
+      "apCount": 0,
+      "apValue": 0,
+      "approvals": 0,
+      "contractAwardedCount": 2,
+      "contractAwardedValue": 397805463,
+      "chartContracts": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 397805463,
+          "count": 2
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "chartPayments": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 209483500,
+          "count": 3
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "chartPos": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 209483500,
+          "count": 3
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "tblProjects": [],
+      "tblTenders": [
+        133,
+        132,
+        131,
+        130
+      ],
+      "tblPos": [
+        3,
+        2,
+        1
+      ],
+      "tblInvoices": [
+        3,
+        2,
+        1
+      ]
+    },
+    "TVM": {
+      "pipelineValue": 0,
+      "pipelineCount": 0,
+      "wonValue": 0,
+      "openPipelineValue": 0,
+      "openDealsCount": 0,
+      "totalProjects": 0,
+      "planning": 0,
+      "inProgress": 0,
+      "active": 0,
+      "completedOrClosed": 0,
+      "onHold": 0,
+      "cancelled": 0,
+      "closedCount": 0,
+      "closedValue": 0,
+      "poCount": 0,
+      "poValue": 0,
+      "payCount": 0,
+      "payValue": 0,
+      "apCount": 0,
+      "apValue": 0,
+      "approvals": 0,
+      "contractAwardedCount": 0,
+      "contractAwardedValue": 0,
+      "chartContracts": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "chartPayments": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "chartPos": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "tblProjects": [],
+      "tblTenders": [],
+      "tblPos": [],
+      "tblInvoices": []
+    },
+    "UNCLASSIFIED": {
+      "pipelineValue": 103979900005,
+      "pipelineCount": 113,
+      "wonValue": 101181069859,
+      "openPipelineValue": 2798830146,
+      "openDealsCount": 106,
+      "totalProjects": 7,
+      "planning": 0,
+      "inProgress": 4,
+      "active": 4,
+      "completedOrClosed": 3,
+      "onHold": 0,
+      "cancelled": 0,
+      "closedCount": 3,
+      "closedValue": 513017358,
+      "poCount": 9,
+      "poValue": 598470207,
+      "payCount": 7,
+      "payValue": 351298957,
+      "apCount": 0,
+      "apValue": 0,
+      "approvals": 0,
+      "contractAwardedCount": 7,
+      "contractAwardedValue": 101181069859,
+      "chartContracts": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 101181069859,
+          "count": 7
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "chartPayments": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 351298957,
+          "count": 7
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "chartPos": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 598470207,
+          "count": 9
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "tblProjects": [
+        9,
+        8,
+        7,
+        6
+      ],
+      "tblTenders": [
+        166,
+        165,
+        164,
+        163
+      ],
+      "tblPos": [
+        12,
+        11,
+        10,
+        9
+      ],
+      "tblInvoices": [
+        10,
+        9,
+        8,
+        7
+      ]
+    },
+    "UNLINKED": {
+      "pipelineValue": 0,
+      "pipelineCount": 0,
+      "wonValue": 0,
+      "openPipelineValue": 0,
+      "openDealsCount": 0,
+      "totalProjects": 0,
+      "planning": 0,
+      "inProgress": 0,
+      "active": 0,
+      "completedOrClosed": 0,
+      "onHold": 0,
+      "cancelled": 0,
+      "closedCount": 0,
+      "closedValue": 0,
+      "poCount": 0,
+      "poValue": 0,
+      "payCount": 0,
+      "payValue": 0,
+      "apCount": 0,
+      "apValue": 0,
+      "approvals": 0,
+      "contractAwardedCount": 0,
+      "contractAwardedValue": 0,
+      "chartContracts": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "chartPayments": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "chartPos": [
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        },
+        {
+          "value": 0,
+          "count": 0
+        }
+      ],
+      "tblProjects": [],
+      "tblTenders": [],
+      "tblPos": [],
+      "tblInvoices": []
+    }
+  },
+  "unclassifiedMeta": {
+    "api": {
+      "tendersCount": 113,
+      "tendersValue": 103979900005,
+      "contractsCount": 7,
+      "contractsValue": 101181069859,
+      "projectsCount": 7,
+      "posCount": 9,
+      "posValue": 598470207,
+      "paymentsCount": 7,
+      "paymentsValue": 351298957
+    },
+    "db": {
+      "tenders": {
+        "count": 113,
+        "value": 103979900005
+      },
+      "contracts": {
+        "count": 7,
+        "value": 101181069859
+      },
+      "projects": {
+        "count": 7,
+        "value": 0
+      },
+      "pos": {
+        "count": 9,
+        "value": 598470207
+      },
+      "payments": {
+        "count": 7,
+        "value": 351298957
+      }
+    },
+    "unlinkedAllTime": {
+      "pos": 0,
+      "payments": 0,
+      "invoices": 0,
+      "projects": 0,
+      "contracts": 0
+    }
+  },
+  "additive": [
+    {
+      "metric": "pipelineValue",
+      "ALL": 105569765920,
+      "UBD": 1589865915,
+      "TVM": 0,
+      "UNCL": 103979900005,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "pipelineCount",
+      "ALL": 163,
+      "UBD": 50,
+      "TVM": 0,
+      "UNCL": 113,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "totalProjects",
+      "ALL": 9,
+      "UBD": 2,
+      "TVM": 0,
+      "UNCL": 7,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "closedCount",
+      "ALL": 5,
+      "UBD": 2,
+      "TVM": 0,
+      "UNCL": 3,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "closedValue",
+      "ALL": 910822821,
+      "UBD": 397805463,
+      "TVM": 0,
+      "UNCL": 513017358,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "poCount",
+      "ALL": 12,
+      "UBD": 3,
+      "TVM": 0,
+      "UNCL": 9,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "poValue",
+      "ALL": 807953707,
+      "UBD": 209483500,
+      "TVM": 0,
+      "UNCL": 598470207,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "payCount",
+      "ALL": 10,
+      "UBD": 3,
+      "TVM": 0,
+      "UNCL": 7,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "payValue",
+      "ALL": 560782457,
+      "UBD": 209483500,
+      "TVM": 0,
+      "UNCL": 351298957,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "apCount",
+      "ALL": 0,
+      "UBD": 0,
+      "TVM": 0,
+      "UNCL": 0,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "apValue",
+      "ALL": 0,
+      "UBD": 0,
+      "TVM": 0,
+      "UNCL": 0,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    },
+    {
+      "metric": "contractAwardedValue",
+      "ALL": 101578875322,
+      "UBD": 397805463,
+      "TVM": 0,
+      "UNCL": 101181069859,
+      "UNLINKED": 0,
+      "ALL-(U+T+UN)": 0,
+      "ALL-sum4": 0
+    }
+  ],
+  "tableRows": {
+    "UBD": {
+      "projectsLeak": [],
+      "tendersLeak": [],
+      "posLeak": [],
+      "invoicesLeak": []
+    },
+    "TVM": {
+      "projectsLeak": [],
+      "tendersLeak": [],
+      "posLeak": [],
+      "invoicesLeak": []
+    }
+  },
+  "apiTables": {
+    "ALL": {
+      "activeProjects": [
+        {
+          "id": 9,
+          "name": "PROJECT SKF BEKASI",
+          "contractNumber": "CONT-20261023-0009",
+          "status": "Eksekusi",
+          "progress": 0
+        },
+        {
+          "id": 8,
+          "name": "PROJECT SKF BEKASI",
+          "contractNumber": "CONT-20261021-0006",
+          "status": "Eksekusi",
+          "progress": 100
+        },
+        {
+          "id": 7,
+          "name": "PROJECT SKF BEKASI",
+          "contractNumber": "CONT-20261021-0007",
+          "status": "Eksekusi",
+          "progress": 0
+        },
+        {
+          "id": 6,
+          "name": "PROJECT PERCOBAAN UNTUK DEBUG",
+          "contractNumber": "CONT-20261022-0008",
+          "status": "Eksekusi",
+          "progress": 0
+        }
+      ],
+      "recentTenders": [
+        {
+          "id": 166,
+          "title": "PROJECT PERCOBAAN UNTUK DEBUG",
+          "customerName": "PROJECT SKF",
+          "val": 100000000000,
+          "stage": "Menang"
+        },
+        {
+          "id": 165,
+          "title": "PROJECT ASIANET (PR26002041) PERCOBAAN 3",
+          "customerName": "Project Sokka Tama Fiber",
+          "val": 248944140,
+          "stage": "Menang"
+        },
+        {
+          "id": 164,
+          "title": "PROJECT ASIANET (PR26002041) PERCOBAAN 2",
+          "customerName": "Project Sokka Tama Fiber",
+          "val": 132036609,
+          "stage": "Menang"
+        },
+        {
+          "id": 163,
+          "title": "PROJECT ASIANET (PR26002041) PERCOBAAN ",
+          "customerName": "Project Sokka Tama Fiber",
+          "val": 132036609,
+          "stage": "Menang"
+        }
+      ],
+      "recentPurchaseOrders": [
+        {
+          "id": 12,
+          "poNumber": "PO-20261023-003",
+          "vendorName": "CV Logistik Terpadu",
+          "totalAmount": 22171250,
+          "status": "Selesai"
+        },
+        {
+          "id": 11,
+          "poNumber": "PO-20261023-002",
+          "vendorName": "CV Logistik Terpadu",
+          "totalAmount": 225000000,
+          "status": "Selesai"
+        },
+        {
+          "id": 10,
+          "poNumber": "PO-20261023-001",
+          "vendorName": "PT IT Solusi Bersama",
+          "totalAmount": 17029000,
+          "status": "Diterbitkan"
+        },
+        {
+          "id": 9,
+          "poNumber": "PO-20261021-005",
+          "vendorName": "PT Maju Infrastruktur",
+          "totalAmount": 3795156,
+          "status": "Diterbitkan"
+        }
+      ],
+      "recentInvoices": [
+        {
+          "id": 10,
+          "invoiceNumber": "INV-20261023-001",
+          "vendorName": "PT IT Solusi Bersama",
+          "totalAmount": 17029000,
+          "paymentStatus": "Lunas"
+        },
+        {
+          "id": 9,
+          "invoiceNumber": "INV-20261021-007",
+          "vendorName": "PT IT Solusi Bersama",
+          "totalAmount": 7760000,
+          "paymentStatus": "Lunas"
+        },
+        {
+          "id": 8,
+          "invoiceNumber": "INV-20261021-006",
+          "vendorName": "PT Suplai Makmur",
+          "totalAmount": 18067056,
+          "paymentStatus": "Lunas"
+        },
+        {
+          "id": 7,
+          "invoiceNumber": "INV-20261021-005",
+          "vendorName": "PT Maju Infrastruktur",
+          "totalAmount": 3795156,
+          "paymentStatus": "Lunas"
+        }
+      ]
+    },
+    "UBD": {
+      "activeProjects": [],
+      "recentTenders": [
+        {
+          "id": 133,
+          "title": "Sewa Core_Fiberization_ Program New and Additional Q2 Capacity Expansion AOP 2025_JB_TSK_RG0011 JB_TSK_RG0011",
+          "customerName": "Project Sokka Tama Fiber",
+          "val": 1641690,
+          "stage": "Prospek"
+        },
+        {
+          "id": 132,
+          "title": "Sewa Core_Fiberization_ Program New and Additional Q2 Capacity Expansion AOP 2025_JB_TSK_RG0011 JB_TSK_RG0011",
+          "customerName": "Project Sokka Tama Fiber",
+          "val": 633810,
+          "stage": "Prospek"
+        },
+        {
+          "id": 131,
+          "title": "Sewa Core_Fiberization_ Program New and Additional Q2 Capacity Expansion AOP 2025_JB_TSK_RG0011 JB_TSK_RG0011",
+          "customerName": "Project Sokka Tama Fiber",
+          "val": 5225880,
+          "stage": "Prospek"
+        },
+        {
+          "id": 130,
+          "title": "Sewa Core Fiberization_Insert Site Rancaupas & Rancabali_JB_SOR_SI0021 JB_SOR_SI0021",
+          "customerName": "Project Sokka Tama Fiber",
+          "val": 24327648,
+          "stage": "Prospek"
+        }
+      ],
+      "recentPurchaseOrders": [
+        {
+          "id": 3,
+          "poNumber": "PO-20261020-001",
+          "vendorName": "PT Cyber Security",
+          "totalAmount": 79875000,
+          "status": "Selesai"
+        },
+        {
+          "id": 2,
+          "poNumber": "PO-20261018-002",
+          "vendorName": "PT IT Solusi Bersama",
+          "totalAmount": 4152000,
+          "status": "Diterbitkan"
+        },
+        {
+          "id": 1,
+          "poNumber": "PO-20261018-001",
+          "vendorName": "PT Maju Infrastruktur",
+          "totalAmount": 125456500,
+          "status": "Selesai"
+        }
+      ],
+      "recentInvoices": [
+        {
+          "id": 3,
+          "invoiceNumber": "INV-20261021-001",
+          "vendorName": "PT Cyber Security",
+          "totalAmount": 79875000,
+          "paymentStatus": "Lunas"
+        },
+        {
+          "id": 2,
+          "invoiceNumber": "INV-20261018-002",
+          "vendorName": "PT IT Solusi Bersama",
+          "totalAmount": 4152000,
+          "paymentStatus": "Lunas"
+        },
+        {
+          "id": 1,
+          "invoiceNumber": "INV-20261018-001",
+          "vendorName": "PT Maju Infrastruktur",
+          "totalAmount": 125456500,
+          "paymentStatus": "Lunas"
+        }
+      ]
+    },
+    "TVM": {
+      "activeProjects": [],
+      "recentTenders": [],
+      "recentPurchaseOrders": [],
+      "recentInvoices": []
+    }
+  },
+  "apiMeta": {
+    "ALL": {
+      "reportingBasis": "MARKETING_ATTRIBUTION",
+      "selectedScope": "ALL",
+      "period": {
+        "type": "YEAR_TO_DATE",
+        "startDate": "2025-12-31T17:00:00.000Z",
+        "endDate": "2026-10-26T16:59:59.999Z"
+      },
+      "generatedAt": "2026-10-26T13:24:19.240Z"
+    },
+    "UBD": {
+      "reportingBasis": "MARKETING_ATTRIBUTION",
+      "selectedScope": "UBD",
+      "period": {
+        "type": "YEAR_TO_DATE",
+        "startDate": "2025-12-31T17:00:00.000Z",
+        "endDate": "2026-10-26T16:59:59.999Z"
+      },
+      "generatedAt": "2026-10-26T13:24:19.299Z"
+    },
+    "TVM": {
+      "reportingBasis": "MARKETING_ATTRIBUTION",
+      "selectedScope": "TVM",
+      "period": {
+        "type": "YEAR_TO_DATE",
+        "startDate": "2025-12-31T17:00:00.000Z",
+        "endDate": "2026-10-26T16:59:59.999Z"
+      },
+      "generatedAt": "2026-10-26T13:24:19.357Z"
+    }
+  }
+}

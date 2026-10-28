@@ -1,0 +1,51 @@
+/* EPMS Executive Dashboard Design Tokens — Phase 4A */
+:root {
+  --dash-primary-navy: #0F2D6B;
+  --dash-primary-navy-hover: #0B2252;
+  --dash-primary-blue: #2563EB;
+  --dash-primary-blue-hover: #1D4ED8;
+  --dash-primary-blue-subtle: #EFF6FF;
+  --dash-accent-blue: #38BDF8;
+
+  --dash-bg: #F8FAFC;
+  --dash-surface: #FFFFFF;
+  --dash-surface-muted: #F8FAFC;
+  --dash-surface-subtle: #F1F5F9;
+
+  --dash-border: #E2E8F0;
+  --dash-border-subtle: #F1F5F9;
+  --dash-border-strong: #CBD5E1;
+  --dash-border-focus: #2563EB;
+
+  --dash-text-primary: #0F172A;
+  --dash-text-secondary: #475569;
+  --dash-text-muted: #64748B;
+  --dash-text-light: #94A3B8;
+
+  --dash-success: #10B981;
+  --dash-success-subtle: #ECFDF5;
+  --dash-success-border: #A7F3D0;
+
+  --dash-warning: #F59E0B;
+  --dash-warning-subtle: #FFFBEB;
+  --dash-warning-border: #FDE68A;
+
+  --dash-danger: #EF4444;
+  --dash-danger-subtle: #FEF2F2;
+  --dash-danger-border: #FECACA;
+
+  --dash-purple: #8B5CF6;
+  --dash-purple-subtle: #F5F3FF;
+  --dash-purple-border: #DDD6FE;
+
+  --dash-info: #0284C7;
+  --dash-info-subtle: #F0F9FF;
+  --dash-info-border: #BAE6FD;
+
+  --dash-radius-card: 14px;
+  --dash-radius-md: 10px;
+  --dash-radius-sm: 6px;
+
+  --dash-shadow-card: 0 1px 3px 0 rgba(15, 23, 42, 0.04), 0 1px 2px -1px rgba(15, 23, 42, 0.02);
+  --dash-shadow-hover: 0 4px 12px -2px rgba(15, 23, 42, 0.06), 0 2px 4px -1px rgba(15, 23, 42, 0.03);
+}
