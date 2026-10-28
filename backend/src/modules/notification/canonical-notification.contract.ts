@@ -25,6 +25,7 @@ export interface CanonicalNotificationResult {
   status: 'PERSISTED' | 'DUPLICATE_SUPPRESSED';
   notification?: Notification;
   notificationId?: number;
+  pushOutboxId?: number;
   dedupeKey: string;
   eventId: string;
   recipientId: number;
