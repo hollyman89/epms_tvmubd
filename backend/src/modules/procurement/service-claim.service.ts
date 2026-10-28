@@ -912,8 +912,33 @@ export class ServiceClaimService {
       });
       await queryRunner.manager.save(AuditLog, audit);
 
+      // Resolve assigned Project Manager for routing
+      let projectManagerId: number | null = null;
+      if (savedClaim.projectId) {
+        const project = await queryRunner.manager.findOne(Project, {
+          where: { id: savedClaim.projectId },
+        });
+        if (project && project.managerId) {
+          projectManagerId = Number(project.managerId);
+        }
+      }
+
       // Outbox Event
       const eventId = randomUUID();
+      const routing = projectManagerId ? { userIds: [projectManagerId] } : undefined;
+      const outboxPayload = {
+        claimId: savedClaim.id,
+        claimNumber: savedClaim.claimNumber,
+        poId: savedClaim.poId,
+        poNumber: savedClaim.purchaseOrder?.poNumber,
+        projectId: savedClaim.projectId,
+        vendorId: savedClaim.vendorId,
+        totalClaimAmount: savedClaim.totalClaimAmount,
+        submittedBy: userId,
+        isResubmit,
+        projectManagerId,
+      };
+
       const outbox = queryRunner.manager.create(OutboxEvent, {
         event_id: eventId,
         event_name: "procurement.service_claim.submitted",
@@ -922,14 +947,9 @@ export class ServiceClaimService {
         aggregate_id: Number(savedClaim.id),
         correlation_id: null,
         payload: {
-          claimId: savedClaim.id,
-          claimNumber: savedClaim.claimNumber,
-          poId: savedClaim.poId,
-          projectId: savedClaim.projectId,
-          vendorId: savedClaim.vendorId,
-          totalClaimAmount: savedClaim.totalClaimAmount,
-          submittedBy: userId,
-          isResubmit,
+          ...outboxPayload,
+          routing,
+          businessPayload: outboxPayload,
         },
         status: OutboxStatus.PENDING,
         retry_count: 0,
@@ -939,18 +959,15 @@ export class ServiceClaimService {
       await queryRunner.commitTransaction();
 
       // Canonical Notification to assigned Project Manager
-      const project = await this.projectRepo.findOne({
-        where: { id: savedClaim.projectId },
-      });
-      if (project && project.managerId && this.notificationWriter) {
+      if (projectManagerId && this.notificationWriter) {
         try {
           await this.notificationWriter.persistCanonicalNotification({
             eventId,
-            recipientId: Number(project.managerId),
+            recipientId: projectManagerId,
             purpose: "SERVICE_CLAIM_SUBMITTED",
             title: `Pengajuan Klaim Jasa Baru (${savedClaim.claimNumber})`,
             message: `Klaim jasa baru untuk PO #${savedClaim.purchaseOrder?.poNumber || savedClaim.poId} diajukan dan membutuhkan verifikasi teknis.`,
-            type: "TASK",
+            type: "ALERT",
             actionTarget: `/project?projectId=${savedClaim.projectId}&claimId=${savedClaim.id}`,
             metaData: {
               claimId: savedClaim.id,
@@ -1107,6 +1124,23 @@ export class ServiceClaimService {
 
       // Outbox Event
       const eventId = randomUUID();
+      const routing =
+        dto.decision === ClaimVerificationDecision.RETURN ||
+        dto.decision === ClaimVerificationDecision.REJECT
+          ? (claim.submittedBy ? { userIds: [Number(claim.submittedBy)] } : undefined)
+          : undefined;
+
+      const outboxPayload = {
+        claimId: saved.id,
+        claimNumber: saved.claimNumber,
+        decision: dto.decision,
+        verifierId: userId,
+        projectId: saved.projectId,
+        submittedBy: claim.submittedBy ? Number(claim.submittedBy) : undefined,
+        revisionNotes: saved.revisionNotes,
+        rejectionReason: saved.rejectionReason,
+      };
+
       const outbox = queryRunner.manager.create(OutboxEvent, {
         event_id: eventId,
         event_name: outboxEventName,
@@ -1115,12 +1149,9 @@ export class ServiceClaimService {
         aggregate_id: Number(saved.id),
         correlation_id: null,
         payload: {
-          claimId: saved.id,
-          claimNumber: saved.claimNumber,
-          decision: dto.decision,
-          verifierId: userId,
-          revisionNotes: saved.revisionNotes,
-          rejectionReason: saved.rejectionReason,
+          ...outboxPayload,
+          routing,
+          businessPayload: outboxPayload,
         },
         status: OutboxStatus.PENDING,
         retry_count: 0,

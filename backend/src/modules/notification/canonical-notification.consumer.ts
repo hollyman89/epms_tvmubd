@@ -884,6 +884,204 @@ export class CanonicalNotificationConsumer {
     });
   }
 
+  /**
+   * Phase PROCUREMENT-CLAIM: Canonical Bell Projection for Service Claim Submitted.
+   * Informs assigned Project Manager that a new service claim requires technical verification.
+   * Deduplication guaranteed via: <eventId>:<recipientId>:SERVICE_CLAIM_SUBMITTED.
+   */
+  @OnEvent('procurement.service_claim.submitted')
+  async handleServiceClaimSubmitted(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) {
+      this.logger.debug(
+        `[CanonicalNotificationConsumer] Skipping non-canonical procurement.service_claim.submitted event (missing eventId)`,
+      );
+      return [];
+    }
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const claimId = payload.claimId || event.aggregateId;
+    const claimNumber = payload.claimNumber || `Klaim #${claimId}`;
+    const projectId = payload.projectId || event.projectId;
+    const poNumber = payload.poNumber || (payload.poId ? `PO #${payload.poId}` : '');
+
+    // Resolve PM recipient: explicit routing -> payload projectManagerId -> database resolution
+    let pmId: number | null = null;
+    if (event.routing?.userIds && event.routing.userIds.length > 0) {
+      pmId = Number(event.routing.userIds[0]);
+    } else if (payload.projectManagerId) {
+      pmId = Number(payload.projectManagerId);
+    } else if (projectId) {
+      pmId = await this.resolvePmUserIdFromProject(Number(projectId));
+    }
+
+    if (!pmId || pmId <= 0) {
+      this.logger.warn(
+        `[CanonicalNotificationConsumer] No assigned Project Manager found for service claim #${claimNumber} (projectId: ${projectId})`,
+      );
+      return [];
+    }
+
+    const poText = poNumber ? ` untuk ${poNumber}` : '';
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'SERVICE_CLAIM_SUBMITTED',
+      type: 'ALERT',
+      title: `Pengajuan Klaim Jasa Baru (${claimNumber})`,
+      message: `Klaim jasa baru${poText} diajukan dan membutuhkan verifikasi teknis.`,
+      actionTarget: `/project?projectId=${projectId}&claimId=${claimId}`,
+      recipientIds: [pmId],
+      metaData: {
+        category: 'PROCUREMENT',
+        priority: 'HIGH',
+        reference_type: 'SERVICE_CLAIM',
+        reference_id: claimId,
+        claimId,
+        claimNumber,
+        projectId,
+        actionType: 'SERVICE_CLAIM_SUBMITTED',
+      },
+    });
+  }
+
+  /**
+   * Phase PROCUREMENT-CLAIM: Canonical Bell Projection for Service Claim Technically Verified by PM.
+   * When approved: informs Procurement & Purchasing that technical verification is complete and ready for commercial audit.
+   * When returned/rejected: delegates to respective handlers.
+   * Deduplication guaranteed via: <eventId>:<recipientId>:<purpose>.
+   */
+  @OnEvent('procurement.service_claim.pm_verified')
+  @OnEvent('procurement.service_claim.verified')
+  async handleServiceClaimVerified(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) {
+      this.logger.debug(
+        `[CanonicalNotificationConsumer] Skipping non-canonical service claim verified event (missing eventId)`,
+      );
+      return [];
+    }
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const decision = payload.decision;
+
+    if (decision === 'RETURN') {
+      return this.handleServiceClaimReturned(event);
+    }
+    if (decision === 'REJECT') {
+      return this.handleServiceClaimRejected(event);
+    }
+
+    // Default / APPROVE: notify Procurement & Purchasing
+    const claimId = payload.claimId || event.aggregateId;
+    const claimNumber = payload.claimNumber || `Klaim #${claimId}`;
+
+    const procRecipientIds = await this.resolveRoleUserIds(['PROCUREMENT', 'PURCHASING']);
+    const recipientIds = event.routing?.userIds && event.routing.userIds.length > 0
+      ? event.routing.userIds
+      : procRecipientIds;
+
+    if (!recipientIds || recipientIds.length === 0) {
+      this.logger.warn(
+        `[CanonicalNotificationConsumer] No active Procurement/Purchasing users found for service claim #${claimNumber}`,
+      );
+      return [];
+    }
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'SERVICE_CLAIM_VERIFIED',
+      type: 'ALERT',
+      title: `Klaim Jasa Terverifikasi Teknis (${claimNumber})`,
+      message: `Klaim jasa ${claimNumber} telah disetujui secara teknis oleh PM dan siap untuk verifikasi komersial.`,
+      actionTarget: `/procurement?tab=service-claim&claimId=${claimId}`,
+      recipientIds,
+      metaData: {
+        category: 'PROCUREMENT',
+        priority: 'HIGH',
+        reference_type: 'SERVICE_CLAIM',
+        reference_id: claimId,
+        claimId,
+        claimNumber,
+        actionType: 'SERVICE_CLAIM_VERIFIED',
+      },
+    });
+  }
+
+  /**
+   * Phase PROCUREMENT-CLAIM: Canonical Bell Projection for Service Claim Returned by PM.
+   * Informs submitter that revision is required with notes.
+   * Deduplication guaranteed via: <eventId>:<recipientId>:SERVICE_CLAIM_RETURNED.
+   */
+  @OnEvent('procurement.service_claim.returned')
+  async handleServiceClaimReturned(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) return [];
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const claimId = payload.claimId || event.aggregateId;
+    const claimNumber = payload.claimNumber || `Klaim #${claimId}`;
+    const submitterId = payload.submittedBy || (event.routing?.userIds && event.routing.userIds[0]);
+    const notes = payload.revisionNotes || '-';
+
+    if (!submitterId) {
+      this.logger.warn(`[CanonicalNotificationConsumer] No submitter found for returned service claim #${claimNumber}`);
+      return [];
+    }
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'SERVICE_CLAIM_RETURNED',
+      type: 'ALERT',
+      title: `Klaim Jasa Membutuhkan Revisi (${claimNumber})`,
+      message: `Klaim dikembalikan oleh PM dengan catatan: ${notes}`,
+      actionTarget: `/procurement?claimId=${claimId}`,
+      recipientIds: [Number(submitterId)],
+      metaData: {
+        category: 'PROCUREMENT',
+        priority: 'HIGH',
+        reference_type: 'SERVICE_CLAIM',
+        reference_id: claimId,
+        claimId,
+        claimNumber,
+        actionType: 'SERVICE_CLAIM_RETURNED',
+      },
+    });
+  }
+
+  /**
+   * Phase PROCUREMENT-CLAIM: Canonical Bell Projection for Service Claim Rejected by PM.
+   * Informs submitter that claim was rejected with reason.
+   * Deduplication guaranteed via: <eventId>:<recipientId>:SERVICE_CLAIM_REJECTED.
+   */
+  @OnEvent('procurement.service_claim.rejected')
+  async handleServiceClaimRejected(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) return [];
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const claimId = payload.claimId || event.aggregateId;
+    const claimNumber = payload.claimNumber || `Klaim #${claimId}`;
+    const submitterId = payload.submittedBy || (event.routing?.userIds && event.routing.userIds[0]);
+    const reason = payload.rejectionReason || '-';
+
+    if (!submitterId) {
+      this.logger.warn(`[CanonicalNotificationConsumer] No submitter found for rejected service claim #${claimNumber}`);
+      return [];
+    }
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'SERVICE_CLAIM_REJECTED',
+      type: 'ALERT',
+      title: `Klaim Jasa Ditolak (${claimNumber})`,
+      message: `Klaim ditolak oleh PM: ${reason}`,
+      actionTarget: `/procurement?claimId=${claimId}`,
+      recipientIds: [Number(submitterId)],
+      metaData: {
+        category: 'PROCUREMENT',
+        priority: 'HIGH',
+        reference_type: 'SERVICE_CLAIM',
+        reference_id: claimId,
+        claimId,
+        claimNumber,
+        actionType: 'SERVICE_CLAIM_REJECTED',
+      },
+    });
+  }
+
   @OnEvent('project.closure.submitted')
   async handleProjectClosureSubmitted(event: any): Promise<CanonicalNotificationResult[]> {
     if (!event || typeof event !== 'object') return [];
@@ -1120,6 +1318,28 @@ export class CanonicalNotificationConsumer {
       return null;
     } catch (err: any) {
       this.logger.error(`[CanonicalNotificationConsumer] Failed to resolve PM for PO #${poId}: ${err.message}`);
+      return null;
+    }
+  }
+
+  private async resolvePmUserIdFromProject(projectId: number): Promise<number | null> {
+    if (!this.dataSource || !projectId) return null;
+    try {
+      const rows = await this.dataSource.query(
+        `SELECT manager_id
+         FROM projects
+         WHERE id = ?
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        [projectId],
+      );
+      if (rows && rows.length > 0) {
+        const mgrId = rows[0].manager_id ?? rows[0].managerId;
+        if (mgrId) return Number(mgrId);
+      }
+      return null;
+    } catch (err: any) {
+      this.logger.error(`[CanonicalNotificationConsumer] Failed to resolve PM for Project #${projectId}: ${err.message}`);
       return null;
     }
   }
