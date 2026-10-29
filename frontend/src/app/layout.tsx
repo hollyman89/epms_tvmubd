@@ -7,6 +7,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'EPMS UBD & TVM',
   description: 'Enterprise Project Management System',
+  manifest: '/manifest.json',
 };
 
 export const viewport = {

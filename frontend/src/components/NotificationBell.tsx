@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { Badge, Popover, List, Typography, Button, Spin, Empty, theme, Tabs, Tag, Drawer } from 'antd';
+import { Badge, Popover, List, Typography, Button, Spin, Empty, theme, Tabs, Tag, Drawer, Space } from 'antd';
 import { BellOutlined, CheckOutlined, ArrowRightOutlined, ClockCircleOutlined, CloseOutlined, UnorderedListOutlined, UserOutlined, RightOutlined, FileTextOutlined, AppstoreOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/axios';
@@ -30,6 +30,7 @@ import {
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import 'dayjs/locale/id';
+import { PushNotificationToggle } from './PushNotificationToggle';
 
 dayjs.extend(relativeTime);
 dayjs.locale('id');
@@ -820,6 +821,7 @@ export const NotificationBell: React.FC = () => {
         <div style={{ padding: '16px 20px 0 20px', borderBottom: `1px solid #f1f5f9`, backgroundColor: '#ffffff' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
             <Text style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>{INBOX_PAGE_CONFIG.TITLE}</Text>
+            <PushNotificationToggle />
           </div>
           <Tabs
             activeKey={activeTab}
@@ -877,18 +879,32 @@ export const NotificationBell: React.FC = () => {
           )}
         </div>
 
-        <div style={{ padding: '10px 16px', borderTop: `1px solid #f1f5f9`, display: 'flex', justifyContent: 'space-between', backgroundColor: '#ffffff' }}>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => {
-              router.push(INBOX_PAGE_CONFIG.ROUTE);
-              setOpen(false);
-            }}
-            style={{ padding: 0 }}
-          >
-            Lihat Semua {INBOX_PAGE_CONFIG.TITLE}
-          </Button>
+        <div style={{ padding: '10px 16px', borderTop: `1px solid #f1f5f9`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff' }}>
+          <Space size={12}>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                router.push(INBOX_PAGE_CONFIG.ROUTE);
+                setOpen(false);
+              }}
+              style={{ padding: 0 }}
+            >
+              Lihat Semua {INBOX_PAGE_CONFIG.TITLE}
+            </Button>
+            <span style={{ color: '#cbd5e1' }}>•</span>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                router.push('/profile');
+                setOpen(false);
+              }}
+              style={{ padding: 0, color: '#64748b', fontSize: 12 }}
+            >
+              Kelola Perangkat
+            </Button>
+          </Space>
 
           {activeTab === 'notifications' && notifications.length > 0 && (
             <Button
@@ -936,17 +952,20 @@ export const NotificationBell: React.FC = () => {
           <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: '#cbd5e1' }} />
         </div>
 
-        {/* Header: Title and Close button */}
+        {/* Header: Title, PushToggle, and Close button */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <Text style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>{INBOX_PAGE_CONFIG.TITLE}</Text>
-          <Button
-            type="text"
-            shape="circle"
-            size="small"
-            icon={<CloseOutlined style={{ fontSize: 15, color: '#475569' }} />}
-            onClick={() => setOpen(false)}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <PushNotificationToggle compact />
+            <Button
+              type="text"
+              shape="circle"
+              size="small"
+              icon={<CloseOutlined style={{ fontSize: 15, color: '#475569' }} />}
+              onClick={() => setOpen(false)}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            />
+          </div>
         </div>
 
         {/* Clean Benchmark Tabs */}
@@ -1078,6 +1097,20 @@ export const NotificationBell: React.FC = () => {
           <UnorderedListOutlined style={{ fontSize: 16 }} />
           <span style={{ flex: 1, textAlign: 'center' }}>Lihat Semua {INBOX_PAGE_CONFIG.TITLE}</span>
           <RightOutlined style={{ fontSize: 12 }} />
+        </div>
+
+        <div style={{ textAlign: 'center', marginTop: 10, paddingBottom: 4 }}>
+          <Button
+            type="link"
+            size="small"
+            onClick={() => {
+              router.push('/profile');
+              setOpen(false);
+            }}
+            style={{ color: '#64748b', fontSize: 12, padding: 0 }}
+          >
+            Pengaturan Notifikasi & Perangkat Mobile
+          </Button>
         </div>
       </div>
     ),

@@ -1,0 +1,22 @@
+{
+  "name": "Enterprise Project Management System",
+  "short_name": "EPMS",
+  "description": "Enterprise Project Management System for UBD & TVM",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1677ff",
+  "icons": [
+    {
+      "src": "/epms-logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/epms-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
+

@@ -148,6 +148,31 @@ export class ProcurementService {
       
       this.eventEmitter.emit('workflow.trigger', payload);
       this.logger.log(`Event Emitted: workflow.trigger for PR ${savedPr.id}`);
+
+      // Emit canonical procurement.pr.submitted event for Finance notification (initial submission)
+      this.eventEmitter.emit('procurement.pr.submitted', {
+        eventId: `pr-sub-${savedPr.id}`,
+        eventName: 'procurement.pr.submitted',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'PURCHASE_REQUEST',
+        aggregateId: savedPr.id,
+        projectId: savedPr.projectId,
+        actor: { userId },
+        routing: { roles: ['FINANCE'] },
+        notificationPolicy: 'NOTIFICATION_AND_SYNC',
+        payload: {
+          purchaseRequestId: savedPr.id,
+          prNumber: savedPr.prNumber,
+          projectId: savedPr.projectId,
+          submittedBy: userId,
+          totalEstimatedAmount: savedPr.totalEstimatedAmount,
+          submittedAt: new Date().toISOString(),
+          isResubmission: false,
+          resubmitted: false,
+          resubmissionCount: 0,
+        },
+      });
       
       return {
         success: true,

@@ -204,7 +204,7 @@ export class PushOutboxWorker implements OnModuleInit, OnModuleDestroy {
       .filter((r) => r.status === 'INVALID_410')
       .map((r) => r.subscriptionId);
 
-    // Clean up invalid subscriptions if any
+    // Clean up invalid subscriptions if any (strictly on confirmed 404/410 from push provider)
     if (invalidSubIds.length > 0) {
       try {
         await this.subscriptionProvider.removeInvalidSubscriptions(invalidSubIds);
@@ -259,10 +259,13 @@ export class PushOutboxWorker implements OnModuleInit, OnModuleDestroy {
         lastErrorMessage = 'Exceeded maximum retry attempts';
       }
     } else {
-      // Default fallback
+      // 5. Permanent failure (e.g., VAPID_ERROR or SSRF_REJECTED)
       finalStatus = PushOutboxStatus.PERMANENT_FAILURE;
-      errorCategory = PushErrorCategory.UNKNOWN_ERROR;
-      lastErrorMessage = 'Unknown delivery outcome';
+      const firstPermFailed = combinedResults.find(
+        (r) => r.status === 'PERMANENT_FAILURE',
+      );
+      errorCategory = this.classifyError(firstPermFailed);
+      lastErrorMessage = firstPermFailed?.error || 'Unknown delivery outcome';
     }
 
     const pendingRetryCount = finalStatus === PushOutboxStatus.FAILED_RETRYABLE

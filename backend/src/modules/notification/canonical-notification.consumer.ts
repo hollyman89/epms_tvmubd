@@ -630,9 +630,12 @@ export class CanonicalNotificationConsumer {
   }
 
   /**
-   * Phase N8.1: Canonical Bell Projection for Marketing Milestone — Go/No-Go Submitted.
-   * Personal tracking confirmation to submitter (Marketing PIC).
-   * Deduplication guaranteed via: <eventId>:<recipientId>:MARKETING_GONOGO_SUBMITTED.
+   * Phase N8.1: Canonical Bell & Push Projection for Marketing Milestone — Go/No-Go Submitted.
+   * 1. Actionable approval alert to authorized Approvers (DIRECTOR, GENERAL_MANAGER, SUPER_ADMIN).
+   * 2. Personal tracking confirmation to submitter (Marketing PIC).
+   * Deduplication guaranteed via:
+   *   - Approver:  <eventId>:<approverId>:MARKETING_GONOGO_APPROVAL_REQUIRED
+   *   - Submitter: <eventId>:<submitterId>:MARKETING_GONOGO_SUBMITTED
    */
   @OnEvent('marketing.gonogo.submitted')
   async handleMarketingGoNoGoSubmitted(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
@@ -645,19 +648,88 @@ export class CanonicalNotificationConsumer {
 
     const tenderTitle = event.payload?.tenderTitle || `Tender #${event.payload?.tenderId || event.aggregateId}`;
     const tenderId = event.payload?.tenderId || event.aggregateId;
+    const isResubmission = Boolean(event.payload?.isResubmission);
+    const submitterId =
+      (event as any).actor?.userId ||
+      (Array.isArray(event.routing?.userIds) && event.routing.userIds.length > 0 ? event.routing.userIds[0] : null);
 
-    return this.projectEventToNotifications(event, {
-      purpose: 'MARKETING_GONOGO_SUBMITTED',
-      type: 'INFO',
-      title: 'GO/NO GO Berhasil Diajukan',
-      message: `Tender "${tenderTitle}" sedang menunggu APPROVE Director.`,
-      actionTarget: `/sales/tenders/${tenderId}`,
-      metaData: {
-        category: 'MARKETING',
-        tenderId,
-        actionType: 'GO_NOGO_SUBMITTED',
-      },
-    });
+    const results: CanonicalNotificationResult[] = [];
+
+    // 1. Projection to Authorized Approvers (DIRECTOR, GENERAL_MANAGER, SUPER_ADMIN)
+    const directorRecipientIds = await this.resolveRoleUserIds(['DIRECTOR', 'GENERAL_MANAGER', 'SUPER_ADMIN']);
+    const candidateApproverIds = (
+      directorRecipientIds.length > 0
+        ? directorRecipientIds
+        : ((event.routing as any)?.approverIds || (event.routing as any)?.candidateUserIds || [])
+    ).filter((id: number) => !submitterId || id !== submitterId);
+
+    const targetApproverIds =
+      candidateApproverIds.length > 0
+        ? candidateApproverIds
+        : directorRecipientIds.filter((id: number) => !submitterId || id !== submitterId);
+
+    if (targetApproverIds.length > 0) {
+      const approverResults = await this.projectEventToNotifications(event, {
+        purpose: 'MARKETING_GONOGO_APPROVAL_REQUIRED',
+        type: 'ALERT',
+        title: isResubmission ? 'Persetujuan Ulang GO / NO GO' : 'Persetujuan GO / NO GO Diperlukan',
+        message: isResubmission
+          ? `Tender "${tenderTitle}" telah direvisi dan diajukan kembali untuk persetujuan GO / NO GO.`
+          : `Tender "${tenderTitle}" telah diajukan dan membutuhkan persetujuan GO / NO GO dari Direktur.`,
+        actionTarget: `/sales?tab=1&tenderId=${tenderId}&action=go-nogo`,
+        recipientIds: targetApproverIds,
+        metaData: {
+          category: 'MARKETING',
+          priority: 'HIGH',
+          reference_type: 'TENDER',
+          reference_id: tenderId,
+          tenderId,
+          actionType: isResubmission ? 'GO_NOGO_RESUBMITTED' : 'GO_NOGO_SUBMITTED',
+        },
+      });
+      results.push(...approverResults);
+    }
+
+    // 2. Personal tracking confirmation to Submitter (Marketing PIC)
+    if (submitterId && typeof submitterId === 'number' && submitterId > 0) {
+      const submitterResults = await this.projectEventToNotifications(event, {
+        purpose: 'MARKETING_GONOGO_SUBMITTED',
+        type: 'INFO',
+        title: isResubmission ? 'GO/NO GO Berhasil Diajukan Ulang' : 'GO/NO GO Berhasil Diajukan',
+        message: `Tender "${tenderTitle}" sedang menunggu APPROVE Director.`,
+        actionTarget: `/sales/tenders/${tenderId}`,
+        recipientIds: [submitterId],
+        metaData: {
+          category: 'MARKETING',
+          priority: 'NORMAL',
+          reference_type: 'TENDER',
+          reference_id: tenderId,
+          tenderId,
+          actionType: isResubmission ? 'GO_NOGO_RESUBMITTED' : 'GO_NOGO_SUBMITTED',
+        },
+      });
+      results.push(...submitterResults);
+    } else if (Array.isArray(event.routing?.userIds) && event.routing.userIds.length > 0) {
+      const submitterResults = await this.projectEventToNotifications(event, {
+        purpose: 'MARKETING_GONOGO_SUBMITTED',
+        type: 'INFO',
+        title: isResubmission ? 'GO/NO GO Berhasil Diajukan Ulang' : 'GO/NO GO Berhasil Diajukan',
+        message: `Tender "${tenderTitle}" sedang menunggu APPROVE Director.`,
+        actionTarget: `/sales/tenders/${tenderId}`,
+        recipientIds: event.routing.userIds,
+        metaData: {
+          category: 'MARKETING',
+          priority: 'NORMAL',
+          reference_type: 'TENDER',
+          reference_id: tenderId,
+          tenderId,
+          actionType: isResubmission ? 'GO_NOGO_RESUBMITTED' : 'GO_NOGO_SUBMITTED',
+        },
+      });
+      results.push(...submitterResults);
+    }
+
+    return results;
   }
 
   /**
@@ -676,6 +748,11 @@ export class CanonicalNotificationConsumer {
 
     const tenderTitle = event.payload?.tenderTitle || `Tender #${event.payload?.tenderId || event.aggregateId}`;
     const tenderId = event.payload?.tenderId || event.aggregateId;
+
+    const approvingActorId = (event as any).actor?.userId || event.payload?.actor?.userId || event.payload?.actorId;
+    if (approvingActorId && this.notificationService) {
+      await this.notificationService.markRelatedNotificationsRead(approvingActorId, 'TENDER', tenderId);
+    }
 
     return this.projectEventToNotifications(event, {
       purpose: 'MARKETING_GONOGO_APPROVED',
@@ -836,6 +913,88 @@ export class CanonicalNotificationConsumer {
   }
 
   /**
+   * Phase PROCUREMENT-PR: Canonical Bell Projection for Submitted Purchase Request.
+   * Informs FINANCE that a new PR has been submitted and is waiting for Finance Review.
+   * Deduplication guaranteed via: <eventId>:<recipientId>:PURCHASE_REQUEST_SUBMITTED_FINANCE_REVIEW.
+   */
+  @OnEvent('procurement.pr.submitted')
+  @OnEvent('purchase_request.submitted')
+  async handlePurchaseRequestSubmitted(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) {
+      this.logger.debug(
+        `[CanonicalNotificationConsumer] Skipping non-canonical procurement.pr.submitted event (missing eventId)`,
+      );
+      return [];
+    }
+
+    const payload = event.payload?.businessPayload || event.payload || {};
+    const prId = payload.purchaseRequestId || payload.prId || event.aggregateId;
+    const prNumber = payload.prNumber || `PR #${prId}`;
+    const projectId = payload.projectId || event.projectId;
+
+    const recipientIds = await this.resolveRoleUserIds(['FINANCE']);
+    if (!recipientIds || recipientIds.length === 0) {
+      this.logger.warn(
+        `[CanonicalNotificationConsumer] No active users with role FINANCE found for PR #${prId}`,
+      );
+      return [];
+    }
+
+    // Stable Business Event Identity:
+    // Guarantees that any emission for this PR (from WorkflowEngine, ProcurementService,
+    // or network/outbox retries) collapses into the EXACT same deterministic dedupeKey per cycle.
+    let cycle = Number(payload.resubmissionCount || payload.cycle || 0);
+    if (!cycle && typeof event.eventId === 'string') {
+      const match = event.eventId.match(/-resub-(\d+)/);
+      if (match) {
+        cycle = parseInt(match[1], 10);
+      }
+    }
+    const isResubmission = Boolean(
+      payload.isResubmission ||
+      payload.resubmitted ||
+      cycle > 0 ||
+      event.eventId?.includes('-resub'),
+    );
+    const cycleSuffix = cycle > 0 ? `-resub-${cycle}` : (isResubmission ? '-resub-1' : '');
+
+    const stableEventId = prId
+      ? `pr-sub-${prId}${isResubmission ? cycleSuffix : ''}`
+      : event.eventId;
+
+    return this.projectEventToNotifications(
+      { ...event, eventId: stableEventId },
+      {
+        purpose: 'PURCHASE_REQUEST_SUBMITTED_FINANCE_REVIEW',
+        type: 'ALERT',
+        title: isResubmission
+          ? (cycle > 1
+              ? `Revisi ke-${cycle} Purchase Request Menunggu Review Finance`
+              : 'Revisi Purchase Request Menunggu Review Finance')
+          : 'Purchase Request Menunggu Review Finance',
+        message: isResubmission
+          ? (cycle > 1
+              ? `Purchase Request "${prNumber}" telah direvisi (siklus ke-${cycle}) dan diajukan kembali untuk peninjauan Finance.`
+              : `Purchase Request "${prNumber}" telah direvisi dan diajukan kembali untuk peninjauan Finance.`)
+          : `Purchase Request "${prNumber}" telah diajukan dan membutuhkan peninjauan Finance.`,
+        actionTarget: `/procurement?tab=pr&prId=${prId}`,
+        recipientIds,
+        metaData: {
+          category: 'PROCUREMENT',
+          priority: 'HIGH',
+          reference_type: 'PURCHASE_REQUEST',
+          reference_id: prId,
+          prId,
+          purchaseRequestId: prId,
+          prNumber,
+          projectId,
+          actionType: 'FINANCE_REVIEW',
+        },
+      },
+    );
+  }
+
+  /**
    * Phase PROCUREMENT-RFQ: Canonical Bell Projection for Approved Purchase Request.
    * Informs PROCUREMENT and PURCHASING that approved PR is ready for RFQ preparation.
    * Deduplication guaranteed via: <eventId>:<recipientId>:PROCUREMENT_PR_APPROVED_RFQ.
@@ -928,7 +1087,7 @@ export class CanonicalNotificationConsumer {
       type: 'ALERT',
       title: `Pengajuan Klaim Jasa Baru (${claimNumber})`,
       message: `Klaim jasa baru${poText} diajukan dan membutuhkan verifikasi teknis.`,
-      actionTarget: `/project?projectId=${projectId}&claimId=${claimId}`,
+      actionTarget: `/project-delivery?projectId=${projectId}&serviceClaimId=${claimId}&claimId=${claimId}`,
       recipientIds: [pmId],
       metaData: {
         category: 'PROCUREMENT',
@@ -1201,12 +1360,14 @@ export class CanonicalNotificationConsumer {
     const safeProjectName = projectName && !projectName.match(/^Proyek\s*#\d+$/i) ? projectName : undefined;
     const displayProjectName = safeProjectName || 'proyek ini';
 
-    let pmId: number | null = payload.actorId ? Number(payload.actorId) : null;
-    if (!pmId && projectId && this.dataSource) {
-      try {
-        const rows = await this.dataSource.query(`SELECT manager_id FROM projects WHERE id = ?`, [projectId]);
-        if (rows && rows.length > 0 && rows[0].manager_id) pmId = Number(rows[0].manager_id);
-      } catch {}
+    let pmId: number | null = payload.projectManagerId
+      ? Number(payload.projectManagerId)
+      : payload.pmId
+        ? Number(payload.pmId)
+        : null;
+
+    if (!pmId && projectId) {
+      pmId = await this.resolvePmUserIdFromProject(Number(projectId));
     }
     const recipientIds = pmId ? [pmId] : (event.routing?.userIds || []);
 
@@ -1260,12 +1421,14 @@ export class CanonicalNotificationConsumer {
     const safeProjectName = projectName && !projectName.match(/^Proyek\s*#\d+$/i) ? projectName : undefined;
     const displayProjectName = safeProjectName || 'proyek ini';
 
-    let pmId: number | null = payload.actorId ? Number(payload.actorId) : null;
-    if (!pmId && projectId && this.dataSource) {
-      try {
-        const rows = await this.dataSource.query(`SELECT manager_id FROM projects WHERE id = ?`, [projectId]);
-        if (rows && rows.length > 0 && rows[0].manager_id) pmId = Number(rows[0].manager_id);
-      } catch {}
+    let pmId: number | null = payload.projectManagerId
+      ? Number(payload.projectManagerId)
+      : payload.pmId
+        ? Number(payload.pmId)
+        : null;
+
+    if (!pmId && projectId) {
+      pmId = await this.resolvePmUserIdFromProject(Number(projectId));
     }
     const recipientIds = pmId ? [pmId] : (event.routing?.userIds || []);
 
@@ -1295,6 +1458,260 @@ export class CanonicalNotificationConsumer {
         },
       },
     );
+  }
+
+  /**
+   * Phase N8.2: Canonical Bell Projection for Invoice Rejected.
+   * Sends ALERT Bell notification to the invoice creator (invoice.createdBy) if verifiable.
+   * If recipient cannot be determined authoritatively, projection is safely skipped (no guessing).
+   * Deduplication guaranteed via: <eventId>:<recipientId>:FINANCE_INVOICE_REJECTED.
+   */
+  @OnEvent('finance.invoice.rejected')
+  async handleFinanceInvoiceRejected(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) return [];
+    if (event.notificationPolicy === NotificationPolicy.SYNC_ONLY) return [];
+
+    const payload = event.payload || {};
+    const invoiceId = payload.invoiceId || event.aggregateId;
+    const invoiceNumber = payload.invoiceNumber || `INV-${invoiceId}`;
+    const poId = payload.poId;
+    const notes = payload.notes ? String(payload.notes).trim() : '';
+
+    // Authoritative Recipient Resolution: invoice.createdBy
+    let creatorId: number | null = payload.createdBy
+      ? Number(payload.createdBy)
+      : Array.isArray(event.routing?.userIds) && event.routing.userIds.length > 0
+        ? Number(event.routing.userIds[0])
+        : null;
+
+    if (!creatorId && invoiceId) {
+      creatorId = await this.resolveInvoiceCreator(Number(invoiceId));
+    }
+
+    if (!creatorId || !(await this.verifyActiveUser(creatorId))) {
+      this.logger.warn(
+        `[CanonicalNotificationConsumer] Cannot determine authoritative active creator for rejected Invoice #${invoiceId}. Projection skipped.`,
+      );
+      return [];
+    }
+
+    const rejectionDetail = notes ? `: ${notes}` : '.';
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'FINANCE_INVOICE_REJECTED',
+      type: 'ALERT',
+      title: `Invoice Ditolak (${invoiceNumber})`,
+      message: `Invoice "${invoiceNumber}" ditolak oleh Finance${rejectionDetail}`,
+      actionTarget: `/finance/invoices?tab=invoices_list&invoiceId=${invoiceId}`,
+      recipientIds: [creatorId],
+      metaData: {
+        category: 'FINANCE',
+        priority: 'HIGH',
+        reference_type: 'INVOICE',
+        reference_id: invoiceId,
+        invoiceId,
+        invoiceNumber,
+        poId,
+        notes: notes || undefined,
+        actionType: 'INVOICE_REJECTED',
+      },
+    });
+  }
+
+  /**
+   * Phase N8.2: Canonical Bell Projection for Invoice Verified.
+   * Sends informational SYSTEM Bell notification to the invoice creator (invoice.createdBy).
+   * Strict Rule: PM recipient MUST NOT be added without valid relation or business rule.
+   * Deduplication guaranteed via: <eventId>:<recipientId>:FINANCE_INVOICE_VERIFIED.
+   */
+  @OnEvent('finance.invoice.verified')
+  async handleFinanceInvoiceVerified(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) return [];
+    if (event.notificationPolicy === NotificationPolicy.SYNC_ONLY) return [];
+
+    const payload = event.payload || {};
+    const invoiceId = payload.invoiceId || event.aggregateId;
+    const invoiceNumber = payload.invoiceNumber || `INV-${invoiceId}`;
+    const poId = payload.poId;
+
+    // Authoritative Recipient Resolution: invoice.createdBy ONLY
+    let creatorId: number | null = payload.createdBy
+      ? Number(payload.createdBy)
+      : Array.isArray(event.routing?.userIds) && event.routing.userIds.length > 0
+        ? Number(event.routing.userIds[0])
+        : null;
+
+    if (!creatorId && invoiceId) {
+      creatorId = await this.resolveInvoiceCreator(Number(invoiceId));
+    }
+
+    if (!creatorId || !(await this.verifyActiveUser(creatorId))) {
+      this.logger.warn(
+        `[CanonicalNotificationConsumer] Cannot determine authoritative active creator for verified Invoice #${invoiceId}. Projection skipped.`,
+      );
+      return [];
+    }
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'FINANCE_INVOICE_VERIFIED',
+      type: 'SYSTEM',
+      title: `Invoice Berhasil Diverifikasi (${invoiceNumber})`,
+      message: `Invoice "${invoiceNumber}" telah diverifikasi oleh Finance dan siap untuk pembayaran.`,
+      actionTarget: `/finance/invoices?tab=invoices_list&invoiceId=${invoiceId}`,
+      recipientIds: [creatorId],
+      metaData: {
+        category: 'FINANCE',
+        priority: 'NORMAL',
+        reference_type: 'INVOICE',
+        reference_id: invoiceId,
+        invoiceId,
+        invoiceNumber,
+        poId,
+        actionType: 'INVOICE_VERIFIED',
+      },
+    });
+  }
+
+  /**
+   * Phase N8.2: Canonical Bell Projection for Procurement Package Returned.
+   * Actionable alert to the PM / Requester responsible for the procurement package based on authoritative relations.
+   * Strictly avoids heuristic guessing or role-based broadcasts.
+   * Deduplication guaranteed via: <eventId>:<recipientId>:PROCUREMENT_PACKAGE_RETURNED.
+   */
+  @OnEvent('procurement.package.returned')
+  async handleProcurementPackageReturned(event: BusinessEvent<any>): Promise<CanonicalNotificationResult[]> {
+    if (!event || typeof event !== 'object' || !event.eventId) return [];
+    if (event.notificationPolicy === NotificationPolicy.SYNC_ONLY) return [];
+
+    const payload = event.payload || {};
+    const packageId = payload.packageId || event.aggregateId;
+    const packageNumber = payload.packageNumber || `PKG-${packageId}`;
+    const projectId = payload.projectId || event.projectId;
+    const reason = payload.reason ? String(payload.reason).trim() : '';
+
+    // Authoritative Recipient Resolution: PM or Requester from data relations
+    let targetUserId: number | null = payload.requestedBy
+      ? Number(payload.requestedBy)
+      : Array.isArray(event.routing?.userIds) && event.routing.userIds.length > 0
+        ? Number(event.routing.userIds[0])
+        : null;
+
+    if (targetUserId && !(await this.verifyActiveUser(targetUserId))) {
+      targetUserId = null;
+    }
+
+    if (!targetUserId && packageId) {
+      targetUserId = await this.resolvePackageRequesterOrPm(
+        Number(packageId),
+        projectId ? Number(projectId) : undefined,
+      );
+    }
+
+    if (!targetUserId) {
+      this.logger.warn(
+        `[CanonicalNotificationConsumer] Cannot determine authoritative active PM/requester for returned Package #${packageId}. Projection skipped.`,
+      );
+      return [];
+    }
+
+    const reasonDetail = reason ? `: ${reason}` : ' untuk direvisi.';
+
+    return this.projectEventToNotifications(event, {
+      purpose: 'PROCUREMENT_PACKAGE_RETURNED',
+      type: 'ALERT',
+      title: `Paket Pengadaan Dikembalikan (${packageNumber})`,
+      message: `Paket pengadaan "${packageNumber}" dikembalikan oleh tim Procurement${reasonDetail}`,
+      actionTarget: `/procurement?tab=packages&packageId=${packageId}`,
+      recipientIds: [targetUserId],
+      metaData: {
+        category: 'PROCUREMENT',
+        priority: 'HIGH',
+        reference_type: 'PROCUREMENT_PACKAGE',
+        reference_id: packageId,
+        packageId,
+        packageNumber,
+        projectId,
+        reason: reason || undefined,
+        actionType: 'PACKAGE_RETURNED',
+      },
+    });
+  }
+
+  private async verifyActiveUser(userId: number): Promise<boolean> {
+    if (!this.dataSource || !userId || isNaN(userId) || userId <= 0) return false;
+    try {
+      const rows = await this.dataSource.query(
+        `SELECT id
+         FROM users
+         WHERE id = ?
+           AND (is_active = 1 OR is_active = true)
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        [userId],
+      );
+      return Boolean(rows && rows.length > 0);
+    } catch (err: any) {
+      this.logger.error(`[CanonicalNotificationConsumer] Failed to verify active user #${userId}: ${err.message}`);
+      return false;
+    }
+  }
+
+  private async resolveInvoiceCreator(invoiceId: number): Promise<number | null> {
+    if (!this.dataSource || !invoiceId) return null;
+    try {
+      const rows = await this.dataSource.query(
+        `SELECT created_by
+         FROM invoices
+         WHERE id = ?
+           AND deleted_at IS NULL
+         LIMIT 1`,
+        [invoiceId],
+      );
+      if (rows && rows.length > 0) {
+        const creatorId = rows[0].created_by ?? rows[0].createdBy;
+        if (creatorId) return Number(creatorId);
+      }
+      return null;
+    } catch (err: any) {
+      this.logger.error(`[CanonicalNotificationConsumer] Failed to resolve creator for Invoice #${invoiceId}: ${err.message}`);
+      return null;
+    }
+  }
+
+  private async resolvePackageRequesterOrPm(packageId: number, projectId?: number): Promise<number | null> {
+    if (!this.dataSource || !packageId) return null;
+    try {
+      const rows = await this.dataSource.query(
+        `SELECT pkg.requested_by, pkg.project_id, p.manager_id
+         FROM procurement_packages pkg
+         LEFT JOIN projects p ON p.id = pkg.project_id AND p.deleted_at IS NULL
+         WHERE pkg.id = ?
+           AND pkg.deleted_at IS NULL
+         LIMIT 1`,
+        [packageId],
+      );
+      if (rows && rows.length > 0) {
+        const row = rows[0];
+        const requestedBy = row.requested_by ? Number(row.requested_by) : (row.requestedBy ? Number(row.requestedBy) : null);
+        if (requestedBy && (await this.verifyActiveUser(requestedBy))) {
+          return requestedBy;
+        }
+        const managerId = row.manager_id ? Number(row.manager_id) : (row.managerId ? Number(row.managerId) : null);
+        if (managerId && (await this.verifyActiveUser(managerId))) {
+          return managerId;
+        }
+      }
+      if (projectId) {
+        const pmId = await this.resolvePmUserIdFromProject(projectId);
+        if (pmId && (await this.verifyActiveUser(pmId))) {
+          return pmId;
+        }
+      }
+      return null;
+    } catch (err: any) {
+      this.logger.error(`[CanonicalNotificationConsumer] Failed to resolve PM/requester for Package #${packageId}: ${err.message}`);
+      return null;
+    }
   }
 
   private async resolvePmUserIdFromPo(poId: number): Promise<number | null> {

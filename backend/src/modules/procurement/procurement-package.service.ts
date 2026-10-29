@@ -771,6 +771,7 @@ export class ProcurementPackageService {
         packageId: number;
         packageNumber: string;
         projectId: number;
+        requestedBy?: number;
         reviewerId: number;
         reason: string;
         status: string;
@@ -783,12 +784,13 @@ export class ProcurementPackageService {
         aggregateId: saved.id,
         projectId: Number(saved.projectId),
         actor: reviewerId ? { userId: Number(reviewerId) } : undefined,
-        routing: undefined,
+        routing: saved.requestedBy ? { userIds: [Number(saved.requestedBy)] } : undefined,
         notificationPolicy: undefined,
         payload: {
           packageId: Number(saved.id),
           packageNumber: saved.packageNumber,
           projectId: Number(saved.projectId),
+          requestedBy: saved.requestedBy ? Number(saved.requestedBy) : undefined,
           reviewerId: Number(reviewerId),
           reason: saved.rejectionNotes,
           status: ProcurementPackageStatus.RETURNED,

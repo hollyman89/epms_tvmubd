@@ -76,6 +76,11 @@ export class InboxService {
     try {
       const workflowTasks = await this.workflowEngineService.getMyTasks(userId, normalizedRoles);
       for (const task of workflowTasks) {
+        // Recipient Isolation defense-in-depth: If task is explicitly assigned to another user, skip
+        if (task.assigneeUserId && Number(task.assigneeUserId) !== Number(userId)) {
+          continue;
+        }
+
         const entityType = task.workflowInstance?.entityType || 'WORKFLOW';
         const entityId = Number(task.workflowInstance?.entityId || 0);
 
@@ -1083,7 +1088,7 @@ export class InboxService {
 
         if (!isSuperAdmin) {
           query.andWhere(
-            '(task.decided_by = :userId OR task.assignee_user_id = :userId OR role.name IN (:...roles))',
+            '(task.decided_by = :userId OR task.assignee_user_id = :userId OR (task.assignee_user_id IS NULL AND role.name IN (:...roles)))',
             { userId, roles: normalizedRoles.length > 0 ? normalizedRoles : ['__NONE__'] },
           );
         }

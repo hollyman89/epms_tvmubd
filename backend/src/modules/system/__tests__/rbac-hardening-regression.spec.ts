@@ -248,7 +248,7 @@ describe('P0-RBAC-R1: Business Authorization Hardening & Segregation of Duties R
 
       // Must have invoked andWhere with role/userId condition
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        '(task.assignee_user_id = :userId OR role.name IN (:...roles) OR (task.assignee_role_id IS NULL AND task.assignee_user_id IS NULL))',
+        '(task.assignee_user_id = :userId OR (task.assignee_user_id IS NULL AND role.name IN (:...roles)) OR (task.assignee_role_id IS NULL AND task.assignee_user_id IS NULL))',
         { userId: 1, roles: ['SUPER_ADMIN'] },
       );
     });

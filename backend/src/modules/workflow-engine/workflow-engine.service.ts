@@ -519,7 +519,7 @@ export class WorkflowEngineService {
       await manager.save(instance);
 
       // Synchronize business entity status on completion/termination
-      await this.syncBusinessEntity(manager, instance, targetNode, action, actorId, reason);
+      await this.syncBusinessEntity(manager, instance, targetNode, action, actorId, reason, fromNode);
 
       await this.recordTransition(manager, {
         instanceId: instance.id,
@@ -695,7 +695,7 @@ export class WorkflowEngineService {
     });
 
     // Synchronize business entity status on task creation
-    await this.syncBusinessEntity(manager, instance, targetNode, action, actorId, reason);
+    await this.syncBusinessEntity(manager, instance, targetNode, action, actorId, reason, fromNode);
   }
 
   // 4. BUSINESS ENTITY SYNCHRONIZATION
@@ -707,6 +707,7 @@ export class WorkflowEngineService {
     action: string,
     actorId?: number,
     reason?: string,
+    fromNode?: BpmnNode,
   ): Promise<void> {
     if (instance.entityType === 'PURCHASE_REQUEST' && instance.entityId) {
       const nodeType = (targetNode.data?.type || targetNode.type || '').toUpperCase();
@@ -761,6 +762,80 @@ export class WorkflowEngineService {
           });
 
           await manager.save(AuditLog, audit);
+        }
+
+        // Phase PROCUREMENT-PR: Save Outbox Event & emit canonical event when PR enters Finance Review
+        if (targetNode.id === 'node_finance_review') {
+          const isResubmission =
+            action.toUpperCase() === 'RESUBMIT' ||
+            oldStatus === 'REJECTED_TO_PROCUREMENT' ||
+            fromNode?.id === 'node_procurement_revision' ||
+            Boolean(instance.context?.isResubmission);
+
+          let resubmissionCount = 0;
+          if (isResubmission) {
+            try {
+              if (typeof manager.count === 'function') {
+                resubmissionCount = await manager.count(WorkflowTransition, {
+                  where: {
+                    instanceId: instance.id,
+                    toNodeId: 'node_finance_review',
+                    action: 'RESUBMIT',
+                  },
+                });
+              }
+            } catch (err) {
+              this.logger.warn(`Failed to count workflow transitions for instance #${instance.id}: ${err}`);
+            }
+
+            if (resubmissionCount === 0) {
+              const ctxCount = Number(instance.context?.resubmissionCount || 0);
+              resubmissionCount = ctxCount > 0 ? ctxCount + 1 : 1;
+            }
+
+            // Persist latest cycle count to instance context for durable traceability
+            instance.context = {
+              ...(instance.context || {}),
+              resubmissionCount,
+            };
+            if (typeof manager.update === 'function') {
+              await manager.update(WorkflowInstance, { id: instance.id }, { context: instance.context });
+            }
+          }
+
+          const cycleSuffix = isResubmission && resubmissionCount > 0 ? `-resub-${resubmissionCount}` : '';
+
+          const submittedEvent: BusinessEvent<any> = {
+            eventId: `pr-wf-sub-${instance.entityId}${cycleSuffix}`,
+            eventName: 'procurement.pr.submitted',
+            eventVersion: 1,
+            occurredAt: new Date().toISOString(),
+            aggregateType: 'PURCHASE_REQUEST',
+            aggregateId: Number(instance.entityId),
+            projectId: pr?.projectId ? Number(pr.projectId) : undefined,
+            actor: actorId ? { userId: Number(actorId) } : undefined,
+            routing: {
+              roles: ['FINANCE'],
+            },
+            notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+            payload: {
+              purchaseRequestId: Number(instance.entityId),
+              prNumber: pr?.prNumber,
+              projectId: pr?.projectId,
+              workflowInstanceId: instance.id,
+              submittedBy: actorId ? Number(actorId) : (pr?.requesterId ? Number(pr.requesterId) : undefined),
+              totalEstimatedAmount: pr?.totalEstimatedAmount ? Number(pr.totalEstimatedAmount) : undefined,
+              submittedAt: new Date().toISOString(),
+              isResubmission,
+              resubmitted: isResubmission,
+              resubmissionCount,
+            },
+          };
+
+          await this.saveOutboxEvent(manager, submittedEvent);
+
+          // Eager in-process emit for immediate real-time notification
+          this.eventEmitter.emit('procurement.pr.submitted', submittedEvent);
         }
 
         // 4. Phase PROCUREMENT-RFQ: Save Outbox Event & emit canonical event when PR transitions into APPROVED
@@ -1251,17 +1326,22 @@ export class WorkflowEngineService {
     actorRoles: string[],
     candidateRoles?: string[],
   ): void {
-    // 1. If specific user assigned
-    if (task.assigneeUserId && task.assigneeUserId === actorId) {
-      return;
+    // 1. If specific user assigned, only that exact user is authorized
+    if (task.assigneeUserId) {
+      if (Number(task.assigneeUserId) === Number(actorId)) {
+        return;
+      }
+      throw new ForbiddenException(
+        `User #${actorId} is not authorized to complete Task #${task.id} (Assigned exclusively to User #${task.assigneeUserId}).`,
+      );
     }
 
-    // 3. If single role assigned
+    // 2. If single role assigned (applies only when no specific user is assigned)
     if (task.assigneeRole && actorRoles.includes(task.assigneeRole.name)) {
       return;
     }
 
-    // 4. Resolve candidate roles from parameter or task's attached workflow version
+    // 3. Resolve candidate roles from parameter or task's attached workflow version
     let resolvedCandidateRoles: string[] = candidateRoles || [];
     if (resolvedCandidateRoles.length === 0) {
       const bpmnJson = task.workflowInstance?.workflowVersion?.bpmnJson;
@@ -1444,7 +1524,7 @@ export class WorkflowEngineService {
       .where('task.status = :status', { status: WorkflowTaskStatus.PENDING });
 
     query.andWhere(
-      '(task.assignee_user_id = :userId OR role.name IN (:...roles) OR (task.assignee_role_id IS NULL AND task.assignee_user_id IS NULL))',
+      '(task.assignee_user_id = :userId OR (task.assignee_user_id IS NULL AND role.name IN (:...roles)) OR (task.assignee_role_id IS NULL AND task.assignee_user_id IS NULL))',
       { userId, roles: roles.length > 0 ? roles : ['__NONE__'] },
     );
 
@@ -1466,6 +1546,8 @@ export class WorkflowEngineService {
 
     for (const task of allPending) {
       if (seenTaskIds.has(task.id)) continue;
+      // Recipient Isolation: If task is explicitly assigned to another user, candidate role must not leak it
+      if (task.assigneeUserId && Number(task.assigneeUserId) !== Number(userId)) continue;
 
       const bpmnJson = task.workflowInstance?.workflowVersion?.bpmnJson;
       if (bpmnJson && Array.isArray(bpmnJson.nodes) && task.nodeId) {

@@ -20,7 +20,7 @@ async function runSeed() {
 
   const queryRunner = AppDataSource.createQueryRunner();
   await queryRunner.connect();
-  
+
   try {
     await queryRunner.startTransaction();
 
@@ -48,18 +48,18 @@ async function runSeed() {
     console.log('Seeding users...');
     const hashedPwd = await bcrypt.hash('123456', 10);
     const usersData = [
-      { email: 'admin@tvmubd.com', name: 'Super Admin', role: 'SUPER_ADMIN' },
-      { email: 'director@tvmubd.com', name: 'Director', role: 'DIRECTOR' },
+      { email: 'admin@epms.com', name: 'Super Admin', role: 'SUPER_ADMIN' },
+      { email: 'director@epms.com', name: 'Director', role: 'DIRECTOR' },
       { email: 'gm@tvmubd.com', name: 'General Manager', role: 'GENERAL_MANAGER' },
-      { email: 'marketing@tvmubd.com', name: 'Marketing Staff', role: 'MARKETING' },
-      { email: 'legal@tvmubd.com', name: 'Legal Staff', role: 'LEGAL' },
-      { email: 'pm@tvmubd.com', name: 'Project Manager', role: 'PROJECT_MANAGER' },
-      { email: 'pmo@tvmubd.com', name: 'PMO Staff', role: 'PMO' },
-      { email: 'procurement@tvmubd.com', name: 'Procurement Staff', role: 'PROCUREMENT' },
-      { email: 'finance@tvmubd.com', name: 'Finance Staff', role: 'FINANCE' },
-      { email: 'headops@tvmubd.com', name: 'Head of Operations', role: 'HEAD_OF_OPERATIONS' },
+      { email: 'marketing@epms.com', name: 'Marketing Staff', role: 'MARKETING' },
+      { email: 'legal@epms.com', name: 'Legal Staff', role: 'LEGAL' },
+      { email: 'pm@epms.com', name: 'Project Manager', role: 'PROJECT_MANAGER' },
+      { email: 'pmo@epms.com', name: 'PMO Staff', role: 'PMO' },
+      { email: 'purchasing@epms.com', name: 'Procurement Staff', role: 'PROCUREMENT' },
+      { email: 'finance@epms.com', name: 'Finance Staff', role: 'FINANCE' },
+      { email: 'headops@epms.com', name: 'Head of Operations', role: 'HEAD_OF_OPERATIONS' },
       { email: 'hops@epms.com', name: 'Head of Operations', role: 'HEAD_OF_OPERATIONS' },
-      { email: 'manager@tvmubd.com', name: 'Operations Manager', role: 'MANAGER' },
+      { email: 'manager@epms.com', name: 'Operations Manager', role: 'MANAGER' },
     ];
 
     for (const u of usersData) {
@@ -69,7 +69,7 @@ async function runSeed() {
 
       if (!userId) {
         const result = await queryRunner.query(
-          'INSERT INTO users (email, password_hash, full_name, is_active) VALUES (?, ?, ?, ?)', 
+          'INSERT INTO users (email, password_hash, full_name, is_active) VALUES (?, ?, ?, ?)',
           [u.email, hashedPwd, u.name, true]
         );
         userId = result.insertId;

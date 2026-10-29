@@ -2221,6 +2221,7 @@ export class FinanceService {
         evidenceRef?: string | null;
         notes?: string | null;
         status: string;
+        createdBy?: number | null;
       }> = {
         eventId: randomUUID(),
         eventName: 'finance.invoice.verified',
@@ -2230,7 +2231,7 @@ export class FinanceService {
         aggregateId: invoice.id,
         projectId: undefined,
         actor: userId ? { userId: Number(userId) } : undefined,
-        routing: undefined,
+        routing: invoice.createdBy ? { userIds: [Number(invoice.createdBy)] } : undefined,
         notificationPolicy: undefined,
         payload: {
           invoiceId: Number(invoice.id),
@@ -2244,6 +2245,7 @@ export class FinanceService {
           evidenceRef: dto.evidenceRef || null,
           notes: dto.notes || null,
           status: 'VERIFIED',
+          createdBy: invoice.createdBy ? Number(invoice.createdBy) : null,
         },
       };
 
