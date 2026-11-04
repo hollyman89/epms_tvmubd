@@ -376,4 +376,95 @@ describe('Workflow Recipient Isolation & Actor Authorization (Tender 129/132 Reg
       expect(todos.some((t) => t.taskId === 149 || t.todoId === 'wf-task-149')).toBe(true);
     });
   });
+
+  describe('4. Management Review PM Isolation & WorkflowKey Guard (Post-Implementation Verification)', () => {
+    it('resolveNodeAssigneeUserId on node_pm_revision_* never falls back to submittedBy when projectManagerId is absent', () => {
+      const revisionNode = {
+        id: 'node_pm_revision_hops',
+        type: 'customNode',
+        data: {
+          role: 'PROJECT_MANAGER',
+          type: 'TASK',
+          assigneeContextKey: 'projectManagerId',
+        },
+      };
+
+      const resolved = (service as any).resolveNodeAssigneeUserId(revisionNode, {
+        projectId: 10,
+        submittedBy: 999, // SUPER_ADMIN submitter, not PM
+      });
+
+      expect(resolved).toBeNull();
+    });
+
+    it('resolveProjectManagerId returns null when DB project has manager_id = null even if submittedBy or context has a user', async () => {
+      const mockManager: any = {
+        query: jest.fn().mockResolvedValue([{ manager_id: null }]),
+      };
+      const instance: any = {
+        entityType: 'PROJECT',
+        entityId: 10,
+        context: {
+          projectId: 10,
+          submittedBy: 999,
+          projectManagerId: 999,
+        },
+      };
+
+      const resolved = await (service as any).resolveProjectManagerId(mockManager, instance);
+      expect(resolved).toBeNull();
+    });
+
+    it('progressToNode on END with action APPROVE for another PROJECT workflow keeps notificationPolicy = SYNC_ONLY', async () => {
+      const savedOutboxEvents: any[] = [];
+      const mockManager: any = {
+        save: jest.fn().mockImplementation(async (entityOrTarget: any, maybeEntity?: any) => {
+          const obj = maybeEntity || entityOrTarget;
+          if (obj && obj.event_name) {
+            savedOutboxEvents.push(obj);
+          }
+          return obj;
+        }),
+        create: jest.fn().mockImplementation((_cls: any, data: any) => data),
+        findOne: jest.fn().mockResolvedValue(null),
+        query: jest.fn().mockResolvedValue([{ manager_id: 401 }]),
+      };
+
+      const instance: any = {
+        id: 500,
+        workflowDefinitionId: 99,
+        entityType: 'PROJECT',
+        entityId: 901,
+        status: 'IN_PROGRESS',
+        context: {
+          workflowKey: 'OTHER_PROJECT_WORKFLOW',
+          projectId: 901,
+          projectManagerId: 401,
+        },
+      };
+
+      const graph: any = { nodes: [], edges: [] };
+      const fromNode: any = { id: 'node_director_approval', type: 'TASK' };
+      const targetNode: any = { id: 'node_end', type: 'END', data: { type: 'END' } };
+      const version: any = { id: 1 };
+
+      await (service as any).progressToNode(
+        mockManager,
+        instance,
+        graph,
+        fromNode,
+        targetNode,
+        version,
+        'APPROVE',
+        504,
+      );
+
+      const completedOutbox = savedOutboxEvents.find(
+        (e) => e.event_name === 'workflow.instance.completed',
+      );
+      expect(completedOutbox).toBeDefined();
+      expect(completedOutbox.payload.notificationPolicy).toBe('SYNC_ONLY');
+      expect(completedOutbox.payload.routing).toBeUndefined();
+    });
+  });
 });

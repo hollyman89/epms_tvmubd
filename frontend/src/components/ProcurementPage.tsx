@@ -269,13 +269,17 @@ export const ProcurementPage: React.FC = () => {
   const tabParam = searchParams.get('tab');
   const prIdParam = searchParams.get('prId');
   const poIdParam = searchParams.get('poId');
+  const createPoParam = searchParams.get('createPo');
   const domainParam = searchParams.get('domain');
+  const claimIdParam = searchParams.get('claimId') || searchParams.get('serviceClaimId');
+  const actionParam = searchParams.get('action');
   const autoOpenedPrRef = useRef<string | null>(null);
   const autoOpenedPoRef = useRef<string | null>(null);
+  const autoOpenedServiceClaimRef = useRef<string | null>(null);
 
   // Workstation Tab
   const [activeTabKey, setActiveTabKey] = useState<string>(() => {
-    if (tabParam === 'po' || poIdParam) return 'po';
+    if (tabParam === 'po' || poIdParam || tabParam === 'service-claim') return 'po';
     if (tabParam === 'pr' || prIdParam) return 'pr';
     if (tabParam === 'gr') return 'gr';
     if (tabParam === 'reconciliation') return 'reconciliation';
@@ -503,7 +507,7 @@ export const ProcurementPage: React.FC = () => {
 
   // Deep-link support: Auto-select tab based on tabParam / query params
   useEffect(() => {
-    if (tabParam === 'po' || poIdParam) {
+    if (tabParam === 'po' || poIdParam || tabParam === 'service-claim') {
       setActiveTabKey('po');
     } else if (tabParam === 'pr' || prIdParam) {
       setActiveTabKey('pr');
@@ -516,10 +520,16 @@ export const ProcurementPage: React.FC = () => {
     }
   }, [tabParam, prIdParam, poIdParam]);
 
-  // Deep-link support: Auto-open PO modal for poIdParam
+  // Deep-link support: Auto-open PO modal or Service Claim modal for poIdParam
   useEffect(() => {
     if (!poIdParam) return;
-    if (autoOpenedPoRef.current === poIdParam) return;
+    const isServiceClaimAction = actionParam === 'service-claim' || Boolean(claimIdParam);
+    const key = `${poIdParam}-${isServiceClaimAction ? (claimIdParam || 'claim') : 'po'}`;
+    if (isServiceClaimAction) {
+      if (autoOpenedServiceClaimRef.current === key) return;
+    } else {
+      if (autoOpenedPoRef.current === key) return;
+    }
 
     const poRecord = pos.find(
       (p: any) =>
@@ -528,11 +538,17 @@ export const ProcurementPage: React.FC = () => {
         String(p.poNumber) === poIdParam
     );
     if (poRecord) {
-      autoOpenedPoRef.current = poIdParam;
-      setSelectedPoForView((poRecord as any).rawRecord || (poRecord as any));
-      setIsPoModalOpen(true);
+      if (isServiceClaimAction) {
+        autoOpenedServiceClaimRef.current = key;
+        setSelectedPoForServiceClaim((poRecord as any).rawRecord || (poRecord as any));
+        setIsServiceClaimModalOpen(true);
+      } else {
+        autoOpenedPoRef.current = key;
+        setSelectedPoForView((poRecord as any).rawRecord || (poRecord as any));
+        setIsPoModalOpen(true);
+      }
     }
-  }, [poIdParam, pos]);
+  }, [poIdParam, claimIdParam, actionParam, pos]);
 
   useEffect(() => {
     if (!prIdParam) return;
@@ -570,6 +586,16 @@ export const ProcurementPage: React.FC = () => {
       isCancelled = true;
     };
   }, [prIdParam, prs, prsLoading]);
+
+  // Deep-link support: Auto-open PO creation modal for createPoParam
+  useEffect(() => {
+    if (!createPoParam) return;
+    const targetPr = prs.find((p: any) => String(p.id) === createPoParam || p.prNumber === createPoParam) || prs[0];
+    if (targetPr) {
+      setSelectedPrForServicePo(targetPr);
+      setIsServicePoModalOpen(true);
+    }
+  }, [createPoParam, prs]);
 
   const { activeRfqMapByPrId, latestRfqMapByPrId } = useMemo(() => {
     const activeMap: Record<string, RfqRecord> = {};
@@ -2688,7 +2714,7 @@ export const ProcurementPage: React.FC = () => {
           setSelectedPrForApproval(null);
         }}
         footer={null}
-        width="min(1180px, calc(100vw - 64px))"
+        width="min(1180px, calc(100vw - 24px))"
         centered
         destroyOnClose
         title={null}
@@ -2696,7 +2722,7 @@ export const ProcurementPage: React.FC = () => {
         styles={{
           content: {
             padding: 0,
-            maxHeight: 'calc(100vh - 80px)',
+            maxHeight: 'calc(100dvh - 32px)',
             overflow: 'hidden',
           },
           body: {
@@ -2934,6 +2960,7 @@ export const ProcurementPage: React.FC = () => {
             setSelectedPoForServiceClaim(null);
           }}
           po={selectedPoForServiceClaim}
+          initialClaimId={claimIdParam ? Number(claimIdParam) : undefined}
           onClaimUpdated={() => {
             refetchPos();
           }}

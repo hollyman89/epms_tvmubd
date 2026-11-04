@@ -40,6 +40,7 @@ describe('Service Claim Notification Recovery & Deduplication Regression Suite',
   const PM_USER_ID = 44;
   const SUBMITTER_USER_ID = 88;
   const PROCUREMENT_USER_ID = 99;
+  const FINANCE_USER_ID = 77;
   const PROJECT_ID = 1001;
   const CLAIM_ID = 501;
   const CLAIM_NUMBER = 'SCL-20261028-001';
@@ -86,7 +87,13 @@ describe('Service Claim Notification Recovery & Deduplication Regression Suite',
           return [{ manager_id: PM_USER_ID }];
         }
         if (sql.includes('FROM users u') && sql.includes('user_roles')) {
+          if (Array.isArray(params) && params.includes('FINANCE')) {
+            return [{ id: FINANCE_USER_ID }];
+          }
           return [{ id: PROCUREMENT_USER_ID }];
+        }
+        if (sql.includes('FROM service_claims')) {
+          return [{ po_id: 101, project_id: PROJECT_ID, submitted_by: SUBMITTER_USER_ID }];
         }
         return [];
       }),
@@ -206,6 +213,9 @@ describe('Service Claim Notification Recovery & Deduplication Regression Suite',
     );
     eventEmitter.on('procurement.service_claim.rejected', (e) =>
       consumer.handleServiceClaimRejected(e),
+    );
+    eventEmitter.on('procurement.service_claim.approved_for_invoice', (e) =>
+      consumer.handleServiceClaimApprovedForInvoice(e),
     );
   });
 
@@ -368,6 +378,7 @@ describe('Service Claim Notification Recovery & Deduplication Regression Suite',
       expect(notif.userId).toBe(SUBMITTER_USER_ID);
       expect(notif.title).toContain('Klaim Jasa Membutuhkan Revisi');
       expect(notif.message).toContain('Mohon lampirkan Berita Acara Opname Fisik.');
+      expect(notif.actionLink).toBe(`/procurement?tab=po&poId=101&claimId=${CLAIM_ID}&action=service-claim`);
       expect(notif.dedupeKey).toBe('evt-claim-return-001:88:SERVICE_CLAIM_RETURNED');
     });
 
@@ -402,7 +413,173 @@ describe('Service Claim Notification Recovery & Deduplication Regression Suite',
       expect(notif.userId).toBe(SUBMITTER_USER_ID);
       expect(notif.title).toContain('Klaim Jasa Ditolak');
       expect(notif.message).toContain('Pekerjaan tidak sesuai spesifikasi kontrak.');
+      expect(notif.actionLink).toBe(`/procurement?tab=po&poId=101&claimId=${CLAIM_ID}&action=service-claim`);
       expect(notif.dedupeKey).toBe('evt-claim-reject-001:88:SERVICE_CLAIM_REJECTED');
+    });
+
+    it('projects notification to Finance role on procurement.service_claim.approved_for_invoice', async () => {
+      const outbox = new OutboxEvent();
+      outbox.id = 14;
+      outbox.event_id = 'evt-claim-approve-invoice-001';
+      outbox.event_name = 'procurement.service_claim.approved_for_invoice';
+      outbox.event_version = '1';
+      outbox.aggregate_type = 'ServiceClaim';
+      outbox.aggregate_id = CLAIM_ID;
+      outbox.status = OutboxStatus.PENDING;
+      outbox.retry_count = 0;
+      outbox.payload = {
+        businessPayload: {
+          claimId: CLAIM_ID,
+          claimNumber: CLAIM_NUMBER,
+          poId: 202,
+          projectId: PROJECT_ID,
+          decision: 'APPROVE',
+          verifierId: PROCUREMENT_USER_ID,
+        },
+      };
+
+      inMemoryOutbox.push(outbox);
+
+      const relayResult = await relayService.relaySingleEvent(14);
+      expect(relayResult).toBe('SUCCESS');
+      expect(outbox.status).toBe(OutboxStatus.PUBLISHED);
+
+      expect(inMemoryNotifications.length).toBe(1);
+      const notif = inMemoryNotifications[0];
+      expect(notif.userId).toBe(FINANCE_USER_ID);
+      expect(notif.title).toContain('Klaim Jasa Siap Ditagihkan');
+      expect(notif.dedupeKey).toBe('evt-claim-approve-invoice-001:77:SERVICE_CLAIM_APPROVED_FOR_INVOICE');
+      expect(notif.actionLink).toBe('/finance/invoices?tab=ready_pos&poId=202&serviceClaimId=501');
+    });
+
+    it('actor exclusion: suppresses self-notification when submitter is the assigned PM on SUBMITTED', async () => {
+      const outbox = new OutboxEvent();
+      outbox.id = 15;
+      outbox.event_id = 'evt-claim-submit-self-001';
+      outbox.event_name = 'procurement.service_claim.submitted';
+      outbox.event_version = '1';
+      outbox.aggregate_type = 'ServiceClaim';
+      outbox.aggregate_id = CLAIM_ID;
+      outbox.status = OutboxStatus.PENDING;
+      outbox.retry_count = 0;
+      outbox.payload = {
+        businessPayload: {
+          claimId: CLAIM_ID,
+          claimNumber: CLAIM_NUMBER,
+          projectId: PROJECT_ID,
+          projectManagerId: PM_USER_ID,
+          submittedBy: PM_USER_ID, // Submitter is PM!
+        },
+      };
+
+      inMemoryOutbox.push(outbox);
+
+      const relayResult = await relayService.relaySingleEvent(15);
+      expect(relayResult).toBe('SUCCESS');
+      expect(outbox.status).toBe(OutboxStatus.PUBLISHED);
+
+      // Self-notification is suppressed, 0 notifications created
+      expect(inMemoryNotifications.length).toBe(0);
+    });
+
+    it('actor exclusion: verifier PM is excluded from Procurement recipient list on pm_verified', async () => {
+      // Setup mock where verifier PM has role PROCUREMENT as well
+      mockDataSource.query.mockImplementationOnce(async (sql: string) => {
+        if (sql.includes('FROM users u') && sql.includes('user_roles')) {
+          return [{ id: PM_USER_ID }, { id: PROCUREMENT_USER_ID }];
+        }
+        return [];
+      });
+
+      const outbox = new OutboxEvent();
+      outbox.id = 16;
+      outbox.event_id = 'evt-claim-verify-sod-001';
+      outbox.event_name = 'procurement.service_claim.pm_verified';
+      outbox.event_version = '1';
+      outbox.aggregate_type = 'ServiceClaim';
+      outbox.aggregate_id = CLAIM_ID;
+      outbox.status = OutboxStatus.PENDING;
+      outbox.retry_count = 0;
+      outbox.payload = {
+        businessPayload: {
+          claimId: CLAIM_ID,
+          claimNumber: CLAIM_NUMBER,
+          decision: 'APPROVE',
+          verifierId: PM_USER_ID,
+        },
+      };
+
+      inMemoryOutbox.push(outbox);
+
+      const relayResult = await relayService.relaySingleEvent(16);
+      expect(relayResult).toBe('SUCCESS');
+
+      // PM is excluded, only PROCUREMENT_USER_ID receives
+      expect(inMemoryNotifications.length).toBe(1);
+      expect(inMemoryNotifications[0].userId).toBe(PROCUREMENT_USER_ID);
+    });
+
+    it('commercial return from Tim Pengadaan delivers to submitter with correct label', async () => {
+      const outbox = new OutboxEvent();
+      outbox.id = 17;
+      outbox.event_id = 'evt-claim-comm-return-001';
+      outbox.event_name = 'procurement.service_claim.returned';
+      outbox.event_version = '1';
+      outbox.aggregate_type = 'ServiceClaim';
+      outbox.aggregate_id = CLAIM_ID;
+      outbox.status = OutboxStatus.PENDING;
+      outbox.retry_count = 0;
+      outbox.payload = {
+        businessPayload: {
+          claimId: CLAIM_ID,
+          claimNumber: CLAIM_NUMBER,
+          decision: 'RETURN',
+          submittedBy: SUBMITTER_USER_ID,
+          commercialVerifierId: PROCUREMENT_USER_ID,
+          revisionNotes: 'Perlu revisi invoice dan tax invoice.',
+        },
+      };
+
+      inMemoryOutbox.push(outbox);
+
+      const relayResult = await relayService.relaySingleEvent(17);
+      expect(relayResult).toBe('SUCCESS');
+
+      expect(inMemoryNotifications.length).toBe(1);
+      const notif = inMemoryNotifications[0];
+      expect(notif.userId).toBe(SUBMITTER_USER_ID);
+      expect(notif.message).toContain('Tim Pengadaan');
+      expect(notif.message).toContain('Perlu revisi invoice dan tax invoice.');
+    });
+
+    it('recovers submitterId from database when payload.submittedBy is missing from legacy event', async () => {
+      const outbox = new OutboxEvent();
+      outbox.id = 18;
+      outbox.event_id = 'evt-claim-legacy-return-001';
+      outbox.event_name = 'procurement.service_claim.returned';
+      outbox.event_version = '1';
+      outbox.aggregate_type = 'ServiceClaim';
+      outbox.aggregate_id = CLAIM_ID;
+      outbox.status = OutboxStatus.PENDING;
+      outbox.retry_count = 0;
+      outbox.payload = {
+        businessPayload: {
+          claimId: CLAIM_ID,
+          claimNumber: CLAIM_NUMBER,
+          decision: 'RETURN',
+          // submittedBy omitted
+          revisionNotes: 'Format Berita Acara salah.',
+        },
+      };
+
+      inMemoryOutbox.push(outbox);
+
+      const relayResult = await relayService.relaySingleEvent(18);
+      expect(relayResult).toBe('SUCCESS');
+
+      // Resolved from DB mock (SUBMITTER_USER_ID = 88)
+      expect(inMemoryNotifications.length).toBe(1);
+      expect(inMemoryNotifications[0].userId).toBe(SUBMITTER_USER_ID);
     });
   });
 

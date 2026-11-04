@@ -5,7 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '../context/AuthContext';
 import { AuthService } from '@/services/auth.service';
 import { Spin, Result, Button } from 'antd';
-import { getRouteAllowedRoles } from '@/constants/menuConfig';
+import { getRouteAllowedRoles, getCanonicalRoleLandingRoute } from '@/constants/menuConfig';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -41,13 +41,13 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
     const userRolesUpper = (user.roles || []).map(r => String(r).toUpperCase());
     const hasRole = effectiveAllowedRoles.some(role => userRolesUpper.includes(String(role).toUpperCase()));
     if (!hasRole) {
-      let homeRoute = '/';
-      if (userRolesUpper.includes('MARKETING') && !userRolesUpper.some(r => ['SUPER_ADMIN', 'DIRECTOR', 'GENERAL_MANAGER'].includes(r))) {
-        homeRoute = '/sales';
-      } else if (userRolesUpper.includes('PROJECT_MANAGER') && !userRolesUpper.some(r => ['SUPER_ADMIN', 'DIRECTOR', 'GENERAL_MANAGER'].includes(r))) {
-        homeRoute = '/project-delivery';
-      } else if (userRolesUpper.includes('LEGAL') && !userRolesUpper.some(r => ['SUPER_ADMIN', 'DIRECTOR', 'GENERAL_MANAGER'].includes(r))) {
-        homeRoute = '/legal/review';
+      let homeRoute = getCanonicalRoleLandingRoute(userRolesUpper);
+      if (homeRoute === '/project-delivery' && !effectiveAllowedRoles.includes('PROJECT_MANAGER')) {
+        if (userRolesUpper.includes('PROCUREMENT') || userRolesUpper.includes('PURCHASING')) {
+          homeRoute = '/procurement';
+        } else {
+          homeRoute = '/';
+        }
       }
 
       // If user opened '/' but is not authorized for Executive Dashboard, redirect seamlessly without 403 flash

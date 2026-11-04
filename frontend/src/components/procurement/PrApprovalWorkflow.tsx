@@ -1110,7 +1110,7 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
                 Aksi Finance: Lakukan evaluasi anggaran WBS sebelum memutuskan.
               </span>
             </div>
-            <Space>
+            <Space wrap className={styles.decisionActions}>
               <Button
                 danger
                 icon={<RollbackOutlined />}
@@ -1161,7 +1161,7 @@ export const PrApprovalWorkflow: React.FC<PrApprovalWorkflowProps> = ({
                 Aksi Director: Keputusan Otorisasi Final Pengadaan.
               </span>
             </div>
-            <Space>
+            <Space wrap className={styles.decisionActions}>
               <Button
                 danger
                 icon={<RollbackOutlined />}

@@ -47,6 +47,7 @@ import {
 import {
   PurchaseOrderPrototypeRecord,
 } from '@/components/procurement/PurchaseOrderModal';
+import styles from './CreateRfqModal.module.css';
 
 const { Text, Title } = Typography;
 
@@ -500,6 +501,7 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
       ),
       wbsNodeId: it.wbsNodeId,
       prItemId: Number(it.id || it.prItemId || 0) || undefined,
+      routeDetails: it.routeDetails || it.route_details || it.rute || it.description || it.specifications || undefined,
     }));
   }, [pr, activeRfq]);
 
@@ -531,6 +533,7 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
       const res = await ProcurementService.createRfq({
         purchaseRequestId: Number(pr.id),
         closingDate: closingDateIso,
+        notes: values.notes?.trim() || undefined,
       });
 
       const savedRfq = (res as any)?.data || res;
@@ -577,21 +580,24 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
 
   return (
     <Modal
+      className={styles.rfqModal}
+      data-testid="rfq-main-modal"
       open={open}
       onCancel={onClose}
-      width="min(980px, 95vw)"
+      width="min(980px, calc(100vw - 24px))"
+      style={{ maxWidth: '100vw' }}
       centered
       destroyOnClose
       footer={
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 8 }}>
-          <Space size={6}>
-            <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 15 }} />
-            <Text type="secondary" style={{ fontSize: 12 }}>
+        <div className={styles.footerContainer} data-testid="rfq-footer-container">
+          <div className={styles.footerLeft} data-testid="rfq-footer-left">
+            <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 15, flexShrink: 0 }} />
+            <Text type="secondary" style={{ fontSize: 12, wordBreak: 'break-word' }}>
               Sumber: <strong>PR Disetujui ({pr.prNumber || `PR-${pr.id}`})</strong>
             </Text>
-          </Space>
+          </div>
 
-          <Space size={8}>
+          <div className={styles.footerActions} data-testid="rfq-footer-actions">
             <Button onClick={onClose} style={{ borderRadius: 6 }}>
               {isViewMode ? 'Tutup' : 'Batal'}
             </Button>
@@ -621,23 +627,23 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
                 Terbitkan RFQ
               </Button>
             )}
-          </Space>
+          </div>
         </div>
       }
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 24 }}>
-          <div style={{ padding: '6px 10px', background: '#ecfdf5', borderRadius: 8, color: '#059669' }}>
+        <div className={styles.headerContainer}>
+          <div className={styles.headerIcon}>
             <ShopOutlined style={{ fontSize: 18 }} />
           </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
+          <div className={styles.headerTextGroup}>
+            <div className={styles.headerTitle}>
               {isViewMode
                 ? `Rincian Request for Quotation — ${activeRfq?.rfqNumber}`
                 : hasCancelledRfq
                 ? 'Buat Request for Quotation (RFQ) Baru'
                 : 'Buat Request for Quotation (RFQ)'}
             </div>
-            <Text type="secondary" style={{ fontSize: 11, color: '#64748b' }}>
+            <Text type="secondary" className={styles.headerSubtitle}>
               {isViewMode
                 ? 'Paket penawaran harga pengadaan material & jasa untuk vendor terdaftar'
                 : hasCancelledRfq
@@ -648,7 +654,7 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
         </div>
       }
     >
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className={styles.modalBody}>
         {/* Previous Cancelled RFQ Reference Strip (Reissue Context) */}
         {!isViewMode && hasCancelledRfq && (
           <Alert
@@ -1046,81 +1052,146 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
           </div>
         )}
 
-        {/* Read-Only Item Breakdown Table */}
-        <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 12px', background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontWeight: 700, fontSize: 12, color: '#334155' }}>
+        {/* Read-Only Item Breakdown Section (Responsive Table on Desktop, Cards on Mobile) */}
+        <div className={styles.itemSectionWrapper}>
+          <div className={styles.itemSectionHeader}>
+            <span className={styles.itemSectionTitle}>
               Daftar Item RFQ ({prItems.length} Item Terkunci dari PR Approved)
             </span>
-            <Tag color="cyan" style={{ fontSize: 10.5, margin: 0 }}>READ-ONLY SNAPSHOT</Tag>
+            <Tag color="cyan" style={{ fontSize: 10.5, margin: 0, fontWeight: 600 }}>READ-ONLY SNAPSHOT</Tag>
           </div>
-          <Table
-            size="small"
-            rowKey="key"
-            dataSource={prItems}
-            pagination={false}
-            scroll={{ y: 220 }}
-            columns={[
-              {
-                title: 'Kategori',
-                dataIndex: 'categoryName',
-                key: 'categoryName',
-                width: 160,
-                render: (cat: string) => <Tag color="blue" style={{ fontSize: 10.5, borderRadius: 4, margin: 0 }}>{cat}</Tag>,
-              },
-              {
-                title: 'Nama Item',
-                dataIndex: 'itemName',
-                key: 'itemName',
-                render: (name: string, it: any) => (
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>{name}</div>
-                    {it.wbsNodeId && (
-                      <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, marginTop: 2 }}>
-                        WBS #{it.wbsNodeId}
+
+          {/* Desktop Table View (screens > 640px) */}
+          <div className={styles.desktopTableView} data-testid="rfq-desktop-table-view">
+            <div className={styles.tableContainer}>
+              <Table
+                size="small"
+                rowKey="key"
+                dataSource={prItems}
+                pagination={false}
+                scroll={{ x: 720, y: 220 }}
+                columns={[
+                  {
+                    title: 'Kategori',
+                    dataIndex: 'categoryName',
+                    key: 'categoryName',
+                    width: 140,
+                    render: (cat: string) => <Tag color="blue" style={{ fontSize: 10.5, borderRadius: 4, margin: 0 }}>{cat}</Tag>,
+                  },
+                  {
+                    title: 'Nama Item & Rincian Rute',
+                    dataIndex: 'itemName',
+                    key: 'itemName',
+                    render: (name: string, it: any) => (
+                      <div style={{ wordBreak: 'break-word', whiteSpace: 'normal', minWidth: 160 }}>
+                        <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a', lineHeight: 1.35 }}>{name}</div>
+                        {it.routeDetails && (
+                          <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, lineHeight: 1.3 }}>
+                            {it.routeDetails}
+                          </div>
+                        )}
+                        {it.wbsNodeId && (
+                          <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, marginTop: 4 }}>
+                            WBS #{it.wbsNodeId}
+                          </Tag>
+                        )}
+                      </div>
+                    ),
+                  },
+                  {
+                    title: 'Qty',
+                    dataIndex: 'quantity',
+                    key: 'quantity',
+                    width: 55,
+                    align: 'center' as const,
+                    render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
+                  },
+                  {
+                    title: 'Satuan',
+                    dataIndex: 'uom',
+                    key: 'uom',
+                    width: 65,
+                    align: 'center' as const,
+                    render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
+                  },
+                  {
+                    title: 'Estimasi Harga Satuan',
+                    dataIndex: 'unitPrice',
+                    key: 'unitPrice',
+                    width: 140,
+                    align: 'right' as const,
+                    render: (price: number) => <span style={{ fontFamily: 'monospace', fontSize: 11 }}>Rp {price.toLocaleString('id-ID')}</span>,
+                  },
+                  {
+                    title: 'Subtotal Plafon',
+                    dataIndex: 'subtotal',
+                    key: 'subtotal',
+                    width: 140,
+                    align: 'right' as const,
+                    render: (subtotal: number) => (
+                      <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
+                        Rp {subtotal.toLocaleString('id-ID')}
+                      </span>
+                    ),
+                  },
+                ]}
+              />
+            </div>
+          </div>
+
+          {/* Mobile Card View (screens <= 640px) */}
+          <div className={styles.mobileCardView} data-testid="rfq-mobile-card-view">
+            {prItems.length === 0 ? (
+              <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>
+                Tidak ada data item PR.
+              </div>
+            ) : (
+              prItems.map((item: any, idx: number) => (
+                <div key={item.key || idx} className={styles.rfqItemCard} data-testid="rfq-item-card">
+                  <div className={styles.rfqItemCardHeader}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div className={styles.rfqItemTitle}>{item.itemName}</div>
+                      {item.routeDetails && (
+                        <div className={styles.rfqRouteDetails} data-testid="rfq-item-route-details">{item.routeDetails}</div>
+                      )}
+                    </div>
+                    {item.wbsNodeId && (
+                      <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, flexShrink: 0 }}>
+                        WBS #{item.wbsNodeId}
                       </Tag>
                     )}
                   </div>
-                ),
-              },
-              {
-                title: 'Qty',
-                dataIndex: 'quantity',
-                key: 'quantity',
-                width: 60,
-                align: 'center' as const,
-                render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
-              },
-              {
-                title: 'Satuan',
-                dataIndex: 'uom',
-                key: 'uom',
-                width: 70,
-                align: 'center' as const,
-                render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
-              },
-              {
-                title: 'Estimasi Harga Satuan',
-                dataIndex: 'unitPrice',
-                key: 'unitPrice',
-                width: 140,
-                align: 'right' as const,
-                render: (price: number) => <span style={{ fontFamily: 'monospace', fontSize: 11 }}>Rp {price.toLocaleString('id-ID')}</span>,
-              },
-              {
-                title: 'Subtotal Plafon',
-                dataIndex: 'subtotal',
-                key: 'subtotal',
-                width: 140,
-                align: 'right' as const,
-                render: (subtotal: number) => (
-                  <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
-                    Rp {subtotal.toLocaleString('id-ID')}
-                  </span>
-                ),
-              },
-            ]}
-          />
+
+                  <div className={styles.rfqItemCategoryRow}>
+                    <Tag color="blue" style={{ fontSize: 10.5, borderRadius: 4, margin: 0 }}>
+                      {item.categoryName}
+                    </Tag>
+                  </div>
+
+                  <div className={styles.rfqItemGrid}>
+                    <div className={styles.rfqItemField}>
+                      <span className={styles.rfqFieldLabel}>Jumlah</span>
+                      <span className={styles.rfqFieldValue}>
+                        {item.quantity} <span style={{ fontWeight: 400, color: '#64748b' }}>{item.uom}</span>
+                      </span>
+                    </div>
+                    <div className={styles.rfqItemField}>
+                      <span className={styles.rfqFieldLabel}>Harga Satuan</span>
+                      <span className={styles.rfqFieldValue} style={{ fontFamily: 'monospace' }}>
+                        Rp {item.unitPrice.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                    <div className={styles.rfqItemFieldFull}>
+                      <span className={styles.rfqFieldLabel}>Subtotal Plafon</span>
+                      <span className={styles.rfqFieldValueHighlight}>
+                        Rp {item.subtotal.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
 
@@ -1192,6 +1263,8 @@ export const CreateRfqModal: React.FC<CreateRfqModalProps> = ({
             setCancelError(null);
           }
         }}
+        width="min(520px, calc(100vw - 24px))"
+        style={{ maxWidth: '100vw' }}
         centered
         destroyOnClose
         zIndex={1100}

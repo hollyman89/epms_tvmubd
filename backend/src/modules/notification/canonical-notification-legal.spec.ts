@@ -384,4 +384,69 @@ describe('Phase N4: Legal Canonical Bell Projection & Decoupling', () => {
       expect(inMemoryNotifications).toHaveLength(0);
     });
   });
+
+  describe('5. legal.contract.rejected (F-CRIT-01)', () => {
+    it('projects ALERT Bell and PushOutbox to Marketing PIC when Legal rejects contract, excluding reviewer self-notification, with idempotency on retry', async () => {
+      const event: BusinessEvent = {
+        eventId: 'evt-legal-reject-001',
+        eventName: 'legal.contract.rejected',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Contract',
+        aggregateId: 401,
+        actor: { userId: 20 },
+        routing: { userIds: [25], roles: ['MARKETING', 'LEGAL', 'SUPER_ADMIN'] },
+        payload: {
+          contractId: 401,
+          contractNumber: 'SPK-2026-401',
+          tenderId: 80,
+          tenderTitle: 'Pembangunan Tower BTS',
+          marketingPicId: 25,
+          reviewerId: 20,
+          action: 'REJECT',
+          reason: 'Klausul denda tidak sesuai standar perusahaan.',
+        },
+      };
+
+      const firstRun = await consumer.handleLegalContractRejected(event);
+      expect(firstRun).toHaveLength(1);
+      expect(firstRun[0].status).toBe('PERSISTED');
+      expect(firstRun[0].dedupeKey).toBe('evt-legal-reject-001:25:LEGAL_CONTRACT_REJECTED');
+
+      expect(inMemoryNotifications).toHaveLength(1);
+      expect(inMemoryNotifications[0].userId).toBe(25);
+      expect(inMemoryNotifications[0].title).toBe('Kontrak Ditolak Legal');
+      expect(inMemoryNotifications[0].actionLink).toBe('/sales/tenders/80');
+
+      // Retry idempotency check
+      const secondRun = await consumer.handleLegalContractRejected(event);
+      expect(secondRun).toHaveLength(1);
+      expect(secondRun[0].status).toBe('DUPLICATE_SUPPRESSED');
+      expect(inMemoryNotifications).toHaveLength(1);
+    });
+
+    it('returns INTENTIONALLY_IGNORED when reviewerId equals marketingPicId (no self-notification)', async () => {
+      const selfRejectEvent: BusinessEvent = {
+        eventId: 'evt-legal-reject-self',
+        eventName: 'legal.contract.rejected',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Contract',
+        aggregateId: 402,
+        actor: { userId: 25 },
+        payload: {
+          contractId: 402,
+          tenderId: 81,
+          marketingPicId: 25,
+          reviewerId: 25,
+          reason: 'Self test',
+        },
+      };
+
+      const results = await consumer.handleLegalContractRejected(selfRejectEvent);
+      expect(results).toEqual([]);
+      expect((results as any).__outboxReceipt?.outcome).toBe('INTENTIONALLY_IGNORED');
+      expect(inMemoryNotifications).toHaveLength(0);
+    });
+  });
 });

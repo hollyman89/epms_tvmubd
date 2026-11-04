@@ -803,6 +803,10 @@ export class ProjectIssueService {
         payload: {
           issueId,
           projectId,
+          issueNumber: issue.issueNumber,
+          ownerId: issue.ownerId,
+          reportedById: issue.reportedById,
+          severity: issue.severity,
           resolution: issue.resolution,
           resolvedBy: userId,
         },
@@ -899,7 +903,15 @@ export class ProjectIssueService {
         event_version: "1",
         aggregate_type: "ProjectIssue",
         aggregate_id: issueId,
-        payload: { issueId, projectId, closedBy: userId },
+        payload: {
+          issueId,
+          projectId,
+          issueNumber: issue.issueNumber,
+          ownerId: issue.ownerId,
+          reportedById: issue.reportedById,
+          severity: issue.severity,
+          closedBy: userId,
+        },
         status: OutboxStatus.PENDING,
         retry_count: 0,
       });
@@ -1019,6 +1031,10 @@ export class ProjectIssueService {
         payload: {
           issueId,
           projectId,
+          issueNumber: issue.issueNumber,
+          ownerId: issue.ownerId,
+          reportedById: issue.reportedById,
+          severity: issue.severity,
           reason: dto.reason.trim(),
           reopenedBy: userId,
         },

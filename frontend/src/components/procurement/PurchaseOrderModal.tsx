@@ -52,6 +52,7 @@ import {
 } from '@/services/procurement.service';
 import { VendorComparisonResult } from '@/components/procurement/VendorComparisonModal';
 import { VendorQuotationRecord } from '@/components/procurement/VendorQuotationModal';
+import styles from './PurchaseOrderModal.module.css';
 
 const { Text, Title } = Typography;
 
@@ -1095,37 +1096,16 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
     <Modal
       open={open}
       onCancel={onClose}
-      width="min(1340px, calc(100vw - 48px))"
+      width="min(1340px, 96vw)"
+      className={styles.poModal || 'poModal'}
+      rootClassName={styles.poModal || 'poModal'}
       centered
       destroyOnClose
-      style={{ top: 20 }}
-      styles={{
-        body: {
-          maxHeight: 'calc(100vh - 140px)',
-          overflowY: 'auto',
-          overflowX: 'hidden',
-          padding: '16px 22px',
-        },
-      }}
-      bodyStyle={{
-        maxHeight: 'calc(100vh - 140px)',
-        overflowY: 'auto',
-        overflowX: 'hidden',
-        padding: '16px 22px',
-      }}
+      style={{ maxWidth: '100vw', top: 20 }}
+      data-testid="purchase-order-modal"
       footer={
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            width: '100%',
-            flexWrap: 'wrap',
-            gap: 12,
-            padding: '4px 0',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className={styles.footerContainer} data-testid="po-modal-footer">
+          <div className={styles.footerLeft}>
             <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 16 }} />
             <Text style={{ fontSize: 12, color: '#334155' }}>
               {isViewMode ? (
@@ -1152,9 +1132,10 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
             </Text>
           </div>
 
-          <Space size={10}>
+          <div className={styles.footerRight}>
             <Button
               onClick={onClose}
+              data-testid="btn-po-cancel"
               style={{
                 borderRadius: 6,
                 height: 38,
@@ -1213,6 +1194,7 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                 disabled={!isLeadTimeValid || !isPaymentScheduleValid}
                 onClick={() => form.submit()}
                 icon={<SendOutlined />}
+                data-testid="btn-po-submit"
                 style={{
                   backgroundColor: !isLeadTimeValid || !isPaymentScheduleValid ? '#94a3b8' : '#059669',
                   borderColor: !isLeadTimeValid || !isPaymentScheduleValid ? '#94a3b8' : '#059669',
@@ -1225,39 +1207,16 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                 Terbitkan Purchase Order (PO)
               </Button>
             )}
-          </Space>
+          </div>
         </div>
       }
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingRight: 24 }}>
-          <div
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 8,
-              background: '#ecfdf5',
-              border: '1px solid #a7f3d0',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#059669',
-              flexShrink: 0,
-            }}
-          >
+        <div className={styles.headerContainer}>
+          <div className={styles.headerIcon}>
             <FileDoneOutlined style={{ fontSize: 18 }} />
           </div>
-          <div>
-            <div
-              style={{
-                fontWeight: 700,
-                fontSize: 16,
-                color: '#0f172a',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                lineHeight: 1.3,
-              }}
-            >
+          <div className={styles.headerTextGroup}>
+            <div className={styles.headerTitle}>
               <span>
                 {isViewMode
                   ? `Rincian Purchase Order — ${activePo?.poNumber}`
@@ -1265,7 +1224,7 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
               </span>
               {isViewMode && activePo && renderPoTypeTag(activePo.orderType)}
             </div>
-            <Text type="secondary" style={{ fontSize: 11.5, color: '#64748b', display: 'block', marginTop: 2 }}>
+            <Text type="secondary" className={styles.headerSubtitle}>
               {isViewMode
                 ? 'Surat Perintah Pembelian resmi yang telah diterbitkan kepada vendor pemenang'
                 : 'Dokumen komitmen pengadaan resmi yang diterbitkan berdasarkan hasil evaluasi vendor comparison'}
@@ -1274,7 +1233,7 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
         </div>
       }
     >
-      <div style={{ marginTop: 4, display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className={styles.modalBody} data-testid="po-modal-body">
         <style>{`
           .po-modal-navy-table .ant-table-thead > tr > th {
             background: #0f233a !important;
@@ -1391,22 +1350,11 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
         )}
 
         {/* PO Reference & Vendor Context Strip */}
-        <div
-          style={{
-            background: '#f8fafc',
-            borderRadius: 8,
-            border: '1px solid #e2e8f0',
-            overflow: 'hidden',
-          }}
-        >
+        <div className={styles.poSummaryStrip} data-testid="po-summary-strip">
           <Row gutter={0} align="middle">
-            <Col xs={24} sm={12} md={6} className="po-summary-col">
-              <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: 4 }}>
-                PROYEK:
-              </Text>
-              <div style={{ fontWeight: 700, fontSize: 13, color: '#0f172a', lineHeight: 1.35, minHeight: 34 }}>
-                {projectName}
-              </div>
+            <Col xs={24} sm={12} md={6} className={styles.summaryCol}>
+              <span className={styles.summaryLabel}>PROYEK:</span>
+              <div className={styles.summaryValue}>{projectName}</div>
               <div style={{ marginTop: 4 }}>
                 {currentProjectId ? (
                   <Tag color="blue" style={{ fontSize: 10, fontWeight: 600, margin: 0, borderRadius: 4, background: '#eff6ff', borderColor: '#bfdbfe', color: '#1d4ed8' }}>
@@ -1418,11 +1366,9 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
               </div>
             </Col>
 
-            <Col xs={24} sm={12} md={6} className="po-summary-col">
-              <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: 4 }}>
-                REFERENSI EVALUASI:
-              </Text>
-              <div style={{ fontWeight: 700, fontSize: 13.5, color: '#1d4ed8', lineHeight: 1.35 }}>
+            <Col xs={24} sm={12} md={6} className={styles.summaryCol}>
+              <span className={styles.summaryLabel}>REFERENSI EVALUASI:</span>
+              <div style={{ fontWeight: 700, fontSize: 13.5, color: '#1d4ed8', lineHeight: 1.35 }} data-testid="po-pr-number">
                 {prNumber}
               </div>
               <div style={{ fontSize: 11, color: '#64748b', marginTop: 4, lineHeight: 1.3 }}>
@@ -1430,11 +1376,9 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
               </div>
             </Col>
 
-            <Col xs={24} sm={12} md={6} className="po-summary-col">
-              <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: 4 }}>
-                VENDOR PEMENANG:
-              </Text>
-              <div style={{ fontWeight: 700, fontSize: 13, color: '#047857', display: 'flex', alignItems: 'center', gap: 6, lineHeight: 1.35 }}>
+            <Col xs={24} sm={12} md={6} className={styles.summaryCol}>
+              <span className={styles.summaryLabel}>VENDOR PEMENANG:</span>
+              <div style={{ fontWeight: 700, fontSize: 13, color: '#047857', display: 'flex', alignItems: 'center', gap: 6, lineHeight: 1.35 }} data-testid="po-vendor-name">
                 <TrophyOutlined style={{ color: '#d97706', fontSize: 14 }} />
                 <span>{vendorName}</span>
               </div>
@@ -1447,11 +1391,9 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
               )}
             </Col>
 
-            <Col xs={24} sm={12} md={6} style={{ padding: '12px 16px' }}>
-              <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: 4 }}>
-                TOTAL NILAI PO (KONTRAK):
-              </Text>
-              <div style={{ fontWeight: 800, fontSize: 16, color: '#059669', fontFamily: 'monospace', lineHeight: 1.3 }}>
+            <Col xs={24} sm={12} md={6} className={styles.summaryCol}>
+              <span className={styles.summaryLabel}>TOTAL NILAI PO (KONTRAK):</span>
+              <div className={styles.summaryHighlight} data-testid="po-total-amount">
                 Rp {totalPoAmount.toLocaleString('id-ID')}
               </div>
               <div style={{ fontSize: 11, color: '#64748b', marginTop: 3 }}>
@@ -1584,34 +1526,23 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
         )}
 
         {/* Syarat & Termin Pembayaran Section */}
-        <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
-          <div
-            style={{
-              padding: '10px 14px',
-              background: '#f8fafc',
-              borderBottom: '1px solid #e2e8f0',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 8,
-            }}
-          >
+        <div className={styles.sectionWrapper} data-testid="po-payment-terms-section">
+          <div className={styles.sectionHeader}>
             <div>
-              <div style={{ fontWeight: 700, fontSize: 13, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div className={styles.sectionTitle}>
                 <AuditOutlined style={{ color: '#2563eb', fontSize: 16 }} />
                 <span>SYARAT & TERMIN PEMBAYARAN</span>
               </div>
-              <Text type="secondary" style={{ fontSize: 11, color: '#64748b' }}>
+              <span className={styles.sectionSubtitle}>
                 {isViewMode
                   ? 'Jadwal dan ketentuan termin pembayaran resmi yang tercatat di sistem (SSOT Database)'
                   : 'Konfigurasi termin pembayaran berdasarkan nilai PO'}
-              </Text>
+              </span>
             </div>
 
             {!isViewMode && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div className={styles.presetsWrapper} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   <Text style={{ fontSize: 11, fontWeight: 600, color: '#475569' }}>Template:</Text>
                   <Tag
                     color={
@@ -1631,12 +1562,13 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                   </Tag>
                 </div>
 
-                <Space size={4}>
+                <div className={styles.presetsButtonGroup}>
                   <Button
                     size="small"
                     type={activePresetInfo.type === '30-30-30-10' ? 'primary' : 'default'}
                     icon={activePresetInfo.type === '30-30-30-10' ? <CheckOutlined /> : undefined}
                     onClick={() => handlePresetClick('30-30-30-10')}
+                    data-testid="preset-a-btn"
                     style={{
                       fontSize: 11,
                       borderRadius: 5,
@@ -1653,6 +1585,7 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                     type={activePresetInfo.type === '20-40-30-10' ? 'primary' : 'default'}
                     icon={activePresetInfo.type === '20-40-30-10' ? <CheckOutlined /> : undefined}
                     onClick={() => handlePresetClick('20-40-30-10')}
+                    data-testid="preset-b-btn"
                     style={{
                       fontSize: 11,
                       borderRadius: 5,
@@ -1669,6 +1602,7 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                     type={activePresetInfo.type === '100' ? 'primary' : 'default'}
                     icon={activePresetInfo.type === '100' ? <CheckOutlined /> : undefined}
                     onClick={() => handlePresetClick('100')}
+                    data-testid="preset-c-btn"
                     style={{
                       fontSize: 11,
                       borderRadius: 5,
@@ -1680,13 +1614,15 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                   >
                     Preset C (100%)
                   </Button>
-                </Space>
+                </div>
 
                 <Button
                   type="dashed"
                   size="small"
                   icon={<PlusOutlined />}
                   onClick={handleAddTerm}
+                  data-testid="btn-add-term"
+                  className={styles.addTermButtonMobile}
                   style={{
                     borderRadius: 5,
                     fontWeight: 600,
@@ -1695,7 +1631,7 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                     fontSize: 11.5,
                   }}
                 >
-                  + Tambah Termin
+                  Tambah Termin
                 </Button>
 
                 {presetFeedback && (
@@ -1723,7 +1659,8 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
 
           {!isViewMode ? (
             <div>
-              <div style={{ overflowX: 'auto' }}>
+              {/* Desktop Table View */}
+              <div className={styles.desktopTableView} data-testid="po-terms-desktop-table">
                 <Table
                   size="small"
                   rowKey="sequence"
@@ -1738,58 +1675,173 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                   locale={{
                     emptyText: (
                       <div style={{ padding: '24px 0', color: '#94a3b8', fontSize: 12 }}>
-                        Belum ada termin pembayaran. Klik "+ Tambah Termin" atau gunakan template di atas untuk memulai.
+                        Belum ada termin pembayaran. Klik "Tambah Termin" atau gunakan template di atas untuk memulai.
                       </div>
                     ),
                   }}
                 />
               </div>
 
+              {/* Mobile Cards View */}
+              <div className={styles.mobileCardsView} data-testid="po-terms-mobile-cards">
+                {estimatedAllocation.length === 0 ? (
+                  <div style={{ padding: '24px 0', textAlign: 'center', color: '#94a3b8', fontSize: 12 }}>
+                    Belum ada termin pembayaran. Klik "Tambah Termin" atau gunakan template di atas untuk memulai.
+                  </div>
+                ) : (
+                  estimatedAllocation.map((rec, idx) => {
+                    const isHighlighted = highlightedSeq.includes(rec.sequence);
+                    const isRet = rec.term_type === 'RETENTION' || Boolean(rec.is_retention);
+                    return (
+                      <div
+                        key={rec.sequence || idx}
+                        className={`${styles.paymentTermCard} ${isHighlighted ? 'term-row-highlight' : ''}`}
+                        data-testid="payment-term-card"
+                      >
+                        {/* Header: Badge, Term Name, Delete */}
+                        <div className={styles.termCardHeader}>
+                          <span className={styles.termIndexBadge}>#{rec.sequence}</span>
+                          <Input
+                            value={rec.term_name}
+                            placeholder="Nama termin (wajib)..."
+                            status={!rec.term_name?.trim() ? 'error' : ''}
+                            onChange={(e) => handleUpdateTerm(idx, 'term_name', e.target.value)}
+                            className={isHighlighted ? 'term-input-pulse' : ''}
+                            data-testid="term-name-input"
+                            style={{
+                              flex: 1,
+                              borderRadius: 6,
+                              height: 38,
+                              fontSize: 12.5,
+                              backgroundColor: isHighlighted ? '#ecfdf5' : '#ffffff',
+                            }}
+                          />
+                          <Button
+                            type="text"
+                            danger
+                            icon={<DeleteOutlined style={{ fontSize: 16 }} />}
+                            onClick={() => handleRemoveTerm(idx)}
+                            data-testid="btn-delete-term"
+                            style={{ padding: 4, height: 38, width: 38 }}
+                            title="Hapus Termin"
+                          />
+                        </div>
+
+                        {/* Grid: Type & Percentage */}
+                        <div className={styles.termCardInputsRow}>
+                          <div className={styles.termCardInputGroup}>
+                            <span className={styles.termInputLabel}>Tipe Pembayaran:</span>
+                            <Select
+                              value={rec.term_type}
+                              onChange={(val) => handleTermTypeChange(idx, val)}
+                              data-testid="term-type-select"
+                              style={{ width: '100%', height: 38, fontSize: 12 }}
+                              options={[
+                                { value: 'DOWN_PAYMENT', label: 'Uang Muka / DP' },
+                                { value: 'PROGRESS', label: 'Progress' },
+                                { value: 'FINAL_DELIVERY', label: 'Pelunasan / Final' },
+                                { value: 'RETENTION', label: 'Retensi' },
+                              ]}
+                            />
+                          </div>
+                          <div className={styles.termCardInputGroup}>
+                            <span className={styles.termInputLabel}>Persentase (%):</span>
+                            <InputNumber
+                              min={0.01}
+                              max={100}
+                              step={1}
+                              precision={2}
+                              value={rec.percentage}
+                              status={rec.percentage <= 0 || rec.percentage > 100 ? 'error' : ''}
+                              addonAfter="%"
+                              onChange={(val) => handleUpdateTerm(idx, 'percentage', val ?? 0)}
+                              className={isHighlighted ? 'term-input-pulse' : ''}
+                              data-testid="term-percentage-input"
+                              style={{
+                                width: '100%',
+                                height: 38,
+                                fontSize: 12.5,
+                                backgroundColor: isHighlighted ? '#ecfdf5' : '#ffffff',
+                              }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Estimasi Nominal Display */}
+                        <div className={styles.termAmountHighlight}>
+                          <span className={styles.termAmountLabel}>Estimasi Nominal Termin:</span>
+                          <span className={styles.termAmountValue} data-testid="term-estimated-amount">
+                            Rp {Number(rec.estimatedAmount || 0).toLocaleString('id-ID')}
+                          </span>
+                        </div>
+
+                        {/* Trigger / Syarat */}
+                        <div className={styles.termTriggerBox}>
+                          <span className={styles.termInputLabel}>Trigger / Syarat Pembayaran:</span>
+                          <Input
+                            value={rec.trigger_condition}
+                            placeholder="Contoh: PO Diterbitkan / BAST 1"
+                            onChange={(e) => handleUpdateTerm(idx, 'trigger_condition', e.target.value)}
+                            data-testid="term-trigger-input"
+                            style={{ borderRadius: 6, height: 38, fontSize: 12 }}
+                          />
+                        </div>
+
+                        {/* Retention (conditional) */}
+                        {isRet && (
+                          <div className={styles.termRetentionBox}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <Tag color="purple" style={{ margin: 0, fontSize: 10 }}>Retensi</Tag>
+                              <span className={styles.termInputLabel}>Masa Retensi:</span>
+                            </div>
+                            <InputNumber
+                              min={1}
+                              precision={0}
+                              value={rec.retention_days}
+                              status={!rec.retention_days || rec.retention_days <= 0 ? 'error' : ''}
+                              addonAfter="hari"
+                              placeholder="Hari"
+                              onChange={(val) => handleUpdateTerm(idx, 'retention_days', val ?? undefined)}
+                              data-testid="term-retention-input"
+                              style={{ width: 110, fontSize: 12 }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
               {/* Summary Bar */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '10px 16px',
-                  background: '#f8fafc',
-                  borderTop: '1px solid #e2e8f0',
-                  flexWrap: 'wrap',
-                  gap: 12,
-                }}
-              >
-                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'center' }}>
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: 2 }}>TOTAL PO:</Text>
-                    <div style={{ fontWeight: 800, fontSize: 13.5, color: '#0f172a', fontFamily: 'monospace' }}>
+              <div className={styles.allocationSummaryBar} data-testid="po-allocation-summary">
+                <div className={styles.allocationStatsGroup}>
+                  <div className={styles.allocationStat}>
+                    <span className={styles.allocationStatLabel}>TOTAL PO:</span>
+                    <div className={styles.allocationStatValue} style={{ color: '#0f172a' }}>
                       Rp {totalPoAmount.toLocaleString('id-ID')}
                     </div>
                   </div>
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: 2 }}>TOTAL PERSENTASE:</Text>
-                    <div style={{ fontWeight: 800, fontSize: 13.5, color: percentageStatus.color, fontFamily: 'monospace' }}>
+                  <div className={styles.allocationStat}>
+                    <span className={styles.allocationStatLabel}>TOTAL PERSENTASE:</span>
+                    <div className={styles.allocationStatValue} style={{ color: percentageStatus.color }} data-testid="total-percentage-val">
                       {totalPercentage.toFixed(2)}%
                     </div>
                   </div>
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: '#64748b', display: 'block', marginBottom: 2 }}>ESTIMASI TOTAL TERMIN:</Text>
-                    <div style={{ fontWeight: 800, fontSize: 13.5, color: '#059669', fontFamily: 'monospace' }}>
+                  <div className={styles.allocationStat}>
+                    <span className={styles.allocationStatLabel}>ESTIMASI TOTAL TERMIN:</span>
+                    <div className={styles.allocationStatValue} style={{ color: '#059669' }} data-testid="total-estimated-amount-val">
                       Rp {totalEstimatedAmount.toLocaleString('id-ID')}
                     </div>
-                    <div style={{ fontSize: 10, color: '#94a3b8' }}>Total Alokasi (Display)</div>
+                    <div style={{ fontSize: 9.5, color: '#94a3b8' }}>Total Alokasi (Display)</div>
                   </div>
                 </div>
 
                 <div>
                   <div
+                    className={styles.allocationStatusBadge}
+                    data-testid="po-allocation-status-badge"
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '5px 12px',
-                      borderRadius: 6,
-                      fontSize: 11.5,
-                      fontWeight: 600,
                       background: percentageStatus.alertType === 'success' ? '#ecfdf5' : '#fffbeb',
                       border: `1px solid ${percentageStatus.alertType === 'success' ? '#a7f3d0' : '#fde68a'}`,
                       color: percentageStatus.alertType === 'success' ? '#047857' : '#b45309',
@@ -1808,98 +1860,156 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
           ) : (
             <div>
               {Array.isArray(activePo?.paymentTerms) && activePo.paymentTerms.length > 0 ? (
-                <div style={{ overflowX: 'auto' }}>
-                  <Table
-                    size="small"
-                    rowKey={(rec, idx) => String((rec as any).id || (rec as any).sequence || idx)}
-                    dataSource={activePo.paymentTerms as any[]}
-                    pagination={false}
-                    scroll={{ x: 1000, y: (activePo.paymentTerms as any[]).length > 5 ? 260 : undefined }}
-                    className="po-modal-navy-table"
-                    columns={[
-                      {
-                        title: 'No',
-                        dataIndex: 'sequence',
-                        key: 'sequence',
-                        width: 56,
-                        align: 'center' as const,
-                        render: (seq, _, idx) => <span style={{ fontWeight: 600, color: '#64748b' }}>{seq || idx + 1}</span>,
-                      },
-                      {
-                        title: 'Nama Termin',
-                        dataIndex: 'termName',
-                        key: 'termName',
-                        width: 220,
-                        render: (name, rec: any) => <strong>{name || rec.term_name || `Termin ${rec.sequence}`}</strong>,
-                      },
-                      {
-                        title: 'Tipe',
-                        dataIndex: 'termType',
-                        key: 'termType',
-                        width: 170,
-                        render: (type, rec: any) => {
-                          const t = type || rec.term_type;
-                          const map: Record<string, { label: string; color: string }> = {
-                            DOWN_PAYMENT: { label: 'Uang Muka / DP', color: 'blue' },
-                            PROGRESS: { label: 'Progress', color: 'orange' },
-                            FINAL_DELIVERY: { label: 'Pelunasan / Final', color: 'green' },
-                            RETENTION: { label: 'Retensi', color: 'purple' },
-                          };
-                          const config = map[t] || { label: t, color: 'default' };
-                          return <Tag color={config.color}>{config.label}</Tag>;
+                <>
+                  {/* Desktop Table View */}
+                  <div className={styles.desktopTableView} data-testid="po-view-terms-desktop-table">
+                    <Table
+                      size="small"
+                      rowKey={(rec, idx) => String((rec as any).id || (rec as any).sequence || idx)}
+                      dataSource={activePo.paymentTerms as any[]}
+                      pagination={false}
+                      scroll={{ x: 1000, y: (activePo.paymentTerms as any[]).length > 5 ? 260 : undefined }}
+                      className="po-modal-navy-table"
+                      columns={[
+                        {
+                          title: 'No',
+                          dataIndex: 'sequence',
+                          key: 'sequence',
+                          width: 56,
+                          align: 'center' as const,
+                          render: (seq, _, idx) => <span style={{ fontWeight: 600, color: '#64748b' }}>{seq || idx + 1}</span>,
                         },
-                      },
-                      {
-                        title: 'Persentase',
-                        dataIndex: 'percentage',
-                        key: 'percentage',
-                        width: 110,
-                        align: 'right' as const,
-                        render: (pct) => <strong>{Number(pct).toFixed(2)}%</strong>,
-                      },
-                      {
-                        title: 'Nominal Kontrak',
-                        dataIndex: 'amount',
-                        key: 'amount',
-                        width: 170,
-                        align: 'right' as const,
-                        render: (amt, rec: any) => {
-                          const val = Number(amt ?? rec.amount ?? 0);
-                          return (
-                            <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#059669' }}>
+                        {
+                          title: 'Nama Termin',
+                          dataIndex: 'termName',
+                          key: 'termName',
+                          width: 220,
+                          render: (name, rec: any) => <strong>{name || rec.term_name || `Termin ${rec.sequence}`}</strong>,
+                        },
+                        {
+                          title: 'Tipe',
+                          dataIndex: 'termType',
+                          key: 'termType',
+                          width: 170,
+                          render: (type, rec: any) => {
+                            const t = type || rec.term_type;
+                            const map: Record<string, { label: string; color: string }> = {
+                              DOWN_PAYMENT: { label: 'Uang Muka / DP', color: 'blue' },
+                              PROGRESS: { label: 'Progress', color: 'orange' },
+                              FINAL_DELIVERY: { label: 'Pelunasan / Final', color: 'green' },
+                              RETENTION: { label: 'Retensi', color: 'purple' },
+                            };
+                            const config = map[t] || { label: t, color: 'default' };
+                            return <Tag color={config.color}>{config.label}</Tag>;
+                          },
+                        },
+                        {
+                          title: 'Persentase',
+                          dataIndex: 'percentage',
+                          key: 'percentage',
+                          width: 110,
+                          align: 'right' as const,
+                          render: (pct) => <strong>{Number(pct).toFixed(2)}%</strong>,
+                        },
+                        {
+                          title: 'Nominal Kontrak',
+                          dataIndex: 'amount',
+                          key: 'amount',
+                          width: 170,
+                          align: 'right' as const,
+                          render: (amt, rec: any) => {
+                            const val = Number(amt ?? rec.amount ?? 0);
+                            return (
+                              <span style={{ fontFamily: 'monospace', fontWeight: 700, color: '#059669' }}>
+                                Rp {val.toLocaleString('id-ID')}
+                              </span>
+                            );
+                          },
+                        },
+                        {
+                          title: 'Syarat / Trigger',
+                          dataIndex: 'triggerCondition',
+                          key: 'triggerCondition',
+                          render: (cond, rec: any) => cond || rec.trigger_condition || '-',
+                        },
+                        {
+                          title: 'Masa Retensi',
+                          key: 'retention',
+                          width: 120,
+                          align: 'center' as const,
+                          render: (_, rec: any) => {
+                            const isRet = rec.isRetention || rec.is_retention || rec.termType === 'RETENTION' || rec.term_type === 'RETENTION';
+                            const days = rec.retentionDays || rec.retention_days;
+                            return isRet && days ? <Tag color="purple">{days} Hari</Tag> : <span style={{ color: '#94a3b8' }}>-</span>;
+                          },
+                        },
+                        {
+                          title: 'Status',
+                          dataIndex: 'status',
+                          key: 'status',
+                          width: 100,
+                          align: 'center' as const,
+                          render: (st) => <Tag color={st === 'PAID' ? 'green' : 'gold'}>{st || 'PENDING'}</Tag>,
+                        },
+                      ]}
+                    />
+                  </div>
+
+                  {/* Mobile Cards View */}
+                  <div className={styles.mobileCardsView} data-testid="po-view-terms-mobile-cards">
+                    {(activePo.paymentTerms as any[]).map((rec, idx) => {
+                      const t = rec.termType || rec.term_type;
+                      const map: Record<string, { label: string; color: string }> = {
+                        DOWN_PAYMENT: { label: 'Uang Muka / DP', color: 'blue' },
+                        PROGRESS: { label: 'Progress', color: 'orange' },
+                        FINAL_DELIVERY: { label: 'Pelunasan / Final', color: 'green' },
+                        RETENTION: { label: 'Retensi', color: 'purple' },
+                      };
+                      const config = map[t] || { label: t || 'Termin', color: 'default' };
+                      const isRet = rec.isRetention || rec.is_retention || rec.termType === 'RETENTION' || rec.term_type === 'RETENTION';
+                      const days = rec.retentionDays || rec.retention_days;
+                      const val = Number(rec.amount ?? 0);
+                      const st = rec.status || 'PENDING';
+
+                      return (
+                        <div key={rec.id || rec.sequence || idx} className={styles.paymentTermCard} data-testid="po-view-term-card">
+                          <div className={styles.termCardHeader}>
+                            <span className={styles.termIndexBadge}>#{rec.sequence || idx + 1}</span>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <strong style={{ fontSize: 13, color: '#0f172a' }}>
+                                {rec.termName || rec.term_name || `Termin ${rec.sequence || idx + 1}`}
+                              </strong>
+                              <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
+                                <Tag color={config.color} style={{ fontSize: 10, margin: 0 }}>{config.label}</Tag>
+                                <Tag color={st === 'PAID' ? 'green' : 'gold'} style={{ fontSize: 10, margin: 0 }}>{st}</Tag>
+                                {isRet && days && <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>Retensi {days} Hari</Tag>}
+                              </div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <span style={{ fontWeight: 800, fontSize: 13, color: '#2563eb' }}>
+                                {Number(rec.percentage || 0).toFixed(2)}%
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className={styles.termAmountHighlight}>
+                            <span className={styles.termAmountLabel}>Nominal Kontrak:</span>
+                            <span className={styles.termAmountValue}>
                               Rp {val.toLocaleString('id-ID')}
                             </span>
-                          );
-                        },
-                      },
-                      {
-                        title: 'Syarat / Trigger',
-                        dataIndex: 'triggerCondition',
-                        key: 'triggerCondition',
-                        render: (cond, rec: any) => cond || rec.trigger_condition || '-',
-                      },
-                      {
-                        title: 'Masa Retensi',
-                        key: 'retention',
-                        width: 120,
-                        align: 'center' as const,
-                        render: (_, rec: any) => {
-                          const isRet = rec.isRetention || rec.is_retention || rec.termType === 'RETENTION' || rec.term_type === 'RETENTION';
-                          const days = rec.retentionDays || rec.retention_days;
-                          return isRet && days ? <Tag color="purple">{days} Hari</Tag> : <span style={{ color: '#94a3b8' }}>-</span>;
-                        },
-                      },
-                      {
-                        title: 'Status',
-                        dataIndex: 'status',
-                        key: 'status',
-                        width: 100,
-                        align: 'center' as const,
-                        render: (st) => <Tag color={st === 'PAID' ? 'green' : 'gold'}>{st || 'PENDING'}</Tag>,
-                      },
-                    ]}
-                  />
-                </div>
+                          </div>
+
+                          {(rec.triggerCondition || rec.trigger_condition) && (
+                            <div style={{ fontSize: 11, color: '#64748b' }}>
+                              <span style={{ fontWeight: 600 }}>Syarat: </span>
+                              {rec.triggerCondition || rec.trigger_condition}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               ) : (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', color: '#475569', fontSize: 12 }}>
                   {typeof activePo?.paymentTerms === 'string'
@@ -1912,22 +2022,11 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
         </div>
 
         {/* Items Locked Breakdown Table */}
-        <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
-          <div
-            style={{
-              padding: '10px 14px',
-              background: '#f8fafc',
-              borderBottom: '1px solid #e2e8f0',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 8,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className={styles.sectionWrapper} data-testid="po-items-section">
+          <div className={styles.sectionHeader}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <ShoppingCartOutlined style={{ color: '#2563eb', fontSize: 16 }} />
-              <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
+              <span className={styles.sectionTitle}>
                 Daftar {poItems.length} Item Pembelian (Terkunci Sesuai Penawaran Pemenang: {vendorName})
               </span>
             </div>
@@ -1947,7 +2046,9 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
               HARGA & KUANTITAS TERKUNCI (READ-ONLY)
             </Tag>
           </div>
-          <div style={{ overflowX: 'auto' }}>
+
+          {/* Desktop Table View */}
+          <div className={styles.desktopTableView} data-testid="po-items-desktop-table">
             <Table
               size="small"
               rowKey="key"
@@ -1998,7 +2099,7 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                       <div style={{ fontWeight: 600, fontSize: 12, color: '#0f172a' }}>{name}</div>
                       {it.wbsNodeId && (
                         <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', marginTop: 2 }}>
-                          WBS #{it.wbsNodeId}
+                          {`WBS #${it.wbsNodeId}`}
                         </Tag>
                       )}
                     </div>
@@ -2084,6 +2185,105 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                 },
               ]}
             />
+          </div>
+
+          {/* Mobile Cards View */}
+          <div className={styles.mobileCardsView} data-testid="po-items-mobile-cards">
+            {poItems.map((item, idx) => {
+              const subtotalVal =
+                item.subtotal !== undefined && item.subtotal !== null
+                  ? Number(item.subtotal)
+                  : item.totalPrice !== undefined && item.totalPrice !== null
+                  ? Number(item.totalPrice)
+                  : Number(item.quantity || 0) * Number(item.unitPrice || 0);
+
+              const upper = (item.categoryName || '').toUpperCase();
+              const color =
+                upper === 'MATERIAL' ? 'blue' :
+                upper === 'SUBCONTRACTOR' ? 'cyan' :
+                upper === 'EQUIPMENT' ? 'purple' :
+                upper === 'OPERATIONAL' ? 'geekblue' : 'default';
+              const catLabel =
+                upper === 'MATERIAL' ? 'Material' :
+                upper === 'SUBCONTRACTOR' ? 'Subkontraktor' :
+                upper === 'EQUIPMENT' ? 'Peralatan' :
+                upper === 'OPERATIONAL' ? 'Operasional' : item.categoryName || 'Material';
+
+              const rem = isViewMode
+                ? Math.max(0, Number(item.quantity || 0) - Number(item.receivedQuantity || 0))
+                : 0;
+
+              return (
+                <div key={item.key || idx} className={styles.purchasedItemCard} data-testid="purchased-item-card">
+                  <div className={styles.itemCardHeader}>
+                    <span className={styles.termIndexBadge}>#{idx + 1}</span>
+                    <div className={styles.itemCardTitleGroup}>
+                      <div className={styles.itemCardTitle} data-testid="item-name">
+                        {item.itemName}
+                      </div>
+                      <div className={styles.itemTagsRow}>
+                        <Tag color={color} style={{ fontSize: 10, margin: 0, fontWeight: 600, padding: '0 5px' }}>
+                          {catLabel}
+                        </Tag>
+                        {item.wbsNodeId && (
+                          <Tag color="geekblue" style={{ fontSize: 10, margin: 0, padding: '0 5px' }}>
+                            {`WBS #${item.wbsNodeId}`}
+                          </Tag>
+                        )}
+                        <Tag color="default" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', color: '#64748b' }}>
+                          Terkunci (Read-Only)
+                        </Tag>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className={styles.itemSnapshotGrid}>
+                    <div className={styles.snapshotField}>
+                      <span className={styles.snapshotLabel}>Volume / Qty Dipesan</span>
+                      <span className={styles.snapshotValue} data-testid="item-quantity">
+                        {Number(item.quantity || 0)} <span style={{ fontWeight: 400, color: '#64748b' }}>{item.uom || 'Unit'}</span>
+                      </span>
+                    </div>
+
+                    <div className={styles.snapshotField}>
+                      <span className={styles.snapshotLabel}>Harga Satuan Disetujui</span>
+                      <span className={styles.snapshotValue} style={{ fontFamily: 'monospace' }} data-testid="item-unit-price">
+                        Rp {Number(item.unitPrice || 0).toLocaleString('id-ID')}
+                      </span>
+                    </div>
+
+                    {isViewMode && (
+                      <>
+                        <div className={styles.snapshotField}>
+                          <span className={styles.snapshotLabel}>Sudah Diterima</span>
+                          <span
+                            className={styles.snapshotValue}
+                            style={{ color: Number(item.receivedQuantity || 0) > 0 ? '#059669' : '#64748b' }}
+                          >
+                            {Number(item.receivedQuantity || 0)} {item.uom || 'Unit'}
+                          </span>
+                        </div>
+                        <div className={styles.snapshotField}>
+                          <span className={styles.snapshotLabel}>Sisa Pengiriman</span>
+                          <div>
+                            <Tag color={rem > 0 ? 'orange' : 'green'} style={{ fontWeight: 700, margin: 0 }}>
+                              {rem} {item.uom || 'Unit'}
+                            </Tag>
+                          </div>
+                        </div>
+                      </>
+                    )}
+
+                    <div className={styles.snapshotFieldFull}>
+                      <span className={styles.snapshotLabel}>Subtotal Kontrak</span>
+                      <span className={styles.snapshotValueHighlight} data-testid="item-subtotal">
+                        Rp {subtotalVal.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

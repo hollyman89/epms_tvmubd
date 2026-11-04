@@ -11,7 +11,7 @@ import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
 import { randomUUID } from 'crypto';
 import { LegalReviewDto } from './dto/legal-review.dto';
 import { emitLegalQueueUpdated } from '../../shared/helpers/legal-event.helper';
-import { BusinessEvent, RoutingMetadata } from '../../shared/contracts/business-event.contract';
+import { BusinessEvent, RoutingMetadata, NotificationPolicy } from '../../shared/contracts/business-event.contract';
 
 @Injectable()
 export class LegalService {
@@ -291,26 +291,30 @@ export class LegalService {
       let canonicalEventName: string;
       let routing: RoutingMetadata = {};
 
+      let deterministicEventId: string;
       if (dto.legalStatus === LegalStatus.APPROVED) {
         canonicalEventName = 'legal.contract.approved';
+        deterministicEventId = `cont-app-${contract.id}`;
         routing = {
           userIds: marketingPicId ? [marketingPicId] : undefined,
           roles: ['PMO'],
         };
       } else if (dto.legalStatus === LegalStatus.REVISION_REQUESTED) {
         canonicalEventName = 'legal.contract.revision_requested';
+        deterministicEventId = `cont-rev-${contract.id}-${contract.grace_extension_count || 1}`;
         routing = {
           userIds: marketingPicId ? [marketingPicId] : undefined,
         };
       } else {
         canonicalEventName = 'legal.contract.rejected';
+        deterministicEventId = `cont-rej-${contract.id}`;
         routing = {
           userIds: marketingPicId ? [marketingPicId] : undefined,
         };
       }
 
       const canonicalBusinessEvent: BusinessEvent = {
-        eventId: randomUUID(),
+        eventId: deterministicEventId,
         eventName: canonicalEventName,
         eventVersion: 1,
         occurredAt: new Date().toISOString(),
@@ -319,6 +323,7 @@ export class LegalService {
         actor: { userId: Number(userId) },
         correlationId,
         routing,
+        notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
         payload: {
           contractId: contract.id,
           contractNumber: contract.contract_number,

@@ -1,0 +1,491 @@
+/* EPMS — VENDOR QUOTATION MODAL RESPONSIVE CSS MODULE */
+
+.quotationModal :global(.ant-modal) {
+  max-width: 100vw;
+}
+
+.modalBody {
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Flex items should never collapse unexpectedly under overflow */
+.modalBody > * {
+  flex-shrink: 0;
+}
+
+/* ── HEADER CONTAINER ── */
+.headerContainer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-right: 24px;
+}
+
+.headerIcon {
+  padding: 6px 10px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.headerIconReadOnly {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.headerIconEditable {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.headerTextGroup {
+  min-width: 0;
+  flex: 1;
+}
+
+.headerTitle {
+  font-weight: 700;
+  font-size: 15px;
+  color: #0f172a;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.headerSubtitle {
+  font-size: 11px;
+  color: #64748b;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  display: block;
+  margin-top: 2px;
+}
+
+/* ── RFQ REFERENCE & PLAFON STRIP ── */
+.referenceStrip {
+  background: #f8fafc;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.referenceLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #64748b;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.referenceValue {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.plafonValue {
+  font-weight: 800;
+  font-size: 14px;
+  color: #059669;
+  font-family: monospace;
+}
+
+/* ── ITEM SECTION CONTAINER ── */
+.itemSectionWrapper {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.itemSectionHeader {
+  padding: 8px 12px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.itemSectionTitle {
+  font-weight: 700;
+  font-size: 12px;
+  color: #334155;
+  word-break: break-word;
+}
+
+/* ── DESKTOP TABLE VIEW (min-width: 641px) ── */
+.desktopTableView {
+  display: block;
+}
+
+.tableContainer {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+.tableContainer :global(.ant-table-thead > tr > th) {
+  padding: 8px 10px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #475569 !important;
+  background: #f8fafc !important;
+  white-space: nowrap !important;
+  line-height: 1.4 !important;
+}
+
+.tableContainer :global(.ant-table-tbody > tr > td) {
+  padding: 8px 10px !important;
+  vertical-align: middle !important;
+  line-height: 1.4 !important;
+}
+
+.desktopRouteDetails {
+  font-size: 10.5px;
+  color: #64748b;
+  margin-top: 3px;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+/* ── MOBILE CARD VIEW (max-width: 640px) ── */
+.mobileCardView {
+  display: none;
+}
+
+.quotationItemCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  height: auto;
+  min-height: fit-content;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.itemIndexBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: #e2e8f0;
+  color: #334155;
+  border-radius: 50%;
+  font-size: 10.5px;
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.cardTitleGroup {
+  flex: 1;
+  min-width: 0;
+}
+
+.itemTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.routeDetails {
+  font-size: 11.5px;
+  color: #475569;
+  margin-top: 4px;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+  background: #f8fafc;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border-left: 3px solid #cbd5e1;
+}
+
+.cardCategoryRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ── READ-ONLY SNAPSHOT PANEL (PR SPEC) ── */
+.snapshotGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  background: #f8fafc;
+  border-radius: 6px;
+  padding: 8px 10px;
+  border: 1px solid #f1f5f9;
+}
+
+.snapshotField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.snapshotFieldFull {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+  flex-wrap: wrap;
+}
+
+.fieldLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.fieldValue {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  word-break: break-word;
+}
+
+.fieldValueHighlight {
+  font-size: 13px;
+  font-weight: 700;
+  color: #059669;
+  font-family: monospace;
+}
+
+/* ── VENDOR QUOTATION INPUT SECTION ── */
+.quotationInputBox {
+  background: #ffffff;
+  border: 1.5px solid #e0e7ff;
+  border-radius: 6px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.quotationInputBoxActive {
+  border-color: #6366f1;
+  background: #faf5ff;
+}
+
+.inputLabelRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.inputLabel {
+  font-size: 11px;
+  font-weight: 700;
+  color: #312e81;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.quotedSubtotalRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.subtotalLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.subtotalValue {
+  font-size: 13.5px;
+  font-weight: 800;
+  font-family: monospace;
+  color: #0f172a;
+}
+
+.subtotalValueEmpty {
+  font-size: 11px;
+  font-style: italic;
+  color: #94a3b8;
+}
+
+/* ── FOOTER CONTAINER ── */
+.footerContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.footerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.footerRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* ── RESPONSIVE MOBILE BREAKPOINTS ── */
+@media (max-width: 640px) {
+  .quotationModal :global(.ant-modal) {
+    top: 10px !important;
+    margin: 0 auto !important;
+    padding-bottom: 10px !important;
+  }
+
+  .quotationModal :global(.ant-modal-content) {
+    padding: 14px 12px 10px 12px !important;
+    max-height: calc(100dvh - 20px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .quotationModal :global(.ant-modal-header) {
+    margin-bottom: 8px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .quotationModal :global(.ant-modal-body) {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    padding: 8px 12px !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .quotationModal :global(.ant-modal-footer) {
+    margin-top: 6px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .modalBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100dvh - 270px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 24px;
+    padding-right: 4px;
+    gap: 10px;
+  }
+
+  .itemSectionWrapper {
+    overflow: visible;
+  }
+
+  .desktopTableView {
+    display: none;
+  }
+
+  /* Single natural card container: no nested scrolling, natural card growth */
+  .mobileCardView {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    background: #f8fafc;
+    max-height: none;
+    overflow: visible;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .footerContainer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .footerLeft {
+    justify-content: center;
+    font-size: 11px;
+    text-align: center;
+    width: 100%;
+  }
+
+  .footerRight {
+    width: 100%;
+    justify-content: stretch;
+    margin-left: 0;
+    gap: 8px;
+  }
+
+  .footerRight > * {
+    flex: 1 1 auto;
+    min-height: 38px;
+  }
+}
+
+@media (max-width: 360px) {
+  .modalBody {
+    max-height: calc(100dvh - 280px);
+    padding-bottom: 28px;
+    gap: 8px;
+  }
+
+  .headerTitle {
+    font-size: 13.5px;
+  }
+
+  .headerSubtitle {
+    font-size: 10px;
+  }
+
+  .snapshotGrid {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  .subtotalValue {
+    font-size: 12.5px;
+  }
+}

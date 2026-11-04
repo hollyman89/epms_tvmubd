@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, MoreThan, Not, IsNull } from 'typeorm';
 import { ObservabilityService } from './observability.service';
+import { OutboxRelayService } from './outbox-relay.service';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
 import { Contract } from '../../entities/contract.entity';
 import { Tender } from '../../entities/tender.entity';
@@ -16,6 +17,7 @@ describe('Phase H: ObservabilityService (Aligned Outbox Metrics & Operational Di
   let projectRepo: any;
   let auditRepo: any;
   let dataSource: any;
+  let outboxRelayService: any;
 
   beforeEach(async () => {
     outboxRepo = {
@@ -28,6 +30,9 @@ describe('Phase H: ObservabilityService (Aligned Outbox Metrics & Operational Di
     projectRepo = { count: jest.fn().mockResolvedValue(3) };
     auditRepo = { count: jest.fn().mockResolvedValue(100) };
     dataSource = { query: jest.fn() };
+    outboxRelayService = {
+      requeueFailedEvent: jest.fn().mockResolvedValue({ success: true, message: 'Requeued' }),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -38,6 +43,7 @@ describe('Phase H: ObservabilityService (Aligned Outbox Metrics & Operational Di
         { provide: getRepositoryToken(Tender), useValue: tenderRepo },
         { provide: getRepositoryToken(Project), useValue: projectRepo },
         { provide: getRepositoryToken(AuditLog), useValue: auditRepo },
+        { provide: OutboxRelayService, useValue: outboxRelayService },
       ],
     }).compile();
 
@@ -301,6 +307,14 @@ describe('Phase H: ObservabilityService (Aligned Outbox Metrics & Operational Di
       expect(db?.status).toBe('NOT_MEASURED');
       expect(db?.trend).toBe('NOT_MEASURED');
       expect(db?.usagePercent).toBeNull();
+    });
+  });
+
+  describe('PARTIAL-REC-01: requeueOutboxEvent Delegation', () => {
+    it('delegates requeue call to OutboxRelayService.requeueFailedEvent', async () => {
+      const result = await service.requeueOutboxEvent(42, 101, 'Need manual replay');
+      expect(outboxRelayService.requeueFailedEvent).toHaveBeenCalledWith(42, 101, 'Need manual replay');
+      expect(result).toEqual({ success: true, message: 'Requeued' });
     });
   });
 });

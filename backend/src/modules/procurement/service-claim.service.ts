@@ -958,29 +958,8 @@ export class ServiceClaimService {
 
       await queryRunner.commitTransaction();
 
-      // Canonical Notification to assigned Project Manager
-      if (projectManagerId && this.notificationWriter) {
-        try {
-          await this.notificationWriter.persistCanonicalNotification({
-            eventId,
-            recipientId: projectManagerId,
-            purpose: "SERVICE_CLAIM_SUBMITTED",
-            title: `Pengajuan Klaim Jasa Baru (${savedClaim.claimNumber})`,
-            message: `Klaim jasa baru untuk PO #${savedClaim.purchaseOrder?.poNumber || savedClaim.poId} diajukan dan membutuhkan verifikasi teknis.`,
-            type: "ALERT",
-            actionTarget: `/project?projectId=${savedClaim.projectId}&claimId=${savedClaim.id}`,
-            metaData: {
-              claimId: savedClaim.id,
-              claimNumber: savedClaim.claimNumber,
-              projectId: savedClaim.projectId,
-            },
-          });
-        } catch (notifErr: any) {
-          this.logger.warn(
-            `Failed to project canonical notification for submitted claim: ${notifErr.message}`,
-          );
-        }
-      }
+      // Canonical Notification: Projected asynchronously via OutboxEvent & CanonicalNotificationConsumer (Phase 1.3 F-CRIT-03)
+      // Eliminates redundant direct write and deep-link race condition.
 
       return (await this.getClaim(savedClaim.id))!;
     } catch (err) {
@@ -1136,6 +1115,8 @@ export class ServiceClaimService {
         decision: dto.decision,
         verifierId: userId,
         projectId: saved.projectId,
+        poId: saved.poId,
+        poNumber: saved.purchaseOrder?.poNumber,
         submittedBy: claim.submittedBy ? Number(claim.submittedBy) : undefined,
         revisionNotes: saved.revisionNotes,
         rejectionReason: saved.rejectionReason,
@@ -1160,42 +1141,8 @@ export class ServiceClaimService {
 
       await queryRunner.commitTransaction();
 
-      // Notifications projection
-      if (this.notificationWriter) {
-        try {
-          if (
-            dto.decision === ClaimVerificationDecision.RETURN ||
-            dto.decision === ClaimVerificationDecision.REJECT
-          ) {
-            // Notify submitter
-            if (claim.submittedBy) {
-              await this.notificationWriter.persistCanonicalNotification({
-                eventId,
-                recipientId: Number(claim.submittedBy),
-                purpose:
-                  dto.decision === ClaimVerificationDecision.RETURN
-                    ? "SERVICE_CLAIM_RETURNED"
-                    : "SERVICE_CLAIM_REJECTED",
-                title:
-                  dto.decision === ClaimVerificationDecision.RETURN
-                    ? `Klaim Jasa Membutuhkan Revisi (${claim.claimNumber})`
-                    : `Klaim Jasa Ditolak (${claim.claimNumber})`,
-                message:
-                  dto.decision === ClaimVerificationDecision.RETURN
-                    ? `Klaim dikembalikan oleh PM dengan catatan: ${dto.revisionNotes}`
-                    : `Klaim ditolak oleh PM: ${dto.rejectionReason}`,
-                type: "ALERT",
-                actionTarget: `/procurement?claimId=${claim.id}`,
-                metaData: { claimId: claim.id, claimNumber: claim.claimNumber },
-              });
-            }
-          }
-        } catch (e: any) {
-          this.logger.warn(
-            `Failed to project notification on technical verify: ${e.message}`,
-          );
-        }
-      }
+      // Canonical Notification: Projected asynchronously via OutboxEvent & CanonicalNotificationConsumer (Phase 1.3 F-CRIT-03)
+      // Eliminates redundant direct write and deep-link race condition.
 
       return (await this.getClaim(saved.id))!;
     } catch (err) {
@@ -1463,6 +1410,27 @@ export class ServiceClaimService {
 
       // Outbox Event
       const eventId = randomUUID();
+      const routing =
+        dto.decision === ClaimVerificationDecision.RETURN ||
+        dto.decision === ClaimVerificationDecision.REJECT
+          ? (claim.submittedBy ? { userIds: [Number(claim.submittedBy)] } : undefined)
+          : undefined;
+
+      const outboxPayload = {
+        claimId: saved.id,
+        claimNumber: saved.claimNumber,
+        poId: saved.poId,
+        poNumber: saved.purchaseOrder?.poNumber,
+        projectId: saved.projectId,
+        decision: dto.decision,
+        verifierId: userId,
+        commercialVerifierId: userId,
+        submittedBy: claim.submittedBy ? Number(claim.submittedBy) : undefined,
+        approvedClaimAmount: saved.approvedClaimAmount,
+        revisionNotes: saved.revisionNotes,
+        rejectionReason: saved.rejectionReason,
+      };
+
       const outbox = queryRunner.manager.create(OutboxEvent, {
         event_id: eventId,
         event_name: outboxEventName,
@@ -1471,13 +1439,9 @@ export class ServiceClaimService {
         aggregate_id: Number(saved.id),
         correlation_id: null,
         payload: {
-          claimId: saved.id,
-          claimNumber: saved.claimNumber,
-          decision: dto.decision,
-          verifierId: userId,
-          approvedClaimAmount: saved.approvedClaimAmount,
-          revisionNotes: saved.revisionNotes,
-          rejectionReason: saved.rejectionReason,
+          ...outboxPayload,
+          routing,
+          businessPayload: outboxPayload,
         },
         status: OutboxStatus.PENDING,
         retry_count: 0,
@@ -1486,47 +1450,8 @@ export class ServiceClaimService {
 
       await queryRunner.commitTransaction();
 
-      // Notifications projection
-      if (this.notificationWriter) {
-        try {
-          if (dto.decision === ClaimVerificationDecision.APPROVE) {
-            // Notify finance
-            // Find finance users or project
-            this.logger.log(
-              `Service claim #${saved.claimNumber} approved for invoice. Outbox event written.`,
-            );
-          } else if (
-            dto.decision === ClaimVerificationDecision.RETURN ||
-            dto.decision === ClaimVerificationDecision.REJECT
-          ) {
-            if (claim.submittedBy) {
-              await this.notificationWriter.persistCanonicalNotification({
-                eventId,
-                recipientId: Number(claim.submittedBy),
-                purpose:
-                  dto.decision === ClaimVerificationDecision.RETURN
-                    ? "SERVICE_CLAIM_RETURNED"
-                    : "SERVICE_CLAIM_REJECTED",
-                title:
-                  dto.decision === ClaimVerificationDecision.RETURN
-                    ? `Klaim Jasa Dikembalikan (${claim.claimNumber})`
-                    : `Klaim Jasa Ditolak (${claim.claimNumber})`,
-                message:
-                  dto.decision === ClaimVerificationDecision.RETURN
-                    ? `Klaim dikembalikan oleh Pengadaan: ${dto.revisionNotes}`
-                    : `Klaim ditolak oleh Pengadaan: ${dto.rejectionReason}`,
-                type: "ALERT",
-                actionTarget: `/procurement?claimId=${claim.id}`,
-                metaData: { claimId: claim.id, claimNumber: claim.claimNumber },
-              });
-            }
-          }
-        } catch (e: any) {
-          this.logger.warn(
-            `Failed to project notification on commercial verify: ${e.message}`,
-          );
-        }
-      }
+      // Canonical Notification: Projected asynchronously via OutboxEvent & CanonicalNotificationConsumer (Phase 1.3 F-CRIT-03)
+      // Eliminates redundant direct write and deep-link race condition.
 
       return (await this.getClaim(saved.id))!;
     } catch (err) {

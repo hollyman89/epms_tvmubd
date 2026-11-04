@@ -33,6 +33,16 @@ describe('PRE-W10 NOTIF-DR1: Notification Deep-Link Regression Remediation Suite
       const target = resolveNotificationTarget(item);
       expect(target).toBe('/finance/payments');
     });
+
+    it('F-HIGH-04: normalizes legacy dead Contract route in actionLink (/governance/contracts/:id -> /legal/review?contractId=:id)', () => {
+      const item = {
+        actionLink: '/governance/contracts/1',
+        metaData: { reference_id: 'CONTRACT:1', reference_type: 'CONTRACT' },
+      };
+
+      const target = resolveNotificationTarget(item);
+      expect(target).toBe('/legal/review?contractId=1');
+    });
   });
 
   describe('Gate 9: Lead / Tender notification navigates correctly', () => {
@@ -61,6 +71,24 @@ describe('PRE-W10 NOTIF-DR1: Notification Deep-Link Regression Remediation Suite
       };
 
       expect(resolveNotificationTarget(item)).toBe('/sales/tenders/77');
+    });
+
+    it('F-HIGH-04: derives tender route from legacy entity reference format TENDER:163', () => {
+      const item = {
+        actionLink: null,
+        metaData: { reference_type: 'TENDER', reference_id: 'TENDER:163' },
+      };
+
+      expect(resolveNotificationTarget(item)).toBe('/sales/tenders/163');
+    });
+
+    it('F-HIGH-04: derives contract route from legacy entity reference format CONTRACT:1', () => {
+      const item = {
+        actionLink: null,
+        metaData: { reference_type: 'CONTRACT', reference_id: 'CONTRACT:1' },
+      };
+
+      expect(resolveNotificationTarget(item)).toBe('/legal/review?contractId=1');
     });
   });
 
@@ -314,6 +342,105 @@ describe('PRE-W10 NOTIF-DR1: Notification Deep-Link Regression Remediation Suite
 
       // Non-existent poId returns undefined (no accidental modal open)
       expect(findPo('9999')).toBeUndefined();
+    });
+  });
+
+  describe('F-CRIT-01-R1: Project Issue and Risk Deep Link Resolution', () => {
+    it('normalizes legacy dead /projects/:id actionLink to /project-delivery?projectId=:id', () => {
+      const item = { actionLink: '/projects/42' };
+      expect(resolveNotificationTarget(item)).toBe('/project-delivery?projectId=42');
+    });
+
+    it('normalizes legacy dead /projects actionLink to /project-delivery', () => {
+      const item = { actionLink: '/projects' };
+      expect(resolveNotificationTarget(item)).toBe('/project-delivery');
+    });
+
+    it('derives Project Issue route from metadata when actionLink is missing', () => {
+      const item = {
+        metaData: {
+          category: 'PROJECT_ISSUE',
+          projectId: 42,
+          issueId: 105,
+        },
+      };
+      expect(resolveNotificationTarget(item)).toBe(
+        '/project-delivery?view=workspace&projectId=42&section=issue-risk&type=issue&id=105',
+      );
+    });
+
+    it('derives Project Risk route from metadata when actionLink is missing', () => {
+      const item = {
+        metaData: {
+          category: 'PROJECT_RISK',
+          projectId: 42,
+          riskId: 205,
+        },
+      };
+      expect(resolveNotificationTarget(item)).toBe(
+        '/project-delivery?view=workspace&projectId=42&section=issue-risk&type=risk&id=205',
+      );
+    });
+  });
+
+  describe('F-CRIT-03: Service Claim Deep Link Resolution', () => {
+    it('normalizes historical dead /project? actionLink to /project-delivery?', () => {
+      const item = { actionLink: '/project?projectId=42&claimId=501' };
+      expect(resolveNotificationTarget(item)).toBe('/project-delivery?projectId=42&claimId=501');
+    });
+
+    it('prioritizes explicit canonical actionLink for Service Claim Commercial Verification', () => {
+      const item = { actionLink: '/procurement?tab=po&poId=101&claimId=501&action=service-claim' };
+      expect(resolveNotificationTarget(item)).toBe(
+        '/procurement?tab=po&poId=101&claimId=501&action=service-claim',
+      );
+    });
+
+    it('prioritizes explicit canonical actionLink for Finance Invoice Workspace', () => {
+      const item = { actionLink: '/finance/invoices?tab=ready_pos&poId=101&serviceClaimId=501' };
+      expect(resolveNotificationTarget(item)).toBe('/finance/invoices?tab=ready_pos&poId=101&serviceClaimId=501');
+    });
+
+    it('derives Service Claim SUBMITTED route from metadata when actionLink is missing', () => {
+      const item = {
+        metaData: {
+          category: 'SERVICE_CLAIM',
+          projectId: 42,
+          claimId: 501,
+          actionType: 'SERVICE_CLAIM_SUBMITTED',
+        },
+      };
+      expect(resolveNotificationTarget(item)).toBe('/project-delivery?projectId=42&claimId=501');
+    });
+
+    it('derives Service Claim VERIFIED (Procurement) route from metadata when actionLink is missing', () => {
+      const item = {
+        metaData: {
+          category: 'SERVICE_CLAIM',
+          projectId: 42,
+          poId: 101,
+          claimId: 501,
+          actionType: 'SERVICE_CLAIM_VERIFIED',
+        },
+      };
+      expect(resolveNotificationTarget(item)).toBe(
+        '/procurement?tab=po&poId=101&claimId=501&action=service-claim',
+      );
+    });
+
+    it('derives Service Claim APPROVED_FOR_INVOICE (Finance) route from metadata when actionLink is missing', () => {
+      const item = {
+        metaData: {
+          category: 'SERVICE_CLAIM',
+          projectId: 42,
+          poId: 101,
+          claimId: 501,
+          actionType: 'SERVICE_CLAIM_APPROVED_FOR_INVOICE',
+        },
+      };
+      expect(resolveNotificationTarget(item)).toBe(
+        '/finance/invoices?tab=ready_pos&poId=101&serviceClaimId=501',
+      );
     });
   });
 });

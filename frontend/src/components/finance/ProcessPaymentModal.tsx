@@ -206,7 +206,8 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
       <Modal
         open={open}
         onCancel={onClose}
-        width={480}
+        width="min(480px, calc(100vw - 24px))"
+        style={{ maxWidth: '100vw' }}
         centered
         destroyOnClose
         title="Akses Ditolak"
@@ -231,7 +232,8 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
     <Modal
       open={open}
       onCancel={onClose}
-      width="min(860px, 95vw)"
+      width="min(860px, calc(100vw - 24px))"
+      style={{ maxWidth: '100vw' }}
       centered
       destroyOnClose
       footer={
@@ -245,9 +247,9 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
             gap: 8,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 16 }} />
-            <Text style={{ fontSize: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 16, flexShrink: 0 }} />
+            <Text style={{ fontSize: 12, wordBreak: 'break-word' }}>
               Total Tagihan:{' '}
               <strong style={{ color: '#059669', fontSize: 13, fontFamily: 'monospace' }}>
                 Rp {totalAmount.toLocaleString('id-ID')}
@@ -260,7 +262,7 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
             </Text>
           </div>
 
-          <Space size={8}>
+          <Space size={8} wrap>
             <Button onClick={onClose} style={{ borderRadius: 6 }} disabled={isSubmitting}>
               Batal
             </Button>
@@ -292,15 +294,15 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
         </div>
       }
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 24 }}>
-          <div style={{ padding: '6px 10px', background: '#ecfdf5', borderRadius: 8, color: '#059669' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 24, flexWrap: 'wrap' }}>
+          <div style={{ padding: '6px 10px', background: '#ecfdf5', borderRadius: 8, color: '#059669', flexShrink: 0 }}>
             <DollarCircleOutlined style={{ fontSize: 18 }} />
           </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', wordBreak: 'break-word' }}>
               Eksekusi Pembayaran Tagihan — {invoiceNumber}
             </div>
-            <Text type="secondary" style={{ fontSize: 11, color: '#64748b' }}>
+            <Text type="secondary" style={{ fontSize: 11, color: '#64748b', wordBreak: 'break-word', display: 'block' }}>
               Pencatatan realisasi transfer kas/bank untuk pelunasan faktur vendor yang telah tervalidasi Finance
             </Text>
           </div>
@@ -401,7 +403,7 @@ export const ProcessPaymentModal: React.FC<ProcessPaymentModalProps> = ({
             <Col xs={24} sm={12}>
               <Form.Item
                 label={
-                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center', flexWrap: 'wrap', gap: 4 }}>
                     <span style={{ fontWeight: 600, fontSize: 12 }}>Nominal Pembayaran Realisasi (Rp)</span>
                     {remainingBalance > 0 && (
                       <a

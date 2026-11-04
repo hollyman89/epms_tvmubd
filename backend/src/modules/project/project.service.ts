@@ -22,7 +22,7 @@ import { randomUUID } from 'crypto';
 import { User } from '../../entities/user.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
-import { BusinessEvent } from '../../shared/contracts/business-event.contract';
+import { BusinessEvent, NotificationPolicy } from '../../shared/contracts/business-event.contract';
 import { ProjectCostEstimate } from '../../entities/project-cost-estimate.entity';
 import { CostItem } from '../../entities/cost-item.entity';
 import { ProjectInitialCondition } from '../../entities/project-initial-condition.entity';
@@ -2394,7 +2394,7 @@ export class ProjectService {
         actualKickoffDate: string;
         status: string;
       }> = {
-        eventId: randomUUID(),
+        eventId: `proj-kick-${savedProject.id}`,
         eventName: 'project.kickoff.executed',
         eventVersion: 1,
         occurredAt: new Date().toISOString(),
@@ -2402,8 +2402,8 @@ export class ProjectService {
         aggregateId: savedProject.id,
         projectId: Number(savedProject.id),
         actor: userId ? { userId: Number(userId) } : undefined,
-        routing: undefined,
-        notificationPolicy: undefined,
+        routing: { roles: ['PMO', 'HEAD_OF_OPERATIONS'] },
+        notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
         payload: {
           projectId: Number(savedProject.id),
           projectCode: savedProject.code,
@@ -4243,12 +4243,18 @@ export class ProjectService {
       }
 
       if (wfService) {
+        const rawPmId = Number(project.managerId ?? (project as any).manager_id ?? 0);
+        const authoritativePmId = !isNaN(rawPmId) && rawPmId > 0 ? rawPmId : undefined;
         activeInstance = await wfService.startInstance(
           {
             workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW',
             entityType: 'PROJECT',
             entityId: projectId,
-            context: { projectId, submittedBy: userId },
+            context: {
+              projectId,
+              submittedBy: userId,
+              ...(authoritativePmId ? { projectManagerId: authoritativePmId } : {}),
+            },
           },
           userId,
         );
@@ -4957,21 +4963,35 @@ export class ProjectService {
         },
       });
 
-      this.eventEmitter?.emit('notification.send', {
-        title: 'Klaim Progres Kritis — Menunggu Verifikasi',
-        message: `Task "${task.name}" pada Proyek #${projectId} diajukan progres ${currentOfficial}% → ${incomingProgress}%. Menunggu verifikasi.`,
-        type: 'TASK',
-        audience: 'HEAD_OF_OPERATIONS',
-        metaData: {
-          category: 'PROJECT',
-          priority: 'HIGH',
-          reference_type: 'PROJECT_PROGRESS_CLAIM',
-          reference_id: savedLog.id,
+      const subOutbox = manager.create(OutboxEvent, {
+        event_id: `proj-progress-sub-${savedLog.id}`,
+        event_name: 'project.progress_claim.submitted',
+        event_version: '1.0',
+        aggregate_type: 'ProjectProgressLog',
+        aggregate_id: Number(savedLog.id),
+        correlation_id: `progress-claim-${savedLog.id}`,
+        payload: {
+          occurredAt: new Date().toISOString(),
           projectId: Number(projectId),
-          taskId: Number(task.id),
-          actionLink: `/project-delivery?view=workspace&projectId=${projectId}&section=tasks&progressClaimId=${savedLog.id}`,
+          actor: { userId: Number(submittedBy), roles: userRoles },
+          routing: { roles: ['HEAD_OF_OPERATIONS', 'PMO'] },
+          businessPayload: {
+            progressLogId: Number(savedLog.id),
+            projectId: Number(projectId),
+            taskId: Number(task.id),
+            taskName: task.name,
+            submittedBy: Number(submittedBy),
+            previousProgress: currentOfficial,
+            reportedProgress: incomingProgress,
+            eventType,
+            reason: dto.reason.trim(),
+            actionLink: `/project-delivery?view=workspace&projectId=${projectId}&section=tasks&progressClaimId=${savedLog.id}`,
+          },
         },
+        status: OutboxStatus.PENDING,
+        retry_count: 0,
       });
+      await manager.save(OutboxEvent, subOutbox);
 
       return {
         id: Number(savedLog.id),
@@ -5103,6 +5123,37 @@ export class ProjectService {
             officialProgress: Number(log.reported_progress),
           },
         });
+
+        const appOutbox = manager.create(OutboxEvent, {
+          event_id: `proj-progress-app-${log.id}`,
+          event_name: 'project.progress_claim.approved',
+          event_version: '1.0',
+          aggregate_type: 'ProjectProgressLog',
+          aggregate_id: Number(log.id),
+          correlation_id: `progress-claim-${log.id}`,
+          payload: {
+            occurredAt: new Date().toISOString(),
+            projectId: Number(projectId),
+            actor: { userId: Number(verifierId), roles: verifierRoles },
+            routing: { userIds: [Number(log.submitted_by)] },
+            businessPayload: {
+              progressLogId: Number(log.id),
+              projectId: Number(projectId),
+              taskId: Number(task.id),
+              taskName: task.name,
+              submittedBy: Number(log.submitted_by),
+              verifiedBy: Number(verifierId),
+              previousProgress: Number(log.previous_progress),
+              reportedProgress: Number(log.reported_progress),
+              officialProgress: Number(log.reported_progress),
+              eventType: log.event_type,
+              actionLink: `/project-delivery?view=workspace&projectId=${projectId}&section=tasks`,
+            },
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await manager.save(OutboxEvent, appOutbox);
       } else {
         log.status = 'REJECTED';
         log.verified_by = Number(verifierId);
@@ -5123,6 +5174,37 @@ export class ProjectService {
             taskProgressPreserved: Number(task.progress),
           },
         });
+
+        const retOutbox = manager.create(OutboxEvent, {
+          event_id: `proj-progress-ret-${log.id}`,
+          event_name: 'project.progress_claim.returned',
+          event_version: '1.0',
+          aggregate_type: 'ProjectProgressLog',
+          aggregate_id: Number(log.id),
+          correlation_id: `progress-claim-${log.id}`,
+          payload: {
+            occurredAt: new Date().toISOString(),
+            projectId: Number(projectId),
+            actor: { userId: Number(verifierId), roles: verifierRoles },
+            routing: { userIds: [Number(log.submitted_by)] },
+            businessPayload: {
+              progressLogId: Number(log.id),
+              projectId: Number(projectId),
+              taskId: Number(task.id),
+              taskName: task.name,
+              submittedBy: Number(log.submitted_by),
+              verifiedBy: Number(verifierId),
+              previousProgress: Number(log.previous_progress),
+              reportedProgress: Number(log.reported_progress),
+              rejectionReason: log.rejection_reason,
+              eventType: log.event_type,
+              actionLink: `/project-delivery?view=workspace&projectId=${projectId}&section=tasks&progressClaimId=${log.id}`,
+            },
+          },
+          status: OutboxStatus.PENDING,
+          retry_count: 0,
+        });
+        await manager.save(OutboxEvent, retOutbox);
       }
 
       return {
@@ -5577,6 +5659,7 @@ export class ProjectService {
         tenderId: item.tenderId ? Number(item.tenderId) : null,
         marketingPicId: item.marketingPicId ? Number(item.marketingPicId) : null,
         contractValue: item.contractValue ? Number(item.contractValue) : null,
+        spkFileUrl: this.sanitizeSpkFileUrl(item.spkFileUrl),
       })),
       total: items.length,
       summary: {
@@ -5687,8 +5770,22 @@ export class ProjectService {
       tenderId: projectData.tenderId ? Number(projectData.tenderId) : null,
       marketingPicId: projectData.marketingPicId ? Number(projectData.marketingPicId) : null,
       contractValue: projectData.contractValue ? Number(projectData.contractValue) : null,
+      spkFileUrl: this.sanitizeSpkFileUrl(projectData.spkFileUrl),
       readiness,
     };
+  }
+
+  /**
+   * Sanitizes stored spk_file_url by stripping hardcoded localhost or direct backend origins.
+   * Preserves relative paths (/uploads/...) and external cloud storage references (S3).
+   */
+  sanitizeSpkFileUrl(rawUrl: string | null): string | null {
+    if (!rawUrl || typeof rawUrl !== 'string') return null;
+    const trimmed = rawUrl.trim();
+    if (!trimmed) return null;
+    return trimmed
+      .replace(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i, '/')
+      .replace(/^https?:\/\/[^/]+(\/uploads\/)/i, '$1');
   }
 
   /**

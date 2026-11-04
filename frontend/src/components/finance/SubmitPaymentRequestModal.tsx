@@ -103,11 +103,12 @@ export const SubmitPaymentRequestModal: React.FC<SubmitPaymentRequestModalProps>
     <Modal
       open={open}
       onCancel={onClose}
-      width={680}
+      width="min(680px, calc(100vw - 24px))"
+      style={{ maxWidth: '100vw' }}
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <DollarCircleOutlined style={{ color: '#059669', fontSize: 18 }} />
-          <span>Pengajuan Persetujuan Pembayaran ke Direktur</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <DollarCircleOutlined style={{ color: '#059669', fontSize: 18, flexShrink: 0 }} />
+          <span style={{ wordBreak: 'break-word', minWidth: 0, flex: 1 }}>Pengajuan Persetujuan Pembayaran ke Direktur</span>
         </div>
       }
       destroyOnClose
@@ -144,26 +145,26 @@ export const SubmitPaymentRequestModal: React.FC<SubmitPaymentRequestModalProps>
 
         <Card size="small" style={{ marginBottom: 16, backgroundColor: '#f8fafc' }}>
           <Row gutter={[16, 12]}>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Text type="secondary" style={{ fontSize: 12 }}>Nomor Invoice:</Text>
               <div style={{ fontWeight: 700, fontFamily: 'monospace', color: '#1d4ed8' }}>
                 {invoice.invoiceNumber}
               </div>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Text type="secondary" style={{ fontSize: 12 }}>Nomor PO:</Text>
               <div style={{ fontWeight: 600, fontFamily: 'monospace', color: '#0f766e' }}>
                 {invoice.purchaseOrder?.poNumber || '—'}
               </div>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Text type="secondary" style={{ fontSize: 12 }}>Vendor Penerima:</Text>
               <div style={{ fontWeight: 600, color: '#0f172a' }}>
                 <ShopOutlined style={{ marginRight: 4 }} />
                 {invoice.purchaseOrder?.vendor?.name || '—'}
               </div>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Text type="secondary" style={{ fontSize: 12 }}>Total Tagihan:</Text>
               <div style={{ fontWeight: 800, color: '#059669', fontSize: 14 }}>
                 {formatCurrency(Number(invoice.totalAmount || 0))}
@@ -209,7 +210,7 @@ export const SubmitPaymentRequestModal: React.FC<SubmitPaymentRequestModalProps>
           </Form.Item>
 
           <Row gutter={12}>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 label="Nama Bank Vendor"
                 name="bankName"
@@ -218,7 +219,7 @@ export const SubmitPaymentRequestModal: React.FC<SubmitPaymentRequestModalProps>
                 <Input prefix={<BankOutlined />} placeholder="Contoh: Bank Mandiri" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 label="Nomor Rekening Vendor"
                 name="bankAccountNumber"
@@ -241,7 +242,7 @@ export const SubmitPaymentRequestModal: React.FC<SubmitPaymentRequestModalProps>
             <Input.TextArea rows={2} placeholder="Catatan pengajuan untuk Direktur..." />
           </Form.Item>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
             <Button onClick={onClose} disabled={submitting}>
               Batal
             </Button>

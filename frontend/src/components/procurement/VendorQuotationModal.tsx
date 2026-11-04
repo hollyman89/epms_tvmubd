@@ -33,6 +33,7 @@ import {
 import dayjs from 'dayjs';
 import { useQueryClient } from '@tanstack/react-query';
 import { ProcurementService, MasterVendor } from '@/services/procurement.service';
+import styles from './VendorQuotationModal.module.css';
 
 const { Text, Title } = Typography;
 
@@ -48,6 +49,7 @@ export interface VendorQuotationItem {
   wbsNodeId?: string;
   rabItemKey?: string;
   prItemId?: number;
+  routeDetails?: string;
 }
 
 export interface VendorQuotationRecord {
@@ -204,6 +206,14 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
         const estimatedUnitPrice = Number(it.estimatedUnitPrice || 0);
         const offeredUnitPrice = it.offeredUnitPrice !== undefined ? Number(it.offeredUnitPrice) : Number(it.unitPrice || 0);
         const subtotal = it.subtotal !== undefined ? Number(it.subtotal) : (offeredUnitPrice * quantity);
+        const routeDetails =
+          it.routeDetails ||
+          it.route_details ||
+          it.rute ||
+          it.description ||
+          it.specifications ||
+          undefined;
+
         return {
           key,
           categoryName: it.categoryName || 'Material & Peralatan',
@@ -216,6 +226,7 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
           wbsNodeId: it.wbsNodeId,
           rabItemKey: it.rabItemKey,
           prItemId,
+          routeDetails,
         };
       });
     }
@@ -226,6 +237,19 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
       const key = it.rabItemKey || (prItemId ? `item_pr_${prItemId}` : it.key || `item_${idx}`);
       const quantity = Number(it.quantity || 1);
       const estimatedUnitPrice = Number(it.estimatedUnitPrice || it.estimated_unit_price || it.unitPrice || 0);
+      const prItem = rfq.purchaseRequest?.items?.[idx] || rfq.items?.[idx];
+      const routeDetails =
+        it.routeDetails ||
+        it.route_details ||
+        it.rute ||
+        it.description ||
+        it.specifications ||
+        prItem?.routeDetails ||
+        prItem?.route_details ||
+        prItem?.rute ||
+        prItem?.description ||
+        prItem?.specifications ||
+        undefined;
 
       // Read vendor offered price strictly from state (DO NOT fallback to estimatedUnitPrice!)
       const offeredVal =
@@ -256,6 +280,7 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
         wbsNodeId: it.wbsNodeId,
         rabItemKey: it.rabItemKey,
         prItemId,
+        routeDetails,
       };
     });
   }, [rawRfqItems, offeredPrices, rfq, existingQuotation]);
@@ -430,20 +455,15 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
       open={open}
       onCancel={onClose}
       width="min(1040px, 96vw)"
+      className={styles.quotationModal}
+      rootClassName={styles.quotationModal}
+      style={{ maxWidth: '100vw', top: 20 }}
       centered
       destroyOnClose
+      data-testid="vendor-quotation-modal"
       footer={
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            width: '100%',
-            flexWrap: 'wrap',
-            gap: 8,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className={styles.footerContainer} data-testid="quotation-footer">
+          <div className={styles.footerLeft}>
             <Text type="secondary" style={{ fontSize: 12 }}>
               Plafon: <strong>Rp {totalBudgetCeiling.toLocaleString('id-ID')}</strong>
             </Text>
@@ -469,7 +489,7 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
               ))}
           </div>
 
-          <Space size={8}>
+          <div className={styles.footerRight}>
             {/* Contextual Status Badge in Footer */}
             {rfq.status === 'CLOSED' ? (
               <Tag color="default" style={{ padding: '4px 8px', fontSize: 11, fontWeight: 600, margin: 0 }}>
@@ -498,7 +518,12 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
             ) : null}
 
             {/* Read-Only Mode: Show Tutup button only; Normal Open RFQ: Show Batal & Simpan */}
-            <Button onClick={onClose} type={isReadOnly ? 'primary' : 'default'} style={{ borderRadius: 6 }}>
+            <Button
+              onClick={onClose}
+              type={isReadOnly ? 'primary' : 'default'}
+              style={{ borderRadius: 6 }}
+              data-testid="btn-cancel-quotation"
+            >
               {isReadOnly ? 'Tutup' : 'Batal'}
             </Button>
 
@@ -514,34 +539,39 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
                   borderRadius: 6,
                   fontWeight: 600,
                 }}
+                data-testid="btn-submit-quotation"
               >
                 Simpan Penawaran Vendor
               </Button>
             )}
-          </Space>
+          </div>
         </div>
       }
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 24 }}>
-          <div style={{ padding: '6px 10px', background: isReadOnly ? '#f1f5f9' : '#ecfdf5', borderRadius: 8, color: isReadOnly ? '#475569' : '#059669' }}>
+        <div className={styles.headerContainer}>
+          <div
+            className={`${styles.headerIcon} ${
+              isReadOnly ? styles.headerIconReadOnly : styles.headerIconEditable
+            }`}
+          >
             <ShopOutlined style={{ fontSize: 18 }} />
           </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
+          <div className={styles.headerTextGroup}>
+            <div className={styles.headerTitle}>
               {isExistingQuote || isSelectedVendorSubmitted
                 ? `Detail Penawaran Vendor — ${displayQuotationNumber || rfq.rfqNumber}`
                 : `Input Penawaran Vendor — ${rfq.rfqNumber}`}
             </div>
-            <Text type="secondary" style={{ fontSize: 11, color: '#64748b' }}>
+            <span className={styles.headerSubtitle}>
               {isReadOnly
                 ? `Penawaran resmi terkunci dari vendor (${itemsSnapshot.length} item)`
                 : `Pencatatan harga penawaran resmi dari vendor untuk paket pengadaan (${itemsSnapshot.length} item)`}
-            </Text>
+            </span>
           </div>
         </div>
       }
     >
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className={styles.modalBody} data-testid="quotation-modal-body">
         {/* Read-Only Informational Banner for Existing Quotation */}
         {(isExistingQuote || isSelectedVendorSubmitted) && (
           <Alert
@@ -614,11 +644,11 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
         )}
 
         {/* RFQ Reference & Plafon Strip */}
-        <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+        <div className={styles.referenceStrip}>
           <Row gutter={[12, 8]} align="middle">
             <Col xs={24} sm={8}>
-              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>PROYEK:</Text>
-              <div style={{ fontWeight: 700, fontSize: 12.5, color: '#0f172a' }}>
+              <div className={styles.referenceLabel}>PROYEK:</div>
+              <div className={styles.referenceValue}>
                 {rfq.purchaseRequest?.project?.name || rfq.projectName || (rfq as any).project_name || 'Proyek Tanpa Nama'}
               </div>
               <Space size={4} wrap style={{ marginTop: 2 }}>
@@ -635,7 +665,7 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
               </Space>
             </Col>
             <Col xs={24} sm={8}>
-              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>REFERENSI RFQ:</Text>
+              <div className={styles.referenceLabel}>REFERENSI RFQ:</div>
               <div style={{ fontWeight: 700, fontSize: 12.5, color: '#1d4ed8' }}>
                 {rfq.rfqNumber || 'RFQ-20260826-001'}
               </div>
@@ -657,8 +687,8 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
               </Tag>
             </Col>
             <Col xs={24} sm={8}>
-              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>PLAFON ANGGARAN PR:</Text>
-              <div style={{ fontWeight: 800, fontSize: 14, color: '#059669', fontFamily: 'monospace' }}>
+              <div className={styles.referenceLabel}>PLAFON ANGGARAN PR:</div>
+              <div className={styles.plafonValue}>
                 Rp {totalBudgetCeiling.toLocaleString('id-ID')}
               </div>
               <div style={{ fontSize: 10.5, color: '#64748b' }}>{itemsSnapshot.length} Item Material / Jasa</div>
@@ -668,7 +698,7 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
 
         {/* Vendor Selection & Terms Form */}
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
-          <Row gutter={16}>
+          <Row gutter={[12, 8]}>
             <Col xs={24} sm={12}>
               <Form.Item
                 label={<span style={{ fontWeight: 600, fontSize: 12 }}>Pilih Vendor Terdaftar (Master Vendor)</span>}
@@ -736,139 +766,285 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
           </Row>
         </Form>
 
-        {/* Item Table */}
-        <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
-          <div
-            style={{
-              padding: '8px 12px',
-              background: '#f1f5f9',
-              borderBottom: '1px solid #e2e8f0',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <span style={{ fontWeight: 700, fontSize: 12, color: '#334155' }}>
+        {/* Item Section Wrapper */}
+        <div className={styles.itemSectionWrapper}>
+          <div className={styles.itemSectionHeader}>
+            <span className={styles.itemSectionTitle}>
               Daftar {itemsSnapshot.length} Item Penawaran Harga Satuan
             </span>
             <Tag color={isReadOnly ? 'default' : 'blue'} style={{ fontSize: 10.5, margin: 0 }}>
               {isReadOnly ? 'SELURUH DATA TERKUNCI (READ-ONLY)' : 'QTY & SPESIFIKASI TERKUNCI (READ-ONLY)'}
             </Tag>
           </div>
-          <Table
-            size="small"
-            rowKey="key"
-            dataSource={itemsSnapshot}
-            pagination={false}
-            scroll={{ y: 260 }}
-            columns={[
-              {
-                title: 'No',
-                key: 'index',
-                width: 45,
-                align: 'center' as const,
-                render: (_: any, __: any, index: number) => (
-                  <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
-                ),
-              },
-              {
-                title: 'Nama Item & Spesifikasi',
-                dataIndex: 'itemName',
-                key: 'itemName',
-                render: (name: string, it: VendorQuotationItem) => (
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>{name}</div>
-                    <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                      <Tag color="blue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
-                        {it.categoryName}
-                      </Tag>
-                      {it.wbsNodeId && (
-                        <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
-                          WBS #{it.wbsNodeId}
-                        </Tag>
+
+          {/* Desktop Table View (min-width: 641px) */}
+          <div className={styles.desktopTableView} data-testid="quotation-desktop-table">
+            <div className={styles.tableContainer}>
+              <Table
+                size="small"
+                rowKey="key"
+                dataSource={itemsSnapshot}
+                pagination={false}
+                scroll={{ x: 860, y: 320 }}
+                columns={[
+                  {
+                    title: 'No',
+                    key: 'index',
+                    width: 45,
+                    align: 'center' as const,
+                    render: (_: any, __: any, index: number) => (
+                      <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
+                    ),
+                  },
+                  {
+                    title: 'Nama Item & Spesifikasi',
+                    dataIndex: 'itemName',
+                    key: 'itemName',
+                    width: 220,
+                    render: (name: string, it: VendorQuotationItem) => (
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>{name}</div>
+                        {it.routeDetails && (
+                          <div className={styles.desktopRouteDetails}>{it.routeDetails}</div>
+                        )}
+                        <div style={{ display: 'flex', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+                          <Tag color="blue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                            {it.categoryName}
+                          </Tag>
+                          {it.wbsNodeId && (
+                            <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                              {`WBS #${it.wbsNodeId}`}
+                            </Tag>
+                          )}
+                        </div>
+                      </div>
+                    ),
+                  },
+                  {
+                    title: 'Qty',
+                    dataIndex: 'quantity',
+                    key: 'quantity',
+                    width: 65,
+                    align: 'center' as const,
+                    render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
+                  },
+                  {
+                    title: 'Satuan',
+                    dataIndex: 'uom',
+                    key: 'uom',
+                    width: 70,
+                    align: 'center' as const,
+                    render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
+                  },
+                  {
+                    title: 'Estimasi Plafon Unit (Benchmark)',
+                    dataIndex: 'estimatedUnitPrice',
+                    key: 'estimatedUnitPrice',
+                    width: 170,
+                    align: 'right' as const,
+                    render: (price: number) => (
+                      <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#64748b' }}>
+                        Rp {price.toLocaleString('id-ID')}
+                      </span>
+                    ),
+                  },
+                  {
+                    title: 'Harga Penawaran Aktual Vendor (Rp)',
+                    key: 'offeredUnitPrice',
+                    width: 210,
+                    align: 'right' as const,
+                    render: (_: any, it: VendorQuotationItem) => (
+                      <InputNumber
+                        min={0}
+                        step={1000}
+                        disabled={isReadOnly}
+                        placeholder={isReadOnly ? '—' : 'Masukkan harga penawaran'}
+                        value={it.offeredUnitPrice}
+                        onChange={(val) => handlePriceChange(it.key, val)}
+                        formatter={(value) =>
+                          value !== undefined && value !== null
+                            ? `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+                            : ''
+                        }
+                        parser={(value) => (value ? Number(String(value).replace(/[^0-9]/g, '')) : 0)}
+                        style={{ width: '100%', borderRadius: 4, fontWeight: 600, fontSize: 11.5 }}
+                      />
+                    ),
+                  },
+                  {
+                    title: 'Subtotal Penawaran',
+                    dataIndex: 'subtotal',
+                    key: 'subtotal',
+                    width: 160,
+                    align: 'right' as const,
+                    render: (subtotal: number, it: VendorQuotationItem) => {
+                      if (it.offeredUnitPrice === undefined || it.offeredUnitPrice <= 0) {
+                        return (
+                          <div style={{ textAlign: 'right' }}>
+                            <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
+                              Belum diisi
+                            </span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#0f172a' }}>
+                            Rp {subtotal.toLocaleString('id-ID')}
+                          </span>
+                        </div>
+                      );
+                    },
+                  },
+                ]}
+              />
+            </div>
+          </div>
+
+          {/* Mobile Card View (max-width: 640px) */}
+          <div className={styles.mobileCardView} data-testid="quotation-mobile-card-view">
+            {itemsSnapshot.map((item, idx) => {
+              const benchmarkSubtotal = item.quantity * item.estimatedUnitPrice;
+              const hasOfferedPrice = item.offeredUnitPrice !== undefined && item.offeredUnitPrice > 0;
+              const itemVariance = hasOfferedPrice ? item.subtotal - benchmarkSubtotal : 0;
+              const isItemOver = itemVariance > 0;
+
+              return (
+                <div
+                  key={item.key || idx}
+                  className={styles.quotationItemCard}
+                  data-testid="quotation-item-card"
+                >
+                  {/* Card Header */}
+                  <div className={styles.cardHeader}>
+                    <span className={styles.itemIndexBadge}>#{idx + 1}</span>
+                    <div className={styles.cardTitleGroup}>
+                      <div className={styles.itemTitle} data-testid="quotation-item-title">
+                        {item.itemName}
+                      </div>
+                      {item.routeDetails && (
+                        <div className={styles.routeDetails} data-testid="quotation-route-details">
+                          {item.routeDetails}
+                        </div>
                       )}
                     </div>
                   </div>
-                ),
-              },
-              {
-                title: 'Qty',
-                dataIndex: 'quantity',
-                key: 'quantity',
-                width: 60,
-                align: 'center' as const,
-                render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
-              },
-              {
-                title: 'Satuan',
-                dataIndex: 'uom',
-                key: 'uom',
-                width: 65,
-                align: 'center' as const,
-                render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
-              },
-              {
-                title: 'Estimasi Plafon Unit (Benchmark)',
-                dataIndex: 'estimatedUnitPrice',
-                key: 'estimatedUnitPrice',
-                width: 170,
-                align: 'right' as const,
-                render: (price: number) => (
-                  <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#64748b' }}>
-                    Rp {price.toLocaleString('id-ID')}
-                  </span>
-                ),
-              },
-              {
-                title: 'Harga Penawaran Aktual Vendor (Rp)',
-                key: 'offeredUnitPrice',
-                width: 210,
-                align: 'right' as const,
-                render: (_: any, it: VendorQuotationItem) => (
-                  <InputNumber
-                    min={0}
-                    step={1000}
-                    disabled={isReadOnly}
-                    placeholder={isReadOnly ? '—' : 'Masukkan harga penawaran'}
-                    value={it.offeredUnitPrice}
-                    onChange={(val) => handlePriceChange(it.key, val)}
-                    formatter={(value) =>
-                      value !== undefined && value !== null
-                        ? `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
-                        : ''
-                    }
-                    parser={(value) => (value ? Number(String(value).replace(/[^0-9]/g, '')) : 0)}
-                    style={{ width: '100%', borderRadius: 4, fontWeight: 600, fontSize: 11.5 }}
-                  />
-                ),
-              },
-              {
-                title: 'Subtotal Penawaran',
-                dataIndex: 'subtotal',
-                key: 'subtotal',
-                width: 150,
-                align: 'right' as const,
-                render: (subtotal: number, it: VendorQuotationItem) => {
-                  if (it.offeredUnitPrice === undefined || it.offeredUnitPrice <= 0) {
-                    return (
-                      <div style={{ textAlign: 'right' }}>
-                        <span style={{ fontSize: 11, color: '#94a3b8', fontStyle: 'italic' }}>
-                          Belum diisi
-                        </span>
-                      </div>
-                    );
-                  }
-                  return (
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#0f172a' }}>
-                        Rp {subtotal.toLocaleString('id-ID')}
+
+                  {/* Category & WBS tags */}
+                  <div className={styles.cardCategoryRow}>
+                    <Tag color="blue" style={{ fontSize: 10, margin: 0, padding: '0 5px' }}>
+                      {item.categoryName}
+                    </Tag>
+                    {item.wbsNodeId && (
+                      <Tag color="geekblue" style={{ fontSize: 10, margin: 0, padding: '0 5px' }}>
+                        {`WBS #${item.wbsNodeId}`}
+                      </Tag>
+                    )}
+                    <Tag color="default" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', color: '#64748b' }}>
+                      Snapshot Terkunci
+                    </Tag>
+                  </div>
+
+                  {/* Read-only Snapshot Grid */}
+                  <div className={styles.snapshotGrid}>
+                    <div className={styles.snapshotField}>
+                      <span className={styles.fieldLabel}>Volume / Qty</span>
+                      <span className={styles.fieldValue}>
+                        {item.quantity} <span style={{ fontWeight: 400, color: '#64748b' }}>{item.uom}</span>
                       </span>
                     </div>
-                  );
-                },
-              },
-            ]}
-          />
+                    <div className={styles.snapshotField}>
+                      <span className={styles.fieldLabel}>Plafon Satuan (Benchmark)</span>
+                      <span
+                        className={styles.fieldValue}
+                        style={{ fontFamily: 'monospace' }}
+                        data-testid="quotation-benchmark-price"
+                      >
+                        Rp {item.estimatedUnitPrice.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                    <div className={styles.snapshotFieldFull}>
+                      <span className={styles.fieldLabel}>Total Plafon Item</span>
+                      <span className={styles.fieldValueHighlight}>
+                        Rp {benchmarkSubtotal.toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Vendor Quotation Input Box */}
+                  <div
+                    className={`${styles.quotationInputBox} ${
+                      hasOfferedPrice ? styles.quotationInputBoxActive : ''
+                    }`}
+                  >
+                    <div className={styles.inputLabelRow}>
+                      <span className={styles.inputLabel}>
+                        <DollarCircleOutlined style={{ color: '#4f46e5' }} />
+                        Harga Penawaran Aktual Vendor (Rp)
+                      </span>
+                      {hasOfferedPrice && (
+                        itemVariance === 0 ? (
+                          <Tag color="cyan" style={{ fontSize: 9.5, margin: 0 }}>
+                            Sesuai Plafon
+                          </Tag>
+                        ) : isItemOver ? (
+                          <Tag color="volcano" style={{ fontSize: 9.5, margin: 0 }}>
+                            + Rp {itemVariance.toLocaleString('id-ID')} Di Atas Plafon
+                          </Tag>
+                        ) : (
+                          <Tag color="success" style={{ fontSize: 9.5, margin: 0 }}>
+                            - Rp {Math.abs(itemVariance).toLocaleString('id-ID')} Lebih Hemat
+                          </Tag>
+                        )
+                      )}
+                    </div>
+
+                    <InputNumber
+                      min={0}
+                      step={1000}
+                      disabled={isReadOnly}
+                      placeholder={isReadOnly ? '—' : 'Masukkan harga satuan vendor'}
+                      value={item.offeredUnitPrice}
+                      onChange={(val) => handlePriceChange(item.key, val)}
+                      formatter={(value) =>
+                        value !== undefined && value !== null
+                          ? `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+                          : ''
+                      }
+                      parser={(value) => (value ? Number(String(value).replace(/[^0-9]/g, '')) : 0)}
+                      data-testid="quotation-price-input"
+                      style={{
+                        width: '100%',
+                        borderRadius: 6,
+                        fontWeight: 700,
+                        fontSize: 13,
+                        borderColor: hasOfferedPrice ? '#6366f1' : '#d1d5db',
+                      }}
+                    />
+
+                    <div className={styles.quotedSubtotalRow}>
+                      <span className={styles.subtotalLabel}>Subtotal Penawaran</span>
+                      {hasOfferedPrice ? (
+                        <span
+                          className={styles.subtotalValue}
+                          data-testid="quotation-subtotal"
+                        >
+                          Rp {item.subtotal.toLocaleString('id-ID')}
+                        </span>
+                      ) : (
+                        <span
+                          className={styles.subtotalValueEmpty}
+                          data-testid="quotation-subtotal"
+                        >
+                          Belum diisi
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </Modal>

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, MoreThan, Not, IsNull } from 'typeorm';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { OutboxRelayService } from './outbox-relay.service';
 import { Contract, LegalStatus } from '../../entities/contract.entity';
 import { Tender, TenderStatus } from '../../entities/tender.entity';
 import { Project } from '../../entities/project.entity';
@@ -26,7 +27,16 @@ export class ObservabilityService {
     @InjectRepository(Tender) private tenderRepo: Repository<Tender>,
     @InjectRepository(Project) private projectRepo: Repository<Project>,
     @InjectRepository(AuditLog) private auditRepo: Repository<AuditLog>,
+    private readonly outboxRelayService: OutboxRelayService,
   ) {}
+
+  /**
+   * Requeues a FAILED transactional outbox event back to PENDING.
+   * Delegated to OutboxRelayService with full audit log and pessimistic locking.
+   */
+  async requeueOutboxEvent(id: number, operatorUserId: number, reason?: string) {
+    return this.outboxRelayService.requeueFailedEvent(id, operatorUserId, reason);
+  }
 
   /**
    * Deep Active Component Health Probing

@@ -106,6 +106,26 @@ export interface NotificationTargetContext {
 }
 
 /**
+ * Helper to extract numeric ID from pure numbers or prefixed entity identifiers
+ * such as 'TENDER:163', 'CONTRACT:1', 'LEAD:42'.
+ */
+export function extractNumericEntityId(value: any): number | null {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number' && !isNaN(value) && value > 0) return value;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const prefixMatch = trimmed.match(/^(?:TENDER|CONTRACT|LEAD|PROJECT|PO|INVOICE|PAYMENT)[:\-_]?\s*(\d+)$/i);
+    if (prefixMatch) {
+      const num = parseInt(prefixMatch[1], 10);
+      return !isNaN(num) && num > 0 ? num : null;
+    }
+    const num = parseInt(trimmed, 10);
+    return !isNaN(num) && num > 0 ? num : null;
+  }
+  return null;
+}
+
+/**
  * PRE-W10 NOTIF-DR1:
  * Resolves the canonical deep-link destination URL for notifications.
  * 
@@ -132,6 +152,12 @@ export function resolveNotificationTarget(item: NotificationTargetContext | null
       if (trimmed.startsWith('/finance/payments/')) {
         return '/finance/payments';
       }
+      // Dead route /governance/contracts/:id -> /legal/review?contractId=:id
+      if (trimmed.startsWith('/governance/contracts/')) {
+        const contractIdStr = trimmed.replace('/governance/contracts/', '').trim();
+        const numericId = parseInt(contractIdStr, 10);
+        return !isNaN(numericId) ? `/legal/review?contractId=${numericId}` : '/legal/review';
+      }
       // Normalize historical C4 /workflow target for closure to /governance/tasks
       if (
         trimmed === '/workflow' &&
@@ -147,6 +173,18 @@ export function resolveNotificationTarget(item: NotificationTargetContext | null
       if (trimmed.startsWith('/project?')) {
         return trimmed.replace('/project?', '/project-delivery?');
       }
+      // Normalize historical dead route /projects or /projects/:id to /project-delivery
+      if (trimmed === '/projects' || trimmed === '/projects/') {
+        return '/project-delivery';
+      }
+      if (trimmed.startsWith('/projects/')) {
+        const remaining = trimmed.replace('/projects/', '').trim();
+        const numericId = parseInt(remaining, 10);
+        if (!isNaN(numericId)) {
+          return `/project-delivery?projectId=${numericId}`;
+        }
+        return '/project-delivery';
+      }
       if (trimmed.startsWith('/')) {
         return trimmed;
       }
@@ -160,17 +198,19 @@ export function resolveNotificationTarget(item: NotificationTargetContext | null
   }
 
   // Tender / Lead: /sales/tenders/:id
-  const leadOrTenderId = meta.lead_id || meta.tenderId || meta.tender_id || (
+  const rawLeadOrTenderId = meta.lead_id || meta.tenderId || meta.tender_id || (
     (meta.reference_type === 'LEAD' || meta.reference_type === 'TENDER') ? meta.reference_id : null
   );
+  const leadOrTenderId = extractNumericEntityId(rawLeadOrTenderId);
   if (leadOrTenderId) {
     return `/sales/tenders/${leadOrTenderId}`;
   }
 
   // Contract: /legal/review?contractId=:id
-  const contractId = meta.contractId || meta.contract_id || (
+  const rawContractId = meta.contractId || meta.contract_id || (
     meta.reference_type === 'CONTRACT' ? meta.reference_id : null
   );
+  const contractId = extractNumericEntityId(rawContractId);
   if (contractId) {
     return `/legal/review?contractId=${contractId}`;
   }
@@ -200,6 +240,48 @@ export function resolveNotificationTarget(item: NotificationTargetContext | null
       return `/project-delivery?view=workspace&projectId=${pId}&section=closure`;
     }
     return '/governance/tasks';
+  }
+
+  // Project Issue: /project-delivery?view=workspace&projectId=:id&section=issue-risk&type=issue&id=:id
+  if (
+    meta.category === 'PROJECT_ISSUE' ||
+    meta.reference_type === 'PROJECT_ISSUE' ||
+    meta.issueId ||
+    meta.issue_id
+  ) {
+    const issueId =
+      meta.issueId ||
+      meta.issue_id ||
+      (meta.reference_type === 'PROJECT_ISSUE' ? meta.reference_id : null);
+    const pId = meta.projectId || meta.project_id;
+    if (issueId && pId) {
+      return `/project-delivery?view=workspace&projectId=${pId}&section=issue-risk&type=issue&id=${issueId}`;
+    }
+    if (pId) {
+      return `/project-delivery?projectId=${pId}`;
+    }
+    return '/project-delivery';
+  }
+
+  // Project Risk: /project-delivery?view=workspace&projectId=:id&section=issue-risk&type=risk&id=:id
+  if (
+    meta.category === 'PROJECT_RISK' ||
+    meta.reference_type === 'PROJECT_RISK' ||
+    meta.riskId ||
+    meta.risk_id
+  ) {
+    const riskId =
+      meta.riskId ||
+      meta.risk_id ||
+      (meta.reference_type === 'PROJECT_RISK' ? meta.reference_id : null);
+    const pId = meta.projectId || meta.project_id;
+    if (riskId && pId) {
+      return `/project-delivery?view=workspace&projectId=${pId}&section=issue-risk&type=risk&id=${riskId}`;
+    }
+    if (pId) {
+      return `/project-delivery?projectId=${pId}`;
+    }
+    return '/project-delivery';
   }
 
   // Project Progress Claim: /project-delivery?view=workspace&projectId=:id&section=tasks&progressClaimId=:id
@@ -235,7 +317,29 @@ export function resolveNotificationTarget(item: NotificationTargetContext | null
       meta.claim_id ||
       (meta.reference_type === 'SERVICE_CLAIM' ? meta.reference_id : null);
     const pId = meta.projectId || meta.project_id;
+    const poId = meta.poId || meta.po_id;
     const paramKey = meta.serviceClaimId || meta.service_claim_id ? 'serviceClaimId' : 'claimId';
+
+    // If approved for invoice -> Finance invoice workspace
+    if (
+      meta.actionType === 'SERVICE_CLAIM_APPROVED_FOR_INVOICE' ||
+      meta.purpose === 'SERVICE_CLAIM_APPROVED_FOR_INVOICE'
+    ) {
+      return poId
+        ? `/finance/invoices?tab=ready_pos&poId=${poId}&serviceClaimId=${scId}`
+        : `/finance/invoices?tab=ready_pos&serviceClaimId=${scId}`;
+    }
+
+    // If verified by PM -> Procurement workspace for commercial verification
+    if (
+      meta.actionType === 'SERVICE_CLAIM_VERIFIED' ||
+      meta.purpose === 'SERVICE_CLAIM_VERIFIED'
+    ) {
+      return poId
+        ? `/procurement?tab=po&poId=${poId}&claimId=${scId}&action=service-claim`
+        : `/procurement?tab=po&claimId=${scId}&action=service-claim`;
+    }
+
     if (scId && pId) {
       return `/project-delivery?projectId=${pId}&${paramKey}=${scId}`;
     }

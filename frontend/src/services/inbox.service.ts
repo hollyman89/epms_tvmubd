@@ -12,6 +12,8 @@ export interface TodoItem {
     | 'DOMAIN_SERVICE_CLAIM'
     | 'DOMAIN_PROJECT_CLOSURE'
     | 'DOMAIN_PURCHASE_REQUEST'
+    | 'DOMAIN_PROCUREMENT_PACKAGE'
+    | 'DOMAIN_PROJECT'
     | 'DOMAIN_INVOICE';
   sourceId: string;
   taskId?: number;

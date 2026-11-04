@@ -28,7 +28,7 @@ import { WorkflowTask } from '../../entities/workflow-task.entity';
 import { randomUUID } from 'crypto';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
-import { BusinessEvent } from '../../shared/contracts/business-event.contract';
+import { BusinessEvent, NotificationPolicy } from '../../shared/contracts/business-event.contract';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import {
   CostCategoryKey,
@@ -668,7 +668,7 @@ export class ProcurementPackageService {
         submittedAt: string;
         status: string;
       }> = {
-        eventId: randomUUID(),
+        eventId: `pkg-sub-${saved.id}`,
         eventName: 'procurement.package.submitted',
         eventVersion: 1,
         occurredAt: new Date().toISOString(),
@@ -676,8 +676,8 @@ export class ProcurementPackageService {
         aggregateId: saved.id,
         projectId: Number(saved.projectId),
         actor: userId ? { userId: Number(userId) } : undefined,
-        routing: undefined,
-        notificationPolicy: undefined,
+        routing: { roles: ['PROCUREMENT', 'PURCHASING'] },
+        notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
         payload: {
           packageId: Number(saved.id),
           packageNumber: saved.packageNumber,

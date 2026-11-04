@@ -88,11 +88,12 @@ describe('EPMS — Finance Invoice Deep-Link Auto-Open & Canonical Handler', () 
       poId?: string | null;
       paymentTermId?: string | null;
       serviceClaimId?: string | null;
+      claimId?: string | null;
     }) {
       const urlTab = params.tab;
       const urlPoId = params.poId;
       const urlPaymentTermId = params.paymentTermId;
-      const urlServiceClaimId = params.serviceClaimId;
+      const urlServiceClaimId = params.serviceClaimId || params.claimId;
 
       // 1. Tab synchronization
       if (urlTab && urlTab !== this.activeTabKey) {
@@ -318,5 +319,15 @@ describe('EPMS — Finance Invoice Deep-Link Auto-Open & Canonical Handler', () 
     expect(harness.isCreateModalOpen).toBe(true);
     expect(harness.selectedPaymentTermForInvoice?.id).toBe(13);
     expect(harness.openModalCallCount).toBe(2);
+  });
+
+  it('13. legacy claimId parameter falls back cleanly to serviceClaimId and auto-opens modal', () => {
+    const harness = new InvoicesPageHarness(mockPos, false);
+
+    harness.runDeepLinkEffect({ tab: 'ready_pos', poId: '250', claimId: '88' });
+
+    expect(harness.isCreateModalOpen).toBe(true);
+    expect(harness.selectedPoForInvoice?.id).toBe(250);
+    expect(harness.selectedServiceClaimIdForInvoice).toBe(88);
   });
 });

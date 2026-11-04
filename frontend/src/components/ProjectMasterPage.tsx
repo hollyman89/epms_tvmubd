@@ -21,6 +21,8 @@ import {
   Spin,
   Alert,
   Divider,
+  Modal,
+  message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -42,7 +44,11 @@ import {
   ExclamationCircleOutlined,
   InfoCircleOutlined,
   SafetyCertificateOutlined,
+  DownloadOutlined,
+  ExportOutlined,
 } from '@ant-design/icons';
+import { streamSecureContractSpk, downloadSecureContractSpk } from '@/lib/fileDelivery';
+import { useAuth } from '@/context/AuthContext';
 import ProjectService, {
   ProjectMasterItem,
   ProjectMasterResponse,
@@ -151,6 +157,17 @@ const renderStatusBadge = (status: string) => {
 
 export const ProjectMasterPage: React.FC = () => {
   const router = useRouter();
+  const { user } = useAuth();
+
+  const userRolesUpper = useMemo(() => (user?.roles || []).map((r: string) => String(r).toUpperCase()), [user]);
+  const canAccessProjectDelivery = useMemo(() => {
+    return userRolesUpper.some((r: string) =>
+      ['SUPER_ADMIN', 'ADMIN', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'DIRECTOR', 'PMO', 'PROJECT_MANAGER'].includes(r)
+    );
+  }, [userRolesUpper]);
+  const isProcurementUser = useMemo(() => {
+    return userRolesUpper.some((r: string) => ['PROCUREMENT', 'PURCHASING'].includes(r));
+  }, [userRolesUpper]);
 
   // Filters State
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -219,8 +236,88 @@ export const ProjectMasterPage: React.FC = () => {
     setDrawerOpen(false);
   };
 
-  // Navigate to Project Delivery Deep-Link
+  // SPK PDF Preview Modal State
+  const [previewModalOpen, setPreviewModalOpen] = useState<boolean>(false);
+  const [previewLoading, setPreviewLoading] = useState<boolean>(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewBlobUrl, setPreviewBlobUrl] = useState<string | null>(null);
+  const [previewContractId, setPreviewContractId] = useState<number | null>(null);
+  const [previewContractNumber, setPreviewContractNumber] = useState<string | null>(null);
+
+  const handleClosePreview = () => {
+    setPreviewModalOpen(false);
+    if (previewBlobUrl) {
+      window.URL.revokeObjectURL(previewBlobUrl);
+      setPreviewBlobUrl(null);
+    }
+    setPreviewError(null);
+    setPreviewContractId(null);
+    setPreviewContractNumber(null);
+  };
+
+  const handlePreviewSpk = async (contractId?: number | null, contractNumber?: string | null) => {
+    if (!contractId) {
+      message.warning('ID kontrak tidak ditemukan untuk pratinjau dokumen.');
+      return;
+    }
+
+    setPreviewContractId(contractId);
+    setPreviewContractNumber(contractNumber || `CONT-${contractId}`);
+    setPreviewModalOpen(true);
+    setPreviewLoading(true);
+    setPreviewError(null);
+
+    if (previewBlobUrl) {
+      window.URL.revokeObjectURL(previewBlobUrl);
+      setPreviewBlobUrl(null);
+    }
+
+    try {
+      const { objectUrl } = await streamSecureContractSpk(contractId);
+      setPreviewBlobUrl(objectUrl);
+    } catch (err: any) {
+      console.error('Failed to stream contract SPK:', err);
+      const status = err?.response?.status;
+      if (status === 403) {
+        setPreviewError('Akses ditolak: Anda tidak memiliki izin untuk mengakses dokumen kontrak ini.');
+      } else if (status === 404) {
+        setPreviewError('Dokumen fisik SPK tidak ditemukan di server.');
+      } else if (status === 401) {
+        setPreviewError('Sesi Anda telah kedaluwarsa. Silakan masuk kembali.');
+      } else {
+        setPreviewError('Gagal memuat pratinjau dokumen SPK dari server.');
+      }
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleDownloadSpk = async () => {
+    if (!previewContractId) return;
+    try {
+      const fileName = `SPK-${previewContractNumber || previewContractId}.pdf`;
+      message.loading({ content: `Mengunduh berkas ${fileName}...`, key: 'spk-download' });
+      await downloadSecureContractSpk(previewContractId, fileName);
+      message.success({ content: `Berkas ${fileName} berhasil diunduh.`, key: 'spk-download' });
+    } catch (err: any) {
+      console.error('Failed to download contract SPK:', err);
+      const status = err?.response?.status;
+      if (status === 403) {
+        message.error({ content: 'Akses ditolak: Anda tidak memiliki izin mengunduh dokumen ini.', key: 'spk-download' });
+      } else if (status === 404) {
+        message.error({ content: 'Dokumen SPK tidak ditemukan di server.', key: 'spk-download' });
+      } else {
+        message.error({ content: 'Gagal mengunduh dokumen SPK.', key: 'spk-download' });
+      }
+    }
+  };
+
+  // Navigate to Project Delivery Deep-Link (gated by access)
   const handleGoToDelivery = (projectId: number) => {
+    if (!canAccessProjectDelivery) {
+      message.warning('Anda tidak memiliki otorisasi untuk mengakses Project Delivery.');
+      return;
+    }
     router.push(`/project-delivery?projectId=${projectId}`);
   };
 
@@ -349,26 +446,33 @@ export const ProjectMasterPage: React.FC = () => {
               </span>
             ) : null}
             {record.spkFileUrl && (
-              <a
-                href={record.spkFileUrl}
-                target="_blank"
-                rel="noreferrer"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 3,
-                  fontSize: '11px',
-                  color: '#DC2626',
-                  background: '#FEF2F2',
-                  padding: '1px 6px',
-                  borderRadius: '4px',
-                  border: '1px solid #FECACA',
-                  textDecoration: 'none',
-                }}
-              >
-                <FilePdfOutlined style={{ fontSize: '10px' }} />
-                SPK
-              </a>
+              <Tooltip title="Klik untuk melihat pratinjau dokumen SPK">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePreviewSpk(record.contractId, record.contractNumber);
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 3,
+                    fontSize: '11px',
+                    color: '#DC2626',
+                    background: '#FEF2F2',
+                    padding: '2px 7px',
+                    borderRadius: '4px',
+                    border: '1px solid #FECACA',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    lineHeight: '14px',
+                  }}
+                >
+                  <FilePdfOutlined style={{ fontSize: '10px' }} />
+                  SPK
+                </button>
+              </Tooltip>
             )}
           </div>
         </div>
@@ -809,7 +913,7 @@ export const ProjectMasterPage: React.FC = () => {
             <Button onClick={handleCloseDrawer} style={{ borderRadius: '6px' }}>
               Tutup
             </Button>
-            {projectDetail?.id && (
+            {projectDetail?.id && canAccessProjectDelivery && (
               <Button
                 type="primary"
                 icon={<ArrowRightOutlined />}
@@ -822,6 +926,21 @@ export const ProjectMasterPage: React.FC = () => {
                 }}
               >
                 Buka Project Delivery
+              </Button>
+            )}
+            {projectDetail?.id && !canAccessProjectDelivery && isProcurementUser && (
+              <Button
+                type="primary"
+                icon={<ArrowRightOutlined />}
+                onClick={() => router.push('/procurement')}
+                style={{
+                  borderRadius: '6px',
+                  background: '#0F766E',
+                  borderColor: '#0F766E',
+                  fontWeight: 600,
+                }}
+              >
+                Buka Procurement Hub
               </Button>
             )}
           </div>
@@ -905,20 +1024,23 @@ export const ProjectMasterPage: React.FC = () => {
 
                 <Text style={{ color: '#64748B' }}>Dokumen SPK:</Text>
                 {projectDetail.spkFileUrl ? (
-                  <a
-                    href={projectDetail.spkFileUrl}
-                    target="_blank"
-                    rel="noreferrer"
+                  <Button
+                    type="link"
+                    icon={<FilePdfOutlined />}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: 4,
                       color: '#DC2626',
                       fontWeight: 500,
+                      padding: 0,
+                      height: 'auto',
+                      justifyContent: 'flex-start',
                     }}
+                    onClick={() => handlePreviewSpk(projectDetail.contractId, projectDetail.contractNumber)}
                   >
-                    <FilePdfOutlined /> Unduh Dokumen SPK
-                  </a>
+                    Pratinjau / Unduh Dokumen SPK
+                  </Button>
                 ) : (
                   <Text style={{ color: '#94A3B8' }}>Belum tersedia</Text>
                 )}
@@ -1007,21 +1129,25 @@ export const ProjectMasterPage: React.FC = () => {
                     : 'Menunggu Kickoff'}
                 </Text>
 
-                <Text style={{ color: '#64748B' }}>Kontrol Jadwal:</Text>
-                <div>
-                  <Button
-                    size="small"
-                    type="primary"
-                    ghost
-                    icon={<CalendarOutlined />}
-                    onClick={() => {
-                      router.push(`/project-delivery?tab=berjalan&view=gantt&projectId=${projectDetail.id}`);
-                    }}
-                    style={{ fontSize: '12px', borderRadius: '6px' }}
-                  >
-                    Buka Gantt Baseline vs Actual
-                  </Button>
-                </div>
+                {canAccessProjectDelivery && (
+                  <>
+                    <Text style={{ color: '#64748B' }}>Kontrol Jadwal:</Text>
+                    <div>
+                      <Button
+                        size="small"
+                        type="primary"
+                        ghost
+                        icon={<CalendarOutlined />}
+                        onClick={() => {
+                          router.push(`/project-delivery?tab=berjalan&view=gantt&projectId=${projectDetail.id}`);
+                        }}
+                        style={{ fontSize: '12px', borderRadius: '6px' }}
+                      >
+                        Buka Gantt Baseline vs Actual
+                      </Button>
+                    </div>
+                  </>
+                )}
               </div>
             </Card>
 
@@ -1160,6 +1286,128 @@ export const ProjectMasterPage: React.FC = () => {
           </div>
         )}
       </Drawer>
+
+      {/* 7. SPK Document Preview Modal */}
+      <Modal
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingRight: 24 }}>
+            <FilePdfOutlined style={{ color: '#DC2626', fontSize: 18 }} />
+            <Text strong style={{ fontSize: '15px', color: '#0F172A' }}>
+              Pratinjau Dokumen SPK
+            </Text>
+            {previewContractNumber && (
+              <Tag color="red" style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                {previewContractNumber}
+              </Tag>
+            )}
+          </div>
+        }
+        open={previewModalOpen}
+        onCancel={handleClosePreview}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', padding: '4px 0' }}>
+            <Space>
+              <Button
+                key="download"
+                icon={<DownloadOutlined />}
+                disabled={!previewBlobUrl || previewLoading}
+                onClick={handleDownloadSpk}
+                style={{ borderRadius: 6, fontWeight: 500 }}
+              >
+                Unduh Dokumen
+              </Button>
+              {previewBlobUrl && (
+                <Button
+                  key="external"
+                  icon={<ExportOutlined />}
+                  onClick={() => window.open(previewBlobUrl, '_blank')}
+                  style={{ borderRadius: 6 }}
+                >
+                  Buka di Tab Baru
+                </Button>
+              )}
+            </Space>
+            <Button
+              key="close"
+              type="primary"
+              onClick={handleClosePreview}
+              style={{ backgroundColor: '#1E293B', borderRadius: 6, fontWeight: 500 }}
+            >
+              Tutup
+            </Button>
+          </div>
+        }
+        width="min(1200px, 94vw)"
+        centered
+        style={{ top: 20 }}
+        styles={{
+          content: {
+            height: 'min(850px, 88vh)',
+            maxHeight: '88vh',
+            display: 'flex',
+            flexDirection: 'column',
+            padding: 0,
+            overflow: 'hidden',
+            borderRadius: 12,
+          },
+          header: {
+            padding: '16px 24px',
+            borderBottom: '1px solid #E2E8F0',
+            background: '#FFFFFF',
+            margin: 0,
+          },
+          body: {
+            flex: '1 1 auto',
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            padding: 0,
+            overflow: 'hidden',
+            background: '#F8FAFC',
+          },
+          footer: {
+            padding: '12px 24px',
+            borderTop: '1px solid #E2E8F0',
+            background: '#FFFFFF',
+            margin: 0,
+          },
+        }}
+      >
+        {previewLoading ? (
+          <div style={{ padding: 60, textAlign: 'center', flex: '1 1 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+            <Spin size="large" />
+            <Text style={{ color: '#64748B', fontSize: 13 }}>Memuat dokumen SPK dari secure endpoint...</Text>
+          </div>
+        ) : previewError ? (
+          <div style={{ padding: 48, textAlign: 'center', flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Alert
+              type="error"
+              showIcon
+              message="Gagal Memuat Dokumen SPK"
+              description={previewError}
+              style={{ maxWidth: 500, textAlign: 'left', borderRadius: 8 }}
+            />
+          </div>
+        ) : previewBlobUrl ? (
+          <iframe
+            src={previewBlobUrl}
+            title="Pratinjau Dokumen SPK"
+            width="100%"
+            height="100%"
+            style={{
+              border: 'none',
+              width: '100%',
+              height: '100%',
+              flex: '1 1 auto',
+              display: 'block',
+            }}
+          />
+        ) : (
+          <div style={{ padding: 60, textAlign: 'center', flex: '1 1 auto', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Text type="secondary">Dokumen tidak dapat dimuat.</Text>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

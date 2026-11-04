@@ -33,6 +33,7 @@ import {
   EyeOutlined,
   EnvironmentOutlined,
   SafetyCertificateOutlined,
+  CalendarOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useQueryClient } from '@tanstack/react-query';
@@ -45,6 +46,7 @@ import {
 } from '@/services/procurement.service';
 import type { PurchaseOrderPrototypeRecord } from '@/components/procurement/PurchaseOrderModal';
 import { formatCurrency } from '@/lib/formatters';
+import styles from './ServiceOrderModal.module.css';
 
 const { Text } = Typography;
 
@@ -275,27 +277,27 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
   // Counts for document status summary
   const issuedCount = serviceOrders.filter((o) => o.status === 'ISSUED').length;
   const draftCount = serviceOrders.filter((o) => o.status === 'DRAFT').length;
-  const cancelledCount = serviceOrders.filter((o) => o.status === 'CANCELLED').length;
 
   return (
     <>
       <Modal
         open={open}
         onCancel={onClose}
-        width={850}
-        style={{ top: 20, maxWidth: 'calc(100vw - 32px)' }}
-        styles={{ body: { maxHeight: 'calc(100vh - 160px)', overflowY: 'auto' } }}
+        width="min(850px, calc(100vw - 24px))"
+        className={styles.serviceOrderModal}
+        rootClassName={styles.serviceOrderModal}
+        style={{ top: 20, maxWidth: 'calc(100vw - 24px)' }}
         destroyOnClose
         title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ padding: '6px 10px', background: '#e0f2fe', borderRadius: 8, color: '#0284c7' }}>
+          <div className={styles.headerContainer} data-testid="spk-modal-header">
+            <div className={styles.headerIcon}>
               <FileTextOutlined style={{ fontSize: 18 }} />
             </div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div className={styles.headerTextGroup}>
+              <div className={styles.headerTitle}>
                 <span>Surat Perintah Kerja (SPK) / Work Order Jasa</span>
                 {viewMode === 'DETAIL' && selectedOrder && (
-                  <>
+                  <div className={styles.detailBadgeGroup}>
                     <Tag
                       color={
                         selectedOrder.status === 'ISSUED'
@@ -311,7 +313,7 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                     <Tag color="purple" style={{ fontWeight: 600, margin: 0 }}>
                       {selectedOrder.documentType}
                     </Tag>
-                  </>
+                  </div>
                 )}
                 {viewMode === 'LIST' && (
                   <Tag color="cyan" style={{ fontWeight: 600, margin: 0 }}>
@@ -319,15 +321,15 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                   </Tag>
                 )}
               </div>
-              <Text type="secondary" style={{ fontSize: 11, color: '#64748b' }}>
+              <span className={styles.headerSubtitle}>
                 Dokumen resmi penugasan pelaksanaan pekerjaan jasa / subkontraktor untuk PO #{po?.poNumber}
-              </Text>
+              </span>
             </div>
           </div>
         }
         footer={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-            <div style={{ fontSize: 12, color: '#64748b' }}>
+          <div className={styles.footerContainer} data-testid="spk-modal-footer">
+            <div className={styles.footerLeft}>
               {viewMode === 'DETAIL' && selectedOrder ? (
                 <span>
                   Nomor Dokumen: <strong style={{ color: '#0284c7', fontFamily: 'monospace', letterSpacing: '0.02em' }}>{selectedOrder.serviceOrderNumber}</strong>
@@ -338,33 +340,22 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                 </span>
               )}
             </div>
-            <Space size={8}>
-              {/* LIST Actions */}
+            <div className={styles.footerRight}>
+              {/* LIST Actions: Only Tutup (Primary Create is in Section Header) */}
               {viewMode === 'LIST' && (
-                <>
-                  <Button onClick={onClose} style={{ borderRadius: 6 }}>
-                    Tutup
-                  </Button>
-                  {canManage && (
-                    <Button
-                      type="primary"
-                      icon={<PlusOutlined />}
-                      onClick={handleOpenCreate}
-                      style={{ backgroundColor: '#0284c7', borderColor: '#0284c7', borderRadius: 6, fontWeight: 600 }}
-                    >
-                      Buat SPK / Work Order
-                    </Button>
-                  )}
-                </>
+                <Button onClick={onClose} style={{ borderRadius: 6 }} data-testid="btn-close-spk-modal">
+                  Tutup
+                </Button>
               )}
 
               {/* DETAIL Actions */}
               {viewMode === 'DETAIL' && selectedOrder && (
-                <>
+                <Space size={8} wrap>
                   <Button
                     icon={<ArrowLeftOutlined />}
                     onClick={() => setViewMode('LIST')}
                     style={{ borderRadius: 6 }}
+                    data-testid="btn-back-to-list"
                   >
                     Daftar Dokumen
                   </Button>
@@ -379,6 +370,7 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                         icon={<EditOutlined />}
                         onClick={() => handleOpenEdit(selectedOrder)}
                         style={{ borderRadius: 6 }}
+                        data-testid="btn-edit-draft-spk"
                       >
                         Ubah Draft
                       </Button>
@@ -394,6 +386,7 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                           icon={<SendOutlined />}
                           loading={isSubmitting}
                           style={{ backgroundColor: '#0284c7', borderColor: '#0284c7', borderRadius: 6, fontWeight: 600 }}
+                          data-testid="btn-issue-spk"
                         >
                           Terbitkan SPK
                         </Button>
@@ -403,6 +396,7 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                         icon={<StopOutlined />}
                         onClick={() => setShowCancelModal(true)}
                         style={{ borderRadius: 6 }}
+                        data-testid="btn-cancel-spk"
                       >
                         Batalkan
                       </Button>
@@ -416,19 +410,21 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                       icon={<StopOutlined />}
                       onClick={() => setShowCancelModal(true)}
                       style={{ borderRadius: 6 }}
+                      data-testid="btn-cancel-spk"
                     >
                       Batalkan SPK
                     </Button>
                   )}
-                </>
+                </Space>
               )}
 
               {/* CREATE / EDIT Actions */}
               {(viewMode === 'CREATE' || viewMode === 'EDIT') && (
-                <>
+                <Space size={8} wrap>
                   <Button
                     onClick={() => setViewMode(selectedOrder ? 'DETAIL' : 'LIST')}
                     style={{ borderRadius: 6 }}
+                    data-testid="btn-cancel-form"
                   >
                     Batal
                   </Button>
@@ -438,12 +434,13 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                     loading={isSubmitting}
                     onClick={() => form.submit()}
                     style={{ backgroundColor: '#0284c7', borderColor: '#0284c7', borderRadius: 6, fontWeight: 600 }}
+                    data-testid="btn-submit-spk-form"
                   >
                     {viewMode === 'EDIT' ? 'Simpan Perubahan' : 'Buat SPK / Work Order'}
                   </Button>
-                </>
+                </Space>
               )}
-            </Space>
+            </div>
           </div>
         }
       >
@@ -455,54 +452,58 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
             </div>
           </div>
         ) : (
-          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {/* Phase 20 Domain Rule Alert */}
+          <div className={styles.modalBody} data-testid="spk-modal-body">
+            {/* Domain Rule Alert */}
             <Alert
               type="info"
               showIcon
               icon={<SafetyCertificateOutlined style={{ color: '#0284c7', fontSize: 16 }} />}
-              message="Ketentuan Pelaksanaan Pekerjaan Jasa (Phase 20)"
+              message="Ketentuan Pelaksanaan Pekerjaan Jasa"
               description="SERVICE PO adalah SSOT komersial. Penerimaan jasa tidak menggunakan Goods Receipt (GR). Dokumen SPK / Work Order bersifat opsional untuk instruksi kerja teknis (0..N dokumen per PO)."
               style={{ borderRadius: 8, border: '1px solid #bae6fd', background: '#f0f9ff' }}
             />
 
             {/* PO Context Reference Strip (Commercial SSOT) */}
-            <div style={{ background: '#f8fafc', padding: '12px 16px', borderRadius: 10, border: '1px solid #e2e8f0' }}>
-              <Row gutter={[16, 10]} align="middle">
-                <Col xs={24} sm={6}>
-                  <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>PROYEK:</Text>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={projectName}>
+            <div className={styles.poSummaryStrip} data-testid="spk-po-summary">
+              <div className={styles.poSummaryGrid}>
+                <div className={styles.summaryCol}>
+                  <span className={styles.summaryLabel}>PROYEK:</span>
+                  <div className={styles.summaryValue} title={projectName}>
                     {projectName}
                   </div>
                   {projectCode && (
-                    <Text type="secondary" style={{ fontSize: 10.5, color: '#64748b', display: 'block', fontFamily: 'monospace' }}>
+                    <span className={styles.summaryCode}>
                       {projectCode}
-                    </Text>
+                    </span>
                   )}
-                </Col>
-                <Col xs={24} sm={6}>
-                  <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>PURCHASE ORDER:</Text>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: '#1d4ed8' }}>{po?.poNumber || (selectedOrder?.purchaseOrder as any)?.poNumber || '—'}</div>
-                  <Tag color="cyan" style={{ fontSize: 10, margin: 0, marginTop: 2, borderRadius: 4 }}>Jasa / Subcon</Tag>
-                </Col>
-                <Col xs={24} sm={6}>
-                  <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>VENDOR / SUBCON:</Text>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: '#047857', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={vendorName}>
+                </div>
+                <div className={styles.summaryCol}>
+                  <span className={styles.summaryLabel}>PURCHASE ORDER:</span>
+                  <div className={styles.summaryValueLink}>
+                    {po?.poNumber || (selectedOrder?.purchaseOrder as any)?.poNumber || '—'}
+                  </div>
+                  <Tag color="cyan" style={{ fontSize: 10, margin: 0, marginTop: 2, borderRadius: 4 }}>
+                    Jasa / Subcon
+                  </Tag>
+                </div>
+                <div className={styles.summaryCol}>
+                  <span className={styles.summaryLabel}>VENDOR / SUBCON:</span>
+                  <div className={styles.summaryValueVendor} title={vendorName}>
                     {vendorName}
                   </div>
                   {vendorCode && (
-                    <Text type="secondary" style={{ fontSize: 10.5, color: '#64748b', display: 'block', fontFamily: 'monospace' }}>
+                    <span className={styles.summaryCode}>
                       {vendorCode}
-                    </Text>
+                    </span>
                   )}
-                </Col>
-                <Col xs={24} sm={6}>
-                  <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>NILAI KONTRAK PO:</Text>
-                  <div style={{ fontWeight: 800, fontSize: 14, color: '#059669', fontFamily: 'monospace' }}>
+                </div>
+                <div className={styles.summaryCol}>
+                  <span className={styles.summaryLabel}>NILAI KONTRAK PO:</span>
+                  <div className={styles.summaryHighlight}>
                     {formatCurrency(totalAmount)}
                   </div>
-                </Col>
-              </Row>
+                </div>
+              </div>
             </div>
 
             {/* ========================================================================= */}
@@ -510,119 +511,164 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
             {/* ========================================================================= */}
             {viewMode === 'LIST' && (
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, color: '#334155' }}>
+                <div className={styles.sectionHeader}>
+                  <div className={styles.sectionTitle}>
                     Daftar Dokumen Pelaksanaan (SPK / Work Order)
                   </div>
                   {canManage && (
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={<PlusOutlined />}
-                      onClick={handleOpenCreate}
-                      style={{ backgroundColor: '#0284c7', borderColor: '#0284c7', borderRadius: 6, fontWeight: 600 }}
-                    >
-                      + Buat SPK / Work Order
-                    </Button>
+                    <div className={styles.sectionAction}>
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<PlusOutlined />}
+                        onClick={handleOpenCreate}
+                        style={{ backgroundColor: '#0284c7', borderColor: '#0284c7', borderRadius: 6, fontWeight: 600 }}
+                        data-testid="btn-create-spk-section"
+                      >
+                        Buat SPK / Work Order
+                      </Button>
+                    </div>
                   )}
                 </div>
 
                 {serviceOrders.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '36px 16px', background: '#ffffff', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                  <div className={styles.emptyStateWrapper} data-testid="spk-empty-state">
                     <Empty
                       image={Empty.PRESENTED_IMAGE_SIMPLE}
                       description={
                         <div>
-                          <div style={{ fontWeight: 600, fontSize: 14, color: '#334155', marginBottom: 4 }}>
+                          <div className={styles.emptyStateTitle}>
                             Belum ada SPK / Work Order
                           </div>
-                          <Text type="secondary" style={{ fontSize: 12 }}>
+                          <div className={styles.emptyStateDesc}>
                             Purchase Order ini sah sebagai SSOT komersial. Dokumen SPK atau Work Order dapat diterbitkan untuk penugasan teknis lapangan.
-                          </Text>
+                          </div>
                         </div>
                       }
-                    >
-                      {canManage && (
-                        <Button
-                          type="primary"
-                          icon={<PlusOutlined />}
-                          onClick={handleOpenCreate}
-                          style={{ backgroundColor: '#0284c7', borderColor: '#0284c7', borderRadius: 6, fontWeight: 600, marginTop: 8 }}
-                        >
-                          Buat SPK / Work Order
-                        </Button>
-                      )}
-                    </Empty>
+                    />
                   </div>
                 ) : (
-                  <Table
-                    size="small"
-                    bordered
-                    pagination={serviceOrders.length > 5 ? { pageSize: 5 } : false}
-                    dataSource={serviceOrders}
-                    rowKey="id"
-                    columns={[
-                      {
-                        title: 'Nomor Dokumen',
-                        dataIndex: 'serviceOrderNumber',
-                        key: 'serviceOrderNumber',
-                        width: '32%',
-                        render: (num: string, record: ServiceOrder) => (
-                          <Space size={6} wrap={false}>
-                            <Tag color="purple" style={{ fontWeight: 600, margin: 0, fontSize: 10 }}>
-                              {record.documentType}
+                  <>
+                    {/* Desktop Table View */}
+                    <div className={styles.desktopTableView} data-testid="spk-desktop-table">
+                      <Table
+                        size="small"
+                        bordered
+                        pagination={serviceOrders.length > 5 ? { pageSize: 5 } : false}
+                        dataSource={serviceOrders}
+                        rowKey="id"
+                        columns={[
+                          {
+                            title: 'Nomor Dokumen',
+                            dataIndex: 'serviceOrderNumber',
+                            key: 'serviceOrderNumber',
+                            width: '32%',
+                            render: (num: string, record: ServiceOrder) => (
+                              <Space size={6} wrap={false}>
+                                <Tag color="purple" style={{ fontWeight: 600, margin: 0, fontSize: 10 }}>
+                                  {record.documentType}
+                                </Tag>
+                                <strong style={{ color: '#0284c7', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
+                                  {num}
+                                </strong>
+                              </Space>
+                            ),
+                          },
+                          {
+                            title: 'Status',
+                            dataIndex: 'status',
+                            key: 'status',
+                            width: '18%',
+                            render: (status: string) => (
+                              <Tag
+                                color={status === 'ISSUED' ? 'blue' : status === 'CANCELLED' ? 'red' : 'gold'}
+                                style={{ fontWeight: 700, borderRadius: 12, padding: '1px 8px', fontSize: 11 }}
+                              >
+                                ● {status}
+                              </Tag>
+                            ),
+                          },
+                          {
+                            title: 'Target Jadwal',
+                            key: 'schedule',
+                            width: '24%',
+                            render: (_: any, r: ServiceOrder) => (
+                              <span style={{ fontSize: 11.5, color: '#475569', whiteSpace: 'nowrap' }}>
+                                {r.startDate ? dayjs(r.startDate).format('DD/MM/YY') : '—'} s/d{' '}
+                                {r.endDate ? dayjs(r.endDate).format('DD/MM/YY') : '—'}
+                              </span>
+                            ),
+                          },
+                          {
+                            title: 'Aksi',
+                            key: 'action',
+                            width: '26%',
+                            align: 'center',
+                            render: (_: any, record: ServiceOrder) => (
+                              <Button
+                                size="small"
+                                type="primary"
+                                ghost
+                                icon={<EyeOutlined />}
+                                onClick={() => handleOpenDetail(record)}
+                                style={{ borderRadius: 6, fontWeight: 600, fontSize: 11.5 }}
+                                data-testid={`btn-view-spk-${record.id}`}
+                              >
+                                Lihat Detail
+                              </Button>
+                            ),
+                          },
+                        ]}
+                      />
+                    </div>
+
+                    {/* Mobile Cards View */}
+                    <div className={styles.mobileCardsView} data-testid="spk-mobile-cards">
+                      {serviceOrders.map((rec) => (
+                        <div key={rec.id} className={styles.documentCard} data-testid="spk-mobile-card">
+                          <div className={styles.cardHeader}>
+                            <div className={styles.cardBadgeGroup}>
+                              <Tag color="purple" style={{ fontWeight: 600, margin: 0, fontSize: 10 }}>
+                                {rec.documentType}
+                              </Tag>
+                              <span className={styles.cardDocNumber}>{rec.serviceOrderNumber}</span>
+                            </div>
+                            <Tag
+                              color={rec.status === 'ISSUED' ? 'blue' : rec.status === 'CANCELLED' ? 'red' : 'gold'}
+                              style={{ fontWeight: 700, borderRadius: 12, padding: '1px 8px', fontSize: 11, margin: 0 }}
+                            >
+                              ● {rec.status}
                             </Tag>
-                            <strong style={{ color: '#0284c7', fontFamily: 'monospace', fontSize: 12, whiteSpace: 'nowrap' }}>
-                              {num}
-                            </strong>
-                          </Space>
-                        ),
-                      },
-                      {
-                        title: 'Status',
-                        dataIndex: 'status',
-                        key: 'status',
-                        width: '18%',
-                        render: (status: string) => (
-                          <Tag
-                            color={status === 'ISSUED' ? 'blue' : status === 'CANCELLED' ? 'red' : 'gold'}
-                            style={{ fontWeight: 700, borderRadius: 12, padding: '1px 8px', fontSize: 11 }}
-                          >
-                            ● {status}
-                          </Tag>
-                        ),
-                      },
-                      {
-                        title: 'Target Jadwal',
-                        key: 'schedule',
-                        width: '24%',
-                        render: (_: any, r: ServiceOrder) => (
-                          <span style={{ fontSize: 11.5, color: '#475569', whiteSpace: 'nowrap' }}>
-                            {r.startDate ? dayjs(r.startDate).format('DD/MM/YY') : '—'} s/d{' '}
-                            {r.endDate ? dayjs(r.endDate).format('DD/MM/YY') : '—'}
-                          </span>
-                        ),
-                      },
-                      {
-                        title: 'Aksi',
-                        key: 'action',
-                        width: '26%',
-                        align: 'center',
-                        render: (_: any, record: ServiceOrder) => (
-                          <Button
-                            size="small"
-                            type="primary"
-                            ghost
-                            icon={<EyeOutlined />}
-                            onClick={() => handleOpenDetail(record)}
-                            style={{ borderRadius: 6, fontWeight: 600, fontSize: 11.5 }}
-                          >
-                            Lihat Detail
-                          </Button>
-                        ),
-                      },
-                    ]}
-                  />
+                          </div>
+                          <div className={styles.cardScheduleRow}>
+                            <CalendarOutlined style={{ color: '#0284c7' }} />
+                            <span>
+                              {rec.startDate ? dayjs(rec.startDate).format('DD/MM/YYYY') : '—'} s/d{' '}
+                              {rec.endDate ? dayjs(rec.endDate).format('DD/MM/YYYY') : '—'}
+                            </span>
+                          </div>
+                          {rec.scopeOfWork && (
+                            <div style={{ fontSize: 11.5, color: '#334155', lineHeight: 1.4, wordBreak: 'break-word' }}>
+                              {rec.scopeOfWork.length > 100 ? `${rec.scopeOfWork.slice(0, 100)}...` : rec.scopeOfWork}
+                            </div>
+                          )}
+                          <div className={styles.cardActionRow}>
+                            <Button
+                              size="small"
+                              type="primary"
+                              ghost
+                              icon={<EyeOutlined />}
+                              onClick={() => handleOpenDetail(rec)}
+                              style={{ borderRadius: 6, fontWeight: 600, fontSize: 12 }}
+                              data-testid={`btn-view-spk-mobile-${rec.id}`}
+                            >
+                              Lihat Detail
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -632,16 +678,17 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
             {/* ========================================================================= */}
             {viewMode === 'DETAIL' && selectedOrder && (
               <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div className={styles.detailTopBar}>
                   <Button
                     size="small"
                     icon={<ArrowLeftOutlined />}
                     onClick={() => setViewMode('LIST')}
                     style={{ borderRadius: 6, fontSize: 11.5 }}
+                    data-testid="btn-back-to-list-top"
                   >
-                    ← Kembali ke Daftar SPK / WO
+                    Kembali ke Daftar SPK / WO
                   </Button>
-                  <Space size={6}>
+                  <div className={styles.detailBadgeGroup}>
                     <Tag color="purple" style={{ fontWeight: 600 }}>{selectedOrder.documentType}</Tag>
                     <Tag
                       color={selectedOrder.status === 'ISSUED' ? 'blue' : selectedOrder.status === 'CANCELLED' ? 'red' : 'gold'}
@@ -649,7 +696,7 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                     >
                       ● {selectedOrder.status}
                     </Tag>
-                  </Space>
+                  </div>
                 </div>
 
                 {/* Issued Notice */}
@@ -667,7 +714,7 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                       <div style={{ fontSize: 11.5, marginTop: 4 }}>
                         Diterbitkan pada{' '}
                         {selectedOrder.issuedAt ? dayjs(selectedOrder.issuedAt).format('DD MMMM YYYY HH:mm') : '—'}.
-                        Status saat ini: <strong>Menunggu Pelaksanaan / Klaim Jasa (Phase 21)</strong>.
+                        Status saat ini: <strong>Menunggu Pelaksanaan / Klaim Jasa</strong>.
                       </div>
                     }
                     style={{ borderRadius: 8, border: '1px solid #86efac', background: '#f0fdf4', marginBottom: 12 }}
@@ -702,8 +749,8 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                   size="small"
                   bordered
                   column={SERVICE_ORDER_DESCRIPTIONS_COLUMN}
-                  labelStyle={{ width: '20%', minWidth: '130px', fontWeight: 600, background: '#f8fafc', color: '#475569' }}
-                  contentStyle={{ width: '30%', color: '#0f172a' }}
+                  labelStyle={{ width: '22%', minWidth: '120px', fontWeight: 600, background: '#f8fafc', color: '#475569' }}
+                  contentStyle={{ color: '#0f172a' }}
                 >
                   <Descriptions.Item label="Nomor Dokumen">
                     <strong style={{ color: '#0284c7', whiteSpace: 'nowrap', wordBreak: 'keep-all', letterSpacing: '0.02em', fontFamily: 'monospace', fontSize: 13 }}>
@@ -765,18 +812,19 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
             {/* VIEW MODE 3: CREATE / EDIT FORM                                          */}
             {/* ========================================================================= */}
             {(viewMode === 'CREATE' || viewMode === 'EDIT') && (
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div className={styles.formWrapper}>
+                <div className={styles.formTopBar}>
                   <Button
                     size="small"
                     icon={<ArrowLeftOutlined />}
                     onClick={() => setViewMode(selectedOrder ? 'DETAIL' : 'LIST')}
                     style={{ borderRadius: 6, fontSize: 11.5 }}
+                    data-testid="btn-back-from-form"
                   >
-                    ← Batal / Kembali
+                    Batal / Kembali
                   </Button>
                   <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
-                    {viewMode === 'EDIT' ? `Ubah Draft SPK #${selectedOrder?.serviceOrderNumber}` : 'Buat SPK / Work Order Baru'}
+                    {viewMode === 'EDIT' ? `Ubah Draft ${selectedOrder?.documentType || 'SPK'} #${selectedOrder?.serviceOrderNumber}` : 'Buat SPK / Work Order Baru'}
                   </span>
                 </div>
 
@@ -789,7 +837,7 @@ export const ServiceOrderModal: React.FC<ServiceOrderModalProps> = ({
                     workLocation: po?.deliveryLocation || 'Lokasi Proyek',
                   }}
                 >
-                  <Row gutter={16}>
+                  <Row gutter={[12, 0]}>
                     <Col xs={24} sm={8}>
                       <Form.Item
                         label={<span style={{ fontWeight: 600, fontSize: 12 }}>Tipe Dokumen</span>}

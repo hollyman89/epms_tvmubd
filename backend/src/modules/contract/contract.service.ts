@@ -535,6 +535,21 @@ export class ContractService {
       throw new NotFoundException(`Contract #${contractId} tidak ditemukan`);
     }
 
+    // Fallback: If contract.project_manager_id is not set, check if a linked project exists
+    if (!contract.project_manager_id) {
+      try {
+        const linkedProjects = await this.contractRepo.manager.query(
+          'SELECT manager_id FROM projects WHERE contract_id = ? AND deleted_at IS NULL LIMIT 1',
+          [contract.id],
+        );
+        if (linkedProjects && linkedProjects[0]?.manager_id) {
+          contract.project_manager_id = Number(linkedProjects[0].manager_id);
+        }
+      } catch {
+        // Safe query failure ignoring in mock environments
+      }
+    }
+
     // 2. Validasi hak akses contract mengikuti existing business rules
     this.validateContractAccess(contract, userId, userRoles);
 

@@ -31,6 +31,11 @@ export class CreateGoodsReceiptDto {
   @IsNotEmpty()
   receiptDate: string;
 
+  @ApiPropertyOptional({ example: 'SJ-2026-0099', description: 'Surat Jalan / Delivery note number from vendor' })
+  @IsString()
+  @IsOptional()
+  deliveryNoteNumber?: string;
+
   @ApiPropertyOptional({ example: 'Received by warehouse staff A', description: 'General remarks for the receipt' })
   @IsString()
   @IsOptional()

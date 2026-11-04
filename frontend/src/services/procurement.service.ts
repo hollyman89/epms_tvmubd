@@ -83,6 +83,7 @@ export interface RfqRecord {
   rfqNumber: string;
   status: 'OPEN' | 'CLOSED' | 'EVALUATED' | 'AWARDED' | 'CANCELLED' | string;
   closingDate?: string | null;
+  notes?: string | null;
   createdBy?: number;
   creator?: RfqCreator | null;
   comparison?: RfqComparisonSummary | null;
@@ -248,6 +249,7 @@ export interface CreatePRPayload {
 export interface CreateRfqPayload {
   purchaseRequestId: number;
   closingDate?: string;
+  notes?: string;
 }
 
 export interface SubmitVendorComparisonPayload {
@@ -317,6 +319,7 @@ export interface CreatePOPayload {
 export interface CreateGRPayload {
   purchaseOrderId: number;
   receiptDate: string;
+  deliveryNoteNumber?: string;
   remarks?: string;
   items: GoodsReceiptItemDto[];
 }

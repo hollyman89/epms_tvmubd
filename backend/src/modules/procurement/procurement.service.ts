@@ -27,7 +27,8 @@ import { CreateServiceOrderDto, UpdateServiceOrderDto, CancelServiceOrderDto, Qu
 import { ProcurementPackage, ProcurementPackageStatus } from '../../entities/procurement-package.entity';
 import { ProcurementReconciliation, ProcurementReconciliationStatus } from '../../entities/procurement-reconciliation.entity';
 import { randomUUID } from 'crypto';
-import { BusinessEvent } from '../../shared/contracts/business-event.contract';
+import { BusinessEvent, NotificationPolicy } from '../../shared/contracts/business-event.contract';
+import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
 
 @Injectable()
 export class ProcurementService {
@@ -133,6 +134,35 @@ export class ProcurementService {
         estimatedUnitPrice: itemDto.estimatedUnitPrice,
       }));
       await queryRunner.manager.save(items);
+
+      const prSubmitPayload = {
+        purchaseRequestId: savedPr.id,
+        prNumber: savedPr.prNumber,
+        projectId: savedPr.projectId,
+        submittedBy: userId,
+        totalEstimatedAmount: savedPr.totalEstimatedAmount,
+        submittedAt: new Date().toISOString(),
+        isResubmission: false,
+        resubmitted: false,
+        resubmissionCount: 0,
+      };
+
+      const prSubmitOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: `pr-sub-${savedPr.id}`,
+        event_name: 'procurement.pr.submitted',
+        event_version: '1',
+        aggregate_type: 'PURCHASE_REQUEST',
+        aggregate_id: savedPr.id,
+        correlation_id: `pr-sub-${savedPr.id}`,
+        payload: {
+          ...prSubmitPayload,
+          businessPayload: prSubmitPayload,
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+          routing: { roles: ['FINANCE'] },
+        },
+        status: OutboxStatus.PENDING,
+      });
+      await queryRunner.manager.save(OutboxEvent, prSubmitOutbox);
 
       await queryRunner.commitTransaction();
 
@@ -297,10 +327,57 @@ export class ProcurementService {
         prId: dto.purchaseRequestId,
         rfqNumber,
         closingDate: dto.closingDate,
+        notes: dto.notes ? String(dto.notes).trim() : null,
         status: 'OPEN'
       });
       
       const savedRfq = await manager.save(Rfq, rfq);
+
+      const rfqEventId = randomUUID();
+      const rfqPayload = {
+        rfqId: savedRfq.id,
+        rfqNumber: savedRfq.rfqNumber,
+        prId: savedRfq.prId,
+        projectId: pr.projectId,
+        status: savedRfq.status,
+      };
+
+      const rfqOutbox = manager.create(OutboxEvent, {
+        event_id: rfqEventId,
+        event_name: 'procurement.rfq.created',
+        event_version: '1',
+        aggregate_type: 'Rfq',
+        aggregate_id: savedRfq.id,
+        correlation_id: `rfq-${savedRfq.id}`,
+        payload: {
+          ...rfqPayload,
+          businessPayload: rfqPayload,
+          notificationPolicy: NotificationPolicy.SYNC_ONLY,
+          routing: {
+            roles: ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'],
+          },
+        },
+        status: OutboxStatus.PENDING,
+      });
+      await manager.save(OutboxEvent, rfqOutbox);
+
+      if (this.eventEmitter && typeof this.eventEmitter.emit === 'function') {
+        const rfqCreatedEvent: BusinessEvent = {
+          eventId: rfqEventId,
+          eventName: 'procurement.rfq.created',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'Rfq',
+          aggregateId: savedRfq.id,
+          projectId: pr.projectId,
+          routing: {
+            roles: ['PROCUREMENT', 'PURCHASING', 'SUPER_ADMIN'],
+          },
+          notificationPolicy: NotificationPolicy.SYNC_ONLY,
+          payload: rfqPayload,
+        };
+        this.eventEmitter.emit('procurement.rfq.created', rfqCreatedEvent);
+      }
 
       return {
         success: true,
@@ -872,33 +949,64 @@ export class ProcurementService {
         }
       }
 
+      const poEventId = `po-iss-${savedPo.id}`;
+      const poPayload = {
+        poId: savedPo.id,
+        poNumber: savedPo.poNumber,
+        vendorId: dto.vendor_id,
+        status: savedPo.status,
+        totalAmount: savedPo.totalAmount,
+        orderType: savedPo.orderType,
+        projectId: pr?.projectId ? Number(pr.projectId) : undefined,
+        purchaseRequestId: pr?.id ? Number(pr.id) : undefined,
+        issuedBy: userId ? Number(userId) : undefined,
+      };
+
+      const poOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: poEventId,
+        event_name: 'procurement.po.issued',
+        event_version: '1',
+        aggregate_type: 'PurchaseOrder',
+        aggregate_id: savedPo.id,
+        correlation_id: `po-${savedPo.id}`,
+        payload: {
+          ...poPayload,
+          businessPayload: poPayload,
+          actor: userId ? { userId: Number(userId) } : undefined,
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+          routing: {
+            roles: ['PROCUREMENT', 'PURCHASING', 'FINANCE', 'SUPER_ADMIN'],
+          },
+        },
+        status: OutboxStatus.PENDING,
+      });
+      await queryRunner.manager.save(OutboxEvent, poOutbox);
+
       await queryRunner.commitTransaction();
 
       // 5. Emit canonical and domain events
       const poIssuedEvent: BusinessEvent = {
-        eventId: randomUUID(),
+        eventId: poEventId,
         eventName: 'procurement.po.issued',
         eventVersion: 1,
         occurredAt: new Date().toISOString(),
         aggregateType: 'PurchaseOrder',
         aggregateId: savedPo.id,
         projectId: pr?.projectId ? Number(pr.projectId) : undefined,
+        actor: userId ? { userId: Number(userId) } : undefined,
         routing: {
           roles: ['PROCUREMENT', 'PURCHASING', 'FINANCE', 'SUPER_ADMIN'],
         },
-        payload: {
-          poId: savedPo.id,
-          poNumber: savedPo.poNumber,
-          vendorId: dto.vendor_id,
-          status: savedPo.status,
-          totalAmount: savedPo.totalAmount,
-        },
+        notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+        payload: poPayload,
       };
-      this.eventEmitter.emit('procurement.po.issued', poIssuedEvent);
-      this.eventEmitter.emit('po.created', {
-        purchase_order_id: savedPo.id,
-        vendor_id: dto.vendor_id
-      });
+      if (this.eventEmitter && typeof this.eventEmitter.emit === 'function') {
+        this.eventEmitter.emit('procurement.po.issued', poIssuedEvent);
+        this.eventEmitter.emit('po.created', {
+          purchase_order_id: savedPo.id,
+          vendor_id: dto.vendor_id
+        });
+      }
       this.logger.log(`Canonical Business Event Emitted: procurement.po.issued for PO ${savedPo.id}`);
 
       return {
@@ -1020,6 +1128,7 @@ export class ProcurementService {
         poId: po.id,
         grNumber,
         receiptDate: new Date(dto.receiptDate),
+        deliveryNoteNumber: dto.deliveryNoteNumber ? String(dto.deliveryNoteNumber).trim() : null,
         totalReceivedAmount,
         remarks: dto.remarks,
         createdBy: userId
@@ -1072,32 +1181,60 @@ export class ProcurementService {
         await queryRunner.manager.save(po);
       }
 
+      const grEventId = `gr-rec-${savedGr.id}`;
+      const grPayload = {
+        grId: savedGr.id,
+        grNumber: savedGr.grNumber,
+        poId: po.id,
+        poNumber: po.poNumber,
+        status: po.status,
+        receivedBy: userId ? Number(userId) : undefined,
+      };
+
+      const grOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: grEventId,
+        event_name: 'procurement.gr.received',
+        event_version: '1',
+        aggregate_type: 'GoodsReceipt',
+        aggregate_id: savedGr.id,
+        correlation_id: `gr-${savedGr.id}`,
+        payload: {
+          ...grPayload,
+          businessPayload: grPayload,
+          actor: userId ? { userId: Number(userId) } : undefined,
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+          routing: {
+            roles: ['PROCUREMENT', 'PURCHASING', 'FINANCE', 'SUPER_ADMIN'],
+          },
+        },
+        status: OutboxStatus.PENDING,
+      });
+      await queryRunner.manager.save(OutboxEvent, grOutbox);
+
       await queryRunner.commitTransaction();
 
       // 7. Emit events: legacy gr.created for existing ProcurementEventListener package closure, and canonical procurement.gr.received for BusinessSync
-      this.eventEmitter.emit('gr.created', {
-        gr_id: savedGr.id,
-        po_id: po.id
-      });
-      const grReceivedEvent: BusinessEvent = {
-        eventId: randomUUID(),
-        eventName: 'procurement.gr.received',
-        eventVersion: 1,
-        occurredAt: new Date().toISOString(),
-        aggregateType: 'GoodsReceipt',
-        aggregateId: savedGr.id,
-        routing: {
-          roles: ['PROCUREMENT', 'PURCHASING', 'FINANCE', 'SUPER_ADMIN'],
-        },
-        payload: {
-          grId: savedGr.id,
-          grNumber: savedGr.grNumber,
-          poId: po.id,
-          poNumber: po.poNumber,
-          status: po.status,
-        },
-      };
-      this.eventEmitter.emit('procurement.gr.received', grReceivedEvent);
+      if (this.eventEmitter && typeof this.eventEmitter.emit === 'function') {
+        this.eventEmitter.emit('gr.created', {
+          gr_id: savedGr.id,
+          po_id: po.id
+        });
+        const grReceivedEvent: BusinessEvent = {
+          eventId: grEventId,
+          eventName: 'procurement.gr.received',
+          eventVersion: 1,
+          occurredAt: new Date().toISOString(),
+          aggregateType: 'GoodsReceipt',
+          aggregateId: savedGr.id,
+          actor: userId ? { userId: Number(userId) } : undefined,
+          routing: {
+            roles: ['PROCUREMENT', 'PURCHASING', 'FINANCE', 'SUPER_ADMIN'],
+          },
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+          payload: grPayload,
+        };
+        this.eventEmitter.emit('procurement.gr.received', grReceivedEvent);
+      }
       this.logger.log(`Canonical Business Event Emitted: procurement.gr.received for GR ${savedGr.id}`);
 
       return {

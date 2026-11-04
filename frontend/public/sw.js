@@ -3,6 +3,12 @@
  * Handles background push notification display and navigation click events.
  */
 
+function resolvePushActionTarget(link, target) {
+  if (typeof link === 'string' && link.trim().length > 0) return link.trim();
+  if (typeof target === 'string' && target.trim().length > 0) return target.trim();
+  return '/';
+}
+
 self.addEventListener('install', function (event) {
   self.skipWaiting();
 });
@@ -25,7 +31,7 @@ self.addEventListener('push', function (event) {
   const title = payload.title || 'EPMS Notification';
   const body = payload.body || payload.message || 'Anda memiliki notifikasi baru di EPMS.';
   const tag = payload.tag || payload.dedupeKey || 'epms-notification';
-  const actionLink = payload.actionLink || '/';
+  const actionLink = resolvePushActionTarget(payload.actionLink, payload.actionTarget);
 
   const options = {
     body: body,
@@ -36,6 +42,7 @@ self.addEventListener('push', function (event) {
     requireInteraction: false,
     data: {
       actionLink: actionLink,
+      actionTarget: payload.actionTarget,
       notificationId: payload.notificationId,
       eventId: payload.eventId,
       purpose: payload.purpose,
@@ -62,7 +69,7 @@ self.addEventListener('notificationclick', function (event) {
   event.notification.close();
 
   const data = event.notification.data || {};
-  const rawActionLink = data.actionLink || '/';
+  const rawActionLink = resolvePushActionTarget(data.actionLink, data.actionTarget);
 
   // Strict origin validation to prevent open-redirect vulnerabilities
   let targetUrl;

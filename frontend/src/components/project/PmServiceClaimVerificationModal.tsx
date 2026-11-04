@@ -89,12 +89,16 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
   onSuccess,
 }) => {
   const [form] = Form.useForm();
+  const [returnForm] = Form.useForm();
+  const [rejectForm] = Form.useForm();
   const [loading, setLoading] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [claim, setClaim] = useState<ServiceClaimRecord | null>(initialClaim || null);
   const [projectClaims, setProjectClaims] = useState<ServiceClaimRecord[]>([]);
-  const [decisionAction, setDecisionAction] = useState<'APPROVE' | 'RETURN' | 'REJECT'>('APPROVE');
+  const [isApproveModalOpen, setIsApproveModalOpen] = useState<boolean>(false);
+  const [isReturnModalOpen, setIsReturnModalOpen] = useState<boolean>(false);
+  const [isRejectModalOpen, setIsRejectModalOpen] = useState<boolean>(false);
 
   const resolvedClaimId = claimId || initialClaim?.id;
 
@@ -102,7 +106,8 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
     setLoading(true);
     setErrorMessage(null);
     form.resetFields();
-    setDecisionAction('APPROVE');
+    returnForm.resetFields();
+    rejectForm.resetFields();
     try {
       const data = await ProcurementService.getServiceClaimById(Number(id));
       setClaim(data);
@@ -119,7 +124,8 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
     setLoading(true);
     setErrorMessage(null);
     form.resetFields();
-    setDecisionAction('APPROVE');
+    returnForm.resetFields();
+    rejectForm.resetFields();
     ProcurementService.getServiceClaims({ projectId: Number(pid) })
       .then(async (claimsList) => {
         setProjectClaims(claimsList);
@@ -150,33 +156,67 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
       setErrorMessage(null);
       setClaim(null);
       setProjectClaims([]);
+      setIsApproveModalOpen(false);
+      setIsReturnModalOpen(false);
+      setIsRejectModalOpen(false);
     }
   }, [open, resolvedClaimId, projectId]);
 
-  const handleExecuteDecision = async () => {
-    if (!claim) return;
+  const handleConfirmTechnicalApprove = async () => {
+    if (!claim || isSubmitting) return;
+    setIsSubmitting(true);
     try {
-      const values = await form.validateFields();
-      setIsSubmitting(true);
-
       const res = await ProcurementService.verifyTechnicalServiceClaim(claim.id, {
-        decision: decisionAction,
-        revisionNotes: decisionAction === 'RETURN' ? values.notes : undefined,
-        rejectionReason: decisionAction === 'REJECT' ? values.notes : undefined,
+        decision: 'APPROVE',
       });
-
-      if (decisionAction === 'APPROVE') {
-        message.success(`Klaim Jasa ${res.claimNumber} berhasil diverifikasi teknis.`);
-      } else if (decisionAction === 'RETURN') {
-        message.success(`Klaim Jasa ${res.claimNumber} berhasil dikembalikan untuk revisi.`);
-      } else {
-        message.success(`Klaim Jasa ${res.claimNumber} ditolak.`);
-      }
-
+      message.success(`Klaim Jasa ${res.claimNumber} berhasil diverifikasi teknis.`);
+      setIsApproveModalOpen(false);
       onSuccess?.(res);
       onClose();
     } catch (err: any) {
       message.error(err?.response?.data?.message || 'Gagal memproses verifikasi teknis.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmTechnicalReturn = async () => {
+    if (!claim || isSubmitting) return;
+    try {
+      const values = await returnForm.validateFields();
+      setIsSubmitting(true);
+      const res = await ProcurementService.verifyTechnicalServiceClaim(claim.id, {
+        decision: 'RETURN',
+        revisionNotes: values.revisionNotes.trim(),
+      });
+      message.success(`Klaim Jasa ${res.claimNumber} berhasil dikembalikan untuk revisi.`);
+      setIsReturnModalOpen(false);
+      returnForm.resetFields();
+      onSuccess?.(res);
+      onClose();
+    } catch (err: any) {
+      message.error(err?.response?.data?.message || 'Gagal memproses pengembalian revisi.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConfirmTechnicalReject = async () => {
+    if (!claim || isSubmitting) return;
+    try {
+      const values = await rejectForm.validateFields();
+      setIsSubmitting(true);
+      const res = await ProcurementService.verifyTechnicalServiceClaim(claim.id, {
+        decision: 'REJECT',
+        rejectionReason: values.rejectionReason.trim(),
+      });
+      message.success(`Klaim Jasa ${res.claimNumber} ditolak.`);
+      setIsRejectModalOpen(false);
+      rejectForm.resetFields();
+      onSuccess?.(res);
+      onClose();
+    } catch (err: any) {
+      message.error(err?.response?.data?.message || 'Gagal memproses penolakan klaim.');
     } finally {
       setIsSubmitting(false);
     }
@@ -678,88 +718,179 @@ export const PmServiceClaimVerificationModal: React.FC<PmServiceClaimVerificatio
                   boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.03)',
                 }}
               >
-                <Form form={form} layout="vertical">
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 8 }}>
-                      Keputusan Verifikasi Teknis
-                    </div>
-                    <div className={styles.decisionButtonGroup}>
-                      <Button
-                        type={decisionAction === 'APPROVE' ? 'primary' : 'default'}
-                        className={styles.decisionButton}
-                        style={
-                          decisionAction === 'APPROVE'
-                            ? { backgroundColor: '#2563EB', borderColor: '#2563EB', fontWeight: 500, borderRadius: 6 }
-                            : { borderRadius: 6, fontWeight: 500 }
-                        }
-                        onClick={() => setDecisionAction('APPROVE')}
-                        icon={<CheckCircleOutlined />}
-                      >
-                        Setujui Teknis
-                      </Button>
-                      <Button
-                        type={decisionAction === 'RETURN' ? 'primary' : 'default'}
-                        className={styles.decisionButton}
-                        style={
-                          decisionAction === 'RETURN'
-                            ? { backgroundColor: '#D97706', borderColor: '#D97706', fontWeight: 500, borderRadius: 6 }
-                            : { borderRadius: 6, fontWeight: 500 }
-                        }
-                        onClick={() => setDecisionAction('RETURN')}
-                        icon={<RollbackOutlined />}
-                      >
-                        Minta Revisi
-                      </Button>
-                      <Button
-                        danger
-                        type={decisionAction === 'REJECT' ? 'primary' : 'default'}
-                        className={styles.decisionButton}
-                        style={{ borderRadius: 6, fontWeight: 500 }}
-                        onClick={() => setDecisionAction('REJECT')}
-                        icon={<CloseCircleOutlined />}
-                      >
-                        Tolak
-                      </Button>
-                    </div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', marginBottom: 4 }}>
+                    Keputusan Verifikasi Teknis Project Manager
                   </div>
+                  <div style={{ fontSize: 12, color: '#64748b' }}>
+                    Pilih tindakan langsung untuk verifikasi volume fisik jasa di lapangan.
+                  </div>
+                </div>
 
-                  {decisionAction !== 'APPROVE' && (
-                    <Form.Item
-                      name="notes"
-                      label={
-                        <span style={{ fontSize: 12.5, fontWeight: 600, color: '#334155' }}>
-                          {decisionAction === 'RETURN' ? 'Catatan Permintaan Revisi (Wajib)' : 'Alasan Penolakan (Wajib)'}
-                        </span>
-                      }
-                      rules={[{ required: true, message: 'Alasan / catatan wajib diisi!' }]}
+                <div className={styles.modalFooterActions}>
+                  <Button onClick={onClose} className={styles.secondaryActionBtn} disabled={isSubmitting}>
+                    Tutup
+                  </Button>
+                  <Button
+                    id="btn-pm-technical-reject"
+                    danger
+                    className={styles.decisionButton}
+                    icon={<CloseCircleOutlined />}
+                    onClick={() => {
+                      rejectForm.resetFields();
+                      setIsRejectModalOpen(true);
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    Tolak
+                  </Button>
+                  <Button
+                    id="btn-pm-technical-return"
+                    style={{ borderColor: '#D97706', color: '#D97706' }}
+                    className={styles.decisionButton}
+                    icon={<RollbackOutlined />}
+                    onClick={() => {
+                      returnForm.resetFields();
+                      setIsReturnModalOpen(true);
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    Minta Revisi
+                  </Button>
+                  <Button
+                    id="btn-pm-technical-approve"
+                    type="primary"
+                    style={{ backgroundColor: '#16A34A', borderColor: '#16A34A' }}
+                    className={styles.decisionButton}
+                    icon={<CheckCircleOutlined />}
+                    onClick={() => setIsApproveModalOpen(true)}
+                    disabled={isSubmitting}
+                  >
+                    Setujui Teknis
+                  </Button>
+                </div>
+
+                {/* 1. Modal Konfirmasi Setujui Teknis */}
+                <Modal
+                  title="Konfirmasi Verifikasi Teknis"
+                  open={isApproveModalOpen}
+                  onCancel={() => {
+                    if (!isSubmitting) setIsApproveModalOpen(false);
+                  }}
+                  onOk={handleConfirmTechnicalApprove}
+                  okText="Ya, Setujui Teknis"
+                  cancelText="Batal"
+                  confirmLoading={isSubmitting}
+                  okButtonProps={{ style: { backgroundColor: '#16A34A', borderColor: '#16A34A' } }}
+                  cancelButtonProps={{ disabled: isSubmitting }}
+                  zIndex={1100}
+                  destroyOnClose
+                >
+                  <div style={{ marginTop: 8 }}>
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="Persetujuan Volume Fisik Lapangan"
+                      description={`Apakah Anda yakin ingin menyetujui verifikasi teknis klaim jasa ${claim.claimNumber} senilai ${formatNumber(claim.totalClaimAmount || 0)} IDR? Persetujuan teknis menyatakan kesesuaian volume fisik jasa di lapangan dan akan meneruskan klaim ke Pengadaan untuk Verifikasi Komersial.`}
                       style={{ marginBottom: 16 }}
-                    >
-                      <TextArea
-                        rows={3}
-                        placeholder={
-                          decisionAction === 'RETURN'
-                            ? 'Sebutkan rincian volume atau dokumen yang perlu diperbaiki...'
-                            : 'Sebutkan alasan penolakan klaim...'
-                        }
-                        style={{ borderRadius: 6 }}
-                      />
-                    </Form.Item>
-                  )}
-
-                  <div className={styles.modalFooterActions}>
-                    <Button onClick={onClose} className={styles.secondaryActionBtn}>
-                      Tutup
-                    </Button>
-                    <Button
-                      type="primary"
-                      onClick={handleExecuteDecision}
-                      loading={isSubmitting}
-                      className={styles.primaryActionBtn}
-                    >
-                      Simpan Verifikasi Teknis
-                    </Button>
+                    />
+                    <div style={{ fontSize: 12.5, color: '#475569', lineHeight: 1.6 }}>
+                      <div><strong>Nomor Klaim:</strong> {claim.claimNumber}</div>
+                      <div><strong>Total Nilai Diajukan:</strong> {formatNumber(claim.totalClaimAmount || 0)} IDR</div>
+                      <div><strong>Status Saat Ini:</strong> {claim.status}</div>
+                    </div>
                   </div>
-                </Form>
+                </Modal>
+
+                {/* 2. Modal Minta Revisi Teknis */}
+                <Modal
+                  title={`Minta Revisi Klaim Jasa — ${claim.claimNumber}`}
+                  open={isReturnModalOpen}
+                  onCancel={() => {
+                    if (!isSubmitting) {
+                      setIsReturnModalOpen(false);
+                      returnForm.resetFields();
+                    }
+                  }}
+                  onOk={handleConfirmTechnicalReturn}
+                  okText="Kirim Permintaan Revisi"
+                  cancelText="Batal"
+                  confirmLoading={isSubmitting}
+                  okButtonProps={{ style: { backgroundColor: '#D97706', borderColor: '#D97706' } }}
+                  cancelButtonProps={{ disabled: isSubmitting }}
+                  zIndex={1100}
+                  destroyOnClose
+                >
+                  <div style={{ marginTop: 8 }}>
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="Pengembalian untuk Koreksi Teknis"
+                      description="Klaim akan dikembalikan ke status revisi agar pembuat klaim dapat memperbaiki volume fisik atau melengkapi dokumen opname."
+                      style={{ marginBottom: 16 }}
+                    />
+                    <Form form={returnForm} layout="vertical">
+                      <Form.Item
+                        name="revisionNotes"
+                        label="Catatan Permintaan Revisi (Wajib)"
+                        rules={[
+                          { required: true, whitespace: true, message: 'Catatan revisi wajib diisi!' },
+                        ]}
+                      >
+                        <TextArea
+                          rows={4}
+                          placeholder="Sebutkan rincian volume fisik atau dokumen opname yang perlu diperbaiki..."
+                          disabled={isSubmitting}
+                        />
+                      </Form.Item>
+                    </Form>
+                  </div>
+                </Modal>
+
+                {/* 3. Modal Tolak Teknis */}
+                <Modal
+                  title={`Tolak Klaim Jasa — ${claim.claimNumber}`}
+                  open={isRejectModalOpen}
+                  onCancel={() => {
+                    if (!isSubmitting) {
+                      setIsRejectModalOpen(false);
+                      rejectForm.resetFields();
+                    }
+                  }}
+                  onOk={handleConfirmTechnicalReject}
+                  okText="Tolak Klaim"
+                  cancelText="Batal"
+                  confirmLoading={isSubmitting}
+                  okButtonProps={{ danger: true }}
+                  cancelButtonProps={{ disabled: isSubmitting }}
+                  zIndex={1100}
+                  destroyOnClose
+                >
+                  <div style={{ marginTop: 8 }}>
+                    <Alert
+                      type="error"
+                      showIcon
+                      message="Penolakan Klaim Jasa"
+                      description="Penolakan klaim bersifat permanen. Pastikan alasan penolakan teknis dijelaskan secara rinci."
+                      style={{ marginBottom: 16 }}
+                    />
+                    <Form form={rejectForm} layout="vertical">
+                      <Form.Item
+                        name="rejectionReason"
+                        label="Alasan Penolakan (Wajib)"
+                        rules={[
+                          { required: true, whitespace: true, message: 'Alasan penolakan wajib diisi!' },
+                        ]}
+                      >
+                        <TextArea
+                          rows={4}
+                          placeholder="Sebutkan alasan penolakan teknis klaim jasa..."
+                          disabled={isSubmitting}
+                        />
+                      </Form.Item>
+                    </Form>
+                  </div>
+                </Modal>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

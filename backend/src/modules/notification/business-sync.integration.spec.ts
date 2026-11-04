@@ -6,6 +6,7 @@ import { OutboxRelayService } from '../system/outbox-relay.service';
 import { BusinessSyncConsumer } from './business-sync.consumer';
 import { NotificationGateway } from './notification.gateway';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
+import { NotificationPolicy } from '../../shared/contracts/business-event.contract';
 
 describe('Phase G Runtime Integration: Relay → Real EventEmitter2 → Real BusinessSyncConsumer', () => {
   let relayService: OutboxRelayService;
@@ -100,7 +101,7 @@ describe('Phase G Runtime Integration: Relay → Real EventEmitter2 → Real Bus
     eventEmitter.on('finance.payment.recorded', (e) => consumer.handleFinancePaymentRecorded(e));
   });
 
-  it('Scenario 1: Valid canonical event flows through Relay -> EventEmitter2 -> Consumer -> Gateway and transitions to PUBLISHED', async () => {
+  it('Scenario 1: Valid SYNC_ONLY canonical event flows through Relay -> EventEmitter2 -> BusinessSyncConsumer -> Gateway and transitions to PUBLISHED', async () => {
     const validOutbox = new OutboxEvent();
     validOutbox.id = 101;
     validOutbox.event_id = 'canonical-uuid-101';
@@ -111,6 +112,7 @@ describe('Phase G Runtime Integration: Relay → Real EventEmitter2 → Real Bus
     validOutbox.status = OutboxStatus.PENDING;
     validOutbox.created_at = new Date('2026-09-23T15:00:00.000Z');
     validOutbox.payload = {
+      notificationPolicy: NotificationPolicy.SYNC_ONLY,
       businessPayload: {
         poNumber: 'PO-2026-001',
       },
@@ -177,5 +179,33 @@ describe('Phase G Runtime Integration: Relay → Real EventEmitter2 → Real Bus
     expect(failureSave).toBeDefined();
     expect(failureSave?.status).toBe(OutboxStatus.PENDING); // Remains PENDING for retry
     expect(failureSave?.error_message).toContain('Missing or invalid \'eventId\'');
+  });
+
+  it('Scenario 3 (F-CRIT-01): Non-SYNC_ONLY event handled ONLY by BusinessSyncConsumer without CanonicalNotificationConsumer is rejected as NO_SUBSCRIBER (FAILED)', async () => {
+    const nonSyncOnlyOutbox = new OutboxEvent();
+    nonSyncOnlyOutbox.id = 103;
+    nonSyncOnlyOutbox.event_id = 'canonical-uuid-103';
+    nonSyncOnlyOutbox.event_name = 'procurement.po.issued';
+    nonSyncOnlyOutbox.event_version = '1';
+    nonSyncOnlyOutbox.aggregate_type = 'PurchaseOrder';
+    nonSyncOnlyOutbox.aggregate_id = 5003;
+    nonSyncOnlyOutbox.status = OutboxStatus.PENDING;
+    nonSyncOnlyOutbox.retry_count = 0;
+    nonSyncOnlyOutbox.payload = {
+      notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+      businessPayload: {
+        poNumber: 'PO-2026-003',
+      },
+    };
+
+    queryRunner.manager.findOne.mockResolvedValue(nonSyncOnlyOutbox);
+
+    const result = await relayService.relaySingleEvent(103);
+
+    expect(result).toBe('FAILED');
+    expect(nonSyncOnlyOutbox.status).toBe(OutboxStatus.FAILED);
+    expect(nonSyncOnlyOutbox.published_at).toBeNull();
+    expect(nonSyncOnlyOutbox.error_message).toContain('[NO_SUBSCRIBER]');
+    expect(nonSyncOnlyOutbox.error_message).toContain('only handled by BusinessSyncConsumer');
   });
 });

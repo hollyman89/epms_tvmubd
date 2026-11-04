@@ -44,7 +44,7 @@ describe('ProcurementService - RFQ Reissue and Active Guard (Audit & Fix)', () =
         orderBy: jest.fn().mockReturnThis(),
         addOrderBy: jest.fn().mockReturnThis(),
         getOne: jest.fn().mockResolvedValue({
-          rfqNumber: 'RFQ-20261023-003',
+          rfqNumber: `RFQ-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-003`,
         }),
       }),
       create: jest.fn().mockImplementation((entityClass, data) => ({
@@ -92,7 +92,8 @@ describe('ProcurementService - RFQ Reissue and Active Guard (Audit & Fix)', () =
     expect(result.success).toBe(true);
     expect(result.data.prId).toBe(13);
     expect(result.data.status).toBe('OPEN');
-    expect(result.data.rfqNumber).toBe('RFQ-20261023-004');
+    const todayDateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    expect(result.data.rfqNumber).toBe(`RFQ-${todayDateStr}-004`);
   });
 
   // 2. APPROVED PR + CANCELLED RFQ → create new RFQ succeeds
@@ -152,7 +153,7 @@ describe('ProcurementService - RFQ Reissue and Active Guard (Audit & Fix)', () =
       orderBy: jest.fn().mockReturnThis(),
       addOrderBy: jest.fn().mockReturnThis(),
       getOne: jest.fn().mockResolvedValue({
-        rfqNumber: 'RFQ-20261023-003',
+        rfqNumber: `RFQ-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-003`,
       }),
     });
 
@@ -160,7 +161,8 @@ describe('ProcurementService - RFQ Reissue and Active Guard (Audit & Fix)', () =
       purchaseRequestId: 13,
     });
 
-    expect(result.data.rfqNumber).toBe('RFQ-20261023-004');
+    const todayDateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    expect(result.data.rfqNumber).toBe(`RFQ-${todayDateStr}-004`);
   });
 
   // 6. APPROVED PR + OPEN RFQ → rejected

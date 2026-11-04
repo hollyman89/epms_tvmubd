@@ -34,40 +34,43 @@ describe('PM Service Claim Verification Modal Mobile Responsive Contracts (MOB-P
     expect(modalCss).toMatch(/\.secondaryActionBtn,\s*\.primaryActionBtn\s*\{[^}]*width:\s*100%\s*!important/);
   });
 
-  // 4. Setujui Teknis remains present
-  test('4. Setujui Teknis remains present and reachable in decisionButtonGroup', () => {
+  // 4. Setujui Teknis direct action button present
+  test('4. Setujui Teknis direct action button present with confirmation modal trigger', () => {
     expect(modalTsx).toContain('Setujui Teknis');
-    expect(modalTsx).toContain("onClick={() => setDecisionAction('APPROVE')}");
+    expect(modalTsx).toContain('onClick={() => setIsApproveModalOpen(true)}');
     expect(modalTsx).toContain('CheckCircleOutlined');
   });
 
-  // 5. Minta Revisi remains present
-  test('5. Minta Revisi remains present and reachable in decisionButtonGroup', () => {
+  // 5. Minta Revisi direct action button present
+  test('5. Minta Revisi direct action button present with revision modal trigger', () => {
     expect(modalTsx).toContain('Minta Revisi');
-    expect(modalTsx).toContain("onClick={() => setDecisionAction('RETURN')}");
+    expect(modalTsx).toContain('setIsReturnModalOpen(true)');
     expect(modalTsx).toContain('RollbackOutlined');
   });
 
-  // 6. Tolak remains present
-  test('6. Tolak remains present and reachable in decisionButtonGroup', () => {
+  // 6. Tolak direct action button present
+  test('6. Tolak direct action button present with rejection modal trigger', () => {
     expect(modalTsx).toContain('Tolak');
-    expect(modalTsx).toContain("onClick={() => setDecisionAction('REJECT')}");
+    expect(modalTsx).toContain('setIsRejectModalOpen(true)');
     expect(modalTsx).toContain('CloseCircleOutlined');
   });
 
-  // 7. Decision inputs remain present
-  test('7. Decision inputs remain present: required notes/reasons TextArea rendered when decision is RETURN or REJECT', () => {
-    expect(modalTsx).toContain("decisionAction !== 'APPROVE'");
-    expect(modalTsx).toContain('name="notes"');
+  // 7. Decision inputs inside dedicated modals
+  test('7. Decision inputs inside dedicated modals: required whitespace-validated revisionNotes and rejectionReason', () => {
+    expect(modalTsx).toContain('name="revisionNotes"');
     expect(modalTsx).toContain('Catatan Permintaan Revisi (Wajib)');
+    expect(modalTsx).toContain('name="rejectionReason"');
     expect(modalTsx).toContain('Alasan Penolakan (Wajib)');
+    expect(modalTsx).toContain('whitespace: true');
     expect(modalTsx).toContain('<TextArea');
   });
 
-  // 8. No business action removed
-  test('8. No business action removed: handleExecuteDecision, onClose, and all decision flows intact', () => {
-    expect(modalTsx).toContain('onClick={handleExecuteDecision}');
-    expect(modalTsx).toContain('Simpan Verifikasi Teknis');
+  // 8. No business action removed and execution handlers intact
+  test('8. Direct action execution handlers and cancellation flows intact without redundant execution button', () => {
+    expect(modalTsx).toContain('onOk={handleConfirmTechnicalApprove}');
+    expect(modalTsx).toContain('onOk={handleConfirmTechnicalReturn}');
+    expect(modalTsx).toContain('onOk={handleConfirmTechnicalReject}');
+    expect(modalTsx).not.toContain('Simpan Verifikasi Teknis');
     expect(modalTsx).toContain('onCancel={onClose}');
     expect(modalTsx).toContain('onClick={onClose}');
   });

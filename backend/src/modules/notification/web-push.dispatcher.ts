@@ -343,8 +343,14 @@ export class WebPushDispatcher implements IPushDispatcher {
       };
     }
 
+    const preview = job.payloadPreview || {};
+    const actionTarget = preview.actionTarget || preview.actionLink || '';
+    const actionLink = preview.actionLink || preview.actionTarget || '';
+
     const payloadJson = JSON.stringify({
-      ...(job.payloadPreview || {}),
+      ...preview,
+      actionTarget,
+      actionLink,
       tag: job.dedupeKey,
       notificationId: job.notificationId,
       eventId: job.eventId,

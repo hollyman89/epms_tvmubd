@@ -14,6 +14,9 @@ import { ProjectClosure } from '../../entities/project-closure.entity';
 import { WorkflowTask } from '../../entities/workflow-task.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { Rfq } from '../../entities/rfq.entity';
+import { ProcurementPackage } from '../../entities/procurement-package.entity';
+import { Invoice } from '../../entities/invoice.entity';
+import { Project } from '../../entities/project.entity';
 
 @Module({
   imports: [
@@ -27,6 +30,9 @@ import { Rfq } from '../../entities/rfq.entity';
       WorkflowTask,
       PurchaseRequest,
       Rfq,
+      ProcurementPackage,
+      Invoice,
+      Project,
     ]),
     WorkflowModule,
     NotificationModule,

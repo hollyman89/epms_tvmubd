@@ -26,7 +26,6 @@ import { ProjectRiskStatus } from "../../entities/project-risk.entity";
 import { ProjectIssueStatus } from "../../entities/project-issue.entity";
 import { AuditLog } from "../../entities/audit-log.entity";
 import { OutboxEvent, OutboxStatus } from "../../entities/outbox-event.entity";
-import { randomUUID } from "crypto";
 import {
   ClosureBlocker,
   ClosureWarning,
@@ -1124,7 +1123,7 @@ export class ProjectClosureService {
 
       // 8. OutboxEvent (Section 8 & 10)
       const outbox = manager.create(OutboxEvent, {
-        event_id: randomUUID(),
+        event_id: `proj-closure-sub-${savedClosure.id}-c${cycleNumber}`,
         event_name: "project.closure.submitted",
         event_version: "1.0",
         aggregate_type: "ProjectClosure",
@@ -1307,7 +1306,7 @@ export class ProjectClosureService {
 
       // 7. OutboxEvent (Section 8 & 10)
       const outbox = manager.create(OutboxEvent, {
-        event_id: randomUUID(),
+        event_id: `proj-closure-hoo-app-${savedClosure.id}-c${savedClosure.cycleNumber}`,
         event_name: "project.closure.hoo.approved",
         event_version: "1.0",
         aggregate_type: "ProjectClosure",
@@ -1474,7 +1473,7 @@ export class ProjectClosureService {
 
       // 6. OutboxEvent (Section 8 & 10)
       const outbox = manager.create(OutboxEvent, {
-        event_id: randomUUID(),
+        event_id: `proj-closure-hoo-ret-${savedClosure.id}-c${savedClosure.cycleNumber}`,
         event_name: "project.closure.hoo.returned",
         event_version: "1.0",
         aggregate_type: "ProjectClosure",
@@ -1687,7 +1686,7 @@ export class ProjectClosureService {
 
       // 8. OutboxEvent (Section 8 & 10)
       const outbox = manager.create(OutboxEvent, {
-        event_id: randomUUID(),
+        event_id: `proj-closure-dir-app-${savedClosure.id}-c${savedClosure.cycleNumber}`,
         event_name: "project.closure.director.approved",
         event_version: "1.0",
         aggregate_type: "ProjectClosure",
@@ -1862,7 +1861,7 @@ export class ProjectClosureService {
 
       // 6. OutboxEvent (Section 8 & 10)
       const outbox = manager.create(OutboxEvent, {
-        event_id: randomUUID(),
+        event_id: `proj-closure-dir-ret-${savedClosure.id}-c${savedClosure.cycleNumber}`,
         event_name: "project.closure.director.returned",
         event_version: "1.0",
         aggregate_type: "ProjectClosure",

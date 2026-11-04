@@ -116,6 +116,7 @@ export class CanonicalNotificationWriter {
             body: input.message.trim(),
             type: input.type,
             actionTarget: input.actionTarget || '',
+            actionLink: input.actionTarget || '',
             tag: `${cleanPurpose.toLowerCase()}-${cleanEventId}`,
             metaData: input.metaData || {},
           };

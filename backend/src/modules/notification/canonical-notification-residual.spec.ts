@@ -933,13 +933,13 @@ describe('Phase N8.1: Residual Legacy Producer Canonical Notification Specs', ()
     });
   });
 
-  describe('11. Non-Bell Invariant Verification', () => {
-    it('finance.invoice.created has NO Bell handler in CanonicalNotificationConsumer', () => {
-      expect((consumer as any).handleFinanceInvoiceCreated).toBeUndefined();
+  describe('11. Non-Bell Invariant Verification & Canonical Coverage', () => {
+    it('finance.invoice.created has canonical Bell handler in CanonicalNotificationConsumer (Phase 1.6)', () => {
+      expect(typeof (consumer as any).handleFinanceInvoiceCreated).toBe('function');
     });
 
-    it('procurement.package.submitted has NO Bell handler in CanonicalNotificationConsumer', () => {
-      expect((consumer as any).handleProcurementPackageSubmitted).toBeUndefined();
+    it('procurement.package.submitted has canonical Bell handler in CanonicalNotificationConsumer (Phase 1.6)', () => {
+      expect(typeof (consumer as any).handleProcurementPackageSubmitted).toBe('function');
     });
 
     it('procurement.package.canceled has NO Bell handler in CanonicalNotificationConsumer', () => {

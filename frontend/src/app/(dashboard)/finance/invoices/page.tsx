@@ -285,7 +285,7 @@ function InvoicesPageContent() {
   const urlTab = searchParams?.get('tab');
   const urlPoId = searchParams?.get('poId');
   const urlPaymentTermId = searchParams?.get('paymentTermId');
-  const urlServiceClaimId = searchParams?.get('serviceClaimId');
+  const urlServiceClaimId = searchParams?.get('serviceClaimId') || searchParams?.get('claimId');
 
   // Active Tab
   const [activeTabKey, setActiveTabKey] = useState<string>(urlTab || 'ready_pos');

@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { ConfigProvider } from 'antd';
 import { CANONICAL_FONT_FAMILY } from '@/constants/theme';
 import './globals.css';
@@ -10,7 +10,8 @@ export const metadata: Metadata = {
   manifest: '/manifest.json',
 };
 
-export const viewport = {
+export const viewport: Viewport = {
+  themeColor: '#0B2A45',
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,

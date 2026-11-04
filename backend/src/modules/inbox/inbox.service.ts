@@ -13,6 +13,9 @@ import { ProjectClosure, ProjectClosureStatus } from '../../entities/project-clo
 import { WorkflowTask, WorkflowTaskStatus } from '../../entities/workflow-task.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { Rfq } from '../../entities/rfq.entity';
+import { ProcurementPackage, ProcurementPackageStatus } from '../../entities/procurement-package.entity';
+import { Invoice } from '../../entities/invoice.entity';
+import { Project } from '../../entities/project.entity';
 import { TodoReadModelDto, InboxSummaryDto, HistoryItemDto } from './inbox.dto';
 import { evaluateMarketingActionItem } from '../marketing/marketing-action-item.predicate';
 
@@ -62,6 +65,15 @@ export class InboxService {
     private readonly rfqRepo?: Repository<Rfq>,
     @Optional()
     private readonly financeService?: FinanceService,
+    @Optional()
+    @InjectRepository(ProcurementPackage)
+    private readonly packageRepo?: Repository<ProcurementPackage>,
+    @Optional()
+    @InjectRepository(Invoice)
+    private readonly invoiceRepo?: Repository<Invoice>,
+    @Optional()
+    @InjectRepository(Project)
+    private readonly projectRepo?: Repository<Project>,
   ) {}
 
   /**
@@ -71,6 +83,7 @@ export class InboxService {
   async getTodos(userId: number, roles: string[] = []): Promise<TodoReadModelDto[]> {
     const todos: TodoReadModelDto[] = [];
     const normalizedRoles = roles.map((r) => String(r).toUpperCase());
+    const isSuperAdmin = normalizedRoles.includes('SUPER_ADMIN');
 
     // 1. Authoritative Workflow Tasks
     try {
@@ -441,6 +454,17 @@ export class InboxService {
         });
 
         for (const prq of pendingApprovalRequests) {
+          const hasMatchingWorkflowTask = todos.some(
+            (t) =>
+              t.sourceType === 'WORKFLOW_TASK' &&
+              (t.entityType === 'PEMBAYARAN' || t.entityType === 'PAYMENT_REQUEST') &&
+              Number(t.entityId) === Number(prq.id) &&
+              t.actionType === 'PAYMENT_REQUEST_APPROVAL',
+          );
+          if (hasMatchingWorkflowTask) {
+            continue;
+          }
+
           todos.push({
             todoId: `prq-${prq.id}`,
             sourceType: 'DOMAIN_PAYMENT_REQUEST',
@@ -482,10 +506,20 @@ export class InboxService {
 
         for (const prq of financeActionableRequests) {
           if (prq.status === PaymentRequestStatus.NEEDS_REVISION) {
+            const hasMatchingWfTask = todos.some(
+              (t) =>
+                t.sourceType === 'WORKFLOW_TASK' &&
+                (t.entityType === 'PEMBAYARAN' || t.entityType === 'PAYMENT_REQUEST') &&
+                Number(t.entityId) === Number(prq.id) &&
+                t.actionType === 'PAYMENT_REQUEST_REVISION',
+            );
+            if (hasMatchingWfTask) continue;
+
             todos.push({
               todoId: `prq-rev-${prq.id}`,
               sourceType: 'DOMAIN_PAYMENT_REQUEST',
               sourceId: String(prq.id),
+              assignedUserId: prq.requestedBy ? Number(prq.requestedBy) : undefined,
               assignedRole: 'FINANCE',
               entityType: 'PEMBAYARAN',
               entityId: Number(prq.id),
@@ -494,6 +528,7 @@ export class InboxService {
               title: `Revisi Pengajuan Pembayaran`,
               description: prq.revisionNotes ? `${prq.requestNumber}: ${prq.revisionNotes}` : `Revisi pengajuan pembayaran ${prq.requestNumber}`,
               status: prq.status,
+              ctaLabel: 'Perbaiki Pengajuan',
               createdAt: prq.returnedAt ? new Date(prq.returnedAt).toISOString() : new Date().toISOString(),
               projectName: prq.invoice?.purchaseOrder?.poNumber || undefined,
               customerName: prq.invoice?.purchaseOrder?.vendor?.name || undefined,
@@ -501,6 +536,15 @@ export class InboxService {
               returnReason: prq.revisionNotes || undefined,
             });
           } else if (prq.status === PaymentRequestStatus.APPROVED_FOR_PAYMENT) {
+            const hasMatchingWfTask = todos.some(
+              (t) =>
+                t.sourceType === 'WORKFLOW_TASK' &&
+                (t.entityType === 'PEMBAYARAN' || t.entityType === 'PAYMENT_REQUEST') &&
+                Number(t.entityId) === Number(prq.id) &&
+                t.actionType === 'PROCESS_PAYMENT',
+            );
+            if (hasMatchingWfTask) continue;
+
             todos.push({
               todoId: `prq-pay-${prq.id}`,
               sourceType: 'DOMAIN_PAYMENT_REQUEST',
@@ -513,6 +557,7 @@ export class InboxService {
               title: `Proses Pembayaran`,
               description: `Tagihan ${prq.requestNumber} (${prq.invoice?.invoiceNumber || ''}) siap diproses pembayaran setelah disetujui Direktur.`,
               status: prq.status,
+              ctaLabel: 'Bayar Tagihan',
               createdAt: prq.approvedAt ? new Date(prq.approvedAt).toISOString() : new Date().toISOString(),
               projectName: prq.invoice?.purchaseOrder?.poNumber || undefined,
               customerName: prq.invoice?.purchaseOrder?.vendor?.name || undefined,
@@ -632,7 +677,7 @@ export class InboxService {
       ['PROCUREMENT', 'PURCHASING'].includes(role),
     );
 
-    if (this.claimRepo) {
+    if (this.claimRepo && typeof this.claimRepo.find === 'function') {
       try {
         const actionableClaims = await this.claimRepo.find({
           where: {
@@ -665,8 +710,10 @@ export class InboxService {
               claim.project?.managerId !== undefined &&
               claim.project?.managerId !== null &&
               Number(claim.project.managerId) === Number(userId);
+            const isSubmitter = Number(claim.submittedBy) === Number(userId);
 
-            if (isAssignedPm) {
+            // Segregation of Duties: Submitter cannot perform PM technical verification of their own claim
+            if (isAssignedPm && !isSubmitter) {
               todos.push({
                 todoId: `service-claim-${claim.id}`,
                 sourceType: 'DOMAIN_SERVICE_CLAIM',
@@ -681,6 +728,7 @@ export class InboxService {
                 title: `Verifikasi Teknis Klaim Jasa #${claim.claimNumber}`,
                 description: `Klaim jasa senilai Rp ${Number(claim.totalClaimAmount || 0).toLocaleString('id-ID')} untuk PO #${poNumber} menunggu verifikasi teknis PM.`,
                 status: claim.status,
+                ctaLabel: 'Verifikasi Teknis',
                 createdAt: claim.submittedAt ? new Date(claim.submittedAt).toISOString() : (claim.createdAt ? new Date(claim.createdAt).toISOString() : new Date().toISOString()),
                 updatedAt: claim.updatedAt ? new Date(claim.updatedAt).toISOString() : undefined,
                 projectName,
@@ -703,6 +751,7 @@ export class InboxService {
               title: `Persetujuan Komersial Klaim Jasa #${claim.claimNumber}`,
               description: `Klaim jasa senilai Rp ${Number(claim.totalClaimAmount || 0).toLocaleString('id-ID')} untuk PO #${poNumber} telah diverifikasi PM dan menunggu persetujuan komersial.`,
               status: claim.status,
+              ctaLabel: 'Persetujuan Komersial',
               createdAt: claim.pmVerifiedAt ? new Date(claim.pmVerifiedAt).toISOString() : (claim.updatedAt ? new Date(claim.updatedAt).toISOString() : new Date().toISOString()),
               updatedAt: claim.updatedAt ? new Date(claim.updatedAt).toISOString() : undefined,
               projectName,
@@ -722,10 +771,13 @@ export class InboxService {
                 entityId: Number(claim.id),
                 projectId: Number(claim.projectId),
                 actionType: 'SERVICE_CLAIM_REVISION',
-                actionTarget: `/project-delivery?projectId=${claim.projectId}&serviceClaimId=${claim.id}`,
+                actionTarget: claim.poId
+                  ? `/procurement?tab=po&poId=${claim.poId}&claimId=${claim.id}&action=service-claim`
+                  : `/procurement?tab=po&claimId=${claim.id}&action=service-claim`,
                 title: `Revisi Klaim Jasa #${claim.claimNumber}`,
                 description: claim.notes || 'Klaim jasa memerlukan revisi.',
                 status: claim.status,
+                ctaLabel: 'Perbaiki Klaim',
                 createdAt: claim.updatedAt ? new Date(claim.updatedAt).toISOString() : new Date().toISOString(),
                 projectName,
                 returnReason: claim.notes || undefined,
@@ -746,7 +798,7 @@ export class InboxService {
       ['DIRECTOR'].includes(role),
     );
 
-    if (this.closureRepo) {
+    if (this.closureRepo && typeof this.closureRepo.find === 'function') {
       try {
         const allClosures = await this.closureRepo.find({
           relations: ['project', 'submittedBy', 'returnActor'],
@@ -917,9 +969,11 @@ export class InboxService {
     const isMarketingRole = normalizedRoles.some((role) => role === 'MARKETING');
     if (isMarketingRole) {
       try {
-        const actionableTenders = await this.tenderRepo
-          .createQueryBuilder('tender')
-          .leftJoinAndSelect('tender.customer', 'customer')
+        const qb = this.tenderRepo.createQueryBuilder('tender');
+        if (typeof qb.leftJoinAndSelect === 'function') {
+          qb.leftJoinAndSelect('tender.customer', 'customer');
+        }
+        const actionableTenders = await qb
           .where('tender.status NOT IN (:...terminalStatuses)', { terminalStatuses: ['WON', 'LOST'] })
           .andWhere('tender.stage NOT IN (:...terminalStages)', { terminalStages: ['WON', 'LOST'] })
           .andWhere(
@@ -1012,7 +1066,227 @@ export class InboxService {
       }
     }
 
-    // 10. Deterministic Ordering:
+    // 10. Authoritative Domain Queue: Procurement Packages (Procurement Review & PM Revision)
+    if (this.packageRepo && typeof this.packageRepo.find === 'function') {
+      try {
+        // 10.1 SUBMITTED -> Procurement / Purchasing Review
+        if (isProcurementUser || isSuperAdmin) {
+          const submittedPackages = await this.packageRepo.find({
+            where: { status: ProcurementPackageStatus.SUBMITTED },
+            relations: ['project', 'requester'],
+            order: { id: 'DESC' },
+          });
+
+          for (const pkg of submittedPackages) {
+            if (pkg.deletedAt) continue;
+
+            const hasMatchingWfTask = todos.some(
+              (t) =>
+                t.sourceType === 'WORKFLOW_TASK' &&
+                t.entityType === 'PROCUREMENT_PACKAGE' &&
+                Number(t.entityId) === Number(pkg.id),
+            );
+            if (hasMatchingWfTask) continue;
+
+            const projectName = pkg.project?.name || undefined;
+            todos.push({
+              todoId: `pkg-sub-${pkg.id}`,
+              sourceType: 'DOMAIN_PROCUREMENT_PACKAGE',
+              sourceId: String(pkg.id),
+              assignedRole: 'PROCUREMENT',
+              entityType: 'PROCUREMENT_PACKAGE',
+              entityId: Number(pkg.id),
+              projectId: pkg.projectId ? Number(pkg.projectId) : undefined,
+              actionType: 'REVIEW_PROCUREMENT_PACKAGE',
+              actionTarget: `/procurement?tab=packages&packageId=${pkg.id}`,
+              title: `Tinjau Paket Pengadaan: ${pkg.packageNumber}`,
+              description: `Paket pengadaan "${pkg.title}" senilai Rp ${Number(pkg.totalEstimatedAmount || 0).toLocaleString('id-ID')} telah diajukan PM dan siap ditinjau untuk pembuatan PR.`,
+              status: pkg.status,
+              priority: 'HIGH',
+              ctaLabel: 'Tinjau Paket',
+              monetaryExposure: pkg.totalEstimatedAmount ? Number(pkg.totalEstimatedAmount) : undefined,
+              businessReference: pkg.packageNumber,
+              createdAt: pkg.submittedAt ? new Date(pkg.submittedAt).toISOString() : (pkg.createdAt ? new Date(pkg.createdAt).toISOString() : new Date().toISOString()),
+              projectName,
+              submittedByName: pkg.requester?.fullName || undefined,
+            });
+          }
+        }
+
+        // 10.2 RETURNED -> Assigned PM / Submitter Revision
+        const isPmUser = normalizedRoles.some((role) => role === 'PROJECT_MANAGER');
+        if (isPmUser || isSuperAdmin) {
+          const returnedPackages = await this.packageRepo.find({
+            where: { status: ProcurementPackageStatus.RETURNED },
+            relations: ['project', 'reviewer'],
+            order: { id: 'DESC' },
+          });
+
+          for (const pkg of returnedPackages) {
+            if (pkg.deletedAt) continue;
+
+            const isAssignedPm =
+              pkg.project?.managerId !== undefined &&
+              pkg.project?.managerId !== null &&
+              Number(pkg.project.managerId) === Number(userId);
+            const isRequester = Number(pkg.requestedBy) === Number(userId);
+
+            if (!isSuperAdmin && !isAssignedPm && !isRequester) {
+              continue;
+            }
+
+            const hasMatchingWfTask = todos.some(
+              (t) =>
+                t.sourceType === 'WORKFLOW_TASK' &&
+                t.entityType === 'PROCUREMENT_PACKAGE' &&
+                Number(t.entityId) === Number(pkg.id),
+            );
+            if (hasMatchingWfTask) continue;
+
+            const projectName = pkg.project?.name || undefined;
+            todos.push({
+              todoId: `pkg-ret-${pkg.id}`,
+              sourceType: 'DOMAIN_PROCUREMENT_PACKAGE',
+              sourceId: String(pkg.id),
+              assignedUserId: pkg.requestedBy ? Number(pkg.requestedBy) : (pkg.project?.managerId ? Number(pkg.project.managerId) : undefined),
+              assignedRole: 'PROJECT_MANAGER',
+              entityType: 'PROCUREMENT_PACKAGE',
+              entityId: Number(pkg.id),
+              projectId: pkg.projectId ? Number(pkg.projectId) : undefined,
+              actionType: 'REVISE_PROCUREMENT_PACKAGE',
+              actionTarget: `/project-delivery?projectId=${pkg.projectId}`,
+              title: `Revisi Paket Pengadaan: ${pkg.packageNumber}`,
+              description: `Paket pengadaan "${pkg.title}" dikembalikan oleh tim Procurement. Alasan: ${pkg.rejectionNotes || 'Perlu perbaikan draf paket'}`,
+              status: pkg.status,
+              priority: 'HIGH',
+              ctaLabel: 'Perbaiki Paket',
+              monetaryExposure: pkg.totalEstimatedAmount ? Number(pkg.totalEstimatedAmount) : undefined,
+              businessReference: pkg.packageNumber,
+              createdAt: pkg.reviewedAt ? new Date(pkg.reviewedAt).toISOString() : (pkg.updatedAt ? new Date(pkg.updatedAt).toISOString() : new Date().toISOString()),
+              projectName,
+              returnedByName: pkg.reviewer?.fullName || undefined,
+              returnReason: pkg.rejectionNotes || undefined,
+            });
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch pending procurement packages: ${err.message}`, err.stack);
+      }
+    }
+
+    // 11. Authoritative Domain Queue: Invoice Verification (FINANCE)
+    if (this.invoiceRepo && typeof this.invoiceRepo.find === 'function' && (isFinance || isSuperAdmin)) {
+      try {
+        const pendingInvoices = await this.invoiceRepo.find({
+          where: {
+            matchStatus: In(['PENDING', 'MISMATCHED']),
+          },
+          relations: ['purchaseOrder', 'purchaseOrder.vendor', 'purchaseOrder.purchaseRequest', 'purchaseOrder.purchaseRequest.project'],
+          order: { id: 'DESC' },
+        });
+
+        for (const inv of pendingInvoices) {
+          if (inv.deletedAt || inv.status === 'CANCELLED' || inv.matchStatus === 'VERIFIED' || inv.matchStatus === 'REJECTED') {
+            continue;
+          }
+
+          const hasMatchingWfTask = todos.some(
+            (t) =>
+              t.sourceType === 'WORKFLOW_TASK' &&
+              t.entityType === 'INVOICE' &&
+              Number(t.entityId) === Number(inv.id),
+          );
+          if (hasMatchingWfTask) continue;
+
+          const poNumber = inv.purchaseOrder?.poNumber || String(inv.poId);
+          const projectName = inv.purchaseOrder?.purchaseRequest?.project?.name || undefined;
+          const projectId = inv.purchaseOrder?.purchaseRequest?.projectId || undefined;
+          const vendorName = inv.purchaseOrder?.vendor?.name || undefined;
+
+          todos.push({
+            todoId: `domain-inv-${inv.id}`,
+            sourceType: 'DOMAIN_INVOICE',
+            sourceId: String(inv.id),
+            assignedRole: 'FINANCE',
+            entityType: 'INVOICE',
+            entityId: Number(inv.id),
+            projectId,
+            projectName,
+            customerName: vendorName,
+            actionType: 'VERIFY_INVOICE',
+            actionTarget: `/finance/invoices?tab=invoices_list&invoiceId=${inv.id}`,
+            title: `Verifikasi Tagihan: ${inv.invoiceNumber}`,
+            description: `Faktur tagihan ${inv.invoiceNumber} senilai Rp ${Number(inv.totalAmount || 0).toLocaleString('id-ID')} untuk PO #${poNumber} memerlukan verifikasi 3-Way Match.`,
+            status: inv.matchStatus || 'PENDING',
+            priority: 'HIGH',
+            ctaLabel: 'Verifikasi Tagihan',
+            monetaryExposure: inv.totalAmount ? Number(inv.totalAmount) : undefined,
+            businessReference: inv.invoiceNumber,
+            createdAt: inv.createdAt ? new Date(inv.createdAt).toISOString() : new Date().toISOString(),
+          });
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch pending invoices for verification: ${err.message}`, err.stack);
+      }
+    }
+
+    // 12. Authoritative Domain Queue: Ready-for-Kickoff (PROJECT_MANAGER)
+    const isPmUser = normalizedRoles.some((role) => role === 'PROJECT_MANAGER');
+    if (this.projectRepo && typeof this.projectRepo.createQueryBuilder === 'function' && (isPmUser || isSuperAdmin)) {
+      try {
+        const query = this.projectRepo
+          .createQueryBuilder('p')
+          .leftJoin('workflow_instances', 'wi', 'wi.entity_type = :entityType AND wi.entity_id = p.id', { entityType: 'PROJECT' })
+          .leftJoin('project_management_reviews', 'pmr', 'pmr.project_id = p.id AND pmr.deleted_at IS NULL')
+          .where('p.status = :status', { status: 'PLANNING' })
+          .andWhere('p.deleted_at IS NULL')
+          .andWhere(
+            '(wi.status = :wfCompleted OR wi.current_node_id = :wfEnd OR (wi.id IS NULL AND pmr.status = :pmrReady))',
+            { wfCompleted: 'COMPLETED', wfEnd: 'node_end', pmrReady: 'READY_FOR_KICKOFF' },
+          );
+
+        if (!isSuperAdmin) {
+          query.andWhere('p.manager_id = :userId', { userId });
+        }
+
+        const readyProjects = await query.orderBy('p.id', 'DESC').getMany();
+
+        for (const proj of readyProjects) {
+          const hasMatchingWfTask = todos.some(
+            (t) =>
+              t.sourceType === 'WORKFLOW_TASK' &&
+              t.entityType === 'PROJECT' &&
+              Number(t.entityId) === Number(proj.id),
+          );
+          if (hasMatchingWfTask) continue;
+
+          todos.push({
+            todoId: `project-kickoff-${proj.id}`,
+            sourceType: 'DOMAIN_PROJECT',
+            sourceId: String(proj.id),
+            assignedUserId: proj.managerId ? Number(proj.managerId) : undefined,
+            assignedRole: 'PROJECT_MANAGER',
+            entityType: 'PROJECT',
+            entityId: Number(proj.id),
+            projectId: Number(proj.id),
+            projectName: proj.name,
+            actionType: 'EXECUTE_KICKOFF',
+            actionTarget: `/project-delivery?projectId=${proj.id}&action=kickoff`,
+            title: `Eksekusi Kick-Off Proyek: ${proj.name}`,
+            description: `Rencana operasional proyek telah disetujui secara final. Silakan lakukan Formal Kick-Off untuk memulai eksekusi proyek.`,
+            status: 'READY_FOR_KICKOFF',
+            priority: 'HIGH',
+            ctaLabel: 'Formal Kick-Off',
+            businessReference: proj.code || proj.name,
+            createdAt: proj.updatedAt ? new Date(proj.updatedAt).toISOString() : (proj.createdAt ? new Date(proj.createdAt).toISOString() : new Date().toISOString()),
+          });
+        }
+      } catch (err: any) {
+        this.logger.error(`Failed to fetch ready-for-kickoff projects: ${err.message}`, err.stack);
+      }
+    }
+
+    // 13. Deterministic Ordering:
     // 1st: Overdue tasks (dueAt < now, earliest dueAt first)
     // 2nd: Upcoming due dates (dueAt >= now, earliest dueAt first)
     // 3rd: Newest createdAt (newest created first)

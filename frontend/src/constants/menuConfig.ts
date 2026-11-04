@@ -204,7 +204,7 @@ export const MENU_GROUPS: MenuGroupConfig[] = [
       },
       {
         key: '/inbox',
-        label: 'Pusat Aktivitas',
+        label: 'Activity Center',
         path: '/inbox',
         iconName: 'MailOutlined',
         allowedRoles: ['SUPER_ADMIN', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'PROJECT_MANAGER', 'PMO', 'FINANCE', 'DIRECTOR', 'MANAGER', 'PROCUREMENT', 'PURCHASING', 'LEGAL', 'MARKETING'],

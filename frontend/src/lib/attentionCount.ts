@@ -7,6 +7,22 @@ export interface NotificationLike {
   metaData?: any;
 }
 
+export function parseNumericId(val: any): number | null {
+  if (val === null || val === undefined || val === '') return null;
+  if (typeof val === 'number' && !isNaN(val)) return val;
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    const match = trimmed.match(/^(?:TENDER|CONTRACT|LEAD|TASK|PAYMENT|CLAIM)[:\-_]?\s*(\d+)$/i);
+    if (match) {
+      const n = parseInt(match[1], 10);
+      return !isNaN(n) ? n : null;
+    }
+    const n = parseInt(trimmed, 10);
+    return !isNaN(n) ? n : null;
+  }
+  return null;
+}
+
 /**
  * Pure predicate to determine if an unread notification represents the exact
  * same actionable business event as an item in the user's To-Do list.
@@ -70,11 +86,15 @@ export function isNotificationDuplicateOfTodo(
       }
 
       // Rule 4: Domain specific matching
+      const todoEntityNum = parseNumericId(todo.entityId);
+
+      const rawContractId = meta.contractId ?? (refType === 'CONTRACT' ? meta.reference_id : null);
+      const contractNum = parseNumericId(rawContractId);
       if (
-        meta.contractId !== undefined &&
-        meta.contractId !== null &&
+        contractNum !== null &&
         todo.entityType === 'CONTRACT' &&
-        Number(meta.contractId) === Number(todo.entityId)
+        todoEntityNum !== null &&
+        contractNum === todoEntityNum
       ) {
         return true;
       }
@@ -83,16 +103,19 @@ export function isNotificationDuplicateOfTodo(
         meta.paymentRequestId !== undefined &&
         meta.paymentRequestId !== null &&
         todo.entityType === 'PAYMENT_REQUEST' &&
-        Number(meta.paymentRequestId) === Number(todo.entityId)
+        todoEntityNum !== null &&
+        Number(meta.paymentRequestId) === todoEntityNum
       ) {
         return true;
       }
 
+      const rawTenderId = meta.tenderId ?? (refType === 'TENDER' ? meta.reference_id : null);
+      const tenderNum = parseNumericId(rawTenderId);
       if (
-        meta.tenderId !== undefined &&
-        meta.tenderId !== null &&
+        tenderNum !== null &&
         todo.entityType === 'TENDER' &&
-        Number(meta.tenderId) === Number(todo.entityId)
+        todoEntityNum !== null &&
+        tenderNum === todoEntityNum
       ) {
         return true;
       }
@@ -118,6 +141,41 @@ export function isNotificationDuplicateOfTodo(
         if (
           (todo.entityType === 'PROJECT_CLOSURE' || todo.sourceType === 'DOMAIN_PROJECT_CLOSURE') &&
           Number(closureId) === Number(todo.entityId)
+        ) {
+          return true;
+        }
+      }
+
+      if (
+        (meta.packageId !== undefined && meta.packageId !== null) ||
+        (meta.procurementPackageId !== undefined && meta.procurementPackageId !== null)
+      ) {
+        const pkgId = meta.packageId ?? meta.procurementPackageId;
+        if (
+          (todo.entityType === 'PROCUREMENT_PACKAGE' || todo.sourceType === 'DOMAIN_PROCUREMENT_PACKAGE') &&
+          Number(pkgId) === Number(todo.entityId)
+        ) {
+          return true;
+        }
+      }
+
+      if (meta.invoiceId !== undefined && meta.invoiceId !== null) {
+        if (
+          (todo.entityType === 'INVOICE' || todo.sourceType === 'DOMAIN_INVOICE') &&
+          Number(meta.invoiceId) === Number(todo.entityId)
+        ) {
+          return true;
+        }
+      }
+
+      if (
+        (meta.progressClaimId !== undefined && meta.progressClaimId !== null) ||
+        (refType === 'PROJECT_PROGRESS_CLAIM' && meta.reference_id !== undefined && meta.reference_id !== null)
+      ) {
+        const claimId = meta.progressClaimId ?? meta.reference_id;
+        if (
+          (todo.entityType === 'PROJECT_PROGRESS_CLAIM' || todo.sourceType === 'DOMAIN_PROGRESS_CLAIM') &&
+          Number(claimId) === Number(todo.entityId)
         ) {
           return true;
         }

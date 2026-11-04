@@ -25,6 +25,9 @@ export class GoodsReceipt {
   @Column({ type: 'text', nullable: true })
   remarks: string;
 
+  @Column({ name: 'delivery_note_number', type: 'varchar', length: 100, nullable: true })
+  deliveryNoteNumber?: string;
+
   @Column({ name: 'created_by', nullable: true })
   createdBy: number;
 

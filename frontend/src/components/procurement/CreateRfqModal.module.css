@@ -1,0 +1,352 @@
+/* EPMS — CREATE RFQ MODAL RESPONSIVE CSS MODULE */
+
+.rfqModal :global(.ant-modal) {
+  max-width: 100vw;
+}
+
+.modalBody {
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Ensure flex children do not get squeezed/collapsed when modal content overflows */
+.modalBody > * {
+  flex-shrink: 0;
+}
+
+.headerContainer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-right: 24px;
+}
+
+.headerIcon {
+  padding: 6px 10px;
+  background: #ecfdf5;
+  border-radius: 8px;
+  color: #059669;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.headerTextGroup {
+  min-width: 0;
+  flex: 1;
+}
+
+.headerTitle {
+  font-weight: 700;
+  font-size: 15px;
+  color: #0f172a;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.headerSubtitle {
+  font-size: 11px;
+  color: #64748b;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  display: block;
+  margin-top: 2px;
+}
+
+/* ── RFQ ITEM TABLE CONTAINER ── */
+.itemSectionWrapper {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.itemSectionHeader {
+  padding: 8px 12px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.itemSectionTitle {
+  font-weight: 700;
+  font-size: 12px;
+  color: #334155;
+  word-break: break-word;
+}
+
+/* ── DESKTOP TABLE VIEW ── */
+.desktopTableView {
+  display: block;
+}
+
+.tableContainer {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+.tableContainer :global(.ant-table-thead > tr > th) {
+  padding: 8px 10px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #475569 !important;
+  background: #f8fafc !important;
+  white-space: nowrap !important;
+  line-height: 1.4 !important;
+}
+
+.tableContainer :global(.ant-table-tbody > tr > td) {
+  padding: 8px 10px !important;
+  vertical-align: middle !important;
+  line-height: 1.4 !important;
+}
+
+/* ── MOBILE CARD VIEW ── */
+.mobileCardView {
+  display: none;
+}
+
+.rfqItemCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  height: auto;
+  min-height: fit-content;
+  overflow: visible;
+}
+
+.rfqItemCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.rfqItemTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.rfqRouteDetails {
+  font-size: 11.5px;
+  color: #475569;
+  margin-top: 4px;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+}
+
+.rfqItemCategoryRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.rfqItemGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+  padding: 8px 10px;
+  border: 1px solid #f1f5f9;
+}
+
+.rfqItemField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.rfqItemFieldFull {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+  flex-wrap: wrap;
+}
+
+.rfqFieldLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.rfqFieldValue {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+
+.rfqFieldValueHighlight {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #059669;
+  font-family: monospace;
+  word-break: break-word;
+}
+
+/* ── FOOTER CONTAINER ── */
+.footerContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.footerLeft {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.footerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* ── RESPONSIVE MOBILE BREAKPOINTS ── */
+@media (max-width: 640px) {
+  .rfqModal :global(.ant-modal) {
+    top: 10px !important;
+    margin: 0 auto !important;
+    padding-bottom: 10px !important;
+  }
+
+  .rfqModal :global(.ant-modal-content) {
+    padding: 14px 12px 10px 12px !important;
+    max-height: calc(100dvh - 20px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .rfqModal :global(.ant-modal-header) {
+    margin-bottom: 8px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .rfqModal :global(.ant-modal-body) {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+  }
+
+  .rfqModal :global(.ant-modal-footer) {
+    margin-top: 6px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .modalBody {
+    max-height: calc(100dvh - 225px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 24px;
+    padding-right: 4px;
+    gap: 10px;
+  }
+
+  .itemSectionWrapper {
+    overflow: visible;
+  }
+
+  .desktopTableView {
+    display: none;
+  }
+
+  /* Single natural card container: no nested scrolling, no height clipping */
+  .mobileCardView {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    background: #f8fafc;
+    max-height: none;
+    overflow: visible;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .footerContainer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .footerLeft {
+    justify-content: center;
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .footerActions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-left: 0;
+    gap: 8px;
+  }
+
+  .footerActions > * {
+    flex: 1 1 auto;
+    min-width: 80px;
+  }
+}
+
+@media (max-width: 360px) {
+  .modalBody {
+    max-height: calc(100dvh - 235px);
+    gap: 8px;
+  }
+
+  .headerTitle {
+    font-size: 13.5px;
+  }
+
+  .headerSubtitle {
+    font-size: 10px;
+  }
+
+  .rfqItemGrid {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  .rfqFieldValueHighlight {
+    font-size: 12.5px;
+  }
+}

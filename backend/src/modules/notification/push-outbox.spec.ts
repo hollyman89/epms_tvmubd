@@ -306,6 +306,7 @@ describe('Stage 3A: Backend Push Foundation & Transactional Outbox (AC-OUTBOX-01
         body: 'Vendor PT Maju mengajukan klaim SC-2026-001',
         type: 'ALERT',
         actionTarget: '/procurement/service-claims/1',
+        actionLink: '/procurement/service-claims/1',
         tag: 'service_claim_submitted-evt-claim-101',
         metaData: {},
       });

@@ -1,0 +1,459 @@
+/* EPMS — VENDOR COMPARISON MODAL RESPONSIVE CSS MODULE */
+
+.comparisonModal :global(.ant-modal) {
+  max-width: 100vw;
+}
+
+.modalBody {
+  max-height: calc(100vh - 180px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 24px;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Ensure flex children maintain natural height and do not collapse */
+.modalBody > * {
+  flex-shrink: 0;
+}
+
+/* ── HEADER CONTAINER ── */
+.headerContainer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-right: 24px;
+}
+
+.headerIcon {
+  padding: 6px 10px;
+  background: #eff6ff;
+  border-radius: 8px;
+  color: #1d4ed8;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.headerTextGroup {
+  min-width: 0;
+  flex: 1;
+}
+
+.headerTitle {
+  font-weight: 700;
+  font-size: 15px;
+  color: #0f172a;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.headerSubtitle {
+  font-size: 11px;
+  color: #64748b;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  display: block;
+  margin-top: 2px;
+}
+
+/* ── CONTEXT STRIP ── */
+.contextStrip {
+  background: #f8fafc;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+/* ── RECOMMENDATION STRIP ── */
+.recommendationStrip {
+  background: #f0fdf4;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #bbf7d0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recommendationTags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── SECTION CONTAINERS ── */
+.sectionWrapper {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.sectionHeader {
+  padding: 8px 12px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sectionTitle {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #334155;
+  word-break: break-word;
+}
+
+/* ── DESKTOP SUMMARY TABLE ── */
+.desktopSummaryTable {
+  display: block;
+}
+
+.desktopSummaryTable :global(.ant-table-thead > tr > th) {
+  padding: 8px 10px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #475569 !important;
+  background: #f8fafc !important;
+  white-space: nowrap !important;
+}
+
+.desktopSummaryTable :global(.ant-table-tbody > tr > td) {
+  padding: 8px 10px !important;
+  vertical-align: middle !important;
+}
+
+/* ── MOBILE VENDOR CARDS VIEW (Section 1) ── */
+.mobileVendorCardView {
+  display: none;
+}
+
+.vendorCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vendorCardSelected {
+  border: 2px solid #2563eb !important;
+  background: #f8faff !important;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.12) !important;
+}
+
+.vendorCardWinner {
+  border: 2px solid #059669 !important;
+  background: #f0fdf4 !important;
+  box-shadow: 0 2px 6px rgba(5, 150, 105, 0.12) !important;
+}
+
+.vendorCardTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.vendorCardRadioArea {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vendorCardName {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.vendorCardBadgeRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.vendorCommercialGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 12px;
+  background: #f8fafc;
+  border-radius: 6px;
+  padding: 8px 10px;
+  border: 1px solid #f1f5f9;
+}
+
+.vendorCardField {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.vendorCardFieldFull {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+}
+
+.vendorFieldLabel {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.vendorFieldValue {
+  font-size: 12px;
+  font-weight: 600;
+  color: #1e293b;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  min-width: 0;
+}
+
+.vendorPriceHighlight {
+  font-size: 13.5px;
+  font-weight: 800;
+  color: #0f172a;
+  font-family: monospace;
+  word-break: break-word;
+}
+
+.vendorNotesBox {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.35;
+  background: #ffffff;
+  padding: 6px 8px;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* ── MATRIX TABLE (Section 2) ── */
+.matrixTableContainer {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+.scrollHintStrip {
+  display: none;
+  padding: 4px 10px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 10.5px;
+  color: #64748b;
+  text-align: center;
+}
+
+.matrixTableContainer :global(.ant-table-thead > tr > th) {
+  padding: 8px 8px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #475569 !important;
+  background: #f8fafc !important;
+  white-space: nowrap !important;
+}
+
+.matrixTableContainer :global(.ant-table-tbody > tr > td) {
+  padding: 6px 8px !important;
+  vertical-align: middle !important;
+}
+
+/* ── FOOTER CONTAINER ── */
+.footerContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.footerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.footerActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+/* ── MOBILE BREAKPOINTS ── */
+@media (max-width: 640px) {
+  .comparisonModal :global(.ant-modal) {
+    top: 10px !important;
+    margin: 0 auto !important;
+    padding-bottom: 10px !important;
+  }
+
+  .comparisonModal :global(.ant-modal-content) {
+    padding: 14px 12px 10px 12px !important;
+    max-height: calc(100dvh - 20px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .comparisonModal :global(.ant-modal-header) {
+    margin-bottom: 8px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .comparisonModal :global(.ant-modal-body) {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    padding: 6px 8px !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .comparisonModal :global(.ant-modal-footer) {
+    margin-top: 6px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .modalBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100dvh - 240px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 24px;
+    padding-right: 4px;
+    gap: 10px;
+  }
+
+  .desktopSummaryTable {
+    display: none;
+  }
+
+  .mobileVendorCardView {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    background: #f8fafc;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .scrollHintStrip {
+    display: block;
+  }
+
+  .footerContainer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .footerLeft {
+    justify-content: center;
+    font-size: 11px;
+    text-align: center;
+  }
+
+  .footerActions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-left: 0;
+    gap: 8px;
+  }
+
+  .footerActions > * {
+    flex: 1 1 auto;
+    min-width: 80px;
+  }
+}
+
+@media (max-width: 360px) {
+  .modalBody {
+    max-height: calc(100dvh - 270px);
+    padding-bottom: 28px;
+    gap: 8px;
+  }
+
+  .headerTitle {
+    font-size: 13.5px;
+  }
+
+  .headerSubtitle {
+    font-size: 10px;
+  }
+
+  .vendorCommercialGrid {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  .vendorPriceHighlight {
+    font-size: 12.5px;
+  }
+}
+
+/* ── SECTION 3: EVALUATION NOTES ── */
+.evaluationNotesContainer {
+  margin-top: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.evaluationNotesTextarea {
+  border-radius: 6px !important;
+  font-size: 13px !important;
+  line-height: 1.45 !important;
+  padding: 8px 10px !important;
+  min-height: 64px !important;
+  touch-action: manipulation;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.evaluationNotesTextarea:focus {
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15) !important;
+}
+
+@media (max-width: 360px) {
+  .evaluationNotesTextarea {
+    font-size: 12.5px !important;
+    min-height: 58px !important;
+  }
+}
+

@@ -139,7 +139,8 @@ export const DirectorApprovalModal: React.FC<DirectorApprovalModalProps> = ({
         setActionType('NONE');
         onClose();
       }}
-      width={800}
+      width="min(800px, calc(100vw - 24px))"
+      style={{ maxWidth: '100vw' }}
       title={
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, paddingBottom: 4 }}>
           <div
@@ -158,11 +159,11 @@ export const DirectorApprovalModal: React.FC<DirectorApprovalModalProps> = ({
           >
             <FileProtectOutlined style={{ color: '#1d4ed8', fontSize: 18 }} />
           </div>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', lineHeight: 1.3 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', lineHeight: 1.3, wordBreak: 'break-word' }}>
               Review & Persetujuan Pembayaran (Direktur)
             </div>
-            <div style={{ fontSize: 13, color: '#64748b', fontWeight: 400, marginTop: 2 }}>
+            <div style={{ fontSize: 13, color: '#64748b', fontWeight: 400, marginTop: 2, wordBreak: 'break-word' }}>
               Tinjau pengajuan pembayaran sebelum memberikan keputusan
             </div>
           </div>
@@ -415,7 +416,7 @@ export const DirectorApprovalModal: React.FC<DirectorApprovalModalProps> = ({
                 flexWrap: 'wrap',
               }}
             >
-              <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 <Button
                   danger
                   icon={<CloseCircleOutlined />}
@@ -490,7 +491,7 @@ export const DirectorApprovalModal: React.FC<DirectorApprovalModalProps> = ({
               id="input-director-return-notes"
               style={{ marginTop: 8, marginBottom: 12, borderRadius: 6 }}
             />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
               <Button onClick={() => setActionType('NONE')} disabled={loading}>
                 Batal
               </Button>
@@ -525,7 +526,7 @@ export const DirectorApprovalModal: React.FC<DirectorApprovalModalProps> = ({
               id="input-director-reject-reason"
               style={{ marginTop: 8, marginBottom: 12, borderRadius: 6 }}
             />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
               <Button onClick={() => setActionType('NONE')} disabled={loading}>
                 Batal
               </Button>

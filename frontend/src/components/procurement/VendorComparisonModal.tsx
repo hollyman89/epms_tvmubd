@@ -40,6 +40,7 @@ import {
   PurchaseOrderModal,
   PurchaseOrderPrototypeRecord,
 } from '@/components/procurement/PurchaseOrderModal';
+import styles from './VendorComparisonModal.module.css';
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -93,8 +94,8 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
   isSuperAdmin = false,
 }) => {
   const queryClient = useQueryClient();
-  const [selectedWinnerId, setSelectedWinnerId] = useState<number | null>(null);
-  const [evaluationNotes, setEvaluationNotes] = useState<string>('');
+  const [selectedWinnerId, setSelectedWinnerId] = useState<number | null>(() => existingComparison?.selectedWinnerVendorId ?? null);
+  const [evaluationNotes, setEvaluationNotes] = useState<string>(() => existingComparison?.evaluationNotes || '');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [isPoModalOpen, setIsPoModalOpen] = useState<boolean>(false);
   const [poVersion, setPoVersion] = useState<number>(0);
@@ -121,6 +122,7 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
 
   const isEvaluated = Boolean(existingComparison);
   const isPoIssued = Boolean(currentPo);
+  const canEditNotes = (isProcurement || isSuperAdmin) && !isPoIssued;
 
   useEffect(() => {
     if (effectiveOpen) {
@@ -144,7 +146,7 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
       const totalOfferedAmount = Number(q.totalOfferedAmount ?? q.totalAmount ?? 0);
       const quotationId = q.quotationId ? String(q.quotationId) : String(q.id || '');
       const leadTimeDays = q.leadTimeDays != null && !isNaN(Number(q.leadTimeDays)) ? Number(q.leadTimeDays) : undefined;
-      const notes = q.notes || '';
+      const notes = q.vendorNotes || (q as any).notes || '';
       const items = Array.isArray(q.items) ? q.items : [];
       const key = vendorId || vendorCode;
       map.set(key, {
@@ -155,7 +157,7 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
         vendorName,
         totalOfferedAmount,
         leadTimeDays,
-        notes,
+        vendorNotes: notes,
         items,
       });
     });
@@ -400,25 +402,20 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
 
   return (
     <Modal
+      className={styles.comparisonModal || 'comparisonModal'}
+      rootClassName={styles.comparisonModal || 'comparisonModal'}
+      data-testid="vendor-comparison-modal"
       open={effectiveOpen}
       onCancel={onClose}
-      width="min(1180px, 96vw)"
+      width="min(1180px, calc(100vw - 24px))"
+      style={{ maxWidth: '100vw' }}
       centered
       destroyOnClose
       footer={
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            width: '100%',
-            flexWrap: 'wrap',
-            gap: 8,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 16 }} />
-            <Text style={{ fontSize: 12 }}>
+        <div className={styles.footerContainer} data-testid="comparison-footer-container">
+          <div className={styles.footerLeft} data-testid="comparison-footer-left">
+            <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 16, flexShrink: 0 }} />
+            <Text style={{ fontSize: 12, wordBreak: 'break-word' }}>
               {isEvaluated ? (
                 <span>
                   Hasil Evaluasi Tersimpan — Pemenang: <strong>{existingComparison?.selectedWinnerVendorName}</strong>
@@ -434,7 +431,7 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
             </Text>
           </div>
 
-          <Space size={8}>
+          <div className={styles.footerActions} data-testid="comparison-footer-actions">
             <Button onClick={onClose} style={{ borderRadius: 6 }}>
               {isEvaluated ? 'Tutup' : 'Batal'}
             </Button>
@@ -488,26 +485,26 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
                 Tetapkan Pemenang Evaluasi
               </Button>
             )}
-          </Space>
+          </div>
         </div>
       }
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 24 }}>
-          <div style={{ padding: '6px 10px', background: '#eff6ff', borderRadius: 8, color: '#1d4ed8' }}>
+        <div className={styles.headerContainer}>
+          <div className={styles.headerIcon}>
             <SlidersOutlined style={{ fontSize: 18 }} />
           </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
+          <div className={styles.headerTextGroup}>
+            <div className={styles.headerTitle}>
               Evaluasi & Perbandingan Vendor — {effectiveRfq.rfqNumber}
             </div>
-            <Text type="secondary" style={{ fontSize: 11, color: '#64748b' }}>
+            <Text type="secondary" className={styles.headerSubtitle}>
               Komparasi komersial dan lead time untuk penetapan satu vendor pemenang pengadaan
             </Text>
           </div>
         </div>
       }
     >
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className={styles.modalBody}>
         {/* Evaluated Result Banner */}
         {isEvaluated && existingComparison && (
           <Alert
@@ -545,7 +542,7 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
         )}
 
         {/* Header Project & Plafon Reference Context */}
-        <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+        <div className={styles.contextStrip}>
           <Row gutter={[12, 8]} align="middle">
             <Col xs={24} sm={6}>
               <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>PROYEK:</Text>
@@ -597,8 +594,8 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
 
         {/* Informational Recommendation Strip */}
         {isEligible && (
-          <div style={{ background: '#f0fdf4', padding: '8px 12px', borderRadius: 6, border: '1px solid #bbf7d0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div className={styles.recommendationStrip}>
+            <div className={styles.recommendationTags}>
               <span style={{ fontWeight: 700, fontSize: 11.5, color: '#166534' }}>
                 Indikator Rekomendasi Sistem:
               </span>
@@ -652,249 +649,379 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
         )}
 
         {/* SECTION 1: Summary Comparison Table with Winner Selection */}
-        <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 12px', background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontWeight: 700, fontSize: 12.5, color: '#334155' }}>
+        <div className={styles.sectionWrapper}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionTitle}>
               1. Ringkasan Komparasi Penawaran & Penetapan Pemenang (Pilih Tepat 1)
             </span>
             <Tag color="geekblue" style={{ fontSize: 10, margin: 0 }}>
               SINGLE WINNER POLICY
             </Tag>
           </div>
-          <Table
-            size="small"
-            rowKey="vendorId"
-            dataSource={uniqueQuotations}
-            pagination={false}
-            columns={[
-              {
-                title: 'Pilih Pemenang',
-                key: 'selection',
-                width: 110,
-                align: 'center' as const,
-                render: (_: any, q: VendorQuotationRecord) => {
-                  const isSelected = selectedWinnerId === q.vendorId;
-                  return (
-                    <Radio
-                      checked={isSelected}
-                      disabled={isEvaluated}
-                      onChange={() => setSelectedWinnerId(q.vendorId)}
-                    >
-                      {isSelected ? <strong style={{ color: '#1d4ed8' }}>Pemenang</strong> : 'Pilih'}
-                    </Radio>
-                  );
+
+          {/* Desktop Summary Table View (screens > 640px) */}
+          <div className={styles.desktopSummaryTable} data-testid="comparison-desktop-table">
+            <Table
+              size="small"
+              rowKey="vendorId"
+              dataSource={uniqueQuotations}
+              pagination={false}
+              scroll={{ x: 720 }}
+              columns={[
+                {
+                  title: 'Pilih Pemenang',
+                  key: 'selection',
+                  width: 110,
+                  align: 'center' as const,
+                  render: (_: any, q: VendorQuotationRecord) => {
+                    const isSelected = selectedWinnerId === q.vendorId;
+                    return (
+                      <Radio
+                        checked={isSelected}
+                        disabled={isEvaluated}
+                        onChange={() => setSelectedWinnerId(q.vendorId)}
+                        data-testid="vendor-winner-radio-desktop"
+                      >
+                        {isSelected ? <strong style={{ color: '#1d4ed8' }}>Pemenang</strong> : 'Pilih'}
+                      </Radio>
+                    );
+                  },
                 },
-              },
-              {
-                title: 'Vendor Terdaftar',
-                key: 'vendor',
-                render: (_: any, q: VendorQuotationRecord) => {
-                  const isLowest = lowestPriceQuotes.some((l) => l.vendorId === q.vendorId);
-                  const isFastest = fastestLeadTimeQuotes.some((f) => f.vendorId === q.vendorId);
-                  return (
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 12, color: '#0f172a' }}>{q.vendorName}</div>
-                      <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
-                        <Tag color="blue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
-                          {q.vendorCode}
-                        </Tag>
-                        {isLowest && (
-                          <Tag color="green" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
-                            {isPriceTie ? 'Harga Terendah (Sama)' : 'Harga Terendah'}
+                {
+                  title: 'Vendor Terdaftar',
+                  key: 'vendor',
+                  render: (_: any, q: VendorQuotationRecord) => {
+                    const isLowest = lowestPriceQuotes.some((l) => l.vendorId === q.vendorId);
+                    const isFastest = fastestLeadTimeQuotes.some((f) => f.vendorId === q.vendorId);
+                    return (
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 12, color: '#0f172a' }}>{q.vendorName}</div>
+                        <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
+                          <Tag color="blue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                            {q.vendorCode}
                           </Tag>
-                        )}
-                        {isFastest && (
-                          <Tag color="cyan" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
-                            {isLeadTimeTie ? `Tie Lead Time (${minLeadTime} hari)` : `Tercepat (${minLeadTime} hari)`}
-                          </Tag>
-                        )}
+                          {isLowest && (
+                            <Tag color="green" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                              {isPriceTie ? 'Harga Terendah (Sama)' : 'Harga Terendah'}
+                            </Tag>
+                          )}
+                          {isFastest && (
+                            <Tag color="cyan" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                              {isLeadTimeTie ? `Tie Lead Time (${minLeadTime} hari)` : `Tercepat (${minLeadTime} hari)`}
+                            </Tag>
+                          )}
+                        </div>
                       </div>
+                    );
+                  },
+                },
+                {
+                  title: 'Total Penawaran',
+                  dataIndex: 'totalOfferedAmount',
+                  key: 'totalOfferedAmount',
+                  width: 170,
+                  align: 'right' as const,
+                  render: (val: number) => (
+                    <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 12.5, color: '#0f172a' }}>
+                      Rp {val.toLocaleString('id-ID')}
+                    </span>
+                  ),
+                },
+                {
+                  title: 'Penghematan vs Plafon',
+                  key: 'variance',
+                  width: 170,
+                  align: 'right' as const,
+                  render: (_: any, q: VendorQuotationRecord) => {
+                    const diff = budgetCeiling - q.totalOfferedAmount;
+                    if (diff > 0) {
+                      return (
+                        <span style={{ fontWeight: 600, fontSize: 11.5, color: '#059669' }}>
+                          Rp {diff.toLocaleString('id-ID')} Hemat
+                        </span>
+                      );
+                    } else if (diff === 0) {
+                      return <span style={{ fontSize: 11.5, color: '#64748b' }}>Rp 0</span>;
+                    } else {
+                      return (
+                        <span style={{ fontWeight: 600, fontSize: 11.5, color: '#e11d48' }}>
+                          Rp {Math.abs(diff).toLocaleString('id-ID')} Over Budget
+                        </span>
+                      );
+                    }
+                  },
+                },
+                {
+                  title: 'Lead Time Vendor',
+                  dataIndex: 'leadTimeDays',
+                  key: 'leadTimeDays',
+                  width: 140,
+                  align: 'center' as const,
+                  render: (days: any) => {
+                    const num = days != null && !isNaN(Number(days)) && Number(days) > 0 ? Number(days) : null;
+                    if (num !== null) {
+                      return <span style={{ fontWeight: 600 }}>{num} hari</span>;
+                    }
+                    return <span style={{ color: '#94a3b8', fontSize: 11 }}>Tidak tersedia</span>;
+                  },
+                },
+                {
+                  title: 'Catatan / Syarat Vendor',
+                  dataIndex: 'vendorNotes',
+                  key: 'vendorNotes',
+                  render: (_: any, q: VendorQuotationRecord) => {
+                    const notes = q.vendorNotes || (q as any).notes;
+                    return <span style={{ fontSize: 11, color: '#64748b' }}>{notes || '—'}</span>;
+                  },
+                },
+              ]}
+            />
+          </div>
+
+          {/* Mobile Vendor Cards View (screens <= 640px) */}
+          <div className={styles.mobileVendorCardView} data-testid="comparison-mobile-card-view">
+            {uniqueQuotations.map((q) => {
+              const isSelected = selectedWinnerId === q.vendorId;
+              const isWinner = isEvaluated && existingComparison?.selectedWinnerVendorId === q.vendorId;
+              const isLowest = lowestPriceQuotes.some((l) => l.vendorId === q.vendorId);
+              const isFastest = fastestLeadTimeQuotes.some((f) => f.vendorId === q.vendorId);
+              const diff = budgetCeiling - q.totalOfferedAmount;
+              const notes = q.vendorNotes || (q as any).notes;
+
+              return (
+                <div
+                  key={q.vendorId}
+                  className={`${styles.vendorCard} ${isSelected ? styles.vendorCardSelected : ''} ${isWinner ? styles.vendorCardWinner : ''}`}
+                  data-testid="comparison-vendor-card"
+                  onClick={() => {
+                    if (!isEvaluated) setSelectedWinnerId(q.vendorId);
+                  }}
+                  style={{ cursor: isEvaluated ? 'default' : 'pointer' }}
+                >
+                  <div className={styles.vendorCardTop}>
+                    <div className={styles.vendorCardRadioArea}>
+                      <Radio
+                        checked={isSelected}
+                        disabled={isEvaluated}
+                        onChange={() => setSelectedWinnerId(q.vendorId)}
+                        data-testid="vendor-winner-radio"
+                      >
+                        <span style={{ fontWeight: isSelected ? 700 : 500, fontSize: 12.5, color: isSelected ? '#1d4ed8' : '#334155' }}>
+                          {isWinner ? 'Pemenang Evaluasi' : isSelected ? 'Vendor Terpilih' : 'Pilih Vendor Ini'}
+                        </span>
+                      </Radio>
                     </div>
-                  );
-                },
-              },
-              {
-                title: 'Total Penawaran',
-                dataIndex: 'totalOfferedAmount',
-                key: 'totalOfferedAmount',
-                width: 170,
-                align: 'right' as const,
-                render: (val: number) => (
-                  <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 12.5, color: '#0f172a' }}>
-                    Rp {val.toLocaleString('id-ID')}
-                  </span>
-                ),
-              },
-              {
-                title: 'Penghematan vs Plafon',
-                key: 'variance',
-                width: 170,
-                align: 'right' as const,
-                render: (_: any, q: VendorQuotationRecord) => {
-                  const diff = budgetCeiling - q.totalOfferedAmount;
-                  if (diff > 0) {
-                    return (
-                      <span style={{ fontWeight: 600, fontSize: 11.5, color: '#059669' }}>
-                        Rp {diff.toLocaleString('id-ID')} Hemat
+                    {isWinner && (
+                      <Tag color="success" style={{ fontWeight: 700, fontSize: 10, margin: 0, padding: '1px 6px' }}>
+                        ● WINNER
+                      </Tag>
+                    )}
+                  </div>
+
+                  <div>
+                    <div className={styles.vendorCardName}>{q.vendorName}</div>
+                    <div className={styles.vendorCardBadgeRow}>
+                      <Tag color="blue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                        {q.vendorCode}
+                      </Tag>
+                      {isLowest && (
+                        <Tag color="green" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                          {isPriceTie ? 'Harga Terendah (Sama)' : 'Harga Terendah'}
+                        </Tag>
+                      )}
+                      {isFastest && (
+                        <Tag color="cyan" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                          {isLeadTimeTie ? `Tie Lead Time (${minLeadTime} hari)` : `Tercepat (${minLeadTime} hari)`}
+                        </Tag>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={styles.vendorCommercialGrid}>
+                    <div className={styles.vendorCardField}>
+                      <span className={styles.vendorFieldLabel}>Total Penawaran</span>
+                      <span className={styles.vendorPriceHighlight}>
+                        Rp {q.totalOfferedAmount.toLocaleString('id-ID')}
                       </span>
-                    );
-                  } else if (diff === 0) {
-                    return <span style={{ fontSize: 11.5, color: '#64748b' }}>Rp 0</span>;
-                  } else {
-                    return (
-                      <span style={{ fontWeight: 600, fontSize: 11.5, color: '#e11d48' }}>
-                        Rp {Math.abs(diff).toLocaleString('id-ID')} Over Budget
+                    </div>
+
+                    <div className={styles.vendorCardField}>
+                      <span className={styles.vendorFieldLabel}>Variansi vs Plafon</span>
+                      {diff > 0 ? (
+                        <span className={styles.vendorFieldValue} style={{ color: '#059669', fontWeight: 700 }}>
+                          - Rp {diff.toLocaleString('id-ID')} (Hemat)
+                        </span>
+                      ) : diff === 0 ? (
+                        <span className={styles.vendorFieldValue} style={{ color: '#64748b' }}>
+                          Rp 0 (Sesuai Plafon)
+                        </span>
+                      ) : (
+                        <span className={styles.vendorFieldValue} style={{ color: '#e11d48', fontWeight: 700 }}>
+                          + Rp {Math.abs(diff).toLocaleString('id-ID')} (Over Plafon)
+                        </span>
+                      )}
+                    </div>
+
+                    <div className={styles.vendorCardField}>
+                      <span className={styles.vendorFieldLabel}>Lead Time Pengiriman</span>
+                      <span className={styles.vendorFieldValue}>
+                        {q.leadTimeDays != null && !isNaN(Number(q.leadTimeDays)) && Number(q.leadTimeDays) > 0
+                          ? `${q.leadTimeDays} hari kerja`
+                          : 'Tidak tersedia'}
                       </span>
-                    );
-                  }
-                },
-              },
-              {
-                title: 'Lead Time Vendor',
-                dataIndex: 'leadTimeDays',
-                key: 'leadTimeDays',
-                width: 140,
-                align: 'center' as const,
-                render: (days: any) => {
-                  const num = days != null && !isNaN(Number(days)) && Number(days) > 0 ? Number(days) : null;
-                  if (num !== null) {
-                    return <span style={{ fontWeight: 600 }}>{num} hari</span>;
-                  }
-                  return <span style={{ color: '#94a3b8', fontSize: 11 }}>Tidak tersedia</span>;
-                },
-              },
-              {
-                title: 'Catatan / Syarat Vendor',
-                dataIndex: 'vendorNotes',
-                key: 'vendorNotes',
-                render: (notes: string) => (
-                  <span style={{ fontSize: 11, color: '#64748b' }}>{notes || '—'}</span>
-                ),
-              },
-            ]}
-          />
+                    </div>
+
+                    <div className={styles.vendorCardField}>
+                      <span className={styles.vendorFieldLabel}>Status Partisipasi</span>
+                      <span className={styles.vendorFieldValue}>
+                        <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                          VALID QUOTATION
+                        </Tag>
+                      </span>
+                    </div>
+
+                    {notes && (
+                      <div className={styles.vendorCardFieldFull}>
+                        <span className={styles.vendorFieldLabel}>Catatan / Syarat Vendor:</span>
+                        <div className={styles.vendorNotesBox}>
+                          {notes}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        {/* SECTION 2: 24 Item-Level Price Breakdown Matrix */}
-        <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
-          <div style={{ padding: '8px 12px', background: '#f1f5f9', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontWeight: 700, fontSize: 12.5, color: '#334155' }}>
+        {/* SECTION 2: Item-Level Price Breakdown Matrix */}
+        <div className={styles.sectionWrapper}>
+          <div className={styles.sectionHeader}>
+            <span className={styles.sectionTitle}>
               2. Matriks Harga Satuan Per Item ({itemComparisonRows.length} Item Pengadaan)
             </span>
             <Tag color="cyan" style={{ fontSize: 10, margin: 0 }}>
               HIJAU = HARGA PENAWARAN TERENDAH
             </Tag>
           </div>
-          <Table
-            size="small"
-            rowKey="key"
-            dataSource={itemComparisonRows}
-            pagination={false}
-            scroll={{ x: 880 + uniqueQuotations.length * 130, y: 220 }}
-            columns={[
-              {
-                title: 'No',
-                key: 'idx',
-                width: 40,
-                align: 'center' as const,
-                render: (_: any, __: any, index: number) => (
-                  <span style={{ fontSize: 10.5, color: '#64748b' }}>{index + 1}</span>
-                ),
-              },
-              {
-                title: 'Nama Item & Spesifikasi',
-                dataIndex: 'itemName',
-                key: 'itemName',
-                width: 220,
-                fixed: 'left' as const,
-                render: (name: string, it: any) => (
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 11, color: '#0f172a' }}>{name}</div>
-                    <div style={{ display: 'flex', gap: 4, marginTop: 1 }}>
-                      <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 3px' }}>
-                        {it.categoryName}
-                      </Tag>
-                    </div>
-                  </div>
-                ),
-              },
-              {
-                title: 'Qty',
-                dataIndex: 'quantity',
-                key: 'quantity',
-                width: 50,
-                align: 'center' as const,
-                render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
-              },
-              {
-                title: 'Satuan',
-                dataIndex: 'uom',
-                key: 'uom',
-                width: 60,
-                align: 'center' as const,
-                render: (uom: string) => <span style={{ fontSize: 10.5, color: '#64748b' }}>{uom}</span>,
-              },
-              {
-                title: 'Plafon Unit',
-                dataIndex: 'estUnitPrice',
-                key: 'estUnitPrice',
-                width: 110,
-                align: 'right' as const,
-                render: (price: number) => (
-                  <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: '#64748b' }}>
-                    Rp {price.toLocaleString('id-ID')}
-                  </span>
-                ),
-              },
-              // Dynamically inject a column for each participating vendor
-              ...uniqueQuotations.map((q) => ({
-                title: (
-                  <div style={{ textAlign: 'right', fontSize: 10.5 }}>
-                    <div><strong>{q.vendorCode}</strong></div>
-                    <div style={{ fontSize: 9.5, color: '#64748b', fontWeight: 'normal' }}>
-                      {q.vendorName.length > 15 ? `${q.vendorName.substring(0, 15)}...` : q.vendorName}
-                    </div>
-                  </div>
-                ),
-                key: `vendor_${q.vendorId}`,
-                width: 130,
-                align: 'right' as const,
-                render: (_: any, row: any) => {
-                  const price = row.vendorPrices[q.vendorId] || 0;
-                  const isLowestInRow = price > 0 && price === row.minPriceInRow;
-                  return (
-                    <div
-                      style={{
-                        padding: '2px 4px',
-                        borderRadius: 4,
-                        background: isLowestInRow ? '#ecfdf5' : 'transparent',
-                        fontFamily: 'monospace',
-                        fontWeight: isLowestInRow ? 700 : 500,
-                        fontSize: 11,
-                        color: isLowestInRow ? '#059669' : '#0f172a',
-                      }}
-                    >
-                      Rp {price.toLocaleString('id-ID')}
-                    </div>
-                  );
+
+          <div className={styles.matrixTableContainer} data-testid="comparison-matrix-table-container">
+            <div className={styles.scrollHintStrip}>
+              ← Geser horizontal untuk melihat rincian harga per vendor →
+            </div>
+            <Table
+              size="small"
+              rowKey="key"
+              dataSource={itemComparisonRows}
+              pagination={false}
+              scroll={{ x: 880 + uniqueQuotations.length * 130, y: 220 }}
+              columns={[
+                {
+                  title: 'No',
+                  key: 'idx',
+                  width: 40,
+                  align: 'center' as const,
+                  render: (_: any, __: any, index: number) => (
+                    <span style={{ fontSize: 10.5, color: '#64748b' }}>{index + 1}</span>
+                  ),
                 },
-              })),
-            ]}
-          />
+                {
+                  title: 'Nama Item & Spesifikasi',
+                  dataIndex: 'itemName',
+                  key: 'itemName',
+                  width: 220,
+                  render: (name: string, it: any) => (
+                    <div style={{ minWidth: 160, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                      <div style={{ fontWeight: 600, fontSize: 11, color: '#0f172a', lineHeight: 1.35 }}>{name}</div>
+                      <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+                        <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 3px' }}>
+                          {it.categoryName}
+                        </Tag>
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  title: 'Qty',
+                  dataIndex: 'quantity',
+                  key: 'quantity',
+                  width: 50,
+                  align: 'center' as const,
+                  render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
+                },
+                {
+                  title: 'Satuan',
+                  dataIndex: 'uom',
+                  key: 'uom',
+                  width: 60,
+                  align: 'center' as const,
+                  render: (uom: string) => <span style={{ fontSize: 10.5, color: '#64748b' }}>{uom}</span>,
+                },
+                {
+                  title: 'Plafon Unit',
+                  dataIndex: 'estUnitPrice',
+                  key: 'estUnitPrice',
+                  width: 110,
+                  align: 'right' as const,
+                  render: (price: number) => (
+                    <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: '#64748b' }}>
+                      Rp {price.toLocaleString('id-ID')}
+                    </span>
+                  ),
+                },
+                // Dynamically inject a column for each participating vendor
+                ...uniqueQuotations.map((q) => ({
+                  title: (
+                    <div style={{ textAlign: 'right', fontSize: 10.5, minWidth: 100 }}>
+                      <div><strong>{q.vendorCode}</strong></div>
+                      <div style={{ fontSize: 9.5, color: '#64748b', fontWeight: 'normal', wordBreak: 'break-word' }}>
+                        {q.vendorName}
+                      </div>
+                    </div>
+                  ),
+                  key: `vendor_${q.vendorId}`,
+                  width: 130,
+                  align: 'right' as const,
+                  render: (_: any, row: any) => {
+                    const price = row.vendorPrices[q.vendorId] || 0;
+                    const isLowestInRow = price > 0 && price === row.minPriceInRow;
+                    return (
+                      <div
+                        style={{
+                          padding: '2px 4px',
+                          borderRadius: 4,
+                          background: isLowestInRow ? '#ecfdf5' : 'transparent',
+                          fontFamily: 'monospace',
+                          fontWeight: isLowestInRow ? 700 : 500,
+                          fontSize: 11,
+                          color: isLowestInRow ? '#059669' : '#0f172a',
+                        }}
+                      >
+                        Rp {price.toLocaleString('id-ID')}
+                      </div>
+                    );
+                  },
+                })),
+              ]}
+            />
+          </div>
         </div>
 
         {/* SECTION 3: Evaluation Notes */}
-        <div>
+        <div className={styles.evaluationNotesContainer}>
           <Text style={{ fontWeight: 600, fontSize: 12 }}>
             Catatan / Justifikasi Evaluasi Pengadaan (Opsional):
           </Text>
           <Input.TextArea
-            rows={2}
+            rows={3}
             value={evaluationNotes}
-            disabled={isEvaluated}
+            disabled={!canEditNotes}
+            readOnly={!canEditNotes}
             onChange={(e) => setEvaluationNotes(e.target.value)}
             placeholder="Contoh: Vendor terpilih memenuhi kriteria teknis spesifikasi terbaik dengan harga hemat dan lead time sesuai target kickoff."
-            style={{ marginTop: 4, borderRadius: 6, fontSize: 11.5 }}
+            className={styles.evaluationNotesTextarea}
+            data-testid="evaluation-notes-textarea"
           />
         </div>
       </div>
@@ -909,6 +1036,7 @@ export const VendorComparisonModal: React.FC<VendorComparisonModalProps> = ({
               ? {
                   ...existingComparison,
                   selectedWinnerVendorId: Number(existingComparison.selectedWinnerVendorId),
+                  evaluationNotes: evaluationNotes.trim(),
                 }
               : null
           }

@@ -21,7 +21,7 @@ import { WorkflowEngineService } from '../workflow-engine/workflow-engine.servic
 import { WorkflowInstance, WorkflowInstanceStatus } from '../../entities/workflow-instance.entity';
 import { WorkflowTaskStatus } from '../../entities/workflow-task.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
-import { BusinessEvent } from '../../shared/contracts/business-event.contract';
+import { BusinessEvent, NotificationPolicy } from '../../shared/contracts/business-event.contract';
 import { randomUUID } from 'crypto';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -876,6 +876,17 @@ export class MarketingService {
 
         // Transactional Outbox: Canonical BusinessEvent for marketing.tender.won
         const wonMarketingPicId = tender.marketing_pic_id ? Number(tender.marketing_pic_id) : undefined;
+        const wonCount = typeof queryRunner.manager.count === 'function'
+          ? await queryRunner.manager.count(AuditLog, {
+              where: {
+                table_name: 'tenders',
+                record_id: tender.id,
+                action: 'TENDER_MARKED_WON',
+              },
+            })
+          : 1;
+        const wonEventId = wonCount > 1 ? `tnd-won-${tender.id}-c${wonCount}` : `tnd-won-${tender.id}`;
+
         const wonBusinessEvent: BusinessEvent<{
           tenderId: number;
           title: string;
@@ -887,7 +898,7 @@ export class MarketingService {
           negotiatedPrice: number;
           marketingPicId?: number;
         }> = {
-          eventId: randomUUID(),
+          eventId: wonEventId,
           eventName: 'marketing.tender.won',
           eventVersion: 1,
           occurredAt: new Date().toISOString(),
@@ -895,6 +906,7 @@ export class MarketingService {
           aggregateId: tender.id,
           actor: userId ? { userId: Number(userId) } : undefined,
           routing: wonMarketingPicId ? { userIds: [wonMarketingPicId] } : undefined,
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
           payload: {
             tenderId: tender.id,
             title: tender.title,
@@ -989,7 +1001,7 @@ export class MarketingService {
           negotiatedPrice: number;
           marketingPicId?: number;
         }> = {
-          eventId: randomUUID(),
+          eventId: `tnd-lost-${tender.id}`,
           eventName: 'marketing.tender.lost',
           eventVersion: 1,
           occurredAt: new Date().toISOString(),
@@ -997,6 +1009,7 @@ export class MarketingService {
           aggregateId: tender.id,
           actor: userId ? { userId: Number(userId) } : undefined,
           routing: lostMarketingPicId ? { userIds: [lostMarketingPicId] } : undefined,
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
           payload: {
             tenderId: tender.id,
             title: tender.title,
@@ -1559,8 +1572,24 @@ export class MarketingService {
       await queryRunner.manager.save(TenderActivity, activity);
 
       // Phase N8.1: Transactional Outbox Canonical Event for marketing.gonogo.submitted
+      let gngEventId: string;
+      if (isResubmission) {
+        const rejectionCount = typeof queryRunner.manager.count === 'function'
+          ? await queryRunner.manager.count(AuditLog, {
+              where: {
+                table_name: 'tenders',
+                record_id: tender.id,
+                action: 'GO_NOGO_REJECTED',
+              },
+            })
+          : 1;
+        gngEventId = `tnd-gng-sub-${tender.id}-resub-${rejectionCount || 1}`;
+      } else {
+        gngEventId = `tnd-gng-sub-${tender.id}`;
+      }
+
       const goNoGoSubmittedEvent: BusinessEvent = {
-        eventId: randomUUID(),
+        eventId: gngEventId,
         eventName: 'marketing.gonogo.submitted',
         eventVersion: 1,
         occurredAt: new Date().toISOString(),
@@ -1570,6 +1599,7 @@ export class MarketingService {
         routing: {
           userIds: [userId],
         },
+        notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
         payload: {
           tenderId: tender.id,
           tenderTitle: tender.title,
@@ -1708,6 +1738,10 @@ export class MarketingService {
         throw new BadRequestException('Keputusan GO / NO GO sudah pernah dilakukan untuk tender ini');
       }
 
+      const oldStage = tender.stage;
+      const oldGoNoGoStatus = tender.go_nogo_status;
+      const oldRevisionStatus = tender.revision_status;
+
       const now = new Date();
       tender.go_nogo_status = dto.decision === 'GO' ? GoNoGoStatus.GO : GoNoGoStatus.NO_GO;
       tender.go_nogo_notes = dto.notes || null;
@@ -1741,11 +1775,32 @@ export class MarketingService {
       });
       await queryRunner.manager.save(TenderActivity, activity);
 
+      // Record AuditLog for GO_NOGO decision (APPROVED or REJECTED)
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'tenders',
+        record_id: tender.id,
+        action: auditAction,
+        old_value: {
+          stage: oldStage,
+          go_nogo_status: oldGoNoGoStatus,
+          revision_status: oldRevisionStatus,
+        },
+        new_value: {
+          stage: tender.stage,
+          go_nogo_status: tender.go_nogo_status,
+          revision_status: tender.revision_status,
+          decision: dto.decision,
+          notes: dto.notes || null,
+        },
+        created_by: userId,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
       // Phase N8.1: Transactional Outbox Canonical Event for marketing.gonogo.approved
       const picId = tender.marketing_pic_id || tender.created_by;
       if (picId && dto.decision === 'GO') {
         const goApprovedEvent: BusinessEvent = {
-          eventId: randomUUID(),
+          eventId: `tnd-gng-app-${tender.id}`,
           eventName: 'marketing.gonogo.approved',
           eventVersion: 1,
           occurredAt: new Date().toISOString(),
@@ -1755,6 +1810,7 @@ export class MarketingService {
           routing: {
             userIds: [picId],
           },
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
           payload: {
             tenderId: tender.id,
             tenderTitle: tender.title,
@@ -1972,7 +2028,7 @@ export class MarketingService {
       if (isOverDiscount) {
         // Phase N8.1: Transactional Outbox Canonical Event for marketing.discount.critical_warning
         const criticalWarningEvent: BusinessEvent = {
-          eventId: randomUUID(),
+          eventId: `tnd-dsc-warn-${tender.id}-${history.id}`,
           eventName: 'marketing.discount.critical_warning',
           eventVersion: 1,
           occurredAt: new Date().toISOString(),
@@ -1982,6 +2038,7 @@ export class MarketingService {
           routing: {
             roles: ['DIRECTOR', 'GENERAL_MANAGER'],
           },
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
           payload: {
             tenderId: tender.id,
             tenderTitle: tender.title,
@@ -2068,7 +2125,7 @@ export class MarketingService {
 
         // Phase N8.1: Transactional Outbox Canonical Event for marketing.discount.rejected
         const discountRejectedEvent: BusinessEvent = {
-          eventId: randomUUID(),
+          eventId: `tnd-dsc-rej-${tender.id}-${history.id}`,
           eventName: 'marketing.discount.rejected',
           eventVersion: 1,
           occurredAt: new Date().toISOString(),
@@ -2079,6 +2136,7 @@ export class MarketingService {
             userIds: recipientUserIds,
             roles: recipientUserIds ? undefined : ['MARKETING'],
           },
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
           payload: {
             tenderId: tender.id,
             tenderTitle: tender.title,
@@ -2110,8 +2168,12 @@ export class MarketingService {
         await manager.save(Tender, tender);
 
         // Phase N8.1: Transactional Outbox Canonical Event for marketing.discount.approved
+        const latestHistory = await manager.findOne(TenderPriceHistory, {
+          where: { tender_id: tender.id },
+          order: { id: 'DESC' },
+        });
         const discountApprovedEvent: BusinessEvent = {
-          eventId: randomUUID(),
+          eventId: `tnd-dsc-app-${tender.id}-${latestHistory?.id || tender.version}`,
           eventName: 'marketing.discount.approved',
           eventVersion: 1,
           occurredAt: new Date().toISOString(),
@@ -2122,6 +2184,7 @@ export class MarketingService {
             userIds: recipientUserIds,
             roles: recipientUserIds ? undefined : ['MARKETING'],
           },
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
           payload: {
             tenderId: tender.id,
             tenderTitle: tender.title,
@@ -2388,12 +2451,14 @@ export class MarketingService {
     const uploadedFilePath = file?.path || (file?.filename ? path.resolve(process.cwd(), 'uploads', 'contracts', file.filename) : null);
 
     try {
-      const baseUrl = process.env.BACKEND_STORAGE_URL || process.env.APP_URL || 'http://localhost:4000';
+      const storageEnv = process.env.BACKEND_STORAGE_URL || process.env.APP_URL;
+      const isLocalHost = storageEnv && /https?:\/\/(localhost|127\.0\.0\.1)/i.test(storageEnv);
+      const baseUrl = isLocalHost ? '' : (storageEnv || '');
       let publicUrl = publicUrlParam;
       if (file?.filename) {
-        publicUrl = `${baseUrl}/uploads/contracts/${file.filename}`;
+        publicUrl = baseUrl ? `${baseUrl}/uploads/contracts/${file.filename}` : `/uploads/contracts/${file.filename}`;
       } else if (publicUrlParam && !publicUrlParam.startsWith('http')) {
-        publicUrl = `${baseUrl}${publicUrlParam.startsWith('/') ? '' : '/'}${publicUrlParam}`;
+        publicUrl = baseUrl ? `${baseUrl}${publicUrlParam.startsWith('/') ? '' : '/'}${publicUrlParam}` : publicUrlParam;
       }
 
       this.logger.log(`[UPLOAD] Menyimpan URL SPK: ${publicUrl}`);
@@ -2424,6 +2489,26 @@ export class MarketingService {
 
         this.logger.log(`[SPK Upload] Contract existing found? ${!!existingContract}`);
 
+        // State-aware retry recovery BEFORE mutation: Same upload on pending/on-review contract is idempotent
+        const isSameUploadRetry =
+          existingContract &&
+          (existingContract.status === 'PENDING_LEGAL_REVIEW' || existingContract.status === 'ON_REVIEW') &&
+          existingContract.spk_file_url === publicUrl;
+
+        if (isSameUploadRetry) {
+          const updatedTender = typeof manager.findOne === 'function'
+            ? await manager.findOne(Tender, { where: { id: tenderId }, relations: ['customer'] })
+            : null;
+          return {
+            contract: existingContract,
+            updatedTender,
+            isRevisionUpload: false,
+            fileName: file?.originalname || file?.filename || 'dokumen.pdf',
+            diskFileName: file?.filename || file?.originalname || 'dokumen.pdf',
+            isRetry: true,
+          };
+        }
+
         // 3. AMBIL ESTIMATED BUDGET, CUSTOMER ID, DAN GO_NOGO_STATUS DARI TENDERS
         const [tenderRow] = await manager.query(
           `SELECT customer_id, estimated_budget, go_nogo_status, marketing_pic_id, created_by, revision_status FROM tenders WHERE id = ? LIMIT 1`,
@@ -2444,11 +2529,12 @@ export class MarketingService {
         let contract: any;
         if (existingContract) {
           // Single canonical contract update via raw SQL inside transaction
+          // NOTE GAP-01: grace_extension_count MUST NOT be reset to 0 upon upload, preserving revision cycle continuity
           if (realCustomerId) {
             await manager.query(
               `UPDATE contracts 
                SET spk_file_url = ?, tender_id = ?, customer_id = ?, status = 'PENDING_LEGAL_REVIEW', legal_status = 'DRAFT',
-                   legal_reviewer_id = NULL, legal_notes = NULL, grace_deadline = NULL, grace_extension_count = 0,
+                   legal_reviewer_id = NULL, legal_notes = NULL, grace_deadline = NULL,
                    grace_extended_by = NULL, grace_extended_at = NULL,
                    contract_value = IF(contract_value = 0, ?, contract_value)
                WHERE tender_id = ? OR proposal_id IN (SELECT id FROM proposals WHERE tender_id = ?)`,
@@ -2458,7 +2544,7 @@ export class MarketingService {
             await manager.query(
               `UPDATE contracts 
                SET spk_file_url = ?, tender_id = ?, status = 'PENDING_LEGAL_REVIEW', legal_status = 'DRAFT',
-                   legal_reviewer_id = NULL, legal_notes = NULL, grace_deadline = NULL, grace_extension_count = 0,
+                   legal_reviewer_id = NULL, legal_notes = NULL, grace_deadline = NULL,
                    grace_extended_by = NULL, grace_extended_at = NULL,
                    contract_value = IF(contract_value = 0, ?, contract_value)
                WHERE tender_id = ? OR proposal_id IN (SELECT id FROM proposals WHERE tender_id = ?)`,
@@ -2592,8 +2678,53 @@ export class MarketingService {
         await manager.save(AuditLog, auditLog);
 
         // 4. Transactional Outbox Pattern: Record marketing.spk.uploaded canonical event in same transaction
+        // NOTE GAP-01: Disentangle Revision Cycle Identity from Upload Sequence Identity
         if (contract?.id) {
-          const spkEventId = randomUUID();
+          let spkEventId: string;
+          if (isRevisionUpload) {
+            const revisionCycle = Number(contract.grace_extension_count || existingContract?.grace_extension_count || 1);
+            let uploadsInCycle = 1;
+            try {
+              const qb = typeof manager.createQueryBuilder === 'function' ? manager.createQueryBuilder(AuditLog, 'log') : null;
+              if (qb && typeof qb.where === 'function' && typeof qb.andWhere === 'function' && typeof qb.getCount === 'function') {
+                const lastLegalRevisionLog = typeof manager.findOne === 'function' ? await manager.findOne(AuditLog, {
+                  where: {
+                    table_name: 'contracts',
+                    record_id: contract.id,
+                    action: 'LEGAL_REVIEW_REVISION_REQUESTED',
+                  },
+                  order: { id: 'DESC' },
+                }) : null;
+
+                uploadsInCycle = await qb
+                  .where('log.table_name = :tbl', { tbl: 'contracts' })
+                  .andWhere('log.record_id = :recId', { recId: contract.id })
+                  .andWhere('log.action = :act', { act: 'REVISED_SPK_UPLOADED' })
+                  .andWhere(lastLegalRevisionLog ? 'log.id >= :sinceId' : '1=1', { sinceId: lastLegalRevisionLog?.id || 0 })
+                  .getCount();
+              }
+            } catch {
+              uploadsInCycle = 1;
+            }
+            spkEventId = uploadsInCycle > 1
+              ? `spk-up-${contract.id}-rev-${revisionCycle}-u${uploadsInCycle}`
+              : `spk-up-${contract.id}-rev-${revisionCycle}`;
+          } else {
+            let initialUploads = 1;
+            if (typeof manager.count === 'function') {
+              initialUploads = await manager.count(AuditLog, {
+                where: {
+                  table_name: 'contracts',
+                  record_id: contract.id,
+                  action: 'SPK_UPLOADED',
+                },
+              });
+            }
+            spkEventId = initialUploads > 1
+              ? `spk-up-${contract.id}-u${initialUploads}`
+              : `spk-up-${contract.id}`;
+          }
+
           const spkBusinessEvent: BusinessEvent = {
             eventId: spkEventId,
             eventName: 'marketing.spk.uploaded',
@@ -2603,6 +2734,7 @@ export class MarketingService {
             aggregateId: contract.id,
             actor: { userId: Number(userId) },
             routing: { roles: ['LEGAL'] },
+            notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
             payload: {
               tenderId,
               contractId: contract.id,
@@ -2651,11 +2783,21 @@ export class MarketingService {
           isRevisionUpload,
           fileName,
           diskFileName,
+          isRetry: false,
         };
       });
 
       // 5. EVENT EMISSION ONLY AFTER SUCCESSFUL DATABASE COMMIT
-      const { contract, updatedTender, isRevisionUpload, fileName } = txResult;
+      const { contract, updatedTender, isRevisionUpload, fileName, isRetry } = txResult;
+
+      if (isRetry) {
+        return {
+          success: true,
+          message: 'SPK telah diupload sebelumnya (idempotent retry)',
+          url: publicUrl,
+          contractId: contract?.id,
+        };
+      }
 
       const user = await this.dataSource.getRepository(User).findOne({ where: { id: userId }, relations: ['roles'] });
       const userName = user ? user.fullName : 'System';

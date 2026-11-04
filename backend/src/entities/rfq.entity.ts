@@ -20,6 +20,9 @@ export class Rfq {
   @Column({ name: 'closing_date', type: 'datetime', nullable: true })
   closingDate: Date;
 
+  @Column({ type: 'text', nullable: true })
+  notes?: string;
+
   @Column({ name: 'created_by', nullable: true })
   createdBy: number;
 

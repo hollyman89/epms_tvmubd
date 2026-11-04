@@ -77,11 +77,12 @@ export const ResubmitPaymentRequestModal: React.FC<ResubmitPaymentRequestModalPr
     <Modal
       open={open}
       onCancel={onClose}
-      width={680}
+      width="min(680px, calc(100vw - 24px))"
+      style={{ maxWidth: '100vw' }}
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <DollarCircleOutlined style={{ color: '#d97706', fontSize: 18 }} />
-          <span>Revisi & Ajukan Ulang Pembayaran (Finance)</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <DollarCircleOutlined style={{ color: '#d97706', fontSize: 18, flexShrink: 0 }} />
+          <span style={{ wordBreak: 'break-word', minWidth: 0, flex: 1 }}>Revisi & Ajukan Ulang Pembayaran (Finance)</span>
         </div>
       }
       destroyOnClose
@@ -94,7 +95,7 @@ export const ResubmitPaymentRequestModal: React.FC<ResubmitPaymentRequestModalPr
           icon={<ExclamationCircleOutlined />}
           message="Catatan Revisi dari Direktur"
           description={
-            <div style={{ fontWeight: 600, fontSize: 13, marginTop: 4 }}>
+            <div style={{ fontWeight: 600, fontSize: 13, marginTop: 4, wordBreak: 'break-word' }}>
               {paymentRequest.revisionNotes || 'Mohon tinjau kembali data pengajuan pembayaran ini.'}
             </div>
           }
@@ -102,7 +103,7 @@ export const ResubmitPaymentRequestModal: React.FC<ResubmitPaymentRequestModalPr
         />
 
         <Card size="small" style={{ marginBottom: 16, backgroundColor: '#f8fafc' }}>
-          <Descriptions size="small" column={2}>
+          <Descriptions size="small" column={{ xs: 1, sm: 2 }}>
             <Descriptions.Item label="Nomor Pengajuan">
               <span style={{ fontWeight: 700, fontFamily: 'monospace' }}>
                 {paymentRequest.requestNumber}
@@ -157,7 +158,7 @@ export const ResubmitPaymentRequestModal: React.FC<ResubmitPaymentRequestModalPr
             />
           </Form.Item>
 
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16, flexWrap: 'wrap' }}>
             <Button onClick={onClose} disabled={submitting}>
               Batal
             </Button>

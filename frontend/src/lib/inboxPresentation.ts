@@ -72,6 +72,10 @@ export function formatEntityLabel(entityType?: string | null): string {
     case 'KLAIM_JASA':
     case 'KLAIM JASA':
       return 'KLAIM JASA';
+    case 'PROJECT_PROGRESS_CLAIM':
+    case 'PROGRESS_CLAIM':
+    case 'KLAIM_PROGRES':
+      return 'KLAIM PROGRES';
     case 'TENDER':
       return 'TENDER';
     case 'OPPORTUNITY':
@@ -114,6 +118,10 @@ export function getEntityTagColor(entityType?: string | null): string {
     case 'KLAIM_JASA':
     case 'KLAIM JASA':
       return 'gold';
+    case 'PROJECT_PROGRESS_CLAIM':
+    case 'PROGRESS_CLAIM':
+    case 'KLAIM_PROGRES':
+      return 'cyan';
     case 'TENDER':
       return 'green';
     default:
@@ -901,10 +909,13 @@ export function resolveItemStatusDomain(item?: {
 
   if (
     source === 'DOMAIN_PURCHASE_REQUEST' ||
+    source === 'DOMAIN_PROCUREMENT_PACKAGE' ||
     entity === 'PURCHASE_REQUEST' ||
+    entity === 'PROCUREMENT_PACKAGE' ||
     entity === 'PR' ||
     entity === 'PERMINTAAN PEMBELIAN' ||
-    action.includes('PURCHASE_REQUEST')
+    action.includes('PURCHASE_REQUEST') ||
+    action.includes('PACKAGE')
   ) {
     return 'pr';
   }

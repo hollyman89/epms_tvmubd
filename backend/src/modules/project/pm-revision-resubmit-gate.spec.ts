@@ -645,5 +645,48 @@ describe('PM Revision Resubmit Gate & Canonical Post-Return Persistence Contract
       expect(res.workflow.current.ownerRole).toBe('DIRECTOR');
       expect(res.workflow.current.stage).toBe(5);
     });
+
+    it('16. Negative: SUPER_ADMIN submitter on project without managerId does NOT set submitter as projectManagerId', async () => {
+      const projectWithoutPm = { id: 15, managerId: null as any, status: 'PLANNING' };
+      mockProjectRepo.findOne.mockResolvedValue(projectWithoutPm);
+
+      jest.spyOn(service, 'getOperationalReadiness').mockResolvedValue({
+        projectId: 15,
+        projectCode: 'PRJ-15',
+        projectName: 'Unassigned PM Project',
+        overallStatus: 'READY',
+        completenessCount: 4,
+        totalPillars: 4,
+        canSubmitForReview: true,
+        canCreatePr: false,
+        pillars: {} as any,
+        gate: { status: 'NOT_SUBMITTED' } as any,
+        hasPersistedRevisionAfterReturn: true,
+      });
+
+      mockWfService.getInstanceByEntity.mockResolvedValue(null);
+      mockWfService.startInstance = jest.fn().mockResolvedValue({
+        id: 105,
+        status: 'IN_PROGRESS',
+        currentNodeId: 'node_hops_review',
+      });
+
+      await service.submitManagementReview(15, 999, ['SUPER_ADMIN']);
+
+      expect(mockWfService.startInstance).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW',
+          entityType: 'PROJECT',
+          entityId: 15,
+          context: {
+            projectId: 15,
+            submittedBy: 999,
+          },
+        }),
+        999,
+      );
+      const passedContext = mockWfService.startInstance.mock.calls[0][0].context;
+      expect(passedContext.projectManagerId).toBeUndefined();
+    });
   });
 });

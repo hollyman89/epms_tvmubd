@@ -181,7 +181,7 @@ export class WorkflowEngineService {
         entityId,
         status: WorkflowInstanceStatus.IN_PROGRESS,
         currentNodeId: startNode.id,
-        context: { ...context },
+        context: { ...context, workflowKey },
         currentStateData: { initiatedAt: new Date().toISOString() },
         createdBy: userId,
       });
@@ -410,7 +410,15 @@ export class WorkflowEngineService {
       // 11. Save Outbox Event
       const isReturned = action === 'RETURN' || action === 'RESUBMIT';
       const eventName = isReturned ? 'workflow.task.returned' : 'workflow.task.completed';
-      const recipientUser = this.resolveNodeAssigneeUserId(nextNode, instance.context);
+      const resolvedWorkflowKey = await this.resolveWorkflowKey(manager, instance, version);
+      let recipientUser = this.resolveNodeAssigneeUserId(nextNode, instance.context);
+      if (
+        instance.entityType === 'PROJECT' &&
+        typeof nextNode.id === 'string' &&
+        nextNode.id.startsWith('node_pm_revision')
+      ) {
+        recipientUser = await this.resolveProjectManagerId(manager, instance);
+      }
       const recipientRole = nextNode.data?.role || nextNode.data?.assigneeRole || nextNode.data?.assignedRole;
 
       await this.saveOutboxEvent(manager, {
@@ -437,6 +445,19 @@ export class WorkflowEngineService {
           fromNode: currentNode.id,
           toNode: nextNode.id,
           reason,
+          entityType: instance.entityType,
+          entityId: Number(instance.entityId),
+          workflowKey: resolvedWorkflowKey || undefined,
+          ...(instance.entityType === 'PROJECT'
+            ? {
+                projectId: Number(instance.entityId),
+                projectManagerId: recipientUser || undefined,
+              }
+            : instance.entityType === 'PURCHASE_REQUEST'
+              ? {
+                  purchaseRequestId: Number(instance.entityId),
+                }
+              : {}),
         },
       });
 
@@ -532,6 +553,20 @@ export class WorkflowEngineService {
         contextSnapshot: instance.context,
       });
 
+      const resolvedWorkflowKey = await this.resolveWorkflowKey(manager, instance, version);
+      const isProjectManagementReviewApproved =
+        instance.entityType === 'PROJECT' &&
+        (resolvedWorkflowKey === 'PROJECT_PLAN_REVIEW_WORKFLOW' ||
+          (!resolvedWorkflowKey && fromNode?.id === 'node_director_approval')) &&
+        instance.status === WorkflowInstanceStatus.COMPLETED &&
+        fromNode?.id === 'node_director_approval' &&
+        targetNode.id === 'node_end' &&
+        String(action || '').toUpperCase() === 'APPROVE';
+
+      const completedPmUserId = isProjectManagementReviewApproved
+        ? await this.resolveProjectManagerId(manager, instance)
+        : null;
+
       await this.saveOutboxEvent(manager, {
         eventId: crypto.randomUUID(),
         eventName: 'workflow.instance.completed',
@@ -541,12 +576,32 @@ export class WorkflowEngineService {
         aggregateId: instance.id,
         projectId: instance.entityType === 'PROJECT' ? Number(instance.entityId) : undefined,
         actor: actorId ? { userId: actorId } : undefined,
-        routing: undefined, // NEEDS MORE EVIDENCE to accurately resolve PM/PMO without tight coupling to Project entity here
-        notificationPolicy: NotificationPolicy.SYNC_ONLY,
+        routing: isProjectManagementReviewApproved
+          ? {
+              userIds: completedPmUserId ? [completedPmUserId] : [],
+              roles: ['PROJECT_MANAGER'],
+            }
+          : undefined,
+        notificationPolicy: isProjectManagementReviewApproved
+          ? NotificationPolicy.NOTIFICATION_AND_SYNC
+          : NotificationPolicy.SYNC_ONLY,
         payload: {
           instanceId: instance.id,
           finalStatus: instance.status,
           completedAt: instance.completedAt,
+          entityType: instance.entityType,
+          entityId: Number(instance.entityId),
+          workflowKey: resolvedWorkflowKey || undefined,
+          ...(isProjectManagementReviewApproved
+            ? {
+                projectId: Number(instance.entityId),
+                fromNode: fromNode?.id,
+                toNode: targetNode.id,
+                action: 'APPROVE',
+                reviewStatus: 'READY_FOR_KICKOFF',
+                projectManagerId: completedPmUserId || undefined,
+              }
+            : {}),
         },
       });
 
@@ -656,7 +711,14 @@ export class WorkflowEngineService {
     }
 
     // Resolve Assignee User ID (Static or Generic Dynamic from Runtime Context)
-    const resolvedAssigneeUserId = this.resolveNodeAssigneeUserId(targetNode, instance.context);
+    let resolvedAssigneeUserId = this.resolveNodeAssigneeUserId(targetNode, instance.context);
+    if (
+      instance.entityType === 'PROJECT' &&
+      typeof targetNode.id === 'string' &&
+      targetNode.id.startsWith('node_pm_revision')
+    ) {
+      resolvedAssigneeUserId = await this.resolveProjectManagerId(manager, instance);
+    }
 
     // Create pending WorkflowTask
     const task = manager.create(WorkflowTask, {
@@ -670,6 +732,8 @@ export class WorkflowEngineService {
     });
 
     await manager.save(task);
+
+    const assignedWorkflowKey = await this.resolveWorkflowKey(manager, instance, version);
 
     await this.saveOutboxEvent(manager, {
       eventId: crypto.randomUUID(),
@@ -691,6 +755,20 @@ export class WorkflowEngineService {
         nodeId: targetNode.id,
         assignedRoleId: roleId,
         assignedUserId: task.assigneeUserId,
+        entityType: instance.entityType,
+        entityId: Number(instance.entityId),
+        workflowKey: assignedWorkflowKey || undefined,
+        fromNode: fromNode?.id,
+        action,
+        ...(instance.entityType === 'PROJECT'
+          ? {
+              projectId: Number(instance.entityId),
+            }
+          : instance.entityType === 'PURCHASE_REQUEST'
+            ? {
+                purchaseRequestId: Number(instance.entityId),
+              }
+            : {}),
       },
     });
 
@@ -1317,6 +1395,86 @@ export class WorkflowEngineService {
       if (typeof val === 'string' && !isNaN(Number(val)) && Number(val) > 0) return Number(val);
     }
 
+    // 5. Management Review PM Revision node fallback from context (projectManagerId only, never submittedBy)
+    if (typeof targetNode.id === 'string' && targetNode.id.startsWith('node_pm_revision')) {
+      const pmCandidate = context.projectManagerId ?? context.pmId;
+      if (typeof pmCandidate === 'number' && pmCandidate > 0) return pmCandidate;
+      if (typeof pmCandidate === 'string' && !isNaN(Number(pmCandidate)) && Number(pmCandidate) > 0) {
+        return Number(pmCandidate);
+      }
+    }
+
+    return null;
+  }
+
+  private async resolveWorkflowKey(
+    manager: EntityManager,
+    instance: WorkflowInstance,
+    version?: WorkflowVersion | null,
+  ): Promise<string | null> {
+    if (instance?.workflowDefinition?.workflowKey) {
+      return String(instance.workflowDefinition.workflowKey).trim();
+    }
+    if (version?.workflowDefinition?.workflowKey) {
+      return String(version.workflowDefinition.workflowKey).trim();
+    }
+    if (instance?.context?.workflowKey) {
+      return String(instance.context.workflowKey).trim();
+    }
+    if (instance?.workflowDefinitionId) {
+      try {
+        if (manager && typeof manager.findOne === 'function') {
+          const def = await manager.findOne(WorkflowDefinition, {
+            where: { id: instance.workflowDefinitionId },
+          });
+          if (def?.workflowKey) return String(def.workflowKey).trim();
+        }
+        if (this.definitionRepo && typeof this.definitionRepo.findOne === 'function') {
+          const def = await this.definitionRepo.findOne({
+            where: { id: instance.workflowDefinitionId },
+          });
+          if (def?.workflowKey) return String(def.workflowKey).trim();
+        }
+      } catch {
+        // Ignore lookup error in partial mocks
+      }
+    }
+    return null;
+  }
+
+  private async resolveProjectManagerId(
+    manager: EntityManager,
+    instance: WorkflowInstance,
+  ): Promise<number | null> {
+    if (instance.entityType !== 'PROJECT' || !instance.entityId) {
+      return null;
+    }
+
+    if (manager && typeof manager.query === 'function') {
+      try {
+        const rows = await manager.query(
+          `SELECT manager_id FROM projects WHERE id = ? AND deleted_at IS NULL LIMIT 1`,
+          [Number(instance.entityId)],
+        );
+        if (Array.isArray(rows) && rows.length > 0) {
+          const mgrId = Number(rows[0].manager_id ?? rows[0].managerId ?? 0);
+          return !isNaN(mgrId) && mgrId > 0 ? mgrId : null;
+        }
+        return null;
+      } catch (err: any) {
+        this.logger.warn(
+          `Failed to query projects.manager_id for project #${instance.entityId}: ${err?.message}`,
+        );
+        return null;
+      }
+    }
+
+    const ctx = instance.context || {};
+    const candidate = ctx.projectManagerId ?? ctx.pmId;
+    if (typeof candidate === 'number' && candidate > 0) return candidate;
+    if (typeof candidate === 'string' && !isNaN(Number(candidate)) && Number(candidate) > 0) {
+      return Number(candidate);
+    }
     return null;
   }
 

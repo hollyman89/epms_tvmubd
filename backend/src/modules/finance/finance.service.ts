@@ -12,7 +12,7 @@ import { ServiceClaim, ServiceClaimStatus } from '../../entities/service-claim.e
 import { randomUUID } from 'crypto';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
-import { BusinessEvent } from '../../shared/contracts/business-event.contract';
+import { BusinessEvent, NotificationPolicy } from '../../shared/contracts/business-event.contract';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { VerifyInvoiceDto } from './dto/verify-invoice.dto';
@@ -20,7 +20,6 @@ import { SubmitPaymentRequestDto } from './dto/submit-payment-request.dto';
 import { DecidePaymentRequestDto, DirectorDecisionAction } from './dto/decide-payment-request.dto';
 import { ResubmitPaymentRequestDto } from './dto/resubmit-payment-request.dto';
 import { PaymentRequest, PaymentRequestStatus, ApprovalSnapshot } from '../../entities/payment-request.entity';
-import { Notification } from '../../entities/notification.entity';
 import { User } from '../../entities/user.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MismatchCode, MatchingMismatch, MatchingResult } from './finance.types';
@@ -529,7 +528,7 @@ export class FinanceService {
           paymentTermId?: number | null;
           createdBy: number | null;
         }> = {
-          eventId: randomUUID(),
+          eventId: `inv-cre-${savedInvoice.id}`,
           eventName: 'finance.invoice.created',
           eventVersion: 1,
           occurredAt: new Date().toISOString(),
@@ -537,8 +536,8 @@ export class FinanceService {
           aggregateId: savedInvoice.id,
           projectId: undefined,
           actor: userId ? { userId: Number(userId) } : undefined,
-          routing: undefined,
-          notificationPolicy: undefined,
+          routing: { roles: ['FINANCE'] },
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
           payload: {
             invoiceId: Number(savedInvoice.id),
             invoiceNumber: savedInvoice.invoiceNumber,
@@ -718,7 +717,7 @@ export class FinanceService {
         paymentTermId?: number | null;
         createdBy: number | null;
       }> = {
-        eventId: randomUUID(),
+        eventId: `inv-cre-${savedInvoice.id}`,
         eventName: 'finance.invoice.created',
         eventVersion: 1,
         occurredAt: new Date().toISOString(),
@@ -726,8 +725,8 @@ export class FinanceService {
         aggregateId: savedInvoice.id,
         projectId: undefined,
         actor: userId ? { userId: Number(userId) } : undefined,
-        routing: undefined,
-        notificationPolicy: undefined,
+        routing: { roles: ['FINANCE'] },
+        notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
         payload: {
           invoiceId: Number(savedInvoice.id),
           invoiceNumber: savedInvoice.invoiceNumber,
@@ -2556,37 +2555,49 @@ export class FinanceService {
       });
       await queryRunner.manager.save(AuditLog, auditLog);
 
-      // 11. Notification for Director (userId 4)
-      const directorUser = await queryRunner.manager.findOne(User, {
-        where: { id: 4 },
+      // 11. Transactional Outbox for finance.payment_request.submitted
+      const submitEventId = `prq-sub-${savedPrq.id}`;
+      const submitPayload = {
+        paymentRequestId: savedPrq.id,
+        requestId: savedPrq.id,
+        requestNumber: savedPrq.requestNumber,
+        invoiceId: savedPrq.invoiceId,
+        invoiceNumber: invoice.invoiceNumber,
+        requestedAmount: savedPrq.requestedAmount,
+        submittedBy: userId,
+        status: savedPrq.status,
+      };
+
+      const submitOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: submitEventId,
+        event_name: 'finance.payment_request.submitted',
+        event_version: '1',
+        aggregate_type: 'PAYMENT_REQUEST',
+        aggregate_id: savedPrq.id,
+        correlation_id: submitEventId,
+        payload: {
+          ...submitPayload,
+          businessPayload: submitPayload,
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+          routing: { roles: ['DIRECTOR'] },
+        },
+        status: OutboxStatus.PENDING,
       });
-      if (directorUser) {
-        const notif = queryRunner.manager.create(Notification, {
-          userId: directorUser.id,
-          title: 'Persetujuan Pembayaran',
-          message: `Pengajuan pembayaran ${savedPrq.requestNumber} untuk invoice ${invoice.invoiceNumber} menunggu persetujuan Direktur.`,
-          notificationType: 'TASK',
-          actionLink: `/finance/payments?tab=approvals&requestId=${savedPrq.id}`,
-          isRead: false,
-          createdBy: userId,
-          metaData: {
-            entityType: 'PAYMENT_REQUEST',
-            entityId: savedPrq.id,
-            requestNumber: savedPrq.requestNumber,
-            invoiceNumber: invoice.invoiceNumber,
-          },
-        });
-        await queryRunner.manager.save(Notification, notif);
-      }
+      await queryRunner.manager.save(OutboxEvent, submitOutbox);
 
       await queryRunner.commitTransaction();
 
       this.eventEmitter.emit('finance.payment_request.submitted', {
-        requestId: savedPrq.id,
-        requestNumber: savedPrq.requestNumber,
-        invoiceId: savedPrq.invoiceId,
-        requestedAmount: savedPrq.requestedAmount,
-        submittedBy: userId,
+        eventId: submitEventId,
+        eventName: 'finance.payment_request.submitted',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'PAYMENT_REQUEST',
+        aggregateId: savedPrq.id,
+        actor: { userId },
+        routing: { roles: ['DIRECTOR'] },
+        notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+        payload: submitPayload,
       });
 
       return this.getPaymentRequestById(savedPrq.id);
@@ -2718,45 +2729,89 @@ export class FinanceService {
       });
       await queryRunner.manager.save(AuditLog, auditLog);
 
-      // Notify Finance requester
-      if (savedPrq.requestedBy) {
-        let title = 'Pemberitahuan Persetujuan Pembayaran';
-        let msg = '';
-        if (dto.action === DirectorDecisionAction.APPROVE) {
-          title = 'Pengajuan Pembayaran Disetujui';
-          msg = `Pengajuan pembayaran ${savedPrq.requestNumber} telah DISETUJUI oleh Direktur dan siap dibayarkan.`;
-        } else if (dto.action === DirectorDecisionAction.RETURN) {
-          title = 'Revisi Pengajuan Pembayaran';
-          msg = `Pengajuan pembayaran ${savedPrq.requestNumber} dikembalikan Direktur untuk revisi: ${savedPrq.revisionNotes}`;
-        } else if (dto.action === DirectorDecisionAction.REJECT) {
-          title = 'Pengajuan Pembayaran Ditolak';
-          msg = `Pengajuan pembayaran ${savedPrq.requestNumber} DITOLAK oleh Direktur: ${savedPrq.rejectionReason}`;
-        }
+      // Transactional Outbox for decision action
+      let eventId: string;
+      let eventName: string;
+      let routing: { roles?: string[]; userIds?: number[] };
+      let decisionPayload: any;
 
-        const notif = queryRunner.manager.create(Notification, {
-          userId: savedPrq.requestedBy,
-          title,
-          message: msg,
-          notificationType: 'TASK',
-          actionLink: `/finance/payments?tab=${dto.action === DirectorDecisionAction.APPROVE ? 'ready_to_pay' : 'requests'}&requestId=${savedPrq.id}`,
-          isRead: false,
-          createdBy: userId,
-          metaData: {
-            entityType: 'PAYMENT_REQUEST',
-            entityId: savedPrq.id,
-            requestNumber: savedPrq.requestNumber,
-          },
-        });
-        await queryRunner.manager.save(Notification, notif);
+      if (dto.action === DirectorDecisionAction.APPROVE) {
+        eventId = `prq-app-${savedPrq.id}`;
+        eventName = 'finance.payment_request.approved';
+        routing = { roles: ['FINANCE'], userIds: savedPrq.requestedBy ? [savedPrq.requestedBy] : [] };
+        decisionPayload = {
+          paymentRequestId: savedPrq.id,
+          requestId: savedPrq.id,
+          requestNumber: savedPrq.requestNumber,
+          invoiceId: savedPrq.invoiceId,
+          approvedAmount: savedPrq.approvedAmount,
+          approvedBy: userId,
+          status: savedPrq.status,
+          requestedBy: savedPrq.requestedBy,
+        };
+      } else if (dto.action === DirectorDecisionAction.RETURN) {
+        eventId = `prq-ret-${savedPrq.id}-${savedPrq.version}`;
+        eventName = 'finance.payment_request.returned';
+        routing = { userIds: savedPrq.requestedBy ? [savedPrq.requestedBy] : [] };
+        decisionPayload = {
+          paymentRequestId: savedPrq.id,
+          requestId: savedPrq.id,
+          requestNumber: savedPrq.requestNumber,
+          invoiceId: savedPrq.invoiceId,
+          revisionNotes: savedPrq.revisionNotes,
+          returnedBy: userId,
+          status: savedPrq.status,
+          requestedBy: savedPrq.requestedBy,
+        };
+      } else {
+        eventId = `prq-rej-${savedPrq.id}`;
+        eventName = 'finance.payment_request.rejected';
+        routing = { userIds: savedPrq.requestedBy ? [savedPrq.requestedBy] : [] };
+        decisionPayload = {
+          paymentRequestId: savedPrq.id,
+          requestId: savedPrq.id,
+          requestNumber: savedPrq.requestNumber,
+          invoiceId: savedPrq.invoiceId,
+          rejectionReason: savedPrq.rejectionReason,
+          rejectedBy: userId,
+          status: savedPrq.status,
+          requestedBy: savedPrq.requestedBy,
+        };
       }
+
+      const decisionOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: eventId,
+        event_name: eventName,
+        event_version: '1',
+        aggregate_type: 'PAYMENT_REQUEST',
+        aggregate_id: savedPrq.id,
+        correlation_id: eventId,
+        payload: {
+          ...decisionPayload,
+          businessPayload: decisionPayload,
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+          routing,
+        },
+        status: OutboxStatus.PENDING,
+      });
+      await queryRunner.manager.save(OutboxEvent, decisionOutbox);
 
       await queryRunner.commitTransaction();
 
-      this.eventEmitter.emit(`finance.payment_request.${dto.action.toLowerCase()}`, {
-        requestId: savedPrq.id,
-        requestNumber: savedPrq.requestNumber,
-        status: savedPrq.status,
-        decidedBy: userId,
+      this.eventEmitter.emit(eventName, {
+        eventId,
+        eventName,
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'PAYMENT_REQUEST',
+        aggregateId: savedPrq.id,
+        actor: { userId },
+        routing,
+        notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+        payload: {
+          ...decisionPayload,
+          decidedBy: userId,
+        },
       });
 
       return this.getPaymentRequestById(savedPrq.id);
@@ -2823,6 +2878,18 @@ export class FinanceService {
       prq.status = PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL;
       prq.submittedAt = new Date();
 
+      // Count previous resubmissions from AuditLog
+      const prevResubmitCount = await queryRunner.manager
+        .createQueryBuilder(AuditLog, 'al')
+        .where('al.table_name = :table AND al.record_id = :id AND al.action = :action', {
+          table: 'payment_requests',
+          id: id,
+          action: 'RESUBMIT',
+        })
+        .getCount();
+
+      const cycle = prevResubmitCount + 1;
+
       const savedPrq = await queryRunner.manager.save(PaymentRequest, prq);
 
       // Audit Log
@@ -2840,35 +2907,51 @@ export class FinanceService {
       });
       await queryRunner.manager.save(AuditLog, auditLog);
 
-      // Notify Director (userId 4)
-      const directorUser = await queryRunner.manager.findOne(User, {
-        where: { id: 4 },
+      // Transactional Outbox for finance.payment_request.resubmitted
+      const resubmitEventId = `prq-sub-${savedPrq.id}-resub-${cycle}`;
+      const resubmitPayload = {
+        paymentRequestId: savedPrq.id,
+        requestId: savedPrq.id,
+        requestNumber: savedPrq.requestNumber,
+        invoiceId: savedPrq.invoiceId,
+        requestedAmount: savedPrq.requestedAmount,
+        resubmittedBy: userId,
+        revisionNotes: dto.revisionNotes,
+        cycle,
+        isResubmission: true,
+        status: savedPrq.status,
+      };
+
+      const resubmitOutbox = queryRunner.manager.create(OutboxEvent, {
+        event_id: resubmitEventId,
+        event_name: 'finance.payment_request.resubmitted',
+        event_version: '1',
+        aggregate_type: 'PAYMENT_REQUEST',
+        aggregate_id: savedPrq.id,
+        correlation_id: resubmitEventId,
+        payload: {
+          ...resubmitPayload,
+          businessPayload: resubmitPayload,
+          notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+          routing: { roles: ['DIRECTOR'] },
+        },
+        status: OutboxStatus.PENDING,
       });
-      if (directorUser) {
-        const notif = queryRunner.manager.create(Notification, {
-          userId: directorUser.id,
-          title: 'Persetujuan Pembayaran',
-          message: `Pengajuan pembayaran ${savedPrq.requestNumber} telah diajukan ulang oleh Finance dan menunggu persetujuan.`,
-          notificationType: 'TASK',
-          actionLink: `/finance/payments?tab=approvals&requestId=${savedPrq.id}`,
-          isRead: false,
-          createdBy: userId,
-          metaData: {
-            entityType: 'PAYMENT_REQUEST',
-            entityId: savedPrq.id,
-            requestNumber: savedPrq.requestNumber,
-          },
-        });
-        await queryRunner.manager.save(Notification, notif);
-      }
+      await queryRunner.manager.save(OutboxEvent, resubmitOutbox);
 
       await queryRunner.commitTransaction();
 
       this.eventEmitter.emit('finance.payment_request.resubmitted', {
-        requestId: savedPrq.id,
-        requestNumber: savedPrq.requestNumber,
-        status: savedPrq.status,
-        resubmittedBy: userId,
+        eventId: resubmitEventId,
+        eventName: 'finance.payment_request.resubmitted',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'PAYMENT_REQUEST',
+        aggregateId: savedPrq.id,
+        actor: { userId },
+        routing: { roles: ['DIRECTOR'] },
+        notificationPolicy: NotificationPolicy.NOTIFICATION_AND_SYNC,
+        payload: resubmitPayload,
       });
 
       return this.getPaymentRequestById(savedPrq.id);

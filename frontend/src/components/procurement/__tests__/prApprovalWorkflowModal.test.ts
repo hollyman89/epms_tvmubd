@@ -583,4 +583,40 @@ describe('EPMS — PR Approval Workflow Modal Redesign Tests', () => {
       expect(metrics.totalCalculatedSubtotal).toBe(2250000000);
     });
   });
+
+  // ── 15. MOBILE RESPONSIVENESS & LAYOUT SAFETY AUDIT ──
+  describe('15. Mobile Responsiveness & Layout Safety Audit', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const cssPath = path.resolve(__dirname, '../PrApprovalWorkflow.module.css');
+    const cssContent = fs.readFileSync(cssPath, 'utf8');
+
+    it('STRICT: should provide mobile header layout that prevents vertical title collapse', () => {
+      // Must contain @media (max-width: 576px)
+      expect(cssContent).toMatch(/@media\s*\(\s*max-width:\s*576px\s*\)/);
+
+      // Mobile modalHeader must use column direction to prevent crushing left section
+      expect(cssContent).toMatch(/flex-direction:\s*column/);
+
+      // Mobile close button must be absolute positioned to not squeeze header title
+      expect(cssContent).toMatch(/\.modalCloseBtn\s*\{[^}]*position:\s*absolute/);
+
+      // Title must use overflow-wrap / break-word without forced character splitting
+      expect(cssContent).toMatch(/overflow-wrap:\s*break-word/);
+    });
+
+    it('STRICT: should provide table container with responsive overflow protection', () => {
+      // Table container must have overflow-x: auto and max-width: 100%
+      const tableMatch = cssContent.match(/\.tableContainer\s*\{([^}]+)\}/);
+      expect(tableMatch).not.toBeNull();
+      const block = tableMatch![1];
+      expect(block).toMatch(/overflow-x:\s*auto/);
+      expect(block).toMatch(/max-width:\s*100%/);
+    });
+
+    it('STRICT: should provide decision actions wrapping for mobile screens', () => {
+      expect(cssContent).toMatch(/\.decisionActions/);
+      expect(cssContent).toMatch(/flex-wrap:\s*wrap/);
+    });
+  });
 });

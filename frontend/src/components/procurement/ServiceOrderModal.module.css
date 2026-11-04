@@ -1,0 +1,553 @@
+/* EPMS — SERVICE ORDER MODAL RESPONSIVE CSS MODULE */
+
+.serviceOrderModal :global(.ant-modal) {
+  max-width: 100vw;
+}
+
+.modalBody {
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.modalBody > * {
+  flex-shrink: 0;
+}
+
+/* ── HEADER CONTAINER ── */
+.headerContainer {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding-right: 28px; /* Clearance for modal close button */
+  width: 100%;
+}
+
+.headerIcon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: #e0f2fe;
+  border: 1px solid #bae6fd;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #0284c7;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.headerTextGroup {
+  min-width: 0;
+  flex: 1;
+}
+
+.headerTitle {
+  font-weight: 700;
+  font-size: 15px;
+  color: #0f172a;
+  line-height: 1.35;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.headerSubtitle {
+  font-size: 11px;
+  color: #64748b;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  display: block;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+/* ── PO CONTEXT SUMMARY STRIP ── */
+.poSummaryStrip {
+  background: #f8fafc;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.poSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.summaryCol {
+  min-width: 0;
+}
+
+.summaryLabel {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.summaryValue {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+.summaryValueLink {
+  font-weight: 700;
+  font-size: 13px;
+  color: #1d4ed8;
+  line-height: 1.35;
+}
+
+.summaryValueVendor {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #047857;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+.summaryCode {
+  font-size: 10px;
+  color: #64748b;
+  display: block;
+  font-family: monospace;
+  margin-top: 1px;
+}
+
+.summaryHighlight {
+  font-weight: 800;
+  font-size: 14px;
+  color: #059669;
+  font-family: monospace;
+  line-height: 1.3;
+}
+
+/* ── SECTION HEADER (DOCUMENT LIST) ── */
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sectionTitle {
+  font-weight: 700;
+  font-size: 13px;
+  color: #334155;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  word-break: break-word;
+}
+
+.sectionAction {
+  flex-shrink: 0;
+}
+
+/* ── DESKTOP TABLE VIEW ── */
+.desktopTableView {
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+/* ── MOBILE CARDS VIEW ── */
+.mobileCardsView {
+  display: none;
+}
+
+.documentCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: all 0.2s ease;
+}
+
+.documentCard:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cardBadgeGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.cardDocNumber {
+  font-weight: 700;
+  font-family: monospace;
+  font-size: 12.5px;
+  color: #0284c7;
+  letter-spacing: 0.02em;
+}
+
+.cardScheduleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #475569;
+  background: #f8fafc;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid #f1f5f9;
+}
+
+.cardActionRow {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+/* ── EMPTY STATE ── */
+.emptyStateWrapper {
+  text-align: center;
+  padding: 24px 16px;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+.emptyStateTitle {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: #334155;
+  margin-bottom: 2px;
+}
+
+.emptyStateDesc {
+  font-size: 11.5px;
+  color: #64748b;
+  max-width: 480px;
+  margin: 0 auto;
+  line-height: 1.4;
+}
+
+/* ── DETAIL TOP BAR ── */
+.detailTopBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.detailBadgeGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── FORM TOP BAR ── */
+.formTopBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.formWrapper {
+  overflow-x: hidden;
+  width: 100%;
+}
+
+/* ── FOOTER CONTAINER ── */
+.footerContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.footerLeft {
+  font-size: 12px;
+  color: #64748b;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.footerRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   MOBILE RESPONSIVE BREAKPOINT (max-width: 640px)
+   ═════════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .serviceOrderModal :global(.ant-modal) {
+    top: 10px !important;
+    margin: 0 auto !important;
+    padding-bottom: 10px !important;
+  }
+
+  .serviceOrderModal :global(.ant-modal-content) {
+    padding: 14px 12px 10px 12px !important;
+    max-height: calc(100dvh - 20px) !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .serviceOrderModal :global(.ant-modal-header) {
+    margin-bottom: 8px !important;
+    flex-shrink: 0 !important;
+    padding-right: 28px !important;
+  }
+
+  .serviceOrderModal :global(.ant-modal-body) {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding: 4px 6px !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .serviceOrderModal :global(.ant-modal-footer) {
+    margin-top: 6px !important;
+    flex-shrink: 0 !important;
+    padding: 8px 0 0 0 !important;
+  }
+
+  .modalBody {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: calc(100dvh - 230px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-bottom: 16px;
+    padding-right: 2px;
+    gap: 10px;
+  }
+
+  .headerContainer {
+    padding-right: 0;
+    gap: 8px;
+  }
+
+  .headerIcon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .headerTitle {
+    font-size: 13.5px;
+    gap: 6px;
+  }
+
+  .headerSubtitle {
+    font-size: 10.5px;
+  }
+
+  /* PO Summary: Compact 2-column info grid */
+  .poSummaryStrip {
+    padding: 10px 12px;
+  }
+
+  .poSummaryGrid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 10px;
+  }
+
+  /* Section Header on Mobile: Title on own row, action on separate row */
+  .sectionHeader {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .sectionTitle {
+    width: 100%;
+    font-size: 12.5px;
+  }
+
+  .sectionAction {
+    width: 100%;
+  }
+
+  .sectionAction > * {
+    width: 100% !important;
+    height: 36px !important;
+    font-size: 12.5px !important;
+  }
+
+  /* Switch from Desktop Table to Mobile Cards */
+  .desktopTableView {
+    display: none;
+  }
+
+  .mobileCardsView {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .cardActionRow > * {
+    width: 100% !important;
+    height: 34px !important;
+  }
+
+  /* Empty State compact */
+  .emptyStateWrapper {
+    padding: 16px 12px;
+  }
+
+  .emptyStateTitle {
+    font-size: 12.5px;
+  }
+
+  .emptyStateDesc {
+    font-size: 11px;
+  }
+
+  /* Detail view top bar on mobile */
+  .detailTopBar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .detailTopBar > * {
+    width: 100%;
+  }
+
+  .detailBadgeGroup {
+    justify-content: flex-start;
+  }
+
+  /* Form view top bar on mobile */
+  .formTopBar {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .formTopBar > * {
+    width: 100%;
+  }
+
+  /* Footer on mobile: Stack/wrap buttons without overflow */
+  .footerContainer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .footerLeft {
+    font-size: 11px;
+    text-align: center;
+    width: 100%;
+  }
+
+  .footerRight {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .footerRight > * {
+    width: 100% !important;
+    min-height: 38px !important;
+  }
+
+  .footerRight :global(.ant-space) {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 6px !important;
+  }
+
+  .footerRight :global(.ant-space-item) {
+    width: 100%;
+  }
+
+  .footerRight :global(.ant-space-item) > * {
+    width: 100% !important;
+    min-height: 38px !important;
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════
+   EXTRA SMALL MOBILE BREAKPOINT (max-width: 360px)
+   ═════════════════════════════════════════════════════════════════ */
+@media (max-width: 360px) {
+  .modalBody {
+    max-height: calc(100dvh - 240px);
+    gap: 8px;
+  }
+
+  .headerTitle {
+    font-size: 12.5px;
+  }
+
+  .headerSubtitle {
+    font-size: 10px;
+  }
+
+  .poSummaryGrid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .summaryLabel {
+    font-size: 9.5px;
+  }
+
+  .summaryValue,
+  .summaryValueVendor {
+    font-size: 12px;
+  }
+
+  .summaryHighlight {
+    font-size: 13px;
+  }
+}
+
