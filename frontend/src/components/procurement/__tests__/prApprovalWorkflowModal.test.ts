@@ -619,4 +619,52 @@ describe('EPMS — PR Approval Workflow Modal Redesign Tests', () => {
       expect(cssContent).toMatch(/flex-wrap:\s*wrap/);
     });
   });
+
+  // ── 16. MOBILE TOUCH TARGETS & TABLE SCROLL CUE REFINEMENTS (TICKETS #1, #9, #10) ──
+  describe('16. Mobile Touch Targets & Table Scroll Cue Refinements (Tickets #1, #9, #10)', () => {
+    const fs = require('fs');
+    const path = require('path');
+    const cssPath = path.resolve(__dirname, '../PrApprovalWorkflow.module.css');
+    const cssContent = fs.readFileSync(cssPath, 'utf8');
+
+    it('STRICT: should provide minimum 42px touch target height for mobile approval buttons', () => {
+      // Must contain min-height: 42px for decision action buttons under @media (max-width: 576px)
+      expect(cssContent).toMatch(/\.decisionActions\s+button\s*\{[^}]*min-height:\s*42px/);
+
+      // Must also preserve 42px touch target under @media (max-width: 360px)
+      expect(cssContent).toMatch(/@media\s*\(\s*max-width:\s*360px\s*\)[^}]*\{[\s\S]*\.decisionActions\s+button\s*\{[^}]*min-height:\s*42px/);
+    });
+
+    it('STRICT: should provide mobile table edge scroll cue without blocking gestures', () => {
+      // Must provide .tableContainer::after with gradient and pointer-events: none under @media (max-width: 576px)
+      expect(cssContent).toMatch(/\.tableContainer::after\s*\{/);
+      expect(cssContent).toMatch(/\.tableContainer::after\s*\{[^}]*pointer-events:\s*none/);
+      expect(cssContent).toMatch(/\.tableContainer::after\s*\{[^}]*background:\s*linear-gradient/);
+    });
+
+    it('STRICT: should preserve long Jasa descriptions fully readable without character truncation', () => {
+      const jasaScopeOfWork =
+        'Route detail survey and design, Service for survey and design route include TSSR softcopy, KMZ, CAD and hardcopy, PDF Scan Files for route 1000 - 5000 m';
+
+      const items: PrItemPresentation[] = [
+        {
+          id: 15,
+          itemName: jasaScopeOfWork,
+          quantity: 3000,
+          uom: 'Unit',
+          estimatedUnitPrice: 5000,
+          totalPrice: 15000000,
+        },
+      ];
+
+      const metrics = derivePrItemsMetrics(items);
+      expect(metrics.itemCount).toBe(1);
+      expect(items[0].itemName).toBe(jasaScopeOfWork);
+      expect(items[0].itemName.length).toBeGreaterThan(100);
+      expect(metrics.totalCalculatedSubtotal).toBe(15000000);
+
+      // Verify CSS contains table cell typography refinement for mobile line rhythm
+      expect(cssContent).toMatch(/\.tableContainer\s+:global\(\.ant-table-tbody\s*>\s*tr\s*>\s*td\)\s*\{[^}]*line-height:\s*1\.4/);
+    });
+  });
 });

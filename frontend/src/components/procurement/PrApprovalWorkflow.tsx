@@ -1,5 +1,6 @@
 'use client';
 
+// EPMS — PR Approval Workflow Component (Refined Mobile Touch Targets & Table Scroll Cues)
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Tag,
