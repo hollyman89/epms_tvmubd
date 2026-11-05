@@ -284,8 +284,12 @@ export class FinanceService {
 
         // A7.b Canonical Service Claim Validation (for Service PO / Service Invoices)
         let referencedClaim: ServiceClaim | null = null;
+        const isDp = paymentTerm.termType === PaymentTermType.DOWN_PAYMENT ||
+          (paymentTerm.termName || '').toUpperCase().includes('DP') ||
+          (paymentTerm.termName || '').toUpperCase().includes('UANG MUKA');
+
         if (po.orderType === 'SERVICE' || dto.serviceClaimId) {
-          if (po.orderType === 'SERVICE' && !dto.serviceClaimId) {
+          if (po.orderType === 'SERVICE' && !isDp && !dto.serviceClaimId) {
             throw new BadRequestException(
               'Invoice penagihan Service PO wajib menyertakan referensi Klaim Jasa yang telah disetujui (APPROVED_FOR_INVOICE).'
             );
@@ -323,26 +327,24 @@ export class FinanceService {
               throw new BadRequestException('Service Claim bukan milik Vendor pada Purchase Order ini.');
             }
 
-            // Duplicate Claim Invoice Protection (Active / Non-Cancelled)
-            const existingActiveInvoiceForClaim = await queryRunner.manager.findOne(Invoice, {
+            // Calculate already invoiced amount for this claim across active invoices
+            const activeInvoicesForClaim = await queryRunner.manager.find(Invoice, {
               where: { serviceClaimId: referencedClaim.id },
             });
-            if (
-              existingActiveInvoiceForClaim &&
-              !existingActiveInvoiceForClaim.deletedAt &&
-              existingActiveInvoiceForClaim.status !== 'CANCELLED' &&
-              existingActiveInvoiceForClaim.matchStatus !== 'REJECTED'
-            ) {
-              throw new BadRequestException(
-                `Service Claim '${referencedClaim.claimNumber || referencedClaim.id}' sudah ditagihkan pada invoice aktif (${existingActiveInvoiceForClaim.invoiceNumber}).`
-              );
+            let alreadyInvoicedClaimAmount = 0;
+            for (const inv of activeInvoicesForClaim) {
+              if (inv.deletedAt || inv.status === 'CANCELLED' || inv.matchStatus === 'REJECTED') {
+                continue;
+              }
+              alreadyInvoicedClaimAmount += Number(inv.totalAmount || 0);
             }
 
-            // Claim Value / Invoice Value Safety
             const approvedClaimValue = Number(referencedClaim.approvedClaimAmount || 0);
-            if (totalInvoiceAmount > approvedClaimValue + 0.01) {
+            const remainingClaimCapacity = Math.max(0, Math.round((approvedClaimValue - alreadyInvoicedClaimAmount) * 100) / 100);
+
+            if (totalInvoiceAmount > remainingClaimCapacity + 0.01) {
               throw new BadRequestException(
-                `Nilai invoice (Rp${totalInvoiceAmount.toLocaleString('id-ID')}) melebihi nilai klaim jasa yang disetujui (Rp${approvedClaimValue.toLocaleString('id-ID')}).`
+                `Nilai invoice (Rp${totalInvoiceAmount.toLocaleString('id-ID')}) melebihi sisa kapasitas klaim jasa yang disetujui (Tersedia: Rp${remainingClaimCapacity.toLocaleString('id-ID')}, Disetujui: Rp${approvedClaimValue.toLocaleString('id-ID')}, Sudah ditagihkan: Rp${alreadyInvoicedClaimAmount.toLocaleString('id-ID')}).`
               );
             }
           }
@@ -374,7 +376,7 @@ export class FinanceService {
 
         // A9. Invoice Items handling
         const invoiceItems: InvoiceItem[] = [];
-        if (paymentTerm.termType === PaymentTermType.PROGRESS) {
+        if (po.orderType !== 'SERVICE' && paymentTerm.termType === PaymentTermType.PROGRESS) {
           if (dto.items && dto.items.length > 0) {
             for (const itemDto of dto.items) {
               const poItem = po.items?.find(i => Number(i.id) === Number(itemDto.poItemId));

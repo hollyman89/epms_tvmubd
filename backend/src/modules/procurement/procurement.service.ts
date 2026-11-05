@@ -1036,6 +1036,8 @@ export class ProcurementService {
         'vendor',
         'purchaseRequest',
         'purchaseRequest.project',
+        'serviceOrders',
+        'serviceClaims',
       ],
       order: {
         paymentTerms: {
@@ -1050,6 +1052,14 @@ export class ProcurementService {
 
     if (po.paymentTerms && Array.isArray(po.paymentTerms)) {
       po.paymentTerms.sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+    }
+
+    if (po.serviceClaims && Array.isArray(po.serviceClaims)) {
+      po.serviceClaims = po.serviceClaims.filter((sc) => !sc.deletedAt && sc.status !== 'CANCELLED');
+    }
+
+    if (po.serviceOrders && Array.isArray(po.serviceOrders)) {
+      po.serviceOrders = po.serviceOrders.filter((so) => !so.deletedAt && so.status !== 'CANCELLED');
     }
 
     return {
@@ -1340,6 +1350,8 @@ export class ProcurementService {
         'vendor',
         'purchaseRequest',
         'purchaseRequest.project',
+        'serviceOrders',
+        'serviceClaims',
       ],
       order: {
         createdAt: 'DESC',
@@ -1352,6 +1364,12 @@ export class ProcurementService {
     pos.forEach((po) => {
       if (po.paymentTerms && Array.isArray(po.paymentTerms)) {
         po.paymentTerms.sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+      }
+      if (po.serviceClaims && Array.isArray(po.serviceClaims)) {
+        po.serviceClaims = po.serviceClaims.filter((sc) => !sc.deletedAt && sc.status !== 'CANCELLED');
+      }
+      if (po.serviceOrders && Array.isArray(po.serviceOrders)) {
+        po.serviceOrders = po.serviceOrders.filter((so) => !so.deletedAt && so.status !== 'CANCELLED');
       }
     });
 

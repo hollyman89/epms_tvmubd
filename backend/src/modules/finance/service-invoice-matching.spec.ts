@@ -27,6 +27,7 @@ describe('FinanceService - Service Invoice Reconciliation & Material Regression'
         find: jest.fn(),
         save: jest.fn(),
         create: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
       },
       isTransactionActive: true,
     };
@@ -367,6 +368,224 @@ describe('FinanceService - Service Invoice Reconciliation & Material Regression'
       // Must still evaluate as MATERIAL and fail with INSUFFICIENT_DELIVERY
       expect(result.status).toBe('MISMATCH');
       expect(result.mismatches.some(m => m.code === MismatchCode.INSUFFICIENT_DELIVERY)).toBe(true);
+    });
+  });
+
+  describe('createInvoice - Service PO Realization & Claim Capacity (EPMS-20261105)', () => {
+    const servicePoSpecimen = {
+      id: 2,
+      poNumber: 'PO-20261104-001',
+      orderType: PurchaseOrderType.SERVICE,
+      status: 'ISSUED',
+      totalAmount: 4152000,
+      vendorId: 1,
+      items: [
+        {
+          id: 5,
+          purchaseOrderId: 2,
+          itemName: 'Jasa Implementasi IT',
+          quantity: 1038,
+          receivedQuantity: 0,
+          unitPrice: 4000,
+          totalPrice: 4152000,
+        },
+      ],
+      paymentTerms: [
+        {
+          id: 201,
+          poId: 2,
+          sequence: 1,
+          termName: 'Pelunasan Penuh',
+          termType: PaymentTermType.FINAL_DELIVERY,
+          percentage: 100,
+          amount: 4152000,
+          status: PaymentTermStatus.PENDING,
+          deletedAt: null,
+        },
+      ],
+      purchaseRequest: { projectId: 10 },
+    };
+
+    const validApprovedClaim = {
+      id: 50,
+      claimNumber: 'SCL-20261104-002',
+      poId: 2,
+      projectId: 10,
+      vendorId: 1,
+      status: ServiceClaimStatus.APPROVED_FOR_INVOICE,
+      totalClaimAmount: 4152000,
+      approvedClaimAmount: 4152000,
+      deletedAt: null,
+    };
+
+    it('1. Service PO createInvoice with valid APPROVED_FOR_INVOICE claim within capacity succeeds', async () => {
+      mockQueryRunner.manager.findOne
+        .mockResolvedValueOnce({ ...servicePoSpecimen }) // PO
+        .mockResolvedValueOnce(null) // Candidate invoice number check
+        .mockResolvedValueOnce({ ...servicePoSpecimen.paymentTerms[0] }) // Payment term
+        .mockResolvedValueOnce(null) // Active invoice check
+        .mockResolvedValueOnce({ ...validApprovedClaim }); // Service claim check
+
+      mockQueryRunner.manager.find
+        .mockResolvedValueOnce([]) // Active invoices for claim (already invoiced)
+        .mockResolvedValueOnce([]); // Active invoices for PO
+
+      mockQueryRunner.manager.save.mockImplementation((entityOrTarget: any, entity: any) => {
+        const target = entity || entityOrTarget;
+        if (!target.id) target.id = 100;
+        return target;
+      });
+
+      const dto = {
+        purchaseOrderId: 2,
+        paymentTermId: 201,
+        serviceClaimId: 50,
+        invoiceDate: '2026-11-05',
+      };
+
+      const result = await service.createInvoice(dto, 37);
+
+      expect(result).toBeDefined();
+      expect(result.poId).toBe(2);
+      expect(result.paymentTermId).toBe(201);
+      expect(result.serviceClaimId).toBe(50);
+      expect(result.totalAmount).toBe(4152000);
+      expect(result.matchStatus).toBe('PENDING');
+    });
+
+    it('2. Service PO createInvoice without serviceClaimId for non-DP term throws BadRequestException', async () => {
+      mockQueryRunner.manager.findOne
+        .mockResolvedValueOnce({ ...servicePoSpecimen }) // PO
+        .mockResolvedValueOnce(null) // Candidate invoice number check
+        .mockResolvedValueOnce({ ...servicePoSpecimen.paymentTerms[0] }) // Payment term
+        .mockResolvedValueOnce(null); // Active invoice check
+
+      const dto = {
+        purchaseOrderId: 2,
+        paymentTermId: 201,
+        invoiceDate: '2026-11-05',
+        // Omitted serviceClaimId
+      };
+
+      await expect(service.createInvoice(dto, 37)).rejects.toThrow(
+        /Invoice penagihan Service PO wajib menyertakan referensi Klaim Jasa yang telah disetujui/
+      );
+    });
+
+    it('3. Service PO createInvoice exceeding remaining claim capacity throws BadRequestException', async () => {
+      const claimWithLowerCapacity = {
+        ...validApprovedClaim,
+        approvedClaimAmount: 2000000, // Only 2M approved, but term amount is 4.152M
+      };
+
+      mockQueryRunner.manager.findOne
+        .mockResolvedValueOnce({ ...servicePoSpecimen }) // PO
+        .mockResolvedValueOnce(null) // Candidate invoice number check
+        .mockResolvedValueOnce({ ...servicePoSpecimen.paymentTerms[0] }) // Payment term
+        .mockResolvedValueOnce(null) // Active invoice check
+        .mockResolvedValueOnce(claimWithLowerCapacity); // Service claim check
+
+      mockQueryRunner.manager.find
+        .mockResolvedValueOnce([]); // Active invoices for claim
+
+      const dto = {
+        purchaseOrderId: 2,
+        paymentTermId: 201,
+        serviceClaimId: 50,
+        invoiceDate: '2026-11-05',
+      };
+
+      await expect(service.createInvoice(dto, 37)).rejects.toThrow(
+        /melebihi sisa kapasitas klaim jasa yang disetujui/
+      );
+    });
+
+    it('4. Service PO createInvoice for DP term succeeds without serviceClaimId', async () => {
+      const dpTerm = {
+        id: 200,
+        poId: 2,
+        sequence: 1,
+        termName: 'Uang Muka 30%',
+        termType: PaymentTermType.DOWN_PAYMENT,
+        percentage: 30,
+        amount: 1245600,
+        status: PaymentTermStatus.PENDING,
+        deletedAt: null,
+      };
+
+      const poWithDp = {
+        ...servicePoSpecimen,
+        paymentTerms: [dpTerm],
+      };
+
+      mockQueryRunner.manager.findOne
+        .mockResolvedValueOnce(poWithDp) // PO
+        .mockResolvedValueOnce(null) // Candidate invoice number check
+        .mockResolvedValueOnce({ ...dpTerm }) // Payment term
+        .mockResolvedValueOnce(null); // Active invoice check
+
+      mockQueryRunner.manager.find
+        .mockResolvedValueOnce([]); // Active invoices for PO
+
+      mockQueryRunner.manager.save.mockImplementation((entityOrTarget: any, entity: any) => {
+        const target = entity || entityOrTarget;
+        if (!target.id) target.id = 101;
+        return target;
+      });
+
+      const dto = {
+        purchaseOrderId: 2,
+        paymentTermId: 200,
+        invoiceDate: '2026-11-05',
+        // No serviceClaimId for DP
+      };
+
+      const result = await service.createInvoice(dto, 37);
+
+      expect(result).toBeDefined();
+      expect(result.totalAmount).toBe(1245600);
+      expect(result.serviceClaimId).toBeUndefined();
+    });
+
+    it('5. Material PO createInvoice with PROGRESS term still enforces Goods Receipt', async () => {
+      const materialProgressPo = {
+        id: 1,
+        poNumber: 'PO-MATERIAL-001',
+        orderType: PurchaseOrderType.MATERIAL,
+        status: 'ISSUED',
+        totalAmount: 10000000,
+        paymentTerms: [
+          {
+            id: 101,
+            poId: 1,
+            sequence: 1,
+            termName: 'Progress 1 (50%)',
+            termType: PaymentTermType.PROGRESS,
+            percentage: 50,
+            amount: 5000000,
+            status: PaymentTermStatus.PENDING,
+            deletedAt: null,
+          },
+        ],
+        items: [{ id: 1, itemName: 'Material', quantity: 10, receivedQuantity: 5, unitPrice: 1000000 }],
+      };
+
+      mockQueryRunner.manager.findOne
+        .mockResolvedValueOnce(materialProgressPo) // PO
+        .mockResolvedValueOnce(null) // Candidate invoice number check
+        .mockResolvedValueOnce({ ...materialProgressPo.paymentTerms[0] }) // Payment term
+        .mockResolvedValueOnce(null); // Active invoice check
+
+      const dto = {
+        purchaseOrderId: 1,
+        paymentTermId: 101,
+        invoiceDate: '2026-11-05',
+        // Missing goodsReceiptId and evidenceRef
+      };
+
+      await expect(service.createInvoice(dto, 37)).rejects.toThrow(
+        /Invoice termin progress wajib menyertakan referensi Goods Receipt valid/
+      );
     });
   });
 });

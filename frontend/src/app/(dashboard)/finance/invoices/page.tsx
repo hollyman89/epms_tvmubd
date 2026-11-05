@@ -91,6 +91,12 @@ const isRetentionTerm = (t: any) => {
   return tType === 'RETENTION' || tName.includes('RETEN') || Boolean(t?.isRetention);
 };
 
+const isFinalDeliveryTerm = (t: any) => {
+  const tType = (t?.termType || '').toUpperCase();
+  const tName = (t?.termName || '').toUpperCase();
+  return tType === 'FINAL_DELIVERY' || tName.includes('PELUNASAN') || tName.includes('FINAL');
+};
+
 // Canonical Queue Eligibility Evaluator (Phase FIN-UI-2)
 const getQueueTermEligibility = (
   term: any,
@@ -145,7 +151,7 @@ const getQueueTermEligibility = (
     }
   }
 
-  // 2. Physical & GR Evidence across PO
+  // 2. Physical & GR Evidence across PO (for Material PO)
   const poGrs = (allGrs || []).filter((g: any) => {
     const mPo = Number(g.poId || g.purchaseOrderId) === Number(po.id) || g.purchaseOrder?.poNumber === po.poNumber;
     const notDeleted = !g.deletedAt;
@@ -167,14 +173,20 @@ const getQueueTermEligibility = (
     }
   }
 
-  // 3. Milestone Gate
+  // 3. Service Claims & Realization Data across PO (for Service PO)
+  const isServicePo = po.orderType === 'SERVICE';
+  const serviceClaims = (po.serviceClaims || []).filter((c: any) => !c.deletedAt && c.status !== 'CANCELLED');
+  const approvedServiceClaims = serviceClaims.filter((c: any) => c.status === 'APPROVED_FOR_INVOICE');
+  const totalApprovedClaimAmount = approvedServiceClaims.reduce((sum: number, c: any) => sum + Number(c.approvedClaimAmount || 0), 0);
+  const poTotalAmount = Number(po.totalAmount || 0);
+
+  // 4. Milestone Gate
   let msPassed = true;
   let msReason = '';
   const isProg = isProgressTerm(term);
   const isDp = isDpTerm(term);
   const isRet = isRetentionTerm(term);
-
-  const isServicePo = po.orderType === 'SERVICE';
+  const isFinal = isFinalDeliveryTerm(term);
 
   if (isDp) {
     if (!['ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED'].includes(po.status)) {
@@ -200,38 +212,94 @@ const getQueueTermEligibility = (
       } else {
         const matchPercent = (term.triggerCondition || '').match(/(\d+(?:\.\d+)?)\s*%/);
         const targetPercent = matchPercent ? parseFloat(matchPercent[1]) : Number(term.percentage || 0);
-        const poTotal = Number(po.totalAmount || 0);
         if (targetPercent > 0 && targetPercent < 100) {
-          const physicalProgress = poTotal > 0 ? (totalPhysicalDeliveryValueAcrossPo / poTotal) * 100 : 0;
+          const physicalProgress = poTotalAmount > 0 ? (totalPhysicalDeliveryValueAcrossPo / poTotalAmount) * 100 : 0;
           if (Math.round(physicalProgress * 100) / 100 + 0.5 < targetPercent) {
             msPassed = false;
             msReason = `Kemajuan fisik baru mencapai ${physicalProgress.toFixed(1)}% (target: ${targetPercent}%)`;
           }
         }
       }
+    } else {
+      // SERVICE PROGRESS MILESTONE
+      if (approvedServiceClaims.length === 0) {
+        msPassed = false;
+        const pmClaim = serviceClaims.find((c: any) => c.status === 'PM_VERIFIED');
+        const subClaim = serviceClaims.find((c: any) => c.status === 'SUBMITTED');
+        if (pmClaim) {
+          msReason = `Klaim Jasa (${pmClaim.claimNumber}) masih berstatus PM_VERIFIED dan menunggu persetujuan komersial (APPROVED_FOR_INVOICE) oleh Purchasing.`;
+        } else if (subClaim) {
+          msReason = `Klaim Jasa (${subClaim.claimNumber}) masih berstatus SUBMITTED dan menunggu verifikasi teknis PM serta komersial Purchasing.`;
+        } else {
+          msReason = 'Belum ada Klaim Jasa yang disetujui secara komersial (APPROVED_FOR_INVOICE) untuk termin progress ini.';
+        }
+      }
+    }
+  } else if (isFinal) {
+    if (!isServicePo) {
+      // Material FINAL_DELIVERY: requires 100% physical delivery
+      const isAllItemsCompleted =
+        po.status === 'COMPLETED' ||
+        ((po.items || []).length > 0 && (po.items || []).every((it: any) => Number(it.receivedQuantity || 0) >= Number(it.quantity || 0))) ||
+        (totalPhysicalDeliveryValueAcrossPo >= poTotalAmount && poTotalAmount > 0);
+
+      if (!isAllItemsCompleted) {
+        const unfulfilled = (po.items || []).filter(
+          (it: any) => Number(it.receivedQuantity || 0) < Number(it.quantity || 0)
+        );
+        const itemDetail = unfulfilled.length > 0
+          ? unfulfilled.map((i: any) => `${i.itemName}: ${i.receivedQuantity || 0}/${i.quantity}`).join(', ')
+          : 'Penerimaan fisik barang belum 100%';
+        msPassed = false;
+        msReason = `Pelunasan penuh barang memerlukan penerimaan fisik 100% (status PO: ${po.status}). Item belum selesai: ${itemDetail}`;
+      }
+    } else {
+      // Service FINAL_DELIVERY: requires 100% approved claim scope
+      if (approvedServiceClaims.length === 0) {
+        msPassed = false;
+        const pmClaim = serviceClaims.find((c: any) => c.status === 'PM_VERIFIED');
+        const subClaim = serviceClaims.find((c: any) => c.status === 'SUBMITTED');
+        if (pmClaim) {
+          msReason = `Klaim Jasa (${pmClaim.claimNumber}) masih berstatus PM_VERIFIED dan menunggu persetujuan komersial (APPROVED_FOR_INVOICE) oleh Purchasing.`;
+        } else if (subClaim) {
+          msReason = `Klaim Jasa (${subClaim.claimNumber}) masih berstatus SUBMITTED dan menunggu verifikasi teknis PM serta komersial Purchasing.`;
+        } else {
+          msReason = 'Belum ada Klaim Jasa yang disetujui secara komersial (APPROVED_FOR_INVOICE) sebagai dasar pelunasan.';
+        }
+      } else if (poTotalAmount > 0 && totalApprovedClaimAmount < poTotalAmount - 0.01) {
+        msPassed = false;
+        msReason = `Pelunasan penuh jasa memerlukan Klaim Jasa disetujui komersial 100% (Tersedia: Rp ${Math.round(totalApprovedClaimAmount).toLocaleString('id-ID')} dari total PO Rp ${Math.round(poTotalAmount).toLocaleString('id-ID')}).`;
+      }
     }
   } else if (isRet) {
-    if (po.status !== 'COMPLETED') {
-      msPassed = false;
-      msReason = 'Termin retensi hanya dapat ditagihkan setelah Purchase Order berstatus COMPLETED';
+    if (!isServicePo) {
+      if (po.status !== 'COMPLETED') {
+        msPassed = false;
+        msReason = 'Termin retensi hanya dapat ditagihkan setelah Purchase Order berstatus COMPLETED';
+      }
+    } else {
+      if (approvedServiceClaims.length === 0 || (poTotalAmount > 0 && totalApprovedClaimAmount < poTotalAmount - 0.01)) {
+        msPassed = false;
+        msReason = 'Termin retensi jasa memerlukan penyelesaian klaim jasa 100% yang telah disetujui komersial.';
+      }
     }
   }
 
-  // 4. Financial Capacity Gate (for Progress terms)
+  // 5. Financial Capacity Gate
   let capPassed = true;
   let capReason = '';
-  if (isProg && !isServicePo) {
+  if (!isServicePo && (isProg || isFinal)) {
     if (poGrs.length === 0) {
       capPassed = false;
       capReason = 'Belum ada dokumen Goods Receipt (GR) aktif sebagai dasar fisik penagihan';
     } else {
       let previousProgressBilled = 0;
       for (const inv of allInvoices) {
-        if ((inv as any).deletedAt || (inv as any).status === 'CANCELLED') continue;
+        if ((inv as any).deletedAt || (inv as any).status === 'CANCELLED' || (inv as any).matchStatus === 'REJECTED') continue;
         const matchesPo = Number(inv.poId) === Number(po.id) || inv.purchaseOrder?.poNumber === po.poNumber;
         if (!matchesPo) continue;
         const invTerm = sortedTerms.find((t) => Number(t.id) === Number(inv.paymentTermId));
-        if (invTerm && isProgressTerm(invTerm)) {
+        if (invTerm && !isDpTerm(invTerm)) {
           previousProgressBilled += Number(inv.totalAmount || 0);
         }
       }
@@ -242,6 +310,34 @@ const getQueueTermEligibility = (
         capPassed = false;
         const deficit = termAmount - remainingCapacity;
         capReason = `Kapasitas fisik defisit Rp ${Math.round(deficit).toLocaleString('id-ID')}. Plafon fisik tersisa: Rp ${Math.round(remainingCapacity).toLocaleString('id-ID')}, nilai termin: Rp ${termAmount.toLocaleString('id-ID')}`;
+      }
+    }
+  } else if (isServicePo && !isDp) {
+    if (approvedServiceClaims.length === 0) {
+      capPassed = false;
+      const pmClaim = serviceClaims.find((c: any) => c.status === 'PM_VERIFIED');
+      if (pmClaim) {
+        capReason = `Klaim Jasa (${pmClaim.claimNumber}) belum disetujui komersial (APPROVED_FOR_INVOICE).`;
+      } else {
+        capReason = 'Belum ada Klaim Jasa yang disetujui (APPROVED_FOR_INVOICE) untuk PO Jasa ini.';
+      }
+    } else {
+      let previousServiceInvoiced = 0;
+      for (const inv of allInvoices) {
+        if ((inv as any).deletedAt || (inv as any).status === 'CANCELLED' || (inv as any).matchStatus === 'REJECTED') continue;
+        const matchesPo = Number(inv.poId) === Number(po.id) || inv.purchaseOrder?.poNumber === po.poNumber;
+        if (!matchesPo) continue;
+        const invTerm = sortedTerms.find((t) => Number(t.id) === Number(inv.paymentTermId));
+        if (invTerm && isDpTerm(invTerm)) continue;
+        previousServiceInvoiced += Number(inv.totalAmount || 0);
+      }
+
+      const termAmount = Number(term.amount || 0);
+      const remainingServiceClaimCapacity = Math.max(0, Math.round((totalApprovedClaimAmount - previousServiceInvoiced) * 100) / 100);
+      if (remainingServiceClaimCapacity < termAmount - 0.01) {
+        capPassed = false;
+        const deficit = termAmount - remainingServiceClaimCapacity;
+        capReason = `Kapasitas klaim jasa yang disetujui defisit Rp ${Math.round(deficit).toLocaleString('id-ID')}. Plafon klaim tersisa: Rp ${Math.round(remainingServiceClaimCapacity).toLocaleString('id-ID')}, nilai termin: Rp ${termAmount.toLocaleString('id-ID')}.`;
       }
     }
   }
@@ -257,10 +353,14 @@ const getQueueTermEligibility = (
       statusText = `Menunggu Urutan: ${term.termName || `Termin #${currentSeq}`}`;
       reason = seqReason;
     } else if (!msPassed) {
-      statusText = `Menunggu Milestone: ${term.termName || `Termin #${currentSeq}`}`;
+      statusText = isServicePo
+        ? `Menunggu Verifikasi: ${term.termName || `Termin #${currentSeq}`}`
+        : `Menunggu Milestone: ${term.termName || `Termin #${currentSeq}`}`;
       reason = msReason;
     } else if (!capPassed) {
-      statusText = `Menunggu Kapasitas GR: ${term.termName || `Termin #${currentSeq}`}`;
+      statusText = isServicePo
+        ? `Menunggu Klaim Jasa: ${term.termName || `Termin #${currentSeq}`}`
+        : `Menunggu Kapasitas GR: ${term.termName || `Termin #${currentSeq}`}`;
       reason = capReason;
     } else {
       statusText = `Belum Siap: ${term.termName || `Termin #${currentSeq}`}`;
@@ -620,9 +720,16 @@ function InvoicesPageContent() {
         width: 170,
         render: (_: any, r: PurchaseOrder) => (
           <div>
-            <span style={{ fontWeight: 700, color: '#1D4ED8', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'nowrap' }}>
-              {r.poNumber}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontWeight: 700, color: '#1D4ED8', fontFamily: 'monospace', fontSize: 13, whiteSpace: 'nowrap' }}>
+                {r.poNumber}
+              </span>
+              {r.orderType === 'SERVICE' && (
+                <Tag color="purple" style={{ fontSize: 10, padding: '0 5px', borderRadius: 4, margin: 0, fontWeight: 600 }}>
+                  Jasa / Subkon
+                </Tag>
+              )}
+            </div>
             <div style={{ marginTop: 2 }}>
               <StatusBadge
                 domain="po"
@@ -698,6 +805,88 @@ function InvoicesPageContent() {
         key: 'fulfillment',
         width: 180,
         render: (_: any, r: PurchaseOrder) => {
+          if (r.orderType === 'SERVICE') {
+            const claims = (r.serviceClaims || []).filter((c: any) => !c.deletedAt && c.status !== 'CANCELLED');
+            const serviceOrders = (r.serviceOrders || []).filter((so: any) => !so.deletedAt && so.status !== 'CANCELLED');
+            const approvedClaims = claims.filter((c: any) => c.status === 'APPROVED_FOR_INVOICE');
+            const totalApprovedAmount = approvedClaims.reduce((sum: number, c: any) => sum + Number(c.approvedClaimAmount || 0), 0);
+            const poTotalAmount = Number(r.totalAmount || 0);
+
+            if (approvedClaims.length > 0 && totalApprovedAmount > 0) {
+              const isFull = totalApprovedAmount >= poTotalAmount && poTotalAmount > 0;
+              const pct = poTotalAmount > 0 ? Math.min(100, Math.round((totalApprovedAmount / poTotalAmount) * 100)) : 0;
+              const tagText = isFull ? '100% Klaim Disetujui' : `${pct}% Klaim Disetujui (Parsial)`;
+              const subText = isFull
+                ? `${approvedClaims[0]?.claimNumber || 'Klaim'} · BAST Disetujui`
+                : `Rp ${formatNumber(totalApprovedAmount)} / Rp ${formatNumber(poTotalAmount)}`;
+
+              return (
+                <div>
+                  <Tag color="success" style={{ fontWeight: 600, fontSize: 11, borderRadius: 4, margin: 0, padding: '1px 8px' }}>
+                    {tagText}
+                  </Tag>
+                  <div style={{ fontSize: 11, color: '#64748B', marginTop: 3, whiteSpace: 'nowrap' }}>
+                    {subText}
+                  </div>
+                </div>
+              );
+            }
+
+            const pmVerifiedClaim = claims.find((c: any) => c.status === 'PM_VERIFIED');
+            if (pmVerifiedClaim) {
+              return (
+                <div>
+                  <Tag color="warning" style={{ fontWeight: 600, fontSize: 11, borderRadius: 4, margin: 0, padding: '1px 8px' }}>
+                    Menunggu Verifikasi Komersial
+                  </Tag>
+                  <div style={{ fontSize: 11, color: '#64748B', marginTop: 3, whiteSpace: 'nowrap' }}>
+                    {pmVerifiedClaim.claimNumber} · PM Verified
+                  </div>
+                </div>
+              );
+            }
+
+            const submittedClaim = claims.find((c: any) => c.status === 'SUBMITTED');
+            if (submittedClaim) {
+              return (
+                <div>
+                  <Tag color="processing" style={{ fontWeight: 600, fontSize: 11, borderRadius: 4, margin: 0, padding: '1px 8px' }}>
+                    Menunggu Verifikasi Klaim
+                  </Tag>
+                  <div style={{ fontSize: 11, color: '#64748B', marginTop: 3, whiteSpace: 'nowrap' }}>
+                    {submittedClaim.claimNumber} · Diajukan
+                  </div>
+                </div>
+              );
+            }
+
+            const issuedSpk = serviceOrders.find((so: any) => so.status === 'ISSUED');
+            if (issuedSpk) {
+              return (
+                <div>
+                  <Tag color="processing" style={{ fontWeight: 600, fontSize: 11, borderRadius: 4, margin: 0, padding: '1px 8px' }}>
+                    SPK Diterbitkan · Belum ada Klaim
+                  </Tag>
+                  <div style={{ fontSize: 11, color: '#64748B', marginTop: 3, whiteSpace: 'nowrap' }}>
+                    {issuedSpk.serviceOrderNumber}
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <div>
+                <Tag color="warning" style={{ fontWeight: 600, fontSize: 11, borderRadius: 4, margin: 0, padding: '1px 8px' }}>
+                  Menunggu SPK / Klaim Jasa
+                </Tag>
+                <div style={{ fontSize: 11, color: '#64748B', marginTop: 3, whiteSpace: 'nowrap' }}>
+                  Belum ada SPK / Klaim
+                </div>
+              </div>
+            );
+          }
+
+          // MATERIAL PO REALIZATION (Unchanged)
           const totalOrdered = (r.items || []).reduce((sum, it) => sum + Number(it.quantity || 0), 0);
           const totalReceived = (r.items || []).reduce((sum, it) => sum + Number(it.receivedQuantity || 0), 0);
           const isFullyReceived = totalReceived >= totalOrdered && totalOrdered > 0;

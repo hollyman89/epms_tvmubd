@@ -371,7 +371,7 @@ describe('EPMS — PO Payment Terms Recovery & Contract Specification (Phases 1-
 
     expect(poRepoMock.findOne).toHaveBeenCalledWith({
       where: { id: 1 },
-      relations: ['items', 'paymentTerms', 'vendor', 'purchaseRequest', 'purchaseRequest.project'],
+      relations: ['items', 'paymentTerms', 'vendor', 'purchaseRequest', 'purchaseRequest.project', 'serviceOrders', 'serviceClaims'],
       order: {
         paymentTerms: {
           sequence: 'ASC',

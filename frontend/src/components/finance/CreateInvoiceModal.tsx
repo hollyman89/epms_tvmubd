@@ -402,43 +402,108 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     const tType = (term.termType || '').toUpperCase();
     const tName = (term.termName || '').toUpperCase();
     const isProgress = tType === 'PROGRESS' || tName.includes('PROGRESS');
-    if (!isProgress) return { passed: true, reason: '' };
-    if (po?.orderType === 'SERVICE') return { passed: true, reason: '' };
+    const isFinalDelivery = tType === 'FINAL_DELIVERY' || tName.includes('PELUNASAN') || tName.includes('FINAL');
+    const isDp = tType === 'DP' || tType === 'DOWN_PAYMENT' || tName.includes('DP') || tName.includes('UANG MUKA');
 
-    const is100Percent =
-      /100%|fisik\s*100%|lengkap/i.test(term.triggerCondition || '') ||
-      Number(term.percentage) === 100;
+    if (isDp) {
+      if (!['ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED'].includes(po?.status || '')) {
+        return {
+          passed: false,
+          reason: `Status PO (${po?.status || 'UNKNOWN'}) belum siap untuk penagihan DP.`,
+        };
+      }
+      return { passed: true, reason: '' };
+    }
 
-    if (is100Percent) {
-      const isPoCompleted = po?.status === 'COMPLETED';
-      const unfulfilledItems = poItems.filter((it) => Number(it.receivedQuantity || 0) < Number(it.quantity || 0));
-      const allItemsCompleted = isPoCompleted && poItems.length > 0 && unfulfilledItems.length === 0;
+    if (po?.orderType === 'SERVICE') {
+      if (isFinalDelivery) {
+        const totalApprovedClaimAmount = approvedServiceClaims.reduce(
+          (sum: number, c: any) => sum + Number(c.approvedClaimAmount || 0),
+          0
+        );
+        const poTotal = Number(po?.totalAmount || 0);
+        if (approvedServiceClaims.length === 0) {
+          return {
+            passed: false,
+            reason: 'Belum ada Klaim Jasa yang disetujui secara komersial (APPROVED_FOR_INVOICE) untuk PO Jasa ini.',
+          };
+        }
+        if (totalApprovedClaimAmount < poTotal - 0.01 && poTotal > 0) {
+          return {
+            passed: false,
+            reason: `Pelunasan penuh jasa memerlukan Klaim Jasa disetujui komersial 100% (Tersedia: Rp ${Math.round(totalApprovedClaimAmount).toLocaleString('id-ID')} dari total PO Rp ${Math.round(poTotal).toLocaleString('id-ID')}).`,
+          };
+        }
+      } else if (isProgress) {
+        if (approvedServiceClaims.length === 0) {
+          return {
+            passed: false,
+            reason: 'Belum ada Klaim Jasa yang disetujui secara komersial (APPROVED_FOR_INVOICE) untuk termin progress ini.',
+          };
+        }
+      }
+      return { passed: true, reason: '' };
+    }
 
-      if (!allItemsCompleted) {
+    // Material PO logic
+    if (isFinalDelivery) {
+      const isAllItemsCompleted =
+        (po?.status === 'COMPLETED') ||
+        (poItems.length > 0 && poItems.every((it) => Number(it.receivedQuantity || 0) >= Number(it.quantity || 0))) ||
+        (totalPoAmount > 0 && totalPhysicalDeliveryValueAcrossPo >= totalPoAmount);
+
+      if (!isAllItemsCompleted) {
+        const unfulfilledItems = poItems.filter((it) => Number(it.receivedQuantity || 0) < Number(it.quantity || 0));
         const itemDetails =
           unfulfilledItems.length > 0
             ? unfulfilledItems.map((i) => `${i.itemName}: ${i.receivedQuantity || 0}/${i.quantity}`).join(', ')
             : 'Kuantitas fisik barang belum lengkap 100%';
         return {
           passed: false,
-          reason: `Kemajuan Fisik 100% belum tercapai (status PO: ${po?.status || 'ACTIVE'}). Item belum selesai: ${itemDetails}.`,
+          reason: `Pelunasan penuh barang memerlukan penerimaan fisik 100% (status PO: ${po?.status || 'ACTIVE'}). Item belum selesai: ${itemDetails}.`,
         };
       }
       return { passed: true, reason: '' };
-    } else {
-      const matchPercent = (term.triggerCondition || '').match(/(\d+(?:\.\d+)?)\s*%/);
-      const targetPercent = matchPercent ? parseFloat(matchPercent[1]) : Number(term.percentage || 0);
-      if (targetPercent > 0 && targetPercent < 100) {
-        const physicalProgress = totalPoAmount > 0 ? (totalPhysicalDeliveryValueAcrossPo / totalPoAmount) * 100 : 0;
-        if (Math.round(physicalProgress * 100) / 100 + 0.5 < targetPercent) {
+    }
+
+    if (isProgress) {
+      const is100Percent =
+        /100%|fisik\s*100%|lengkap/i.test(term.triggerCondition || '') ||
+        Number(term.percentage) === 100;
+
+      if (is100Percent) {
+        const isPoCompleted = po?.status === 'COMPLETED';
+        const unfulfilledItems = poItems.filter((it) => Number(it.receivedQuantity || 0) < Number(it.quantity || 0));
+        const allItemsCompleted = isPoCompleted && poItems.length > 0 && unfulfilledItems.length === 0;
+
+        if (!allItemsCompleted) {
+          const itemDetails =
+            unfulfilledItems.length > 0
+              ? unfulfilledItems.map((i) => `${i.itemName}: ${i.receivedQuantity || 0}/${i.quantity}`).join(', ')
+              : 'Kuantitas fisik barang belum lengkap 100%';
           return {
             passed: false,
-            reason: `Kemajuan fisik baru mencapai ${physicalProgress.toFixed(2)}% (target syarat termin: ${targetPercent}%).`,
+            reason: `Kemajuan Fisik 100% belum tercapai (status PO: ${po?.status || 'ACTIVE'}). Item belum selesai: ${itemDetails}.`,
           };
         }
+        return { passed: true, reason: '' };
+      } else {
+        const matchPercent = (term.triggerCondition || '').match(/(\d+(?:\.\d+)?)\s*%/);
+        const targetPercent = matchPercent ? parseFloat(matchPercent[1]) : Number(term.percentage || 0);
+        if (targetPercent > 0 && targetPercent < 100) {
+          const physicalProgress = totalPoAmount > 0 ? (totalPhysicalDeliveryValueAcrossPo / totalPoAmount) * 100 : 0;
+          if (Math.round(physicalProgress * 100) / 100 + 0.5 < targetPercent) {
+            return {
+              passed: false,
+              reason: `Kemajuan fisik baru mencapai ${physicalProgress.toFixed(2)}% (target syarat termin: ${targetPercent}%).`,
+            };
+          }
+        }
+        return { passed: true, reason: '' };
       }
-      return { passed: true, reason: '' };
     }
+
+    return { passed: true, reason: '' };
   };
 
   const evaluateRetention = (term: PoPaymentTermRecord | null) => {
@@ -481,22 +546,54 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     const tType = (term.termType || '').toUpperCase();
     const tName = (term.termName || '').toUpperCase();
     const isProgress = tType === 'PROGRESS' || tName.includes('PROGRESS');
+    const isFinalDelivery = tType === 'FINAL_DELIVERY' || tName.includes('PELUNASAN') || tName.includes('FINAL');
 
     if (po?.orderType === 'SERVICE') {
-      const isTermDp = (term.termType || '').toUpperCase() === 'DP' || (term.termName || '').toUpperCase().includes('DP');
+      const isTermDp = (term.termType || '').toUpperCase() === 'DP' || (term.termName || '').toUpperCase().includes('DP') || (term.termType || '').toUpperCase() === 'DOWN_PAYMENT';
       if (!isTermDp) {
         if (approvedServiceClaims.length === 0) {
           capPassed = false;
           capReason = 'Belum ada Klaim Jasa yang disetujui (APPROVED_FOR_INVOICE) untuk PO Jasa ini.';
+        } else {
+          const totalApprovedClaimAmount = approvedServiceClaims.reduce(
+            (sum: number, c: any) => sum + Number(c.approvedClaimAmount || 0),
+            0
+          );
+          let alreadyInvoicedServiceAmount = 0;
+          for (const inv of activePoInvoices) {
+            const invTerm = paymentTerms.find((t: any) => Number(t.id) === Number(inv.paymentTermId));
+            const isInvDp = (invTerm?.termType || '').toUpperCase() === 'DP' || (invTerm?.termType || '').toUpperCase() === 'DOWN_PAYMENT' || (invTerm?.termName || '').toUpperCase().includes('DP');
+            if (isInvDp) continue;
+            alreadyInvoicedServiceAmount += Number(inv.totalAmount || 0);
+          }
+          const remainingClaimCapacity = Math.max(0, Math.round((totalApprovedClaimAmount - alreadyInvoicedServiceAmount) * 100) / 100);
+          const termAmount = Number(term.amount || 0);
+          if (remainingClaimCapacity < termAmount - 0.01) {
+            capPassed = false;
+            const deficit = termAmount - remainingClaimCapacity;
+            capReason = `Kapasitas klaim jasa yang disetujui defisit Rp ${Math.round(deficit).toLocaleString('id-ID')}. Plafon klaim tersisa: Rp ${Math.round(remainingClaimCapacity).toLocaleString('id-ID')}, nilai termin: Rp ${termAmount.toLocaleString('id-ID')}.`;
+          }
         }
       }
-    } else if (isProgress) {
+    } else if (isProgress || isFinalDelivery) {
       if (goodsReceipts.length === 0) {
         capPassed = false;
         capReason = 'Belum ada dokumen Goods Receipt (GR) aktif sebagai dasar fisik penagihan.';
-      } else if (!isFinanciallySupported) {
-        capPassed = false;
-        capReason = `Kapasitas fisik defisit Rp ${capacityDeficit.toLocaleString('id-ID')}. Plafon fisik tersisa: Rp ${remainingProgressCapacity.toLocaleString('id-ID')}, nilai termin: Rp ${Number(term.amount || 0).toLocaleString('id-ID')}.`;
+      } else {
+        let previousNonDpBilled = 0;
+        for (const inv of activePoInvoices) {
+          const invTerm = paymentTerms.find((t: any) => Number(t.id) === Number(inv.paymentTermId));
+          const isInvDp = (invTerm?.termType || '').toUpperCase() === 'DP' || (invTerm?.termType || '').toUpperCase() === 'DOWN_PAYMENT' || (invTerm?.termName || '').toUpperCase().includes('DP');
+          if (isInvDp) continue;
+          previousNonDpBilled += Number(inv.totalAmount || 0);
+        }
+        const termAmount = Number(term.amount || 0);
+        const remainingCapacity = Math.max(0, Math.round((totalPhysicalDeliveryValueAcrossPo - previousNonDpBilled) * 100) / 100);
+        if (remainingCapacity < termAmount - 0.01) {
+          capPassed = false;
+          const deficit = termAmount - remainingCapacity;
+          capReason = `Kapasitas fisik defisit Rp ${Math.round(deficit).toLocaleString('id-ID')}. Plafon fisik tersisa: Rp ${Math.round(remainingCapacity).toLocaleString('id-ID')}, nilai termin: Rp ${termAmount.toLocaleString('id-ID')}.`;
+        }
       }
     }
 
@@ -530,7 +627,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
 
   const activeTermEligibility = useMemo(() => {
     return getTermEligibility(activeTerm);
-  }, [activeTerm, paymentTerms, activePoInvoices, po, totalPoAmount, totalPhysicalDeliveryValueAcrossPo, isFinanciallySupported, capacityDeficit, remainingProgressCapacity, goodsReceipts, poItems]);
+  }, [activeTerm, paymentTerms, activePoInvoices, po, totalPoAmount, totalPhysicalDeliveryValueAcrossPo, isFinanciallySupported, capacityDeficit, remainingProgressCapacity, goodsReceipts, poItems, approvedServiceClaims]);
 
   // Initialize or reset form state on modal open
   useEffect(() => {
@@ -1253,6 +1350,8 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
                 <div style={{ fontSize: 10.5, color: activeTerm && !activeTermEligibility.isEligible ? '#dc2626' : '#64748b', marginTop: 4 }}>
                   {activeTerm && !activeTermEligibility.isEligible
                     ? (activeTermEligibility.reasons[0] || 'Syarat penagihan belum terpenuhi')
+                    : po?.orderType === 'SERVICE'
+                    ? (selectedServiceClaimId ? 'Divalidasi dengan Klaim Jasa yang Disetujui' : isDpTerm ? 'Uang Muka / DP Disetujui Kontrak' : 'Menunggu pemilihan Klaim Jasa')
                     : isProgressTerm
                     ? (selectedGr ? `Divalidasi dengan ${selectedGr.grNumber}` : 'Menunggu pemilihan Goods Receipt')
                     : 'Dievaluasi Matching Engine SSOT'}
@@ -1262,12 +1361,12 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
           </Row>
         </Card>
 
-        {/* ITEMS BREAKDOWN TABLE (For Progress: Justified GR Items; For Others: Full PO Items) */}
+        {/* ITEMS BREAKDOWN TABLE (For Progress Material: Justified GR Items; For Others/Service: Full PO Items) */}
         <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
           <div
             style={{
               padding: '8px 12px',
-              background: isProgressTerm ? '#f0fdf4' : '#f8fafc',
+              background: (isProgressTerm && po?.orderType !== 'SERVICE') ? '#f0fdf4' : '#f8fafc',
               borderBottom: '1px solid #e2e8f0',
               display: 'flex',
               justifyContent: 'space-between',
@@ -1276,17 +1375,17 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
               gap: 8,
             }}
           >
-            <span style={{ fontWeight: 700, fontSize: 12.5, color: isProgressTerm ? '#166534' : '#334155' }}>
-              {isProgressTerm
+            <span style={{ fontWeight: 700, fontSize: 12.5, color: (isProgressTerm && po?.orderType !== 'SERVICE') ? '#166534' : '#334155' }}>
+              {(isProgressTerm && po?.orderType !== 'SERVICE')
                 ? `Rincian Item Yang Divalidasi GR #${selectedGr?.grNumber || '—'} (${progressInvoiceItems.length} Item Diterima Fisik)`
                 : `Daftar Item Kontrak PO: ${vendorName} (${poItems.length} Item)`}
             </span>
-            <Tag color={isProgressTerm ? 'green' : 'cyan'} style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
-              {isProgressTerm ? 'KUANTITAS FISIK JUSTIFIKASI GR' : 'HARGA & KUANTITAS KONTRAK (READ-ONLY)'}
+            <Tag color={(isProgressTerm && po?.orderType !== 'SERVICE') ? 'green' : (po?.orderType === 'SERVICE' ? 'purple' : 'cyan')} style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
+              {(isProgressTerm && po?.orderType !== 'SERVICE') ? 'KUANTITAS FISIK JUSTIFIKASI GR' : po?.orderType === 'SERVICE' ? 'RUANG LINGKUP JASA / SUBKON (READ-ONLY)' : 'HARGA & KUANTITAS KONTRAK (READ-ONLY)'}
             </Tag>
           </div>
 
-          {isProgressTerm ? (
+          {(isProgressTerm && po?.orderType !== 'SERVICE') ? (
             <Table
               size="small"
               rowKey="key"
@@ -1432,8 +1531,8 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>{name}</div>
                       <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                        <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
-                          {it.categoryName || 'Material'}
+                        <Tag color={po?.orderType === 'SERVICE' ? 'purple' : 'blue'} style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                          {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
                         </Tag>
                         {it.wbsNodeId && (
                           <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
@@ -1453,19 +1552,35 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
                   render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
                 },
                 {
-                  title: 'Qty Diterima (GR)',
+                  title: po?.orderType === 'SERVICE' ? 'Status Realisasi' : 'Qty Diterima (GR)',
                   dataIndex: 'receivedQuantity',
                   key: 'receivedQuantity',
-                  width: 110,
+                  width: po?.orderType === 'SERVICE' ? 140 : 110,
                   align: 'center' as const,
-                  render: (rec: number, it: any) => (
-                    <Tag
-                      color={rec >= it.quantity ? 'green' : rec > 0 ? 'orange' : 'default'}
-                      style={{ fontWeight: 700, fontSize: 11, margin: 0 }}
-                    >
-                      {rec} / {it.quantity}
-                    </Tag>
-                  ),
+                  render: (rec: number, it: any) => {
+                    if (po?.orderType === 'SERVICE') {
+                      const approvedClaimTotal = (approvedServiceClaims || [])
+                        .reduce((acc: number, c: any) => acc + Number(c.approvedClaimAmount || c.totalClaimAmount || 0), 0);
+                      const isFullyApproved = approvedClaimTotal >= Number(po?.totalAmount || 0) && approvedClaimTotal > 0;
+                      const hasApproved = approvedClaimTotal > 0;
+                      return (
+                        <Tag
+                          color={isFullyApproved ? 'green' : hasApproved ? 'cyan' : 'default'}
+                          style={{ fontWeight: 700, fontSize: 11, margin: 0 }}
+                        >
+                          {isFullyApproved ? 'Klaim Disetujui' : hasApproved ? 'Klaim Parsial' : 'Menunggu Klaim'}
+                        </Tag>
+                      );
+                    }
+                    return (
+                      <Tag
+                        color={rec >= it.quantity ? 'green' : rec > 0 ? 'orange' : 'default'}
+                        style={{ fontWeight: 700, fontSize: 11, margin: 0 }}
+                      >
+                        {rec} / {it.quantity}
+                      </Tag>
+                    );
+                  },
                 },
                 {
                   title: 'Satuan',

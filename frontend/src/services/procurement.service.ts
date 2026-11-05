@@ -222,6 +222,7 @@ export interface PurchaseOrder {
   paymentTerms?: PoPaymentTermRecord[];
   items?: any[];
   serviceOrders?: ServiceOrder[];
+  serviceClaims?: ServiceClaimRecord[];
   vendorId?: number;
   vendor?: MasterVendor;
   vendorName?: string;
