@@ -203,7 +203,7 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
         const prItemId = Number(it.prItemId || it.id || 0) || undefined;
         const key = it.key || it.rabItemKey || (prItemId ? `item_pr_${prItemId}` : `item_${idx}`);
         const quantity = Number(it.quantity || 1);
-        const estimatedUnitPrice = Number(it.estimatedUnitPrice || 0);
+        const estimatedUnitPrice = Number(it.estimatedUnitPrice || it.estimated_unit_price || it.purchaseRequestItem?.estimatedUnitPrice || it.purchaseRequestItem?.estimated_unit_price || 0);
         const offeredUnitPrice = it.offeredUnitPrice !== undefined ? Number(it.offeredUnitPrice) : Number(it.unitPrice || 0);
         const subtotal = it.subtotal !== undefined ? Number(it.subtotal) : (offeredUnitPrice * quantity);
         const routeDetails =
@@ -212,18 +212,20 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
           it.rute ||
           it.description ||
           it.specifications ||
+          it.purchaseRequestItem?.routeDetails ||
+          it.purchaseRequestItem?.route_details ||
           undefined;
 
         return {
           key,
-          categoryName: it.categoryName || 'Material & Peralatan',
-          itemName: it.itemName || 'Item Pengadaan',
+          categoryName: it.categoryName || it.purchaseRequestItem?.categoryName || 'Material & Peralatan',
+          itemName: it.itemName || it.item_name || it.purchaseRequestItem?.itemName || it.purchaseRequestItem?.item_name || 'Item Pengadaan',
           quantity,
           uom: it.uom || 'Unit',
           estimatedUnitPrice,
           offeredUnitPrice,
           subtotal,
-          wbsNodeId: it.wbsNodeId,
+          wbsNodeId: it.wbsNodeId || it.purchaseRequestItem?.wbsNodeId,
           rabItemKey: it.rabItemKey,
           prItemId,
           routeDetails,
@@ -802,8 +804,8 @@ export const VendorQuotationModal: React.FC<VendorQuotationModalProps> = ({
                     key: 'itemName',
                     width: 220,
                     render: (name: string, it: VendorQuotationItem) => (
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>{name}</div>
+                      <div style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                        <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a', lineHeight: 1.35, wordBreak: 'break-word', overflowWrap: 'break-word' }}>{name}</div>
                         {it.routeDetails && (
                           <div className={styles.desktopRouteDetails}>{it.routeDetails}</div>
                         )}

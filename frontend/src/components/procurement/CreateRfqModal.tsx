@@ -182,7 +182,7 @@ export interface CreateRfqModalProps {
   viewOnly?: boolean;
 }
 
-const mapBackendQuotationToRecord = (q: any, rfqObj: any): VendorQuotationRecord => {
+export const mapBackendQuotationToRecord = (q: any, rfqObj: any): VendorQuotationRecord => {
   return {
     quotationId: String(q.id),
     quotationNumber: q.quotationNumber || q.quotation_number || undefined,
@@ -218,17 +218,35 @@ const mapBackendQuotationToRecord = (q: any, rfqObj: any): VendorQuotationRecord
     status: 'SUBMITTED',
     submittedAt: q.createdAt || new Date().toISOString(),
     items: Array.isArray(q.items)
-      ? q.items.map((it: any, idx: number) => ({
-          key: it.rabItemKey || (it.prItemId ? `item_pr_${it.prItemId}` : `item_${it.id || idx}`),
-          categoryName: it.categoryName || 'Material & Peralatan',
-          itemName: it.itemName,
-          quantity: Number(it.quantity || 0),
-          uom: it.uom || 'Unit',
-          estimatedUnitPrice: Number(it.estimatedUnitPrice || 0),
-          offeredUnitPrice: Number(it.unitPrice || 0),
-          subtotal: Number(it.totalAmount || 0),
-          prItemId: it.prItemId,
-        }))
+      ? q.items.map((it: any, idx: number) => {
+          const prItemId = it.prItemId ? Number(it.prItemId) : undefined;
+          const matchingPrItem = Array.isArray(rfqObj?.purchaseRequest?.items)
+            ? rfqObj.purchaseRequest.items.find((pri: any) => Number(pri.id || pri.prItemId) === prItemId)
+            : undefined;
+
+          return {
+            key: it.rabItemKey || (prItemId ? `item_pr_${prItemId}` : `item_${it.id || idx}`),
+            categoryName: it.categoryName || matchingPrItem?.categoryName || 'Material & Peralatan',
+            itemName: it.itemName || it.item_name || matchingPrItem?.itemName || matchingPrItem?.item_name || 'Item Pengadaan',
+            quantity: Number(it.quantity || matchingPrItem?.quantity || 0),
+            uom: it.uom || matchingPrItem?.uom || 'Unit',
+            estimatedUnitPrice: Number(it.estimatedUnitPrice || matchingPrItem?.estimatedUnitPrice || matchingPrItem?.estimated_unit_price || 0),
+            offeredUnitPrice: Number(it.unitPrice || 0),
+            subtotal: Number(it.totalAmount || 0),
+            prItemId,
+            routeDetails:
+              it.routeDetails ||
+              it.route_details ||
+              it.purchaseRequestItem?.routeDetails ||
+              it.purchaseRequestItem?.route_details ||
+              matchingPrItem?.routeDetails ||
+              matchingPrItem?.route_details ||
+              it.description ||
+              it.specifications ||
+              undefined,
+            wbsNodeId: it.wbsNodeId || matchingPrItem?.wbsNodeId || undefined,
+          };
+        })
       : [],
   };
 };

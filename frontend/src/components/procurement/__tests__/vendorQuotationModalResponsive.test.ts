@@ -57,8 +57,23 @@ jest.mock('antd', () => {
   };
 });
 
+// Mock AuthContext
+jest.mock('@/context/AuthContext', () => ({
+  useAuth: () => ({
+    user: {
+      sub: 12,
+      email: 'purchasing@epms.com',
+      fullName: 'Purchasing Officer',
+      roles: ['PURCHASING'],
+    },
+  }),
+}));
+
 // Mock react-query
 jest.mock('@tanstack/react-query', () => ({
+  QueryClient: jest.fn().mockImplementation(() => ({
+    defaultOptions: {},
+  })),
   useQueryClient: () => ({
     invalidateQueries: jest.fn(),
   }),
@@ -76,6 +91,7 @@ jest.mock('@/services/procurement.service', () => ({
 }));
 
 import { VendorQuotationModal } from '../VendorQuotationModal';
+import { mapBackendQuotationToRecord } from '../CreateRfqModal';
 
 describe('VendorQuotationModal Mobile Responsiveness & Input Fidelity', () => {
   const mockRfq = {
@@ -303,5 +319,203 @@ describe('VendorQuotationModal Mobile Responsiveness & Input Fidelity', () => {
 
     // Values from existing quotation
     expect(html).toContain('74.100.000');
+  });
+
+  test('8. resolves item name from snake_case item_name in existing quotation (Fix B)', () => {
+    const quoteWithSnakeCaseItem = {
+      quotationId: 'QT-20261104-002',
+      quotationNumber: 'QT-20261104-002',
+      rfqId: 15,
+      rfqNumber: 'RFQ-20261104-001',
+      projectId: 1,
+      projectName: 'Fiber Optic Backbone Jatim',
+      vendorId: 2,
+      vendorCode: 'VND-002',
+      vendorName: 'PT Maju Infrastruktur',
+      budgetCeiling: 119653000,
+      totalOfferedAmount: 88000000,
+      leadTimeDays: 10,
+      status: 'SUBMITTED' as const,
+      submittedAt: '2026-11-04T11:00:00Z',
+      items: [
+        {
+          key: 'item_snake_1',
+          prItemId: 101,
+          item_name: 'Pipa HDPE Subduct 40/34mm Roll', // snake_case only
+          itemName: undefined as any,
+          categoryName: 'Material & Jalur',
+          quantity: 200,
+          uom: 'Roll',
+          estimatedUnitPrice: 400000,
+          offeredUnitPrice: 390000,
+          subtotal: 78000000,
+        },
+      ],
+    };
+
+    const html = ReactDOMServer.renderToString(
+      React.createElement(VendorQuotationModal, {
+        open: true,
+        onClose: jest.fn(),
+        rfq: mockRfq,
+        existingQuotation: quoteWithSnakeCaseItem as any,
+      })
+    );
+
+    // Resolves snake_case item_name without falling back to generic 'Item Pengadaan'
+    expect(html).toContain('Pipa HDPE Subduct 40/34mm Roll');
+    expect(html).not.toContain('Item Pengadaan');
+  });
+
+  test('9. renders existing quotation with routeDetails and gracefully handles absence of routeDetails', () => {
+    const quoteWithMixedRoute = {
+      quotationId: 'QT-20261104-003',
+      quotationNumber: 'QT-20261104-003',
+      rfqId: 15,
+      rfqNumber: 'RFQ-20261104-001',
+      projectId: 1,
+      projectName: 'Fiber Optic Backbone Jatim',
+      vendorId: 1,
+      vendorCode: 'VND-001',
+      vendorName: 'PT IT Solusi Bersama',
+      budgetCeiling: 119653000,
+      totalOfferedAmount: 50000000,
+      leadTimeDays: 7,
+      status: 'SUBMITTED' as const,
+      submittedAt: '2026-11-04T12:00:00Z',
+      items: [
+        {
+          key: 'item_with_route',
+          prItemId: 101,
+          itemName: 'Item Dengan Rincian Rute Spesifik',
+          routeDetails: 'Segmen Jalur Timur KM 10 s/d KM 15',
+          quantity: 5,
+          uom: 'KM',
+          estimatedUnitPrice: 5000000,
+          offeredUnitPrice: 4800000,
+          subtotal: 24000000,
+        },
+        {
+          key: 'item_without_route',
+          prItemId: 102,
+          itemName: 'Item Standar Tanpa Rincian Rute',
+          routeDetails: undefined,
+          quantity: 10,
+          uom: 'Unit',
+          estimatedUnitPrice: 2600000,
+          offeredUnitPrice: 2600000,
+          subtotal: 26000000,
+        },
+      ],
+    };
+
+    const html = ReactDOMServer.renderToString(
+      React.createElement(VendorQuotationModal, {
+        open: true,
+        onClose: jest.fn(),
+        rfq: mockRfq,
+        existingQuotation: quoteWithMixedRoute,
+      })
+    );
+
+    // Item 1 displays routeDetails
+    expect(html).toContain('Item Dengan Rincian Rute Spesifik');
+    expect(html).toContain('Segmen Jalur Timur KM 10 s/d KM 15');
+
+    // Item 2 displays title without route details element crash
+    expect(html).toContain('Item Standar Tanpa Rincian Rute');
+  });
+
+  test('10. renders long unbroken item names and handles wordBreak on desktop column', () => {
+    const quoteWithLongName = {
+      quotationId: 'QT-20261104-004',
+      quotationNumber: 'QT-20261104-004',
+      rfqId: 15,
+      rfqNumber: 'RFQ-20261104-001',
+      projectId: 1,
+      projectName: 'Fiber Optic Backbone Jatim',
+      vendorId: 1,
+      vendorCode: 'VND-001',
+      vendorName: 'PT IT Solusi Bersama',
+      budgetCeiling: 119653000,
+      totalOfferedAmount: 1000000,
+      leadTimeDays: 5,
+      status: 'SUBMITTED' as const,
+      submittedAt: '2026-11-04T12:00:00Z',
+      items: [
+        {
+          key: 'item_long',
+          prItemId: 101,
+          itemName: 'SUPER-LONG-UNBROKEN-ITEM-NAME-SERIAL-1122334455667788990011223344556677889900-SPEC-CODE-XYZ',
+          quantity: 1,
+          uom: 'Lot',
+          estimatedUnitPrice: 1000000,
+          offeredUnitPrice: 1000000,
+          subtotal: 1000000,
+        },
+      ],
+    };
+
+    const html = ReactDOMServer.renderToString(
+      React.createElement(VendorQuotationModal, {
+        open: true,
+        onClose: jest.fn(),
+        rfq: mockRfq,
+        existingQuotation: quoteWithLongName,
+      })
+    );
+
+    expect(html).toContain('SUPER-LONG-UNBROKEN-ITEM-NAME-SERIAL-1122334455667788990011223344556677889900-SPEC-CODE-XYZ');
+    // Desktop column title container contains word-break: break-word
+    expect(html).toContain('word-break:break-word');
+  });
+
+  test('11. verifies mapBackendQuotationToRecord safely resolves itemName, item_name, and routeDetails from upstream PR (Fix A)', () => {
+    const mockRawQuotation = {
+      id: 55,
+      quotationNumber: 'QT-RAW-2026-001',
+      rfqId: 15,
+      vendorId: 3,
+      totalAmount: 50000000,
+      createdAt: '2026-11-04T12:00:00Z',
+      vendor: { id: 3, code: 'VND-003', name: 'PT Vendor Mandiri' },
+      items: [
+        {
+          id: 1,
+          prItemId: 101,
+          itemName: 'FO Cable Standard',
+          quantity: 100,
+          uom: 'Meter',
+          unitPrice: 50000,
+          totalAmount: 5000000,
+          routeDetails: 'Rute Direct from API item',
+        },
+        {
+          id: 2,
+          prItemId: 102,
+          item_name: 'Joint Closure from snake_case item_name', // snake_case
+          quantity: 5,
+          uom: 'Unit',
+          unitPrice: 2000000,
+          totalAmount: 10000000,
+          // routeDetails missing on item directly, should inherit from mockRfq.purchaseRequest.items (prItemId: 102)
+        },
+      ],
+    };
+
+    const mapped = mapBackendQuotationToRecord(mockRawQuotation, mockRfq);
+
+    expect(mapped.quotationNumber).toBe('QT-RAW-2026-001');
+    expect(mapped.vendorName).toBe('PT Vendor Mandiri');
+    expect(mapped.items.length).toBe(2);
+
+    // Item 1: Direct itemName & routeDetails preserved
+    expect(mapped.items[0].itemName).toBe('FO Cable Standard');
+    expect(mapped.items[0].routeDetails).toBe('Rute Direct from API item');
+
+    // Item 2: snake_case item_name preserved & routeDetails resolved from matching PR item
+    expect(mapped.items[1].itemName).toBe('Joint Closure from snake_case item_name');
+    expect(mapped.items[1].routeDetails).toBe('Manhole Junction Point KM 12 & KM 24');
+    expect(mapped.items[1].estimatedUnitPrice).toBe(1850000);
   });
 });
