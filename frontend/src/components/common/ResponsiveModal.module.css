@@ -1,0 +1,363 @@
+/* ==========================================================================
+   EPMS CANONICAL RESPONSIVE MODAL FOUNDATION
+   Shared Responsive Modal Standard for Finance & Enterprise Workflows
+   ========================================================================== */
+
+/* Root portal wrapper scoping */
+.modalRoot {
+  --modal-safe-top: max(8px, env(safe-area-inset-top, 8px));
+  --modal-safe-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+}
+
+/* Modal Dialog Bounds & Centering Override */
+.modalRoot :global(.ant-modal) {
+  max-width: calc(100vw - 24px);
+  margin: 16px auto;
+  padding-bottom: 0 !important;
+  box-sizing: border-box;
+}
+
+/* Non-centered mobile alignment to prevent off-screen header centering & virtual keyboard collapse */
+@media (max-width: 768px) {
+  .modalRoot :global(.ant-modal) {
+    max-width: calc(100vw - 16px) !important;
+    width: calc(100vw - 16px) !important;
+    margin: 8px auto !important;
+    top: var(--modal-safe-top) !important;
+    padding-bottom: 0 !important;
+  }
+
+  .modalRoot :global(.ant-modal-wrap) {
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    padding-top: var(--modal-safe-top) !important;
+    overflow-x: hidden !important;
+  }
+
+  /* Reset vertical centering pseudoelement on mobile */
+  .modalRoot :global(.ant-modal-wrap)::before {
+    display: none !important;
+  }
+}
+
+/* Modal Content Container: Flex-Column Layout with Viewport Height Containment */
+.modalRoot :global(.ant-modal-content) {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: hidden !important;
+  padding: 0 !important;
+  border-radius: 12px;
+  background-color: #ffffff;
+  box-shadow: 0 20px 25px -5px rgba(15, 23, 42, 0.1), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
+  border: 1px solid #e2e8f0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .modalRoot :global(.ant-modal-content) {
+    max-height: calc(100vh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    border-radius: 10px;
+  }
+}
+
+/* Natural height mode (when bodyScrollable=false) */
+.modalRootNatural :global(.ant-modal-content) {
+  max-height: none !important;
+  display: block !important;
+}
+
+/* Modal Header: Fixed at top, clear close-button spacing, line break protection */
+.modalRoot :global(.ant-modal-header) {
+  flex: 0 0 auto !important;
+  padding: 14px 20px !important;
+  margin: 0 !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background-color: #ffffff !important;
+  padding-right: 50px !important;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1024px) {
+  .modalRoot :global(.ant-modal-header) {
+    padding: 12px 14px !important;
+    padding-right: 56px !important;
+  }
+}
+
+/* Modal Close Button: 44x44px Touch Target on Mobile & Touch Viewports (<= 1024px) */
+.modalRoot :global(.ant-modal-close) {
+  position: absolute !important;
+  z-index: 10 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  color: #64748b !important;
+  cursor: pointer !important;
+  box-sizing: border-box !important;
+  touch-action: manipulation;
+  transition: all 0.2s ease;
+}
+
+@media (max-width: 1024px) {
+  .modalRoot :global(.ant-modal-close) {
+    width: 44px !important;
+    height: 44px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
+    max-width: 44px !important;
+    max-height: 44px !important;
+    top: 8px !important;
+    right: 8px !important;
+    border-radius: 8px !important;
+  }
+
+  .modalRoot :global(.ant-modal-close:hover),
+  .modalRoot :global(.ant-modal-close:active) {
+    background-color: #f1f5f9 !important;
+    color: #0f172a !important;
+  }
+}
+
+@media (min-width: 1025px) {
+  .modalRoot :global(.ant-modal-close) {
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    top: 12px !important;
+    right: 12px !important;
+    border-radius: 6px !important;
+  }
+
+  .modalRoot :global(.ant-modal-close:hover) {
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+  }
+}
+
+.modalRoot :global(.ant-modal-close-x) {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  height: 100% !important;
+  font-size: 16px !important;
+  line-height: 1 !important;
+}
+
+/* Modal Body: Internal Scrolling Container */
+.modalRoot :global(.ant-modal-body) {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 20px !important;
+  background-color: #ffffff;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .modalRoot :global(.ant-modal-body) {
+    padding: 12px 14px !important;
+  }
+}
+
+/* Thin Scrollbar for Modal Body */
+.modalRoot :global(.ant-modal-body)::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.modalRoot :global(.ant-modal-body)::-webkit-scrollbar-track {
+  background: transparent;
+}
+.modalRoot :global(.ant-modal-body)::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+.modalRoot :global(.ant-modal-body)::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Modal Footer: Fixed at bottom with PWA Safe-Area padding */
+.modalRoot :global(.ant-modal-footer) {
+  flex: 0 0 auto !important;
+  padding: 12px 20px !important;
+  margin: 0 !important;
+  border-top: 1px solid #e2e8f0 !important;
+  background-color: #ffffff !important;
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 12px)) !important;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .modalRoot :global(.ant-modal-footer) {
+    padding: 10px 14px !important;
+    padding-bottom: max(10px, env(safe-area-inset-bottom, 10px)) !important;
+  }
+}
+
+/* Header Content Components */
+.headerWrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  max-width: 100%;
+}
+
+.headerIconContainer {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 18px;
+  margin-top: 2px;
+}
+
+@media (max-width: 768px) {
+  .headerIconContainer {
+    width: 32px;
+    height: 32px;
+    font-size: 16px;
+  }
+}
+
+.headerIconBlue {
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+}
+
+.headerIconGreen {
+  background-color: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #059669;
+}
+
+.headerIconAmber {
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #d97706;
+}
+
+.headerIconPurple {
+  background-color: #faf5ff;
+  border: 1px solid #e9d5ff;
+  color: #7e22ce;
+}
+
+.headerIconRed {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+}
+
+.headerIconDefault {
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  color: #475569;
+}
+
+.headerTextContainer {
+  flex: 1;
+  min-width: 0;
+}
+
+.headerTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+@media (max-width: 768px) {
+  .headerTitle {
+    font-size: 14.5px;
+  }
+}
+
+.headerSubtitle {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 2px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Footer Content Components */
+.footerContainer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .footerContainer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+}
+
+.footerExtraSlot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .footerExtraSlot {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+.footerActionsSlot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 768px) {
+  .footerActionsSlot {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .footerActionsSlot :global(.ant-btn) {
+    min-height: 40px !important;
+    flex: 1;
+  }
+}
+
+/* PWA Standalone Mode Adjustments */
+@media (display-mode: standalone) {
+  .modalRoot :global(.ant-modal-content) {
+    max-height: calc(100dvh - max(20px, env(safe-area-inset-top, 0px)) - max(20px, env(safe-area-inset-bottom, 0px)));
+  }
+
+  .modalRoot :global(.ant-modal-footer) {
+    padding-bottom: max(14px, env(safe-area-inset-bottom, 14px)) !important;
+  }
+}
