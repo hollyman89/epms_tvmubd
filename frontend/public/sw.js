@@ -35,8 +35,8 @@ self.addEventListener('push', function (event) {
 
   const options = {
     body: body,
-    icon: '/epms-logo.png',
-    badge: '/epms-logo.png',
+    icon: '/icons/epms-icon-192.png?v=20261105',
+    badge: '/icons/epms-icon-192.png?v=20261105',
     tag: tag,
     renotify: false,
     requireInteraction: false,

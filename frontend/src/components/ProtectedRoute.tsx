@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { AuthService } from '@/services/auth.service';
 import { Spin, Result, Button } from 'antd';
 import { getRouteAllowedRoles, getCanonicalRoleLandingRoute } from '@/constants/menuConfig';
+import { EpmsWelcomeScreen } from '@/components/common/EpmsWelcomeScreen';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -25,7 +26,16 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
 
   if (isLoading || !isAuthenticated) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          backgroundColor: '#f8fafc',
+        }}
+        data-testid="protected-route-session-loader"
+      >
         <Spin size="large" tip="Memverifikasi sesi..." />
       </div>
     );
@@ -54,11 +64,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
       if (pathname === '/') {
         if (homeRoute !== '/') {
           router.replace(homeRoute);
-          return (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-              <Spin size="large" tip="Mengalihkan ke beranda kerja..." />
-            </div>
-          );
+          return <EpmsWelcomeScreen mode="initializing" statusText="Menyiapkan workspace..." />;
         }
       }
 

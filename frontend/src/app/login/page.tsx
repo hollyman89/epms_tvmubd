@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/axios';
 import { useAuth } from '@/context/AuthContext';
 import { getCanonicalRoleLandingRoute } from '@/constants/menuConfig';
+import { EpmsWelcomeScreen } from '@/components/common/EpmsWelcomeScreen';
 
 export default function LoginPage() {
   const [form] = Form.useForm();
@@ -27,10 +28,23 @@ export default function LoginPage() {
 
   if (isLoading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#f8fafc' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          height: '100vh',
+          backgroundColor: '#f8fafc',
+        }}
+        data-testid="login-session-loader"
+      >
         <Spin size="large" tip="Memverifikasi sesi..." />
       </div>
     );
+  }
+
+  if (isAuthenticated && user) {
+    return <EpmsWelcomeScreen mode="initializing" statusText="Menyiapkan workspace..." />;
   }
 
   const onFinish = async (values: any) => {
