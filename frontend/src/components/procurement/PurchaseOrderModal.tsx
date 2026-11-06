@@ -298,10 +298,18 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
           it.categoryName ||
           it.category_name ||
           (activePo?.orderType === 'SERVICE' ? 'SUBCONTRACTOR' : 'MATERIAL');
+        const resolvedPoItemName =
+          (it.itemName && String(it.itemName).trim()) ||
+          (it.item_name && String(it.item_name).trim()) ||
+          (it.purchaseRequestItem?.itemName && String(it.purchaseRequestItem.itemName).trim()) ||
+          (it.purchaseRequestItem?.item_name && String(it.purchaseRequestItem.item_name).trim()) ||
+          (it.costItem?.itemName && String(it.costItem.itemName).trim()) ||
+          (it.costItem?.item_name && String(it.costItem.item_name).trim()) ||
+          `Item #${idx + 1}`;
         return {
           key: it.key || String(it.id || idx),
           categoryName: rawCat,
-          itemName: it.itemName || `Item #${idx + 1}`,
+          itemName: resolvedPoItemName,
           quantity: qty,
           receivedQuantity: Number(it.receivedQuantity || 0),
           uom: it.uom || 'Unit',
@@ -324,10 +332,18 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
           (it as any).category_key ||
           (it as any).costItem?.categoryKey ||
           'MATERIAL';
+        const resolvedQuoteItemName =
+          (it.itemName && String(it.itemName).trim()) ||
+          ((it as any).item_name && String((it as any).item_name).trim()) ||
+          ((it as any).purchaseRequestItem?.itemName && String((it as any).purchaseRequestItem.itemName).trim()) ||
+          ((it as any).purchaseRequestItem?.item_name && String((it as any).purchaseRequestItem.item_name).trim()) ||
+          ((it as any).costItem?.itemName && String((it as any).costItem.itemName).trim()) ||
+          ((it as any).costItem?.item_name && String((it as any).costItem.item_name).trim()) ||
+          'Item Pengadaan';
         return {
           key: it.key || `item_${idx}`,
           categoryName: rawQuoteCat,
-          itemName: it.itemName || 'Item Pengadaan',
+          itemName: resolvedQuoteItemName,
           quantity,
           uom: it.uom || 'Unit',
           unitPrice,
@@ -349,10 +365,16 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
           it.categoryKey ||
           it.category_key ||
           'SUBCONTRACTOR';
+        const resolvedPrItemName =
+          (it.itemName && String(it.itemName).trim()) ||
+          (it.item_name && String(it.item_name).trim()) ||
+          (it.costItem?.itemName && String(it.costItem.itemName).trim()) ||
+          (it.costItem?.item_name && String(it.costItem.item_name).trim()) ||
+          `Item Jasa #${idx + 1}`;
         return {
           key: String(it.id || idx),
           categoryName: rawPrCat,
-          itemName: it.itemName || `Item Jasa #${idx + 1}`,
+          itemName: resolvedPrItemName,
           quantity: qty,
           receivedQuantity: 0,
           uom: it.uom || 'Unit',
@@ -2095,7 +2117,7 @@ export const PurchaseOrderModal: React.FC<PurchaseOrderModalProps> = ({
                   dataIndex: 'itemName',
                   key: 'itemName',
                   render: (name: string, it: PurchaseOrderItemRecord) => (
-                    <div>
+                    <div style={{ wordBreak: 'break-word', whiteSpace: 'normal' }}>
                       <div style={{ fontWeight: 600, fontSize: 12, color: '#0f172a' }}>{name}</div>
                       {it.wbsNodeId && (
                         <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px', marginTop: 2 }}>

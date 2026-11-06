@@ -536,6 +536,8 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
+  white-space: nowrap;
+  flex-wrap: nowrap;
 }
 
 /* Responsive Table vs Mobile Cards */

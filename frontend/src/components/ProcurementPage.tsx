@@ -40,6 +40,7 @@ import {
   FileTextOutlined,
   StopOutlined,
   MoreOutlined,
+  DownOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
@@ -232,6 +233,107 @@ export function checkIsDuplicatePr(r: any, allPrs: any[]): boolean {
   });
 
   return hasCanonicalApproved && !isApproved;
+}
+
+export interface PoActionConfig {
+  isService: boolean;
+  canReceiveGoods: boolean;
+  isEligibleForGr: boolean;
+  isCompleted: boolean;
+  hasGrs: boolean;
+  grCount: number;
+  primaryAction: { label: string; key: string };
+  dropdownActions: Array<{ key: string; label: string }>;
+}
+
+export function getPoActionConfig(po: any, allGoodsReceipts: any[] = [], canReceiveGoods = false): PoActionConfig {
+  const isService = po?.orderType === 'SERVICE';
+  const poGrs = (allGoodsReceipts || []).filter(
+    (g) =>
+      String(g.poId) === String(po?.id || po?.poId) ||
+      String(g.poNumber) === String(po?.poNumber)
+  );
+  const isEligibleForGr =
+    (po?.status === 'ISSUED' || po?.status === 'PARTIALLY_FULFILLED') && canReceiveGoods && !isService;
+  const isCompleted = po?.status === 'COMPLETED';
+
+  const dropdownActions: Array<{ key: string; label: string }> = [];
+  if (isService) {
+    dropdownActions.push(
+      { key: 'spk', label: 'SPK / Work Order' },
+      { key: 'claim', label: 'Klaim Jasa' }
+    );
+  } else {
+    if (poGrs.length > 0) {
+      dropdownActions.push({ key: 'gr-history', label: `Riwayat GR (${poGrs.length})` });
+    }
+  }
+
+  return {
+    isService,
+    canReceiveGoods,
+    isEligibleForGr,
+    isCompleted,
+    hasGrs: poGrs.length > 0,
+    grCount: poGrs.length,
+    primaryAction: { label: 'Lihat PO', key: 'view-po' },
+    dropdownActions,
+  };
+}
+
+export interface PoMobileCardViewModel {
+  poNumber: string;
+  orderType: string;
+  orderTypeLabel: 'JASA' | 'CAMPURAN' | 'MATERIAL';
+  orderTypeTagColor: 'cyan' | 'orange' | 'blue';
+  prNumber: string | null;
+  vendorDisplay: string;
+  vendorCode: string | null;
+  status: string;
+  isCompleted: boolean;
+  totalAmountFormatted: string;
+  issuedAtFormatted: string;
+  primaryActionLabel: string;
+  secondaryActionLabel: string | null;
+  overflowItemKeys: string[];
+}
+
+export function projectPoMobileCard(po: any, allGoodsReceipts: any[] = [], canReceiveGoods = false): PoMobileCardViewModel {
+  const isService = po?.orderType === 'SERVICE';
+  const isLegacyMixed = po?.orderType === 'LEGACY_MIXED';
+  const poGrs = (allGoodsReceipts || []).filter(
+    (g) =>
+      String(g.poId) === String(po?.id || po?.poId) ||
+      String(g.poNumber) === String(po?.poNumber)
+  );
+  const isEligibleForGr =
+    (po?.status === 'ISSUED' || po?.status === 'PARTIALLY_FULFILLED') && canReceiveGoods && !isService;
+  const isCompleted = po?.status === 'COMPLETED';
+
+  const overflowItemKeys: string[] = ['view-po'];
+  if (isService) {
+    overflowItemKeys.push('service-order', 'service-claim');
+  } else {
+    if (isEligibleForGr) overflowItemKeys.push('gr');
+    if (poGrs.length > 0) overflowItemKeys.push('gr-history');
+  }
+
+  return {
+    poNumber: po?.poNumber || `PO-${po?.id || ''}`,
+    orderType: po?.orderType || 'MATERIAL',
+    orderTypeLabel: isService ? 'JASA' : isLegacyMixed ? 'CAMPURAN' : 'MATERIAL',
+    orderTypeTagColor: isService ? 'cyan' : isLegacyMixed ? 'orange' : 'blue',
+    prNumber: po?.purchaseRequest?.prNumber || po?.prNumber || null,
+    vendorDisplay: po?.vendor?.name || po?.vendorName || '—',
+    vendorCode: po?.vendor?.code || po?.vendorCode || null,
+    status: po?.status || 'UNKNOWN',
+    isCompleted,
+    totalAmountFormatted: formatCurrency(Number(po?.totalAmount || 0)),
+    issuedAtFormatted: formatDateTime(po?.createdAt || po?.issuedAt),
+    primaryActionLabel: 'Lihat PO',
+    secondaryActionLabel: isService ? 'SPK / WO' : isEligibleForGr ? 'Terima Barang' : null,
+    overflowItemKeys,
+  };
 }
 
 const { Title, Text, Paragraph } = Typography;
@@ -1652,7 +1754,7 @@ export const ProcurementPage: React.FC = () => {
       {
         title: 'AKSI',
         key: 'action',
-        width: 250,
+        width: 260,
         align: 'center' as const,
         render: (_: any, r: any) => {
           const poRecord: PurchaseOrderPrototypeRecord = {
@@ -1692,8 +1794,72 @@ export const ProcurementPage: React.FC = () => {
             (r.status === 'ISSUED' || r.status === 'PARTIALLY_FULFILLED') && canReceiveGoods;
           const isCompleted = r.status === 'COMPLETED';
 
+          if (r.orderType === 'SERVICE') {
+            const serviceMenuItems: MenuProps['items'] = [
+              {
+                key: 'spk',
+                icon: <FileTextOutlined />,
+                label: 'SPK / Work Order',
+                onClick: () => {
+                  setSelectedPoForServiceOrder(poRecord);
+                  setIsServiceOrderModalOpen(true);
+                },
+              },
+              {
+                key: 'claim',
+                icon: <SafetyCertificateOutlined />,
+                label: 'Klaim Jasa',
+                onClick: () => {
+                  setSelectedPoForServiceClaim(poRecord);
+                  setIsServiceClaimModalOpen(true);
+                },
+              },
+            ];
+
+            return (
+              <div className={styles.actionCell} data-testid="po-table-actions">
+                <Button
+                  size="small"
+                  icon={<EyeOutlined />}
+                  onClick={() => {
+                    setSelectedPoForView(poRecord);
+                    setIsPoModalOpen(true);
+                  }}
+                  className={styles.btnActionSecondary}
+                  data-testid="po-action-lihat"
+                >
+                  Lihat PO
+                </Button>
+                <Dropdown menu={{ items: serviceMenuItems }} trigger={['click']} placement="bottomRight">
+                  <Button
+                    size="small"
+                    icon={<FileTextOutlined />}
+                    className={styles.btnActionBlue}
+                    data-testid="po-action-kelola-jasa"
+                  >
+                    Kelola Jasa <DownOutlined style={{ fontSize: 9 }} />
+                  </Button>
+                </Dropdown>
+              </div>
+            );
+          }
+
+          const materialOverflowItems: MenuProps['items'] = [];
+          if (poGrs.length > 0) {
+            materialOverflowItems.push({
+              key: 'gr-history',
+              icon: <InboxOutlined />,
+              label: `Riwayat GR (${poGrs.length})`,
+              onClick: () => {
+                setSelectedGrForView(poGrs[0]);
+                setSelectedPoForGr(null);
+                setIsGrModalOpen(true);
+              },
+            });
+          }
+
           return (
-            <Space size={6} wrap>
+            <div className={styles.actionCell} data-testid="po-table-actions">
               <Button
                 size="small"
                 icon={<EyeOutlined />}
@@ -1702,6 +1868,7 @@ export const ProcurementPage: React.FC = () => {
                   setIsPoModalOpen(true);
                 }}
                 className={styles.btnActionSecondary}
+                data-testid="po-action-lihat"
               >
                 Lihat PO
               </Button>
@@ -1716,36 +1883,10 @@ export const ProcurementPage: React.FC = () => {
                     setIsGrModalOpen(true);
                   }}
                   className={styles.btnActionTeal}
+                  data-testid="po-action-gr"
                 >
                   Terima Barang
                 </Button>
-              )}
-
-              {r.orderType === 'SERVICE' && (
-                <>
-                  <Button
-                    size="small"
-                    icon={<FileTextOutlined />}
-                    onClick={() => {
-                      setSelectedPoForServiceOrder(poRecord);
-                      setIsServiceOrderModalOpen(true);
-                    }}
-                    className={styles.btnActionBlue}
-                  >
-                    SPK / Work Order
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<SafetyCertificateOutlined />}
-                    onClick={() => {
-                      setSelectedPoForServiceClaim(poRecord);
-                      setIsServiceClaimModalOpen(true);
-                    }}
-                    className={styles.btnActionTeal}
-                  >
-                    Klaim Jasa
-                  </Button>
-                </>
               )}
 
               {isCompleted && (
@@ -1754,7 +1895,7 @@ export const ProcurementPage: React.FC = () => {
                 </Tag>
               )}
 
-              {poGrs.length > 0 && (
+              {!isEligibleForGr && poGrs.length > 0 && (
                 <Button
                   size="small"
                   onClick={() => {
@@ -1763,11 +1904,18 @@ export const ProcurementPage: React.FC = () => {
                     setIsGrModalOpen(true);
                   }}
                   className={styles.btnActionAmber}
+                  data-testid="po-action-gr-history"
                 >
                   Riwayat GR ({poGrs.length})
                 </Button>
               )}
-            </Space>
+
+              {isEligibleForGr && poGrs.length > 0 && (
+                <Dropdown menu={{ items: materialOverflowItems }} trigger={['click']} placement="bottomRight">
+                  <Button size="small" icon={<MoreOutlined />} title="Menu Lainnya" data-testid="po-action-more" />
+                </Dropdown>
+              )}
+            </div>
           );
         },
       },
@@ -2160,6 +2308,250 @@ export const ProcurementPage: React.FC = () => {
     ]
   );
 
+  const renderPoMobileCard = useCallback(
+    (po: any) => {
+      const poRecord: PurchaseOrderPrototypeRecord = {
+        poId: String(po.id || po.poId),
+        poNumber: po.poNumber,
+        comparisonId: po.comparisonId || '',
+        rfqId: po.rfqId || '',
+        rfqNumber: po.rfqNumber || '',
+        prId: po.purchaseRequestId || po.purchaseRequest?.id || '',
+        prNumber: po.purchaseRequest?.prNumber || '',
+        projectId: po.projectId || po.purchaseRequest?.projectId || po.purchaseRequest?.project?.id || '',
+        projectName: po.projectName || po.purchaseRequest?.projectName || po.purchaseRequest?.project?.name || po.project?.name || '',
+        vendorId: po.vendorId || po.vendor?.id || 0,
+        vendorCode: po.vendorCode || po.vendor?.code || '',
+        vendorName: po.vendorName || po.vendor?.name || '—',
+        totalAmount: Number(po.totalAmount || 0),
+        budgetCeiling: 0,
+        orderType: po.orderType,
+        status: po.status,
+        issuedAt: po.createdAt || po.issuedAt,
+        issuedBy: po.issuedBy || 'Purchasing',
+        deliveryDate: po.deliveryDate,
+        deliveryLocation: po.deliveryLocation,
+        paymentTerms: po.paymentTerms,
+        notes: po.notes,
+        items: po.items || [],
+        serviceOrders: po.serviceOrders || [],
+        vendor: po.vendor,
+        purchaseRequest: po.purchaseRequest,
+      };
+
+      const poGrs = allGoodsReceipts.filter(
+        (g) =>
+          String(g.poId) === String(poRecord.poId || (poRecord as any).id) ||
+          String(g.poNumber) === String(poRecord.poNumber)
+      );
+      const isEligibleForGr =
+        (po.status === 'ISSUED' || po.status === 'PARTIALLY_FULFILLED') && canReceiveGoods;
+      const isService = po.orderType === 'SERVICE';
+      const isCompleted = po.status === 'COMPLETED';
+
+      const overflowItems: MenuProps['items'] = [];
+
+      let primaryBtn: React.ReactNode = null;
+
+      if (isService) {
+        primaryBtn = (
+          <Button
+            size="small"
+            icon={<FileTextOutlined />}
+            onClick={() => {
+              setSelectedPoForServiceOrder(poRecord);
+              setIsServiceOrderModalOpen(true);
+            }}
+            className={styles.btnActionBlue}
+            data-testid="po-mobile-spk-btn"
+          >
+            SPK / WO
+          </Button>
+        );
+
+        overflowItems.push(
+          {
+            key: 'view-po',
+            icon: <EyeOutlined />,
+            label: 'Lihat Purchase Order',
+            onClick: () => {
+              setSelectedPoForView(poRecord);
+              setIsPoModalOpen(true);
+            },
+          },
+          {
+            key: 'service-order',
+            icon: <FileTextOutlined />,
+            label: 'Kelola SPK / Work Order',
+            onClick: () => {
+              setSelectedPoForServiceOrder(poRecord);
+              setIsServiceOrderModalOpen(true);
+            },
+          },
+          {
+            key: 'service-claim',
+            icon: <SafetyCertificateOutlined />,
+            label: 'Klaim Jasa / BAST',
+            onClick: () => {
+              setSelectedPoForServiceClaim(poRecord);
+              setIsServiceClaimModalOpen(true);
+            },
+          }
+        );
+      } else {
+        if (isEligibleForGr) {
+          primaryBtn = (
+            <Button
+              size="small"
+              icon={<InboxOutlined />}
+              onClick={() => {
+                setSelectedPoForGr(poRecord);
+                setSelectedGrForView(null);
+                setIsGrModalOpen(true);
+              }}
+              className={styles.btnActionTeal}
+              data-testid="po-mobile-gr-btn"
+            >
+              Terima Barang
+            </Button>
+          );
+        } else {
+          primaryBtn = (
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => {
+                setSelectedPoForView(poRecord);
+                setIsPoModalOpen(true);
+              }}
+              className={styles.btnActionSecondary}
+              data-testid="po-mobile-view-btn"
+            >
+              Lihat PO
+            </Button>
+          );
+        }
+
+        overflowItems.push({
+          key: 'view-po',
+          icon: <EyeOutlined />,
+          label: 'Lihat Purchase Order',
+          onClick: () => {
+            setSelectedPoForView(poRecord);
+            setIsPoModalOpen(true);
+          },
+        });
+
+        if (isEligibleForGr) {
+          overflowItems.push({
+            key: 'gr',
+            icon: <InboxOutlined />,
+            label: 'Terima Barang (GR)',
+            onClick: () => {
+              setSelectedPoForGr(poRecord);
+              setSelectedGrForView(null);
+              setIsGrModalOpen(true);
+            },
+          });
+        }
+
+        if (poGrs.length > 0) {
+          overflowItems.push({
+            key: 'gr-history',
+            icon: <InboxOutlined />,
+            label: `Riwayat GR (${poGrs.length})`,
+            onClick: () => {
+              setSelectedGrForView(poGrs[0]);
+              setSelectedPoForGr(null);
+              setIsGrModalOpen(true);
+            },
+          });
+        }
+      }
+
+      return (
+        <div
+          key={po.id || po.poNumber}
+          className={styles.prMobileCard}
+          data-testid={`po-mobile-card-${po.id || po.poNumber}`}
+        >
+          <div className={styles.prMobileCardHeader}>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span className={styles.idMonospace} style={{ fontWeight: 700, fontSize: 13, color: '#1D4ED8' }}>
+                  {po.poNumber || `PO-${po.id}`}
+                </span>
+                <Tag
+                  color={isService ? 'cyan' : po.orderType === 'LEGACY_MIXED' ? 'orange' : 'blue'}
+                  style={{ fontSize: 9.5, margin: 0, fontWeight: 700, padding: '0 4px' }}
+                >
+                  {isService ? 'JASA' : po.orderType === 'LEGACY_MIXED' ? 'CAMPURAN' : 'MATERIAL'}
+                </Tag>
+              </div>
+              {(po.purchaseRequest?.prNumber || po.prNumber) && (
+                <span style={{ fontSize: 11, color: '#64748B' }}>
+                  Ref PR: {po.purchaseRequest?.prNumber || po.prNumber}
+                </span>
+              )}
+            </div>
+            <span className={styles.currencyText} style={{ color: '#059669', fontSize: 13, fontWeight: 700 }}>
+              {formatCurrency(po.totalAmount || 0)}
+            </span>
+          </div>
+
+          <div className={styles.prMobileCardRow}>
+            <span className={styles.prMobileCardLabel}>Vendor:</span>
+            <span style={{ fontWeight: 600, color: '#1E293B', textAlign: 'right', maxWidth: '65%' }}>
+              {po.vendor?.name || po.vendorName || '—'}
+              {(po.vendor?.code || po.vendorCode) ? ` (${po.vendor?.code || po.vendorCode})` : ''}
+            </span>
+          </div>
+
+          <div className={styles.prMobileCardRow}>
+            <span className={styles.prMobileCardLabel}>Status:</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <StatusBadge domain="po" status={po.status} showDot />
+              {isCompleted && (
+                <Tag color="green" style={{ fontWeight: 700, margin: 0, padding: '1px 6px', borderRadius: 10, fontSize: 9.5 }}>
+                  Selesai
+                </Tag>
+              )}
+            </div>
+          </div>
+
+          <div className={styles.prMobileCardRow}>
+            <span className={styles.prMobileCardLabel}>Tanggal Terbit:</span>
+            <span className={styles.idMonospace} style={{ fontSize: 11.5, color: '#475569' }}>
+              {formatDateTime(po.createdAt || po.issuedAt)}
+            </span>
+          </div>
+
+          <div className={styles.prMobileCardActions}>
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => {
+                setSelectedPoForView(poRecord);
+                setIsPoModalOpen(true);
+              }}
+              className={styles.btnActionSecondary}
+              data-testid="po-mobile-view-btn"
+            >
+              Lihat PO
+            </Button>
+            {primaryBtn && (primaryBtn as any).key !== 'view' && primaryBtn}
+            {overflowItems.length > 0 && (
+              <Dropdown menu={{ items: overflowItems }} trigger={['click']} placement="bottomRight">
+                <Button size="small" icon={<MoreOutlined />} title="Menu Lainnya" data-testid="po-mobile-more-btn" />
+              </Dropdown>
+            )}
+          </div>
+        </div>
+      );
+    },
+    [allGoodsReceipts, canReceiveGoods]
+  );
+
   // 5. TABS ITEMS
   const tabItems = [
     {
@@ -2402,33 +2794,57 @@ export const ProcurementPage: React.FC = () => {
               Daftar Purchase Order (PO) resmi yang diterbitkan ke vendor rekanan terpilih.
             </div>
           </div>
-          <div className={styles.tableContainer}>
-            <Table
-              className={styles.procurementTable}
-              columns={poColumns}
-              dataSource={pos}
-              rowKey="id"
-              loading={posLoading}
-              pagination={{ pageSize: 8, showSizeChanger: false }}
-              scroll={{ x: 1050 }}
-              locale={{
-                emptyText: (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={
-                      <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                        <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
-                          Belum ada Purchase Order
+          {/* Desktop Structured Table View */}
+          <div className={styles.desktopTableView}>
+            <div className={styles.tableContainer}>
+              <Table
+                className={styles.procurementTable}
+                columns={poColumns}
+                dataSource={pos}
+                rowKey="id"
+                loading={posLoading}
+                pagination={{ pageSize: 8, showSizeChanger: false }}
+                scroll={{ x: 1240 }}
+                locale={{
+                  emptyText: (
+                    <Empty
+                      image={Empty.PRESENTED_IMAGE_SIMPLE}
+                      description={
+                        <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+                            Belum ada Purchase Order
+                          </div>
+                          <Text type="secondary" style={{ fontSize: 11.5 }}>
+                            Terbitkan PO melalui alur evaluasi vendor RFQ pada PR yang telah disetujui Direktur.
+                          </Text>
                         </div>
-                        <Text type="secondary" style={{ fontSize: 11.5 }}>
-                          Terbitkan PO melalui alur evaluasi vendor RFQ pada PR yang telah disetujui Direktur.
-                        </Text>
-                      </div>
-                    }
-                  />
-                ),
-              }}
-            />
+                      }
+                    />
+                  ),
+                }}
+              />
+            </div>
+          </div>
+
+          {/* Mobile & Tablet Compact Card View */}
+          <div className={styles.mobileCardView}>
+            {pos.length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#475569' }}>
+                      Belum ada Purchase Order
+                    </div>
+                    <Text type="secondary" style={{ fontSize: 11.5 }}>
+                      Terbitkan PO melalui alur evaluasi vendor RFQ pada PR yang telah disetujui Direktur.
+                    </Text>
+                  </div>
+                }
+              />
+            ) : (
+              pos.map((po) => renderPoMobileCard(po))
+            )}
           </div>
         </div>
       ),
