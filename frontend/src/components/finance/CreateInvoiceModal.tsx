@@ -35,6 +35,8 @@ import {
 import dayjs, { Dayjs } from 'dayjs';
 import { PurchaseOrder, PoPaymentTermRecord, ProcurementService } from '@/services/procurement.service';
 import { InvoiceDto, FinanceService, CreateInvoicePayload } from '@/services/finance.service';
+import { ResponsiveFinanceModal } from './ResponsiveFinanceModal';
+import styles from './CreateInvoiceModal.module.css';
 
 const { Text } = Typography;
 
@@ -68,7 +70,14 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   const [form] = Form.useForm();
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [selectedTermId, setSelectedTermId] = useState<number | undefined>(undefined);
+  const [selectedTermId, setSelectedTermId] = useState<number | undefined>(() => {
+    if (initialPaymentTermId) return initialPaymentTermId;
+    if (po?.paymentTerms && Array.isArray(po.paymentTerms) && po.paymentTerms.length > 0) {
+      const pending = po.paymentTerms.find((t: any) => t.status === 'PENDING' || !t.status);
+      return pending ? pending.id : po.paymentTerms[0]?.id;
+    }
+    return undefined;
+  });
 
   // Canonical Goods Receipt States for Progress Billing (Phase GR-6)
   const [goodsReceipts, setGoodsReceipts] = useState<any[]>([]);
@@ -223,11 +232,72 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
       const receivedQty = Number(it.receivedQuantity || it.received_quantity || 0);
       const price = Number(it.unitPrice || 0);
       const subtotal = Number(it.totalPrice || qty * price);
+
+      // 1. Resolve canonical item name (support itemName, item_name, PR/Cost item, and safe fallback)
+      let resolvedItemName = '';
+      if (it.itemName && typeof it.itemName === 'string' && it.itemName.trim() !== '') {
+        resolvedItemName = it.itemName.trim();
+      } else if (it.item_name && typeof it.item_name === 'string' && it.item_name.trim() !== '') {
+        resolvedItemName = it.item_name.trim();
+      } else if (
+        it.purchaseRequestItem?.itemName &&
+        typeof it.purchaseRequestItem.itemName === 'string' &&
+        it.purchaseRequestItem.itemName.trim() !== ''
+      ) {
+        resolvedItemName = it.purchaseRequestItem.itemName.trim();
+      } else if (
+        it.purchaseRequestItem?.item_name &&
+        typeof it.purchaseRequestItem.item_name === 'string' &&
+        it.purchaseRequestItem.item_name.trim() !== ''
+      ) {
+        resolvedItemName = it.purchaseRequestItem.item_name.trim();
+      } else if (
+        it.costItem?.itemName &&
+        typeof it.costItem.itemName === 'string' &&
+        it.costItem.itemName.trim() !== ''
+      ) {
+        resolvedItemName = it.costItem.itemName.trim();
+      } else if (
+        it.costItem?.item_name &&
+        typeof it.costItem.item_name === 'string' &&
+        it.costItem.item_name.trim() !== ''
+      ) {
+        resolvedItemName = it.costItem.item_name.trim();
+      } else {
+        resolvedItemName = `Item Pengadaan #${idx + 1}`;
+      }
+
+      // 2. Resolve canonical category (preserve explicit valid category; default by orderType)
+      const isService = po?.orderType === 'SERVICE';
+      const explicitCat =
+        it.categoryName ||
+        it.category_name ||
+        it.costItem?.categoryKey ||
+        it.costItem?.category_key ||
+        it.categoryKey ||
+        it.category_key;
+
+      const categoryName = explicitCat && String(explicitCat).trim() !== ''
+        ? String(explicitCat).trim()
+        : isService
+        ? 'Jasa / Subkon'
+        : 'Material';
+
+      // 3. Resolve canonical specification (optional)
+      const specification =
+        it.costItem?.description ||
+        it.purchaseRequestItem?.specification ||
+        it.purchaseRequestItem?.description ||
+        it.specification ||
+        it.description ||
+        null;
+
       return {
         key: String(it.id || idx),
         id: Number(it.id || idx + 1),
-        itemName: it.itemName || `Item Pengadaan #${idx + 1}`,
-        categoryName: it.categoryName || 'Material',
+        itemName: resolvedItemName,
+        categoryName,
+        specification: specification ? String(specification).trim() : null,
         quantity: qty,
         receivedQuantity: receivedQty,
         uom: it.uom || 'Unit',
@@ -244,14 +314,15 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     return selectedGr.items
       .filter((grItem: any) => Number(grItem.receivedQuantity || 0) > 0)
       .map((grItem: any, idx: number) => {
-        const poItem = poItems.find((p) => Number(p.id) === Number(grItem.poItemId)) || (grItem.purchaseOrderItem ? {
+        const poItem = poItems.find((p) => Number(p.id) === Number(grItem.poItemId || grItem.po_item_id)) || (grItem.purchaseOrderItem ? {
           id: Number(grItem.purchaseOrderItem.id),
-          itemName: grItem.purchaseOrderItem.itemName,
-          categoryName: grItem.purchaseOrderItem.categoryName || 'Material',
+          itemName: grItem.purchaseOrderItem.itemName || grItem.purchaseOrderItem.item_name,
+          categoryName: grItem.purchaseOrderItem.categoryName || grItem.purchaseOrderItem.category_name || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material'),
           quantity: Number(grItem.purchaseOrderItem.quantity || 0),
           uom: grItem.purchaseOrderItem.uom || 'Unit',
           unitPrice: Number(grItem.purchaseOrderItem.unitPrice || 0),
           wbsNodeId: grItem.purchaseOrderItem.wbsNodeId,
+          specification: grItem.purchaseOrderItem.costItem?.description || null,
         } : null);
 
         const receivedQty = Number(grItem.receivedQuantity || 0);
@@ -260,24 +331,36 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
         const outstandingQty = Math.max(0, orderedQty - receivedQty);
         const subtotal = receivedQty * unitPrice;
 
+        const resolvedItemName =
+          poItem?.itemName ||
+          (grItem.purchaseOrderItem?.itemName && String(grItem.purchaseOrderItem.itemName).trim()) ||
+          (grItem.purchaseOrderItem?.item_name && String(grItem.purchaseOrderItem.item_name).trim()) ||
+          `Item #${grItem.poItemId || grItem.po_item_id}`;
+
+        const isService = po?.orderType === 'SERVICE';
+        const categoryName = poItem?.categoryName ||
+          (grItem.purchaseOrderItem?.categoryName && String(grItem.purchaseOrderItem.categoryName).trim()) ||
+          (isService ? 'Jasa / Subkon' : 'Material');
+
         return {
           key: String(grItem.id || idx),
           id: Number(grItem.id || idx + 1),
-          poItemId: Number(grItem.poItemId),
-          itemName: poItem?.itemName || `Item #${grItem.poItemId}`,
-          categoryName: poItem?.categoryName || 'Material',
+          poItemId: Number(grItem.poItemId || grItem.po_item_id),
+          itemName: resolvedItemName,
+          categoryName,
+          specification: poItem?.specification || null,
           orderedQty,
           receivedQty,
           outstandingQty,
           quantity: receivedQty, // Capped strictly at physical receipt
-          uom: poItem?.uom || 'Unit',
+          uom: poItem?.uom || grItem.purchaseOrderItem?.uom || 'Unit',
           unitPrice,
           totalPrice: subtotal,
-          wbsNodeId: poItem?.wbsNodeId,
+          wbsNodeId: poItem?.wbsNodeId || grItem.purchaseOrderItem?.wbsNodeId,
           remarks: grItem.remarks,
         };
       });
-  }, [selectedGr, poItems]);
+  }, [selectedGr, poItems, po]);
 
   // Total Physical Delivery Value of Selected GR
   const totalPhysicalDeliveryValue = useMemo(() => {
@@ -761,86 +844,69 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   const isSubmitDisabled = !canCreateInvoice || isSubmitting || isProgressBlocked || isTermIneligible;
 
   return (
-    <Modal
+    <ResponsiveFinanceModal
       open={open}
       onCancel={onClose}
-      width="min(1140px, 96vw)"
-      centered
+      domain="INVOICE"
+      size="full"
       destroyOnClose
-      footer={
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            width: '100%',
-            flexWrap: 'wrap',
-            gap: 8,
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 16 }} />
-            <Text style={{ fontSize: 12 }}>
-              Otoritas Matching &amp; Status:{' '}
-              <Tag color="blue" style={{ fontWeight: 700, margin: '0 4px' }}>
-                BACKEND SSOT
-              </Tag>
-              — Evaluasi:{' '}
-              <Tag color="default" style={{ fontWeight: 600, margin: '0 4px' }}>
-                MATCHING ENGINE
-              </Tag>
-            </Text>
+      title={`Penerbitan Invoice Penagihan Vendor — PO ${poNumber}`}
+      subtitle="Pembuatan faktur penagihan vendor berbasis Purchase Order dan evaluasi Backend Matching Engine"
+      headerIcon={<FileTextOutlined />}
+      footerExtra={
+        <div className={styles.footerExtraContainer} data-testid="footer-extra-container">
+          <div className={styles.footerRow} data-testid="footer-authority-row">
+            <SafetyCertificateOutlined style={{ color: '#059669', fontSize: 13, flexShrink: 0 }} />
+            <span className={styles.footerLabel}>Otoritas Data &amp; Status:</span>
+            <Tag color="blue" className={styles.footerTag}>BACKEND SSOT</Tag>
           </div>
-
-          <Space size={8} wrap>
-            {isTermIneligible && (
+          <div className={styles.footerRow} data-testid="footer-evaluation-row">
+            <AuditOutlined style={{ color: '#2563eb', fontSize: 13, flexShrink: 0 }} />
+            <span className={styles.footerLabel}>Sistem Validasi &amp; Evaluasi:</span>
+            <Tag color="default" className={styles.footerTag}>MATCHING ENGINE</Tag>
+          </div>
+        </div>
+      }
+      footerActions={
+        <div className={styles.footerActionsWrapper} data-testid="footer-actions-wrapper">
+          {isTermIneligible && (
+            <div className={styles.footerIneligibleAlert}>
               <Text type="danger" style={{ fontSize: 11, fontWeight: 600 }}>
                 <ExclamationCircleOutlined style={{ marginRight: 4 }} />
                 {activeTermEligibility.statusTag.replace(/[\[\]]/g, '')}: {activeTermEligibility.reasons[0]}
               </Text>
-            )}
-            <Button onClick={onClose} style={{ borderRadius: 6 }} disabled={isSubmitting}>
-              Batal
-            </Button>
-            {canCreateInvoice && (
-              <Button
-                type="primary"
-                loading={isSubmitting}
-                disabled={isSubmitDisabled}
-                onClick={() => form.submit()}
-                icon={<SendOutlined />}
-                style={{
-                  backgroundColor: isSubmitDisabled ? undefined : '#059669',
-                  borderColor: isSubmitDisabled ? undefined : '#059669',
-                  borderRadius: 6,
-                  fontWeight: 600,
-                }}
-              >
-                {activeTerm
-                  ? `Terbitkan Invoice Termin #${activeTerm.sequence} (${activeTerm.percentage}%)`
-                  : 'Terbitkan Invoice Tagihan (100% PO)'}
-              </Button>
-            )}
-          </Space>
-        </div>
-      }
-      title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 24 }}>
-          <div style={{ padding: '6px 10px', background: '#eff6ff', borderRadius: 8, color: '#2563eb' }}>
-            <FileTextOutlined style={{ fontSize: 18 }} />
-          </div>
-          <div>
-            <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
-              Penerbitan Invoice Penagihan Vendor — PO {poNumber}
             </div>
-            <Text type="secondary" style={{ fontSize: 11, color: '#64748b' }}>
-              Pembuatan faktur penagihan vendor berbasis Purchase Order dan evaluasi Backend Matching Engine
-            </Text>
-          </div>
+          )}
+          <Button
+            onClick={onClose}
+            style={{ borderRadius: 6 }}
+            disabled={isSubmitting}
+            className={styles.cancelBtn}
+          >
+            Batal
+          </Button>
+          {canCreateInvoice && (
+            <Button
+              type="primary"
+              loading={isSubmitting}
+              disabled={isSubmitDisabled}
+              onClick={() => form.submit()}
+              icon={<SendOutlined />}
+              className={styles.submitBtn}
+              style={{
+                backgroundColor: isSubmitDisabled ? undefined : '#059669',
+                borderColor: isSubmitDisabled ? undefined : '#059669',
+              }}
+            >
+              {activeTerm
+                ? `Terbitkan Invoice Termin #${activeTerm.sequence} (${activeTerm.percentage}%)`
+                : 'Terbitkan Invoice Tagihan (100% PO)'}
+            </Button>
+          )}
         </div>
       }
     >
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className={styles.modalScrollContent} data-testid="modal-scroll-content">
         {/* Backend Validation / Submission Error Alert */}
         {submitError && (
           <Alert
@@ -897,46 +963,47 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
         )}
 
         {/* PO & Vendor Context Strip */}
-        <div style={{ background: '#f8fafc', padding: '10px 14px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
-          <Row gutter={[12, 8]} align="middle">
-            <Col xs={24} sm={6}>
-              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>PROYEK:</Text>
-              <div style={{ fontWeight: 700, fontSize: 12.5, color: '#0f172a' }}>{projectName}</div>
+        <div className={styles.poSummaryCard} data-testid="po-summary-card">
+          <div className={styles.poSummaryGrid} data-testid="po-summary-grid">
+            <div className={styles.poSummaryItem}>
+              <span className={styles.poSummaryLabel}>PROYEK</span>
+              <div className={styles.poSummaryValuePrimary}>{projectName}</div>
               {projectId ? (
-                <Tag color="blue" style={{ fontSize: 9.5, margin: 0, marginTop: 2 }}>Project ID #{projectId}</Tag>
+                <Tag color="blue" className={styles.poSummaryTag}>Project ID #{projectId}</Tag>
               ) : (
-                <Tag style={{ fontSize: 9.5, margin: 0, marginTop: 2 }}>Project ID Tidak Tersedia</Tag>
+                <Tag className={styles.poSummaryTag}>Project ID Tidak Tersedia</Tag>
               )}
-            </Col>
-            <Col xs={24} sm={6}>
-              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>PURCHASE ORDER:</Text>
-              <div style={{ fontWeight: 700, fontSize: 12.5, color: '#1d4ed8', fontFamily: 'monospace' }}>
-                {poNumber}
-              </div>
-              <Tag color="green" style={{ fontSize: 9.5, margin: 0, marginTop: 2, fontWeight: 700 }}>
+            </div>
+
+            <div className={styles.poSummaryItem}>
+              <span className={styles.poSummaryLabel}>PURCHASE ORDER</span>
+              <div className={styles.poSummaryValuePo}>{poNumber}</div>
+              <Tag color="green" className={styles.poSummaryTagBold}>
                 ● {po.status || 'ACTIVE'}
               </Tag>
-            </Col>
-            <Col xs={24} sm={6}>
-              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>VENDOR PENYEDIA:</Text>
-              <div style={{ fontWeight: 700, fontSize: 12.5, color: '#0f766e' }}>
-                <ShopOutlined style={{ marginRight: 4 }} />
-                {vendorName}
+            </div>
+
+            <div className={styles.poSummaryItem}>
+              <span className={styles.poSummaryLabel}>VENDOR PENYEDIA</span>
+              <div className={styles.poSummaryValueVendor}>
+                <ShopOutlined style={{ marginRight: 4, flexShrink: 0 }} />
+                <span>{vendorName}</span>
               </div>
-              {vendorCode && <Tag color="cyan" style={{ fontSize: 9.5, margin: 0, marginTop: 2 }}>{vendorCode}</Tag>}
-            </Col>
-            <Col xs={24} sm={6}>
-              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>KONFIGURASI TERMIN:</Text>
-              <div style={{ fontWeight: 700, fontSize: 12.5, color: '#334155' }}>
+              {vendorCode && <Tag color="cyan" className={styles.poSummaryTag}>{vendorCode}</Tag>}
+            </div>
+
+            <div className={styles.poSummaryItem}>
+              <span className={styles.poSummaryLabel}>KONFIGURASI TERMIN</span>
+              <div className={styles.poSummaryValueTerm}>
                 {paymentTerms.length > 0
                   ? `${paymentTerms.length} Jadwal Termin Terdaftar`
                   : (typeof po.paymentTerms === 'string' ? po.paymentTerms : 'Full Delivery (100%)')}
               </div>
-              <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
-                {paymentTerms.length > 0 ? 'Pilih termin di formulir bawah' : 'Penagihan sekaligus'}
+              <div className={styles.poSummarySubtext}>
+                {paymentTerms.length > 0 ? 'Pilih termin di formulir bawah' : 'Penagihan sekaligus (100%)'}
               </div>
-            </Col>
-          </Row>
+            </div>
+          </div>
         </div>
 
         {/* Invoice Metadata Form (Form Input Termin, Tanggal, & Dokumen Pajak) */}
@@ -945,26 +1012,27 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
           layout="vertical"
           onFinish={handleSubmit}
           initialValues={{
+            paymentTermId: selectedTermId,
             invoiceDate: dayjs(),
             taxInvoiceNumber: '',
             notes: '',
           }}
+          className={styles.formContainer}
         >
           <Row gutter={16}>
             {paymentTerms.length > 0 ? (
               <Col xs={24} sm={12}>
                 <Form.Item
-                  label={
-                    <span style={{ fontWeight: 600, fontSize: 12 }}>
-                      Pilih Termin Pembayaran PO <span style={{ color: '#dc2626' }}>*</span>
-                    </span>
-                  }
+                  label={<span className={styles.formLabel}>Pilih Termin Pembayaran PO</span>}
                   name="paymentTermId"
                   rules={[{ required: true, message: 'Termin pembayaran wajib dipilih' }]}
+                  className={styles.formItem}
                 >
                   <Select
                     placeholder="Pilih Termin Pembayaran..."
-                    style={{ width: '100%', borderRadius: 6 }}
+                    className={styles.termSelect}
+                    popupMatchSelectWidth={false}
+                    data-testid="payment-term-select"
                     onChange={(val) => setSelectedTermId(val)}
                     options={paymentTerms.map((t) => {
                       const elig = getTermEligibility(t);
@@ -972,7 +1040,21 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
                       return {
                         value: t.id,
                         disabled: isAlreadyProcessed,
-                        label: `Termin #${t.sequence}: ${t.termName} (${t.percentage}%) — Rp ${Number(t.amount).toLocaleString('id-ID')} ${elig.statusTag}`,
+                        label: (
+                          <div className={styles.termOptionItem}>
+                            <div className={styles.termOptionMain}>
+                              <strong>Termin #{t.sequence}: {t.termName}</strong> ({t.percentage}%)
+                            </div>
+                            <div className={styles.termOptionSub}>
+                              <span className={styles.termOptionAmount}>
+                                Rp {Number(t.amount).toLocaleString('id-ID')}
+                              </span>
+                              <span className={styles.termOptionTag} style={{ color: elig.isEligible ? '#0284c7' : '#ea580c' }}>
+                                {elig.statusTag}
+                              </span>
+                            </div>
+                          </div>
+                        ),
                       };
                     })}
                   />
@@ -982,12 +1064,13 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
 
             <Col xs={24} sm={paymentTerms.length > 0 ? 12 : 8}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Tanggal Faktur / Invoice</span>}
+                label={<span className={styles.formLabel}>Tanggal Faktur / Invoice</span>}
                 name="invoiceDate"
                 rules={[{ required: true, message: 'Tanggal invoice wajib diisi' }]}
+                className={styles.formItem}
               >
                 <DatePicker
-                  style={{ width: '100%', borderRadius: 6 }}
+                  className={styles.formDatePicker}
                   format="DD MMMM YYYY"
                   allowClear={false}
                   disabledDate={(d) => d && d.isAfter(dayjs())}
@@ -997,19 +1080,27 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
 
             <Col xs={24} sm={paymentTerms.length > 0 ? 12 : 8}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Nomor Faktur Pajak / E-Faktur (Opsional)</span>}
+                label={<span className={styles.formLabel}>Nomor Faktur Pajak / E-Faktur (Opsional)</span>}
                 name="taxInvoiceNumber"
+                className={styles.formItem}
               >
-                <Input placeholder="Contoh: 010.000-26.12345678..." style={{ borderRadius: 6, fontSize: 11.5 }} />
+                <Input
+                  placeholder="Contoh: 010.000-26.12345678..."
+                  className={styles.formInput}
+                />
               </Form.Item>
             </Col>
 
             <Col xs={24} sm={paymentTerms.length > 0 ? 12 : 8}>
               <Form.Item
-                label={<span style={{ fontWeight: 600, fontSize: 12 }}>Catatan Khusus Finance (Opsional)</span>}
+                label={<span className={styles.formLabel}>Catatan Khusus Finance (Opsional)</span>}
                 name="notes"
+                className={styles.formItem}
               >
-                <Input placeholder="Catatan perihal penagihan / rekening..." style={{ borderRadius: 6, fontSize: 11.5 }} />
+                <Input
+                  placeholder="Catatan perihal penagihan / rekening..."
+                  className={styles.formInput}
+                />
               </Form.Item>
             </Col>
           </Row>
@@ -1386,240 +1477,435 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
           </div>
 
           {(isProgressTerm && po?.orderType !== 'SERVICE') ? (
-            <Table
-              size="small"
-              rowKey="key"
-              dataSource={progressInvoiceItems}
-              pagination={false}
-              scroll={{ y: 220 }}
-              locale={{ emptyText: selectedGrId ? 'Tidak ada item yang diterima pada Goods Receipt ini' : 'Pilih Goods Receipt terlebih dahulu' }}
-              columns={[
-                {
-                  title: 'No',
-                  key: 'index',
-                  width: 45,
-                  align: 'center' as const,
-                  render: (_: any, __: any, index: number) => (
-                    <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
-                  ),
-                },
-                {
-                  title: 'Nama Item & Spesifikasi',
-                  dataIndex: 'itemName',
-                  key: 'itemName',
-                  render: (name: string, it: any) => (
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>{name}</div>
-                      <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                        <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
-                          {it.categoryName || 'Material'}
+            <>
+              {/* Desktop Table View */}
+              <div className={styles.desktopTableView} data-testid="desktop-progress-items-table">
+                <Table
+                  size="small"
+                  rowKey="key"
+                  dataSource={progressInvoiceItems}
+                  pagination={false}
+                  scroll={{ x: 800, y: 220 }}
+                  locale={{ emptyText: selectedGrId ? 'Tidak ada item yang diterima pada Goods Receipt ini' : 'Pilih Goods Receipt terlebih dahulu' }}
+                  columns={[
+                    {
+                      title: 'No',
+                      key: 'index',
+                      width: 45,
+                      align: 'center' as const,
+                      render: (_: any, __: any, index: number) => (
+                        <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
+                      ),
+                    },
+                    {
+                      title: 'Nama Item & Spesifikasi',
+                      dataIndex: 'itemName',
+                      key: 'itemName',
+                      render: (name: string, it: any) => (
+                        <div style={{ minWidth: 160 }}>
+                          <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a', wordBreak: 'break-word', whiteSpace: 'normal' }}>{name}</div>
+                          {it.specification && (
+                            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                              {it.specification}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
+                            <Tag
+                              color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
+                              style={{ fontSize: 9, margin: 0, padding: '0 4px' }}
+                            >
+                              {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
+                            </Tag>
+                            {it.wbsNodeId && (
+                              <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                                WBS #{it.wbsNodeId}
+                              </Tag>
+                            )}
+                            {it.remarks && (
+                              <Tag style={{ fontSize: 9, margin: 0, padding: '0 4px', color: '#64748b' }}>
+                                {it.remarks}
+                              </Tag>
+                            )}
+                          </div>
+                        </div>
+                      ),
+                    },
+                    {
+                      title: 'Qty Kontrak',
+                      dataIndex: 'orderedQty',
+                      key: 'orderedQty',
+                      width: 85,
+                      align: 'center' as const,
+                      render: (qty: number) => <span style={{ color: '#64748b', fontSize: 11 }}>{qty}</span>,
+                    },
+                    {
+                      title: 'Qty Fisik (GR)',
+                      dataIndex: 'receivedQty',
+                      key: 'receivedQty',
+                      width: 95,
+                      align: 'center' as const,
+                      render: (qty: number) => (
+                        <Tag color="green" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
+                          {qty}
                         </Tag>
-                        {it.wbsNodeId && (
-                          <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
-                            WBS #{it.wbsNodeId}
-                          </Tag>
-                        )}
-                        {it.remarks && (
-                          <Tag style={{ fontSize: 9, margin: 0, padding: '0 4px', color: '#64748b' }}>
-                            {it.remarks}
-                          </Tag>
-                        )}
+                      ),
+                    },
+                    {
+                      title: 'Sisa Outstanding',
+                      dataIndex: 'outstandingQty',
+                      key: 'outstandingQty',
+                      width: 100,
+                      align: 'center' as const,
+                      render: (qty: number) => (
+                        <span style={{ fontSize: 11, color: qty > 0 ? '#d97706' : '#16a34a', fontWeight: 600 }}>
+                          {qty}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: 'Qty Ditagih',
+                      dataIndex: 'quantity',
+                      key: 'quantity',
+                      width: 90,
+                      align: 'center' as const,
+                      render: (qty: number) => (
+                        <span style={{ fontWeight: 700, color: '#0f172a', fontSize: 12 }}>
+                          {qty}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: 'Satuan',
+                      dataIndex: 'uom',
+                      key: 'uom',
+                      width: 65,
+                      align: 'center' as const,
+                      render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
+                    },
+                    {
+                      title: 'Harga Satuan',
+                      dataIndex: 'unitPrice',
+                      key: 'unitPrice',
+                      width: 135,
+                      align: 'right' as const,
+                      render: (price: number) => (
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
+                          Rp {price.toLocaleString('id-ID')}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: 'Subtotal Fisik',
+                      dataIndex: 'totalPrice',
+                      key: 'totalPrice',
+                      width: 150,
+                      align: 'right' as const,
+                      render: (subtotal: number) => (
+                        <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
+                          Rp {subtotal.toLocaleString('id-ID')}
+                        </span>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+
+              {/* Mobile Card View */}
+              <div className={styles.mobileCardView} data-testid="mobile-progress-items-cards">
+                {progressInvoiceItems.length === 0 ? (
+                  <div className={styles.emptyCardState}>
+                    {selectedGrId ? 'Tidak ada item yang diterima pada Goods Receipt ini' : 'Pilih Goods Receipt terlebih dahulu'}
+                  </div>
+                ) : (
+                  progressInvoiceItems.map((it, idx) => (
+                    <div key={it.key || idx} className={styles.mobileItemCard} data-testid={`progress-item-card-${idx}`}>
+                      <div className={styles.cardHeader}>
+                        <div className={styles.itemTitleBlock}>
+                          <span className={styles.itemIndexBadge}>{idx + 1}</span>
+                          <div>
+                            <div className={styles.itemNameText}>{it.itemName}</div>
+                            {it.specification && (
+                              <div className={styles.itemSpecificationText}>{it.specification}</div>
+                            )}
+                            <div className={styles.tagsRow}>
+                              <Tag
+                                color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
+                                style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}
+                              >
+                                {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
+                              </Tag>
+                              {it.wbsNodeId && (
+                                <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                                  WBS #{it.wbsNodeId}
+                                </Tag>
+                              )}
+                              {it.remarks && (
+                                <Tag style={{ fontSize: 9.5, margin: 0, padding: '0 4px', color: '#64748b' }}>
+                                  {it.remarks}
+                                </Tag>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className={styles.cardStatsGrid}>
+                        <div className={styles.statItem}>
+                          <span className={styles.statLabel}>Qty Kontrak:</span>
+                          <span className={styles.statValue}>{it.orderedQty} {it.uom}</span>
+                        </div>
+                        <div className={styles.statItem}>
+                          <span className={styles.statLabel}>Qty Fisik (GR):</span>
+                          <span className={styles.statValue}>
+                            <Tag color="green" style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}>
+                              {it.receivedQty} {it.uom}
+                            </Tag>
+                          </span>
+                        </div>
+                        <div className={styles.statItem}>
+                          <span className={styles.statLabel}>Sisa Outstanding:</span>
+                          <span style={{ fontSize: 12, color: it.outstandingQty > 0 ? '#d97706' : '#16a34a', fontWeight: 600 }}>
+                            {it.outstandingQty} {it.uom}
+                          </span>
+                        </div>
+                        <div className={styles.statItem}>
+                          <span className={styles.statLabel}>Qty Ditagih:</span>
+                          <span className={styles.statValueBold}>{it.quantity} {it.uom}</span>
+                        </div>
+                      </div>
+
+                      <div className={styles.cardFooter}>
+                        <div>
+                          <span className={styles.statLabel} style={{ display: 'block' }}>Harga Satuan:</span>
+                          <span className={styles.statValueMono}>Rp {Number(it.unitPrice).toLocaleString('id-ID')}</span>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span className={styles.statLabel} style={{ display: 'block' }}>Subtotal Fisik:</span>
+                          <span className={styles.statValueEmerald}>Rp {Number(it.totalPrice).toLocaleString('id-ID')}</span>
+                        </div>
                       </div>
                     </div>
-                  ),
-                },
-                {
-                  title: 'Qty Kontrak',
-                  dataIndex: 'orderedQty',
-                  key: 'orderedQty',
-                  width: 85,
-                  align: 'center' as const,
-                  render: (qty: number) => <span style={{ color: '#64748b', fontSize: 11 }}>{qty}</span>,
-                },
-                {
-                  title: 'Qty Fisik (GR)',
-                  dataIndex: 'receivedQty',
-                  key: 'receivedQty',
-                  width: 95,
-                  align: 'center' as const,
-                  render: (qty: number) => (
-                    <Tag color="green" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
-                      {qty}
-                    </Tag>
-                  ),
-                },
-                {
-                  title: 'Sisa Outstanding',
-                  dataIndex: 'outstandingQty',
-                  key: 'outstandingQty',
-                  width: 100,
-                  align: 'center' as const,
-                  render: (qty: number) => (
-                    <span style={{ fontSize: 11, color: qty > 0 ? '#d97706' : '#16a34a', fontWeight: 600 }}>
-                      {qty}
-                    </span>
-                  ),
-                },
-                {
-                  title: 'Qty Ditagih',
-                  dataIndex: 'quantity',
-                  key: 'quantity',
-                  width: 90,
-                  align: 'center' as const,
-                  render: (qty: number) => (
-                    <span style={{ fontWeight: 700, color: '#0f172a', fontSize: 12 }}>
-                      {qty}
-                    </span>
-                  ),
-                },
-                {
-                  title: 'Satuan',
-                  dataIndex: 'uom',
-                  key: 'uom',
-                  width: 65,
-                  align: 'center' as const,
-                  render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
-                },
-                {
-                  title: 'Harga Satuan',
-                  dataIndex: 'unitPrice',
-                  key: 'unitPrice',
-                  width: 135,
-                  align: 'right' as const,
-                  render: (price: number) => (
-                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
-                      Rp {price.toLocaleString('id-ID')}
-                    </span>
-                  ),
-                },
-                {
-                  title: 'Subtotal Fisik',
-                  dataIndex: 'totalPrice',
-                  key: 'totalPrice',
-                  width: 150,
-                  align: 'right' as const,
-                  render: (subtotal: number) => (
-                    <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
-                      Rp {subtotal.toLocaleString('id-ID')}
-                    </span>
-                  ),
-                },
-              ]}
-            />
+                  ))
+                )}
+              </div>
+            </>
           ) : (
-            <Table
-              size="small"
-              rowKey="key"
-              dataSource={poItems}
-              pagination={false}
-              scroll={{ y: 220 }}
-              columns={[
-                {
-                  title: 'No',
-                  key: 'index',
-                  width: 45,
-                  align: 'center' as const,
-                  render: (_: any, __: any, index: number) => (
-                    <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
-                  ),
-                },
-                {
-                  title: 'Nama Item & Spesifikasi',
-                  dataIndex: 'itemName',
-                  key: 'itemName',
-                  render: (name: string, it: any) => (
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>{name}</div>
-                      <div style={{ display: 'flex', gap: 4, marginTop: 2 }}>
-                        <Tag color={po?.orderType === 'SERVICE' ? 'purple' : 'blue'} style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
-                          {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
-                        </Tag>
-                        {it.wbsNodeId && (
-                          <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
-                            WBS #{it.wbsNodeId}
+            <>
+              {/* Desktop Table View */}
+              <div className={styles.desktopTableView} data-testid="desktop-po-items-table">
+                <Table
+                  size="small"
+                  rowKey="key"
+                  dataSource={poItems}
+                  pagination={false}
+                  scroll={{ x: 800, y: 220 }}
+                  columns={[
+                    {
+                      title: 'No',
+                      key: 'index',
+                      width: 45,
+                      align: 'center' as const,
+                      render: (_: any, __: any, index: number) => (
+                        <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
+                      ),
+                    },
+                    {
+                      title: 'Nama Item & Spesifikasi',
+                      dataIndex: 'itemName',
+                      key: 'itemName',
+                      render: (name: string, it: any) => (
+                        <div style={{ minWidth: 160 }}>
+                          <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a', wordBreak: 'break-word', whiteSpace: 'normal' }}>{name}</div>
+                          {it.specification && (
+                            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                              {it.specification}
+                            </div>
+                          )}
+                          <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
+                            <Tag
+                              color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
+                              style={{ fontSize: 9, margin: 0, padding: '0 4px' }}
+                            >
+                              {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
+                            </Tag>
+                            {it.wbsNodeId && (
+                              <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                                WBS #{it.wbsNodeId}
+                              </Tag>
+                            )}
+                          </div>
+                        </div>
+                      ),
+                    },
+                    {
+                      title: 'Qty Kontrak',
+                      dataIndex: 'quantity',
+                      key: 'quantity',
+                      width: 90,
+                      align: 'center' as const,
+                      render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
+                    },
+                    {
+                      title: po?.orderType === 'SERVICE' ? 'Status Realisasi' : 'Qty Diterima (GR)',
+                      dataIndex: 'receivedQuantity',
+                      key: 'receivedQuantity',
+                      width: po?.orderType === 'SERVICE' ? 140 : 110,
+                      align: 'center' as const,
+                      render: (rec: number, it: any) => {
+                        if (po?.orderType === 'SERVICE') {
+                          const approvedClaimTotal = (approvedServiceClaims || [])
+                            .reduce((acc: number, c: any) => acc + Number(c.approvedClaimAmount || c.totalClaimAmount || 0), 0);
+                          const isFullyApproved = approvedClaimTotal >= Number(po?.totalAmount || 0) && approvedClaimTotal > 0;
+                          const hasApproved = approvedClaimTotal > 0;
+                          return (
+                            <Tag
+                              color={isFullyApproved ? 'green' : hasApproved ? 'cyan' : 'default'}
+                              style={{ fontWeight: 700, fontSize: 11, margin: 0 }}
+                            >
+                              {isFullyApproved ? 'Klaim Disetujui' : hasApproved ? 'Klaim Parsial' : 'Menunggu Klaim'}
+                            </Tag>
+                          );
+                        }
+                        return (
+                          <Tag
+                            color={rec >= it.quantity ? 'green' : rec > 0 ? 'orange' : 'default'}
+                            style={{ fontWeight: 700, fontSize: 11, margin: 0 }}
+                          >
+                            {rec} / {it.quantity}
                           </Tag>
-                        )}
-                      </div>
-                    </div>
-                  ),
-                },
-                {
-                  title: 'Qty Kontrak',
-                  dataIndex: 'quantity',
-                  key: 'quantity',
-                  width: 90,
-                  align: 'center' as const,
-                  render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
-                },
-                {
-                  title: po?.orderType === 'SERVICE' ? 'Status Realisasi' : 'Qty Diterima (GR)',
-                  dataIndex: 'receivedQuantity',
-                  key: 'receivedQuantity',
-                  width: po?.orderType === 'SERVICE' ? 140 : 110,
-                  align: 'center' as const,
-                  render: (rec: number, it: any) => {
+                        );
+                      },
+                    },
+                    {
+                      title: 'Satuan',
+                      dataIndex: 'uom',
+                      key: 'uom',
+                      width: 70,
+                      align: 'center' as const,
+                      render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
+                    },
+                    {
+                      title: 'Harga Satuan',
+                      dataIndex: 'unitPrice',
+                      key: 'unitPrice',
+                      width: 150,
+                      align: 'right' as const,
+                      render: (price: number) => (
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
+                          Rp {price.toLocaleString('id-ID')}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: 'Subtotal Kontrak',
+                      dataIndex: 'totalPrice',
+                      key: 'totalPrice',
+                      width: 160,
+                      align: 'right' as const,
+                      render: (subtotal: number) => (
+                        <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
+                          Rp {subtotal.toLocaleString('id-ID')}
+                        </span>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+
+              {/* Mobile Card View */}
+              <div className={styles.mobileCardView} data-testid="mobile-po-items-cards">
+                {poItems.length === 0 ? (
+                  <div className={styles.emptyCardState}>
+                    Belum ada item kontrak PO
+                  </div>
+                ) : (
+                  poItems.map((it, idx) => {
+                    let realizationBadge: React.ReactNode;
                     if (po?.orderType === 'SERVICE') {
                       const approvedClaimTotal = (approvedServiceClaims || [])
                         .reduce((acc: number, c: any) => acc + Number(c.approvedClaimAmount || c.totalClaimAmount || 0), 0);
                       const isFullyApproved = approvedClaimTotal >= Number(po?.totalAmount || 0) && approvedClaimTotal > 0;
                       const hasApproved = approvedClaimTotal > 0;
-                      return (
+                      realizationBadge = (
                         <Tag
                           color={isFullyApproved ? 'green' : hasApproved ? 'cyan' : 'default'}
-                          style={{ fontWeight: 700, fontSize: 11, margin: 0 }}
+                          style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}
                         >
                           {isFullyApproved ? 'Klaim Disetujui' : hasApproved ? 'Klaim Parsial' : 'Menunggu Klaim'}
                         </Tag>
                       );
+                    } else {
+                      const rec = Number(it.receivedQuantity || 0);
+                      realizationBadge = (
+                        <Tag
+                          color={rec >= it.quantity ? 'green' : rec > 0 ? 'orange' : 'default'}
+                          style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}
+                        >
+                          {rec} / {it.quantity}
+                        </Tag>
+                      );
                     }
+
                     return (
-                      <Tag
-                        color={rec >= it.quantity ? 'green' : rec > 0 ? 'orange' : 'default'}
-                        style={{ fontWeight: 700, fontSize: 11, margin: 0 }}
-                      >
-                        {rec} / {it.quantity}
-                      </Tag>
+                      <div key={it.key || idx} className={styles.mobileItemCard} data-testid={`po-item-card-${idx}`}>
+                        <div className={styles.cardHeader}>
+                          <div className={styles.itemTitleBlock}>
+                            <span className={styles.itemIndexBadge}>{idx + 1}</span>
+                            <div>
+                              <div className={styles.itemNameText}>{it.itemName}</div>
+                              {it.specification && (
+                                <div className={styles.itemSpecificationText}>{it.specification}</div>
+                              )}
+                              <div className={styles.tagsRow}>
+                                <Tag
+                                  color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
+                                  style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}
+                                >
+                                  {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
+                                </Tag>
+                                {it.wbsNodeId && (
+                                  <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                                    WBS #{it.wbsNodeId}
+                                  </Tag>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className={styles.cardStatsGrid}>
+                          <div className={styles.statItem}>
+                            <span className={styles.statLabel}>Qty Kontrak:</span>
+                            <span className={styles.statValueBold}>{it.quantity} {it.uom}</span>
+                          </div>
+                          <div className={styles.statItem}>
+                            <span className={styles.statLabel}>
+                              {po?.orderType === 'SERVICE' ? 'Status Realisasi:' : 'Qty Diterima (GR):'}
+                            </span>
+                            <span className={styles.statValue}>{realizationBadge}</span>
+                          </div>
+                        </div>
+
+                        <div className={styles.cardFooter}>
+                          <div>
+                            <span className={styles.statLabel} style={{ display: 'block' }}>Harga Satuan:</span>
+                            <span className={styles.statValueMono}>Rp {Number(it.unitPrice).toLocaleString('id-ID')}</span>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <span className={styles.statLabel} style={{ display: 'block' }}>Subtotal Kontrak:</span>
+                            <span className={styles.statValueEmerald}>Rp {Number(it.totalPrice).toLocaleString('id-ID')}</span>
+                          </div>
+                        </div>
+                      </div>
                     );
-                  },
-                },
-                {
-                  title: 'Satuan',
-                  dataIndex: 'uom',
-                  key: 'uom',
-                  width: 70,
-                  align: 'center' as const,
-                  render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
-                },
-                {
-                  title: 'Harga Satuan',
-                  dataIndex: 'unitPrice',
-                  key: 'unitPrice',
-                  width: 150,
-                  align: 'right' as const,
-                  render: (price: number) => (
-                    <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
-                      Rp {price.toLocaleString('id-ID')}
-                    </span>
-                  ),
-                },
-                {
-                  title: 'Subtotal Kontrak',
-                  dataIndex: 'totalPrice',
-                  key: 'totalPrice',
-                  width: 160,
-                  align: 'right' as const,
-                  render: (subtotal: number) => (
-                    <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
-                      Rp {subtotal.toLocaleString('id-ID')}
-                    </span>
-                  ),
-                },
-              ]}
-            />
+                  })
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>
-    </Modal>
+    </ResponsiveFinanceModal>
   );
 };
 

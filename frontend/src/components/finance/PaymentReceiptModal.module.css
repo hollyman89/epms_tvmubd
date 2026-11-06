@@ -1,0 +1,184 @@
+/* EPMS Finance - PaymentReceiptModal Responsive Styles */
+
+.amountBanner {
+  background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+  padding: 16px 20px;
+  border-radius: 8px;
+  color: #ffffff;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.amountInfoBlock {
+  display: flex;
+  flex-direction: column;
+}
+
+.amountLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #a7f3d0;
+  font-weight: 600;
+}
+
+.amountValue {
+  font-size: 24px;
+  font-weight: 800;
+  font-family: monospace;
+  margin-top: 2px;
+  line-height: 1.2;
+}
+
+.amountSubtext {
+  font-size: 11px;
+  color: #d1fae5;
+  margin-top: 3px;
+}
+
+.topContextBox {
+  background: #f8fafc;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+
+/* Dual Presentation */
+.desktopTableView {
+  display: block;
+  width: 100%;
+}
+
+.mobileCardView {
+  display: none;
+  width: 100%;
+}
+
+.receiptCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.cardSection {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cardFieldLabel {
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.cardFieldValue {
+  font-size: 12.5px;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.cardFieldValuePrimary {
+  font-size: 14px;
+  font-weight: 800;
+  color: #047857;
+  font-family: monospace;
+  letter-spacing: 0.02em;
+}
+
+.cardFieldValueMono {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #1e293b;
+  font-family: monospace;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.cardFieldGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.cardDivider {
+  height: 1px;
+  background: #f1f5f9;
+  margin: 2px 0;
+}
+
+.cardNotesValue {
+  font-size: 12px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-top: 4px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+/* Footer elements */
+.footerExtra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.footerText {
+  font-size: 11.5px;
+  color: #334155;
+}
+
+.closeBtn {
+  border-radius: 6px;
+  min-height: 38px;
+  min-width: 84px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .amountValue {
+    font-size: 20px;
+  }
+
+  .desktopTableView {
+    display: none !important;
+  }
+
+  .mobileCardView {
+    display: flex !important;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .footerExtra {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+  }
+
+  .footerText {
+    font-size: 11px;
+  }
+
+  .closeBtn {
+    width: 100%;
+    min-height: 42px;
+    font-size: 14px;
+  }
+}
+

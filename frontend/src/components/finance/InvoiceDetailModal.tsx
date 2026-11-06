@@ -54,6 +54,8 @@ import {
   formatPercentage,
 } from '@/lib/formatters';
 import { StatusBadge } from '@/components/common/StatusBadge';
+import { ResponsiveFinanceModal } from './ResponsiveFinanceModal';
+import styles from './InvoiceDetailModal.module.css';
 
 const { Text, Title } = Typography;
 const { TextArea } = Input;
@@ -77,7 +79,9 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
   const canVerify = isFinance;
 
   // Authoritative data states from backend
-  const [matchingResult, setMatchingResult] = useState<MatchingResult | null>(null);
+  const [matchingResult, setMatchingResult] = useState<MatchingResult | null>(
+    (invoice as any)?.matchingResult || (invoice as any)?.matching || null
+  );
   const [loadingMatching, setLoadingMatching] = useState<boolean>(false);
   const [matchingError, setMatchingError] = useState<string | null>(null);
   const [freshInvoice, setFreshInvoice] = useState<InvoiceDto | null>(null);
@@ -361,89 +365,73 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
   return (
     <>
-      <Modal
+      <ResponsiveFinanceModal
         open={open}
         onCancel={onClose}
-        width="min(1180px, 96vw)"
-        centered
+        domain="INVOICE"
+        size="full"
         destroyOnClose
-        footer={
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              width: '100%',
-              flexWrap: 'wrap',
-              gap: 8,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        title={`Rincian & Verifikasi Invoice — ${invoiceNumber}`}
+        subtitle="Faktur tagihan vendor terintegrasi authoritative Finance Matching Engine & Jadwal Termin PO"
+        headerIcon={<FileTextOutlined />}
+        footerExtra={
+          <div className={styles.footerExtraContainer}>
+            <div className={styles.footerIdentityRow}>
               <SafetyCertificateOutlined
                 style={{
                   color: isVerified ? '#059669' : isMatched ? '#0284c7' : isMismatch ? '#dc2626' : '#d97706',
-                  fontSize: 16,
+                  fontSize: 15,
+                  flexShrink: 0,
                 }}
               />
-              <Text style={{ fontSize: 12 }}>
-                Nomor Faktur: <strong>{invoiceNumber}</strong> — Status Rekonsiliasi: {renderStatusBadge()} — Pembayaran:{' '}
-                <StatusBadge
-                  domain="payment"
-                  status={(activeInvoice as any).paymentStatus || 'UNPAID'}
-                  showDot
-                  style={{ margin: '0 4px', fontWeight: 700 }}
-                />
-              </Text>
+              <span className={styles.footerInvoiceNumber}>
+                Nomor Faktur: <strong>{invoiceNumber}</strong>
+              </span>
             </div>
-
-            <Space size={8}>
-              {/* Verification and Rejection Buttons (RBAC + MATCHED status guard) */}
-              {canVerify && isMatched && !isVerified && !isRejected && !isPaid && (
-                <>
-                  <Button
-                    danger
-                    icon={<CloseOutlined />}
-                    onClick={() => setIsRejectModalOpen(true)}
-                    style={{ borderRadius: 6, fontWeight: 600 }}
-                  >
-                    Tolak Verifikasi
-                  </Button>
-                  <Button
-                    type="primary"
-                    icon={<CheckOutlined />}
-                    onClick={() => setIsVerifyModalOpen(true)}
-                    disabled={!isServicePo && isProgressInvoice && (!selectedVerifyGrId || poGoodsReceipts.length === 0)}
-                    style={{
-                      backgroundColor: '#059669',
-                      borderColor: '#059669',
-                      borderRadius: 6,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {isServicePo ? 'Verifikasi Invoice Jasa' : 'Verifikasi Invoice'}
-                  </Button>
-                </>
-              )}
-
-              <Button onClick={onClose} style={{ borderRadius: 6 }}>
-                Tutup
-              </Button>
-            </Space>
+            <div className={styles.footerStatusRow}>
+              <span className={styles.footerStatusLabel}>Rekonsiliasi:</span>
+              {renderStatusBadge()}
+              <span className={styles.footerStatusLabel}>Pembayaran:</span>
+              <StatusBadge
+                domain="payment"
+                status={(activeInvoice as any).paymentStatus || 'UNPAID'}
+                showDot
+                style={{ margin: 0, fontWeight: 700 }}
+              />
+            </div>
           </div>
         }
-        title={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingRight: 24 }}>
-            <div style={{ padding: '6px 10px', background: '#eff6ff', borderRadius: 8, color: '#2563eb' }}>
-              <FileTextOutlined style={{ fontSize: 18 }} />
-            </div>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 15, color: '#0f172a' }}>
-                Rincian &amp; Verifikasi Invoice — {invoiceNumber}
-              </div>
-              <Text type="secondary" style={{ fontSize: 11, color: '#64748b' }}>
-                Faktur tagihan vendor terintegrasi authoritative Finance Matching Engine &amp; Jadwal Termin PO
-              </Text>
-            </div>
+        footerActions={
+          <div className={styles.footerActionsContainer}>
+            {canVerify && isMatched && !isVerified && !isRejected && !isPaid && (
+              <>
+                <Button
+                  danger
+                  icon={<CloseOutlined />}
+                  onClick={() => setIsRejectModalOpen(true)}
+                  style={{ borderRadius: 6, fontWeight: 600 }}
+                >
+                  Tolak Verifikasi
+                </Button>
+                <Button
+                  type="primary"
+                  icon={<CheckOutlined />}
+                  onClick={() => setIsVerifyModalOpen(true)}
+                  disabled={!isServicePo && isProgressInvoice && (!selectedVerifyGrId || poGoodsReceipts.length === 0)}
+                  style={{
+                    backgroundColor: '#059669',
+                    borderColor: '#059669',
+                    borderRadius: 6,
+                    fontWeight: 600,
+                  }}
+                >
+                  {isServicePo ? 'Verifikasi Invoice Jasa' : 'Verifikasi Invoice'}
+                </Button>
+              </>
+            )}
+            <Button onClick={onClose} style={{ borderRadius: 6 }} className={styles.closeActionButton}>
+              Tutup
+            </Button>
           </div>
         }
       >
@@ -655,12 +643,12 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
 
                 {/* MISMATCHES LIST (SHOW ALL) */}
                 {matchingResult.mismatches && matchingResult.mismatches.length > 0 && (
-                  <div style={{ marginTop: 4 }}>
+                  <div style={{ marginTop: 6 }}>
                     <Alert
                       type="warning"
                       showIcon
                       message={
-                        <span style={{ fontWeight: 700 }}>
+                        <span style={{ fontWeight: 700, fontSize: 12 }}>
                           Ditemukan {matchingResult.mismatches.length} Catatan Ketidaksesuaian (Mismatch):
                         </span>
                       }
@@ -676,28 +664,26 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                             return (
                               <div
                                 key={idx}
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'flex-start',
-                                  gap: 8,
-                                  background: '#ffffff',
-                                  padding: '6px 10px',
-                                  borderRadius: 6,
-                                  border: '1px solid #fed7aa',
-                                }}
+                                className={styles.mismatchCard}
+                                data-testid={`mismatch-card-${idx}`}
                               >
-                                <Tag color={def.badgeColor} style={{ margin: 0, fontWeight: 700, fontSize: 10.5 }}>
-                                  {def.label}
-                                </Tag>
-                                <div style={{ fontSize: 11.5, color: '#7c2d12', flex: 1 }}>
-                                  <strong>[{m.code}]</strong> {m.message || def.fallbackMessage}
+                                <div className={styles.mismatchHeader}>
+                                  <Tag color={def.badgeColor} style={{ margin: 0, fontWeight: 700, fontSize: 10.5 }}>
+                                    {def.label}
+                                  </Tag>
+                                  <span className={styles.mismatchCodeBadge}>
+                                    [{m.code}]
+                                  </span>
+                                </div>
+                                <div className={styles.mismatchDescription}>
+                                  {m.message || def.fallbackMessage}
                                 </div>
                               </div>
                             );
                           })}
                         </div>
                       }
-                      style={{ borderRadius: 8, border: '1px solid #fbd38d' }}
+                      style={{ borderRadius: 8, border: '1px solid #fbd38d', padding: '10px 12px' }}
                     />
                   </div>
                 )}
@@ -709,36 +695,77 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             )}
           </Card>
 
-          {/* Invoice Metadata Descriptions */}
-          <Descriptions
-            size="small"
-            bordered
-            column={{ xs: 1, sm: 3 }}
-            style={{ borderRadius: 6, overflow: 'hidden' }}
-          >
-            <Descriptions.Item label="Nomor Invoice">
-              <span style={{ fontWeight: 700, fontFamily: 'monospace', color: '#1d4ed8' }}>
-                {invoiceNumber}
-              </span>
-            </Descriptions.Item>
-            <Descriptions.Item label="Tanggal Terbit Faktur">
-              {activeInvoice.invoiceDate ? dayjs(activeInvoice.invoiceDate).format('DD MMMM YYYY') : '—'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Termin Pembayaran">
-              {paymentTerm ? `${paymentTerm.termName} (${paymentTerm.percentage}%)` : (activeInvoice as any).paymentTerms || 'Net 30 Days'}
-            </Descriptions.Item>
-            <Descriptions.Item label="Diterbitkan Oleh">
-              <UserIdentityDisplay
-                user={(activeInvoice as any).creator}
-                userId={(activeInvoice as any).createdBy}
-                fallbackRole="Finance Team"
-                showEmail
-              />
-            </Descriptions.Item>
-            <Descriptions.Item label="Waktu Terbit" span={2}>
-              {activeInvoice.createdAt ? dayjs(activeInvoice.createdAt).format('DD/MM/YYYY HH:mm') : '—'}
-            </Descriptions.Item>
-          </Descriptions>
+          {/* Desktop Metadata View */}
+          <div className={styles.desktopMetadataView} data-testid="desktop-invoice-metadata">
+            <Descriptions
+              size="small"
+              bordered
+              column={{ xs: 1, sm: 3 }}
+              style={{ borderRadius: 6, overflow: 'hidden' }}
+            >
+              <Descriptions.Item label="Nomor Invoice">
+                <span style={{ fontWeight: 700, fontFamily: 'monospace', color: '#1d4ed8' }}>
+                  {invoiceNumber}
+                </span>
+              </Descriptions.Item>
+              <Descriptions.Item label="Tanggal Terbit Faktur">
+                {activeInvoice.invoiceDate ? dayjs(activeInvoice.invoiceDate).format('DD MMMM YYYY') : '—'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Termin Pembayaran">
+                {paymentTerm ? `${paymentTerm.termName} (${paymentTerm.percentage}%)` : (activeInvoice as any).paymentTerms || 'Net 30 Days'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Diterbitkan Oleh">
+                <UserIdentityDisplay
+                  user={(activeInvoice as any).creator}
+                  userId={(activeInvoice as any).createdBy}
+                  fallbackRole="Finance Team"
+                  showEmail
+                />
+              </Descriptions.Item>
+              <Descriptions.Item label="Waktu Terbit" span={2}>
+                {activeInvoice.createdAt ? dayjs(activeInvoice.createdAt).format('DD/MM/YYYY HH:mm') : '—'}
+              </Descriptions.Item>
+            </Descriptions>
+          </div>
+
+          {/* Mobile Metadata View */}
+          <div className={styles.mobileMetadataView} data-testid="mobile-invoice-metadata">
+            <div className={styles.metadataCard}>
+              <div className={styles.metadataRow}>
+                <span className={styles.metadataLabel}>Nomor Invoice:</span>
+                <span style={{ fontWeight: 700, fontFamily: 'monospace', color: '#1d4ed8', wordBreak: 'break-all' }}>
+                  {invoiceNumber}
+                </span>
+              </div>
+              <div className={styles.metadataRow}>
+                <span className={styles.metadataLabel}>Tanggal Terbit:</span>
+                <span>{activeInvoice.invoiceDate ? dayjs(activeInvoice.invoiceDate).format('DD MMMM YYYY') : '—'}</span>
+              </div>
+              <div className={styles.metadataRow}>
+                <span className={styles.metadataLabel}>Termin Pembayaran:</span>
+                <span style={{ fontWeight: 500 }}>
+                  {paymentTerm ? `${paymentTerm.termName} (${paymentTerm.percentage}%)` : (activeInvoice as any).paymentTerms || 'Net 30 Days'}
+                </span>
+              </div>
+              <div className={styles.metadataRow}>
+                <span className={styles.metadataLabel}>Diterbitkan Oleh:</span>
+                <div>
+                  <UserIdentityDisplay
+                    user={(activeInvoice as any).creator}
+                    userId={(activeInvoice as any).createdBy}
+                    fallbackRole="Finance Team"
+                    showEmail
+                  />
+                </div>
+              </div>
+              <div className={styles.metadataRow}>
+                <span className={styles.metadataLabel}>Waktu Terbit:</span>
+                <span style={{ color: '#64748b', fontSize: 11 }}>
+                  {activeInvoice.createdAt ? dayjs(activeInvoice.createdAt).format('DD/MM/YYYY HH:mm') : '—'}
+                </span>
+              </div>
+            </div>
+          </div>
 
           {/* EVIDENCE SECTION: SERVICE CLAIM FOR SERVICE PO, CANONICAL GR FOR MATERIAL PO */}
           {isServicePo ? (
@@ -816,11 +843,11 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
               </div>
 
               {poGoodsReceipts.length > 1 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, paddingTop: 8, borderTop: '1px dashed #cbd5e1' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4, paddingTop: 8, borderTop: '1px dashed #cbd5e1', flexWrap: 'wrap' }}>
                   <Text style={{ fontSize: 11.5, color: '#334155', fontWeight: 600 }}>Pilih Dokumen GR Bukti Fisik:</Text>
                   <Select
                     size="small"
-                    style={{ flex: 1, maxWidth: 440 }}
+                    style={{ flex: 1, minWidth: 220, maxWidth: '100%' }}
                     value={selectedVerifyGrId}
                     onChange={(val) => {
                       setSelectedVerifyGrId(val);
@@ -862,87 +889,147 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </Tag>
               </div>
 
-              <Table
-                size="small"
-                rowKey={(it: any) => it.id || it.key || it.poItemId}
-                dataSource={activeInvoice.items}
-                pagination={false}
-                scroll={{ y: 200 }}
-                columns={[
-                  {
-                    title: 'No',
-                    key: 'index',
-                    width: 45,
-                    align: 'center' as const,
-                    render: (_: any, __: any, index: number) => (
-                      <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
-                    ),
-                  },
-                  {
-                    title: 'Nama Item & Spesifikasi',
-                    key: 'name',
-                    render: (_: any, it: any) => {
-                      const { itemName, specification } = normalizeInvoiceItem(it);
-                      return (
-                        <div>
-                          <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>
-                            {itemName}
-                          </div>
-                          {specification && (
-                            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
-                              {specification}
+              {/* Desktop Table View */}
+              <div className={styles.desktopTableView} data-testid="desktop-items-table">
+                <Table
+                  size="small"
+                  rowKey={(it: any) => it.id || it.key || it.poItemId}
+                  dataSource={activeInvoice.items}
+                  pagination={false}
+                  scroll={{ x: 650, y: 200 }}
+                  columns={[
+                    {
+                      title: 'No',
+                      key: 'index',
+                      width: 45,
+                      align: 'center' as const,
+                      render: (_: any, __: any, index: number) => (
+                        <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
+                      ),
+                    },
+                    {
+                      title: 'Nama Item & Spesifikasi',
+                      key: 'name',
+                      render: (_: any, it: any) => {
+                        const { itemName, specification } = normalizeInvoiceItem(it);
+                        return (
+                          <div>
+                            <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a' }}>
+                              {itemName}
                             </div>
-                          )}
-                          {it.categoryName && (
-                            <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 4px', marginTop: 2 }}>
-                              {it.categoryName}
-                            </Tag>
-                          )}
-                        </div>
-                      );
+                            {specification && (
+                              <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
+                                {specification}
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 }}>
+                              {it.categoryName && (
+                                <Tag color="blue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                                  {it.categoryName}
+                                </Tag>
+                              )}
+                              {it.wbsNodeId && (
+                                <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                                  WBS: {it.wbsNodeId}
+                                </Tag>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      },
                     },
-                  },
-                  {
-                    title: 'Qty Ditagih',
-                    dataIndex: 'quantity',
-                    key: 'quantity',
-                    width: 120,
-                    align: 'center' as const,
-                    render: (qty: number, it: any) => {
-                      const { uom } = normalizeInvoiceItem(it);
-                      return (
-                        <span style={{ fontWeight: 600 }}>
-                          {formatQuantityWithUom(qty, uom)}
+                    {
+                      title: 'Qty Ditagih',
+                      dataIndex: 'quantity',
+                      key: 'quantity',
+                      width: 120,
+                      align: 'center' as const,
+                      render: (qty: number, it: any) => {
+                        const { uom } = normalizeInvoiceItem(it);
+                        return (
+                          <span style={{ fontWeight: 600 }}>
+                            {formatQuantityWithUom(qty, uom)}
+                          </span>
+                        );
+                      },
+                    },
+                    {
+                      title: 'Harga Satuan',
+                      dataIndex: 'unitPrice',
+                      key: 'unitPrice',
+                      width: 140,
+                      align: 'right' as const,
+                      render: (price: number) => (
+                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
+                          {formatRp(price)}
                         </span>
-                      );
+                      ),
                     },
-                  },
-                  {
-                    title: 'Harga Satuan',
-                    dataIndex: 'unitPrice',
-                    key: 'unitPrice',
-                    width: 140,
-                    align: 'right' as const,
-                    render: (price: number) => (
-                      <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
-                        {formatRp(price)}
-                      </span>
-                    ),
-                  },
-                  {
-                    title: 'Subtotal',
-                    dataIndex: 'totalPrice',
-                    key: 'totalPrice',
-                    width: 150,
-                    align: 'right' as const,
-                    render: (subtotal: number) => (
-                      <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
-                        {formatRp(subtotal)}
-                      </span>
-                    ),
-                  },
-                ]}
-              />
+                    {
+                      title: 'Subtotal',
+                      dataIndex: 'totalPrice',
+                      key: 'totalPrice',
+                      width: 150,
+                      align: 'right' as const,
+                      render: (subtotal: number) => (
+                        <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
+                          {formatRp(subtotal)}
+                        </span>
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+
+              {/* Mobile Card View */}
+              <div className={styles.mobileCardView} data-testid="mobile-items-cards">
+                {activeInvoice.items.map((it: any, idx: number) => {
+                  const { itemName, specification, uom } = normalizeInvoiceItem(it);
+                  return (
+                    <div key={it.id || it.key || it.poItemId || idx} className={styles.mobileItemCard} data-testid={`mobile-item-card-${idx}`}>
+                      <div className={styles.cardHeader}>
+                        <div className={styles.itemTitleBlock}>
+                          <span className={styles.itemIndexBadge}>{idx + 1}</span>
+                          <div>
+                            <div className={styles.itemNameText}>{itemName}</div>
+                            {specification && (
+                              <div className={styles.itemSpecificationText}>{specification}</div>
+                            )}
+                            <div className={styles.tagsRow}>
+                              {it.categoryName && (
+                                <Tag color="blue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                                  {it.categoryName}
+                                </Tag>
+                              )}
+                              {it.wbsNodeId && (
+                                <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                                  WBS: {it.wbsNodeId}
+                                </Tag>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className={styles.cardStatsGrid}>
+                        <div className={styles.statItem}>
+                          <span className={styles.statLabel}>Qty Ditagih:</span>
+                          <span className={styles.statValueBold}>{formatQuantityWithUom(it.quantity, uom)}</span>
+                        </div>
+                        <div className={styles.statItem}>
+                          <span className={styles.statLabel}>Harga Satuan:</span>
+                          <span className={styles.statValueMono}>{formatRp(it.unitPrice)}</span>
+                        </div>
+                      </div>
+
+                      <div className={styles.cardFooter}>
+                        <span className={styles.statLabel}>Subtotal:</span>
+                        <span className={styles.statValueEmerald}>{formatRp(it.totalPrice)}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : (
             <div style={{ background: '#f8fafc', padding: '12px', borderRadius: 8, border: '1px solid #e2e8f0', textAlign: 'center' }}>
@@ -975,76 +1062,100 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 </Tag>
               </div>
 
-              <Table
-                size="small"
-                rowKey={(p: any) => p.id || p.paymentNumber}
-                dataSource={activeInvoice.payments.filter((p: any) => !p.deletedAt)}
-                pagination={false}
-                scroll={{ y: 160 }}
-                columns={[
-                  {
-                    title: 'No. Bukti Bayar',
-                    dataIndex: 'paymentNumber',
-                    key: 'paymentNumber',
-                    render: (num: string) => (
-                      <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11, color: '#047857' }}>
-                        {num || '—'}
-                      </span>
-                    ),
-                  },
-                  {
-                    title: 'Tanggal',
-                    dataIndex: 'paymentDate',
-                    key: 'paymentDate',
-                    width: 120,
-                    render: (d: string) => d ? dayjs(d).format('DD MMM YYYY') : '—',
-                  },
-                  {
-                    title: 'Nominal',
-                    dataIndex: 'amount',
-                    key: 'amount',
-                    width: 160,
-                    align: 'right' as const,
-                    render: (amt: number) => (
-                      <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
-                        {formatRp(amt)}
-                      </span>
-                    ),
-                  },
-                  {
-                    title: 'Diproses',
-                    dataIndex: 'createdAt',
-                    key: 'createdAt',
-                    width: 140,
-                    render: (d: string) => d ? dayjs(d).format('DD/MM/YYYY HH:mm') : '—',
-                  },
-                ]}
-              />
+              {/* Desktop Table View */}
+              <div className={styles.desktopTableView} data-testid="desktop-payment-history-table">
+                <Table
+                  size="small"
+                  rowKey={(p: any) => p.id || p.paymentNumber}
+                  dataSource={activeInvoice.payments.filter((p: any) => !p.deletedAt)}
+                  pagination={false}
+                  scroll={{ x: 500, y: 160 }}
+                  columns={[
+                    {
+                      title: 'No. Bukti Bayar',
+                      dataIndex: 'paymentNumber',
+                      key: 'paymentNumber',
+                      render: (num: string) => (
+                        <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11, color: '#047857' }}>
+                          {num || '—'}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: 'Tanggal',
+                      dataIndex: 'paymentDate',
+                      key: 'paymentDate',
+                      width: 120,
+                      render: (d: string) => d ? dayjs(d).format('DD MMM YYYY') : '—',
+                    },
+                    {
+                      title: 'Nominal',
+                      dataIndex: 'amount',
+                      key: 'amount',
+                      width: 160,
+                      align: 'right' as const,
+                      render: (amt: number) => (
+                        <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
+                          {formatRp(amt)}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: 'Diproses',
+                      dataIndex: 'createdAt',
+                      key: 'createdAt',
+                      width: 140,
+                      render: (d: string) => d ? dayjs(d).format('DD/MM/YYYY HH:mm') : '—',
+                    },
+                  ]}
+                />
+              </div>
+
+              {/* Mobile Card View */}
+              <div className={styles.mobileCardView} data-testid="mobile-payment-history-cards">
+                {activeInvoice.payments.filter((p: any) => !p.deletedAt).map((p: any, idx: number) => (
+                  <div key={p.id || p.paymentNumber || idx} className={styles.paymentCard} data-testid={`payment-card-${idx}`}>
+                    <div className={styles.paymentHeader}>
+                      <span className={styles.paymentNumber}>{p.paymentNumber || '—'}</span>
+                      <span className={styles.paymentDate}>{p.paymentDate ? dayjs(p.paymentDate).format('DD MMM YYYY') : '—'}</span>
+                    </div>
+                    <div className={styles.paymentRow}>
+                      <span style={{ color: '#64748b' }}>Nominal Pembayaran:</span>
+                      <span className={styles.statValueEmerald}>{formatRp(p.amount)}</span>
+                    </div>
+                    {p.createdAt && (
+                      <div className={styles.paymentRow}>
+                        <span style={{ color: '#64748b', fontSize: 11 }}>Diproses:</span>
+                        <span style={{ color: '#334155', fontSize: 11 }}>{dayjs(p.createdAt).format('DD/MM/YYYY HH:mm')}</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
-      </Modal>
+      </ResponsiveFinanceModal>
 
       {/* VERIFY INVOICE SUB-MODAL */}
-      <Modal
+      <ResponsiveFinanceModal
         open={isVerifyModalOpen}
         onCancel={() => !submittingAction && setIsVerifyModalOpen(false)}
-        title={
-          <Space>
-            <CheckCircleOutlined style={{ color: '#059669', fontSize: 18 }} />
-            <span>{isServicePo ? `Verifikasi Invoice Jasa — ${invoiceNumber}` : `Verifikasi Faktur Invoice — ${invoiceNumber}`}</span>
-          </Space>
+        title={isServicePo ? `Verifikasi Invoice Jasa — ${invoiceNumber}` : `Verifikasi Faktur Invoice — ${invoiceNumber}`}
+        subtitle="Validasi otoritatif Finance sebelum penerbitan status VERIFIED."
+        domain="APPROVAL"
+        size="compact"
+        hideSsotBadge
+        headerIconTheme="green"
+        headerIcon={<CheckCircleOutlined style={{ color: '#059669', fontSize: 20 }} />}
+        primaryActionText={isServicePo ? 'Konfirmasi Rekonsiliasi Jasa' : 'Konfirmasi & Setujui Verifikasi'}
+        onPrimaryAction={handleVerifySubmit}
+        isSubmitting={submittingAction}
+        isSubmitDisabled={
+          (!isServicePo && isProgressInvoice && (!selectedVerifyGrId || poGoodsReceipts.length === 0)) ||
+          (!isServicePo && isRetentionInvoice && !evidenceRef.trim())
         }
-        confirmLoading={submittingAction}
-        onOk={handleVerifySubmit}
-        okText={isServicePo ? 'Konfirmasi Rekonsiliasi Jasa' : 'Konfirmasi & Setujui Verifikasi'}
         cancelText="Batal"
-        okButtonProps={{
-          style: { backgroundColor: '#059669', borderColor: '#059669', fontWeight: 600 },
-          disabled:
-            (!isServicePo && isProgressInvoice && (!selectedVerifyGrId || poGoodsReceipts.length === 0)) ||
-            (!isServicePo && isRetentionInvoice && !evidenceRef.trim()),
-        }}
         destroyOnClose
       >
         <div style={{ padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1076,13 +1187,13 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                 Dokumen Bukti Pelaksanaan: Service Claim Disetujui
               </div>
               <Row gutter={[8, 6]}>
-                <Col span={12}>
+                <Col xs={24} sm={12}>
                   <Text type="secondary" style={{ fontSize: 10 }}>NOMOR KLAIM JASA:</Text>
                   <div style={{ fontWeight: 700, color: '#166534', fontFamily: 'monospace' }}>
                     {(activeInvoice as any).serviceClaim?.claimNumber || `Claim #${(activeInvoice as any).serviceClaimId || '—'}`}
                   </div>
                 </Col>
-                <Col span={12}>
+                <Col xs={24} sm={12}>
                   <Text type="secondary" style={{ fontSize: 10 }}>STATUS KLAIM:</Text>
                   <div>
                     <Tag color="green" style={{ fontWeight: 700, margin: 0 }}>
@@ -1090,14 +1201,14 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                     </Tag>
                   </div>
                 </Col>
-                <Col span={12} style={{ marginTop: 4 }}>
+                <Col xs={24} sm={12} style={{ marginTop: 4 }}>
                   <Text type="secondary" style={{ fontSize: 10 }}>NILAI KLAIM DISETUJUI:</Text>
                   <div style={{ fontWeight: 700, color: '#15803d', fontFamily: 'monospace' }}>
                     Rp {Number((activeInvoice as any).serviceClaim?.approvedClaimAmount || activeInvoice.totalAmount || 0).toLocaleString('id-ID')}
                   </div>
                 </Col>
                 {(activeInvoice as any).serviceClaim?.serviceOrder?.soNumber && (
-                  <Col span={12} style={{ marginTop: 4 }}>
+                  <Col xs={24} sm={12} style={{ marginTop: 4 }}>
                     <Text type="secondary" style={{ fontSize: 10 }}>NOMOR SPK/WO:</Text>
                     <div style={{ fontWeight: 600, color: '#334155' }}>
                       {(activeInvoice as any).serviceClaim.serviceOrder.soNumber}
@@ -1159,19 +1270,19 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                       }}
                     >
                       <Row gutter={[8, 4]}>
-                        <Col span={12}>
+                        <Col xs={24} sm={12}>
                           <Text type="secondary" style={{ fontSize: 10 }}>NOMOR GR:</Text>
                           <div style={{ fontWeight: 700, color: '#166534', fontFamily: 'monospace' }}>
                             {selectedVerifyGr.grNumber} (ID #{selectedVerifyGr.id})
                           </div>
                         </Col>
-                        <Col span={12}>
+                        <Col xs={24} sm={12}>
                           <Text type="secondary" style={{ fontSize: 10 }}>NILAI FISIK DITERIMA:</Text>
                           <div style={{ fontWeight: 700, color: '#15803d', fontFamily: 'monospace' }}>
                             Rp {Number(selectedVerifyGr.totalReceivedAmount || 0).toLocaleString('id-ID')}
                           </div>
                         </Col>
-                        <Col span={24} style={{ marginTop: 4 }}>
+                        <Col xs={24} sm={24} style={{ marginTop: 4 }}>
                           <Text type="secondary" style={{ fontSize: 10 }}>TANGGAL PENERIMAAN:</Text>
                           <div style={{ color: '#334155' }}>
                             {dayjs(selectedVerifyGr.receiptDate).format('DD MMMM YYYY')}
@@ -1233,23 +1344,24 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             />
           </div>
         </div>
-      </Modal>
+      </ResponsiveFinanceModal>
 
       {/* REJECT INVOICE SUB-MODAL */}
-      <Modal
+      <ResponsiveFinanceModal
         open={isRejectModalOpen}
         onCancel={() => !submittingAction && setIsRejectModalOpen(false)}
-        title={
-          <Space>
-            <CloseCircleOutlined style={{ color: '#dc2626', fontSize: 18 }} />
-            <span>Tolak Verifikasi Invoice — {invoiceNumber}</span>
-          </Space>
-        }
-        confirmLoading={submittingAction}
-        onOk={handleRejectSubmit}
-        okText="Tolak Invoice"
+        title={`Tolak Verifikasi Invoice — ${invoiceNumber}`}
+        subtitle="Penolakan akan mengubah status invoice menjadi REJECTED dan mengembalikan faktur ke vendor."
+        domain="FORM"
+        size="compact"
+        hideSsotBadge
+        headerIconTheme="red"
+        headerIcon={<CloseCircleOutlined style={{ color: '#dc2626', fontSize: 20 }} />}
+        primaryActionText="Tolak Invoice"
+        onPrimaryAction={handleRejectSubmit}
+        isSubmitting={submittingAction}
+        isPrimaryDanger
         cancelText="Batal"
-        okButtonProps={{ danger: true, style: { fontWeight: 600 } }}
         destroyOnClose
       >
         <div style={{ padding: '8px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -1274,7 +1386,7 @@ export const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
             />
           </div>
         </div>
-      </Modal>
+      </ResponsiveFinanceModal>
     </>
   );
 };

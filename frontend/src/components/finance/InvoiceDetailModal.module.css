@@ -1,0 +1,362 @@
+/* EPMS Finance - InvoiceDetailModal Responsive Styles */
+
+.desktopTableView {
+  display: block;
+  width: 100%;
+}
+
+.mobileCardView {
+  display: none;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .desktopTableView {
+    display: none !important;
+  }
+
+  .mobileCardView {
+    display: flex !important;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    background: #f8fafc;
+    border-radius: 6px;
+  }
+}
+
+.mobileItemCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+}
+
+.cardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.itemTitleBlock {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.itemIndexBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.itemNameText {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.itemSpecificationText {
+  font-size: 11px;
+  color: #64748b;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+.tagsRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.cardStatsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  background: #f8fafc;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #f1f5f9;
+}
+
+.statItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.statLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #64748b;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.statValue {
+  font-size: 12px;
+  color: #1e293b;
+  font-weight: 500;
+}
+
+.statValueBold {
+  font-size: 12.5px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.statValueMono {
+  font-family: monospace;
+  font-size: 12px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.statValueEmerald {
+  font-family: monospace;
+  font-size: 13px;
+  color: #059669;
+  font-weight: 800;
+}
+
+.cardFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 6px;
+  border-top: 1px solid #f1f5f9;
+  font-size: 12px;
+}
+
+/* Payment history mobile card */
+.paymentCard {
+  background: #ffffff;
+  border: 1px solid #d1fae5;
+  border-radius: 8px;
+  padding: 10px 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+}
+
+.paymentHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #f0fdf4;
+}
+
+.paymentNumber {
+  font-weight: 700;
+  font-family: monospace;
+  font-size: 12px;
+  color: #047857;
+}
+
+.paymentDate {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.paymentRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+/* Mismatch Warning Panel Cards */
+.mismatchCard {
+  background: #ffffff;
+  border: 1px solid #fed7aa;
+  border-left: 4px solid #f97316;
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-sizing: border-box;
+}
+
+.mismatchHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mismatchCodeBadge {
+  font-family: monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #ffedd5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+
+.mismatchDescription {
+  font-size: 11.5px;
+  color: #7c2d12;
+  line-height: 1.4;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+}
+
+/* Invoice Metadata Dual Views */
+.desktopMetadataView {
+  display: block;
+  width: 100%;
+}
+
+.mobileMetadataView {
+  display: none;
+  width: 100%;
+}
+
+.metadataCard {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.metadataRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 11.5px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #f8fafc;
+}
+
+.metadataRow:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.metadataLabel {
+  font-size: 10.5px;
+  color: #64748b;
+  font-weight: 600;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+/* Footer Responsive Layout */
+.footerExtraContainer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.footerIdentityRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: #1e293b;
+}
+
+.footerInvoiceNumber {
+  font-weight: 500;
+}
+
+.footerStatusRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #64748b;
+  flex-wrap: wrap;
+}
+
+.footerStatusLabel {
+  font-size: 10.5px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.footerActionsContainer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.closeActionButton {
+  border-radius: 6px;
+}
+
+@media (max-width: 768px) {
+  .desktopMetadataView {
+    display: none !important;
+  }
+
+  .mobileMetadataView {
+    display: flex !important;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .footerExtraContainer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    width: 100%;
+  }
+
+  .footerIdentityRow {
+    font-size: 11px;
+  }
+
+  .footerStatusRow {
+    gap: 6px;
+  }
+
+  .footerActionsContainer {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .closeActionButton {
+    min-height: 40px;
+    font-weight: 600;
+    flex: 1;
+  }
+}
