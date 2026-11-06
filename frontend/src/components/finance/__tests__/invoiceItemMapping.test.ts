@@ -104,4 +104,157 @@ describe('PRE-W10 UIUX-DP1 Frontend Invoice Item Mapping Tests (ROOT-02)', () =>
     };
     expect(normalizeInvoiceItem(itemWithoutAnyName).itemName).toBe('Item #123');
   });
+
+  describe('Ticket #5 — Contract Item List & Finance Invoice Term Item Integrity', () => {
+    it('1. CamelCase itemName is resolved correctly', () => {
+      const item = {
+        id: 1,
+        itemName: 'Kabel ADSS 288 Core',
+      };
+      const res = normalizeInvoiceItem(item);
+      expect(res.itemName).toBe('Kabel ADSS 288 Core');
+    });
+
+    it('2. Snake_case item_name is resolved correctly', () => {
+      const item = {
+        id: 2,
+        item_name: 'Pipa Subduct HDPE 40/34',
+      };
+      const res = normalizeInvoiceItem(item);
+      expect(res.itemName).toBe('Pipa Subduct HDPE 40/34');
+    });
+
+    it('3. Empty item name falls back to the Purchase Order Item name', () => {
+      const itemEmptyName = {
+        id: 3,
+        itemName: '   ',
+        purchaseOrderItem: {
+          itemName: 'Tiang Feeder 9 Meter',
+        },
+      };
+      const res = normalizeInvoiceItem(itemEmptyName);
+      expect(res.itemName).toBe('Tiang Feeder 9 Meter');
+
+      const itemSnakePo = {
+        id: 4,
+        purchaseOrderItem: {
+          item_name: 'Tiang Feeder 7 Meter',
+        },
+      };
+      expect(normalizeInvoiceItem(itemSnakePo).itemName).toBe('Tiang Feeder 7 Meter');
+    });
+
+    it('4. Cost Item description is displayed as specification', () => {
+      const item = {
+        id: 5,
+        itemName: 'Jasa Tarik Kabel',
+        purchaseOrderItem: {
+          costItem: {
+            description: 'Penarikan kabel fiber optik aerial rute SKF Bekasi sepanjang 3000m',
+          },
+        },
+      };
+      const res = normalizeInvoiceItem(item);
+      expect(res.specification).toBe('Penarikan kabel fiber optik aerial rute SKF Bekasi sepanjang 3000m');
+    });
+
+    it('5. Purchase Order Item UoM Meter is preserved', () => {
+      const item = {
+        id: 6,
+        purchaseOrderItem: {
+          itemName: 'HDPE Subduct',
+          uom: 'Meter',
+        },
+      };
+      const res = normalizeInvoiceItem(item);
+      expect(res.uom).toBe('Meter');
+    });
+
+    it('6. Purchase Order Item UoM Batang is preserved', () => {
+      const item = {
+        id: 7,
+        purchaseOrderItem: {
+          itemName: 'Tiang 7M',
+          uom: 'Batang',
+        },
+      };
+      const res = normalizeInvoiceItem(item);
+      expect(res.uom).toBe('Batang');
+    });
+
+    it('7. Conflicting upstream UoM does not override valid PO UoM', () => {
+      const item = {
+        id: 8,
+        purchaseOrderItem: {
+          itemName: 'Tiang 9M',
+          uom: 'Batang', // Authoritative PO line UoM
+          purchaseRequestItem: { uom: 'Unit' }, // Conflicting upstream PR
+          costItem: { uom: 'PCS' }, // Conflicting upstream cost item
+        },
+      };
+      const res = normalizeInvoiceItem(item);
+      expect(res.uom).toBe('Batang'); // Must strictly preserve PO UoM
+    });
+
+    it('8. Missing PO UoM uses a valid upstream fallback', () => {
+      const itemPrFallback = {
+        id: 9,
+        purchaseOrderItem: {
+          itemName: 'Kabel Drop Core',
+          uom: null, // PO UoM absent
+          purchaseRequestItem: { uom: 'Meter' },
+        },
+      };
+      expect(normalizeInvoiceItem(itemPrFallback).uom).toBe('Meter');
+
+      const itemCostFallback = {
+        id: 10,
+        purchaseOrderItem: {
+          itemName: 'Klem Tiang',
+          uom: '',
+          costItem: { uom: 'Lot' },
+        },
+      };
+      expect(normalizeInvoiceItem(itemCostFallback).uom).toBe('Lot');
+    });
+
+    it('9. Missing all UoM values falls back to Unit', () => {
+      const itemNoUom = {
+        id: 11,
+        itemName: 'Material Pengadaan',
+        purchaseOrderItem: {
+          itemName: 'Material Pengadaan',
+          uom: null,
+          purchaseRequestItem: null,
+          costItem: null,
+        },
+      };
+      expect(normalizeInvoiceItem(itemNoUom).uom).toBe('Unit');
+    });
+
+    it('10. Missing specification is handled safely', () => {
+      const item = {
+        id: 12,
+        itemName: 'Material Standar',
+        purchaseOrderItem: {
+          costItem: null,
+          purchaseRequestItem: null,
+        },
+      };
+      const res = normalizeInvoiceItem(item);
+      expect(res.specification).toBeNull();
+    });
+
+    it('11. Existing invoice snapshot item name is preserved', () => {
+      const item = {
+        id: 13,
+        itemName: 'Snapshot Fixed Invoice Name (INV-20261018-001)',
+        purchaseOrderItem: {
+          itemName: 'Different Upstream Name After Modification',
+        },
+      };
+      const res = normalizeInvoiceItem(item);
+      expect(res.itemName).toBe('Snapshot Fixed Invoice Name (INV-20261018-001)');
+    });
+  });
 });

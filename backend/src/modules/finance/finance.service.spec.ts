@@ -1913,16 +1913,38 @@ describe('FinanceService', () => {
 
   // 5. GET INVOICES & GET INVOICE BY ID (PHASE 7E-D-3)
   describe('getInvoices and getInvoiceById', () => {
-    it('should get all invoices with paymentTerm relation', async () => {
-      const mockList = [{ id: 1, invoiceNumber: 'INV-1', paymentTerm: { id: 10, termName: 'Termin 1' } }];
+    it('should get all invoices with paymentTerm and purchaseOrderItem relations', async () => {
+      const mockList = [{
+        id: 1,
+        invoiceNumber: 'INV-1',
+        paymentTerm: { id: 10, termName: 'Termin 1' },
+        items: [
+          {
+            id: 101,
+            itemName: 'Snapshot Name',
+            purchaseOrderItem: {
+              id: 501,
+              itemName: 'PO Item Name',
+              uom: 'Meter',
+              costItem: { description: 'Fiber Optic Spec' },
+              purchaseRequestItem: { uom: 'Meter' },
+            },
+          },
+        ],
+      }];
       (service as any).invoiceRepository.find = jest.fn().mockResolvedValue(mockList);
 
       const result = await service.getInvoices();
       expect(result).toHaveLength(1);
       expect(result[0].paymentTerm).toBeDefined();
+      expect(result[0].items[0].itemName).toBe('Snapshot Name');
+      expect(result[0].items[0].purchaseOrderItem.uom).toBe('Meter');
       expect((service as any).invoiceRepository.find).toHaveBeenCalledWith({
         relations: [
           'items',
+          'items.purchaseOrderItem',
+          'items.purchaseOrderItem.costItem',
+          'items.purchaseOrderItem.purchaseRequestItem',
           'purchaseOrder',
           'purchaseOrder.vendor',
           'purchaseOrder.purchaseRequest',
@@ -1930,19 +1952,43 @@ describe('FinanceService', () => {
           'paymentTerm',
         ],
       });
+      // Verifies no write operations occur during read
+      expect((service as any).invoiceRepository.save || jest.fn()).not.toHaveBeenCalled();
     });
 
-    it('should get invoice by id with full relations', async () => {
-      const mockInv = { id: 1, invoiceNumber: 'INV-1', paymentTerm: { id: 10 } };
+    it('should get invoice by id with full relations including items.purchaseOrderItem', async () => {
+      const mockInv = {
+        id: 1,
+        invoiceNumber: 'INV-1',
+        paymentTerm: { id: 10 },
+        items: [
+          {
+            id: 101,
+            itemName: 'Snapshot Cable',
+            purchaseOrderItem: {
+              id: 501,
+              itemName: 'Original PO Cable',
+              uom: 'Batang',
+              costItem: { description: 'Tiang 7M Spec' },
+              purchaseRequestItem: { uom: 'Batang' },
+            },
+          },
+        ],
+      };
       (service as any).invoiceRepository.findOne = jest.fn().mockResolvedValue(mockInv);
 
       const result = await service.getInvoiceById(1);
       expect(result).toBeDefined();
       expect(result.id).toBe(1);
+      expect(result.items[0].itemName).toBe('Snapshot Cable');
+      expect(result.items[0].purchaseOrderItem.uom).toBe('Batang');
       expect((service as any).invoiceRepository.findOne).toHaveBeenCalledWith({
         where: { id: 1 },
         relations: [
           'items',
+          'items.purchaseOrderItem',
+          'items.purchaseOrderItem.costItem',
+          'items.purchaseOrderItem.purchaseRequestItem',
           'purchaseOrder',
           'purchaseOrder.vendor',
           'purchaseOrder.purchaseRequest',
@@ -1951,6 +1997,8 @@ describe('FinanceService', () => {
           'payments',
         ],
       });
+      // Verifies no mutation occurs
+      expect((service as any).invoiceRepository.save || jest.fn()).not.toHaveBeenCalled();
     });
 
     it('should throw 400 if invoice by id not found', async () => {

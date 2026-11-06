@@ -2302,6 +2302,9 @@ export class FinanceService {
     return this.invoiceRepository.find({
       relations: [
         'items',
+        'items.purchaseOrderItem',
+        'items.purchaseOrderItem.costItem',
+        'items.purchaseOrderItem.purchaseRequestItem',
         'purchaseOrder',
         'purchaseOrder.vendor',
         'purchaseOrder.purchaseRequest',
@@ -2316,6 +2319,9 @@ export class FinanceService {
       where: { id },
       relations: [
         'items',
+        'items.purchaseOrderItem',
+        'items.purchaseOrderItem.costItem',
+        'items.purchaseOrderItem.purchaseRequestItem',
         'purchaseOrder',
         'purchaseOrder.vendor',
         'purchaseOrder.purchaseRequest',
