@@ -23,6 +23,7 @@ import {
 } from '../../entities/workflow-task.entity';
 import { WorkflowTransition } from '../../entities/workflow-transition.entity';
 import { Role } from '../../entities/role.entity';
+import { Project } from '../../entities/project.entity';
 import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { ProjectManagementReview } from '../../entities/project-management-review.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
@@ -162,24 +163,50 @@ export class WorkflowEngineService {
     const graph = this.parseGraph(publishedVersion.bpmnJson);
     this.validateGraph(graph);
 
-    // 4. Check Idempotency (Prevent multiple active instances for the same entity + workflow)
-    const existingActive = await this.instanceRepo.findOne({
-      where: {
-        workflowDefinitionId: definition.id,
-        entityType,
-        entityId,
-        status: WorkflowInstanceStatus.IN_PROGRESS,
-      },
-    });
+    // Fast-path pre-check outside transaction (if no external manager supplied)
+    if (!externalManager) {
+      const existingActive = await this.instanceRepo.findOne({
+        where: {
+          workflowDefinitionId: definition.id,
+          entityType,
+          entityId: Number(entityId),
+          status: WorkflowInstanceStatus.IN_PROGRESS,
+        },
+      });
 
-    if (existingActive) {
-      throw new ConflictException(
-        `An active workflow instance (#${existingActive.id}) already exists for ${entityType} #${entityId}.`,
-      );
+      if (existingActive) {
+        throw new ConflictException(
+          `An active workflow instance (#${existingActive.id}) already exists for ${entityType} #${entityId}.`,
+        );
+      }
     }
 
-    // 5. Execute within a strict Database Transaction
+    // 4. Execute within a strict Database Transaction
     const executeStartInManager = async (manager: EntityManager) => {
+      // Concurrency Protection: If entityType is PROJECT, lock parent Project row to serialize concurrent starts
+      // Fail-Closed: If locking fails for any reason, the error must propagate immediately to abort the transaction.
+      if (entityType === 'PROJECT' && entityId) {
+        await manager.findOne(Project, {
+          where: { id: Number(entityId) },
+          lock: { mode: 'pessimistic_write' },
+        });
+      }
+
+      // Check Idempotency under lock inside transaction (Prevent multiple active instances)
+      const existingActive = await manager.findOne(WorkflowInstance, {
+        where: {
+          workflowDefinitionId: definition.id,
+          entityType,
+          entityId: Number(entityId),
+          status: WorkflowInstanceStatus.IN_PROGRESS,
+        },
+      });
+
+      if (existingActive) {
+        throw new ConflictException(
+          `An active workflow instance (#${existingActive.id}) already exists for ${entityType} #${entityId}.`,
+        );
+      }
       // Find START node
       const startNode = graph.nodes.find(
         (n) => (n.data?.type || n.type) === 'START',
@@ -1987,6 +2014,7 @@ export class WorkflowEngineService {
   async getInstanceByEntity(
     entityType: string,
     entityId: string | number,
+    externalManager?: EntityManager,
   ): Promise<WorkflowInstance | null> {
     const allowedEntityTypes = ['PURCHASE_REQUEST', 'PROJECT', 'TENDER', 'CONTRACT', 'PROJECT_CLOSURE'];
     if (!allowedEntityTypes.includes(entityType)) {
@@ -2005,29 +2033,48 @@ export class WorkflowEngineService {
     ];
 
     // 1. Check for active IN_PROGRESS instance first
-    const activeInstance = await this.instanceRepo.findOne({
-      where: {
-        entityType,
-        entityId: Number(entityId),
-        status: WorkflowInstanceStatus.IN_PROGRESS,
-      },
-      relations,
-      order: { id: 'DESC' },
-    });
+    const activeInstance = externalManager && typeof externalManager.findOne === 'function'
+      ? await externalManager.findOne(WorkflowInstance, {
+          where: {
+            entityType,
+            entityId: Number(entityId),
+            status: WorkflowInstanceStatus.IN_PROGRESS,
+          },
+          relations,
+          order: { id: 'DESC' },
+        })
+      : await this.instanceRepo.findOne({
+          where: {
+            entityType,
+            entityId: Number(entityId),
+            status: WorkflowInstanceStatus.IN_PROGRESS,
+          },
+          relations,
+          order: { id: 'DESC' },
+        });
 
     if (activeInstance) {
       return activeInstance;
     }
 
     // 2. If no active instance, return latest workflow instance for this entity
-    return this.instanceRepo.findOne({
-      where: {
-        entityType,
-        entityId: Number(entityId),
-      },
-      relations,
-      order: { id: 'DESC' },
-    });
+    return externalManager && typeof externalManager.findOne === 'function'
+      ? await externalManager.findOne(WorkflowInstance, {
+          where: {
+            entityType,
+            entityId: Number(entityId),
+          },
+          relations,
+          order: { id: 'DESC' },
+        })
+      : await this.instanceRepo.findOne({
+          where: {
+            entityType,
+            entityId: Number(entityId),
+          },
+          relations,
+          order: { id: 'DESC' },
+        });
   }
 
   async getInstancesByEntities(

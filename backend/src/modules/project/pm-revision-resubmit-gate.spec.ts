@@ -393,6 +393,7 @@ describe('PM Revision Resubmit Gate & Canonical Post-Return Persistence Contract
         },
         38,
         ['PROJECT_MANAGER'],
+        expect.anything(),
       );
     });
 
@@ -449,6 +450,7 @@ describe('PM Revision Resubmit Gate & Canonical Post-Return Persistence Contract
         expect.objectContaining({ action: 'RESUBMIT' }),
         38,
         ['PROJECT_MANAGER'],
+        expect.anything(),
       );
 
       // 2. Workflow target remains node_procurement_review
@@ -523,6 +525,7 @@ describe('PM Revision Resubmit Gate & Canonical Post-Return Persistence Contract
           entityId: 10,
         }),
         1,
+        expect.anything(),
       );
     });
 
@@ -561,6 +564,7 @@ describe('PM Revision Resubmit Gate & Canonical Post-Return Persistence Contract
         expect.objectContaining({ action: 'RESUBMIT' }),
         38,
         ['PROJECT_MANAGER'],
+        expect.anything(),
       );
       expect(res.workflow.current.ownerRole).toBe('HEAD_OF_OPERATIONS');
       expect(res.workflow.current.stage).toBe(2);
@@ -601,6 +605,7 @@ describe('PM Revision Resubmit Gate & Canonical Post-Return Persistence Contract
         expect.objectContaining({ action: 'RESUBMIT' }),
         38,
         ['PROJECT_MANAGER'],
+        expect.anything(),
       );
       expect(res.workflow.current.ownerRole).toBe('FINANCE');
       expect(res.workflow.current.stage).toBe(4);
@@ -641,6 +646,7 @@ describe('PM Revision Resubmit Gate & Canonical Post-Return Persistence Contract
         expect.objectContaining({ action: 'RESUBMIT' }),
         38,
         ['PROJECT_MANAGER'],
+        expect.anything(),
       );
       expect(res.workflow.current.ownerRole).toBe('DIRECTOR');
       expect(res.workflow.current.stage).toBe(5);
@@ -684,6 +690,7 @@ describe('PM Revision Resubmit Gate & Canonical Post-Return Persistence Contract
           },
         }),
         999,
+        expect.anything(),
       );
       const passedContext = mockWfService.startInstance.mock.calls[0][0].context;
       expect(passedContext.projectManagerId).toBeUndefined();

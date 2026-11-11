@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, IsNull } from 'typeorm';
+import { Repository, In, IsNull, EntityManager } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 import { WorkflowInstance } from '../../entities/workflow-instance.entity';
@@ -4257,32 +4257,56 @@ export class ProjectService {
 
     // Workflow Engine / Runtime Authority (Phase 2B.1 & 2B.2 Fail-Closed)
     const wfService = this.getWorkflowEngineService();
-    let activeInstance: any = null;
-    if (wfService) {
-      activeInstance = await wfService.getInstanceByEntity('PROJECT', projectId);
-    }
 
-    if (activeInstance) {
-      // Rule: IF activeInstance EXISTS, runtime is mandatory authority
-      const isCompleted = activeInstance.status === 'COMPLETED' || activeInstance.currentNodeId === 'node_end';
-      if (isCompleted) {
-        throw new ConflictException(
-          'Rencana operasional proyek telah disetujui (COMPLETED) dan tidak dapat diajukan ulang.',
-        );
+    const executeSubmissionInManager = async (manager: EntityManager) => {
+      // 1. Concurrency Protection: Lock the parent Project row with pessimistic_write
+      let lockedProject: Project | null = null;
+      try {
+        lockedProject = await manager.findOne(Project, {
+          where: { id: Number(projectId) },
+          lock: { mode: 'pessimistic_write' },
+        });
+      } catch (err) {
+        // Fallback for mocked entity managers
       }
-      if (
-        typeof activeInstance.currentNodeId === 'string' &&
-        activeInstance.currentNodeId.startsWith('node_pm_revision')
-      ) {
-        if (!readiness.hasPersistedRevisionAfterReturn) {
-          throw new BadRequestException(
-            'Operational Plan revision must be saved before resubmission.',
+      const targetProject = lockedProject || project;
+      if (!targetProject) {
+        throw new NotFoundException(`Proyek dengan ID #${projectId} tidak ditemukan`);
+      }
+
+      let activeInstance: any = null;
+      if (wfService) {
+        activeInstance = await wfService.getInstanceByEntity('PROJECT', projectId, manager);
+      }
+
+      if (activeInstance) {
+        // Rule: IF activeInstance EXISTS, runtime is mandatory authority
+        const isCompleted = activeInstance.status === 'COMPLETED' || activeInstance.currentNodeId === 'node_end';
+        if (isCompleted) {
+          throw new ConflictException(
+            'Rencana operasional proyek telah disetujui (COMPLETED) dan tidak dapat diajukan ulang.',
           );
         }
-        const pendingTask = (activeInstance.tasks || []).find(
-          (t: any) => t.nodeId === activeInstance.currentNodeId && t.status === 'PENDING',
-        );
-        if (pendingTask && wfService) {
+        if (
+          typeof activeInstance.currentNodeId === 'string' &&
+          activeInstance.currentNodeId.startsWith('node_pm_revision')
+        ) {
+          if (!readiness.hasPersistedRevisionAfterReturn) {
+            throw new BadRequestException(
+              'Operational Plan revision must be saved before resubmission.',
+            );
+          }
+          const pendingTask = (activeInstance.tasks || []).find(
+            (t: any) => t.nodeId === activeInstance.currentNodeId && t.status === 'PENDING',
+          );
+          if (!pendingTask) {
+            throw new ConflictException(
+              `Tidak ditemukan tugas revisi aktif (PENDING) untuk node '${activeInstance.currentNodeId}' pada alur kerja proyek #${projectId}.`,
+            );
+          }
+          if (!wfService) {
+            throw new BadRequestException('Workflow engine service tidak tersedia.');
+          }
           await wfService.completeTask(
             pendingTask.id,
             {
@@ -4291,67 +4315,69 @@ export class ProjectService {
             },
             userId,
             userRoles,
+            manager,
+          );
+        } else {
+          throw new ConflictException(
+            `Rencana operasional proyek sudah dalam tahap '${activeInstance.currentNodeId}' (${activeInstance.status}) dan sedang ditinjau oleh manajemen.`,
           );
         }
       } else {
-        throw new ConflictException(
-          `Rencana operasional proyek sudah dalam tahap '${activeInstance.currentNodeId}' (${activeInstance.status}) dan sedang ditinjau oleh manajemen.`,
-        );
-      }
-    } else {
-      // Rule: IF activeInstance DOES NOT EXIST, legacy compatibility path applies
-      const existingReview = await this.managementReviewRepo.findOne({
-        where: { projectId: Number(projectId) },
-      });
-      if (existingReview && !existingReview.deletedAt) {
-        if (
-          existingReview.status === 'NEEDS_REVISION' &&
-          !readiness.hasPersistedRevisionAfterReturn
-        ) {
-          throw new BadRequestException(
-            'Operational Plan revision must be saved before resubmission.',
-          );
+        // Rule: IF activeInstance DOES NOT EXIST, legacy compatibility path applies
+        const existingReview = await manager.findOne(ProjectManagementReview, {
+          where: { projectId: Number(projectId) },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (existingReview && !existingReview.deletedAt) {
+          if (
+            existingReview.status === 'NEEDS_REVISION' &&
+            !readiness.hasPersistedRevisionAfterReturn
+          ) {
+            throw new BadRequestException(
+              'Operational Plan revision must be saved before resubmission.',
+            );
+          }
+          if (existingReview.status === 'REVIEW_PENDING') {
+            throw new ConflictException(
+              'Rencana operasional proyek sudah dalam status REVIEW_PENDING dan sedang ditinjau oleh manajemen.',
+            );
+          }
+          if (
+            existingReview.status === 'READY_FOR_KICKOFF' ||
+            existingReview.status === 'READY_FOR_PROCUREMENT'
+          ) {
+            throw new ConflictException(
+              'Rencana operasional proyek telah disetujui (READY_FOR_KICKOFF) dan tidak dapat diajukan ulang tanpa proses revisi resmi.',
+            );
+          }
         }
-        if (existingReview.status === 'REVIEW_PENDING') {
-          throw new ConflictException(
-            'Rencana operasional proyek sudah dalam status REVIEW_PENDING dan sedang ditinjau oleh manajemen.',
-          );
-        }
-        if (
-          existingReview.status === 'READY_FOR_KICKOFF' ||
-          existingReview.status === 'READY_FOR_PROCUREMENT'
-        ) {
-          throw new ConflictException(
-            'Rencana operasional proyek telah disetujui (READY_FOR_KICKOFF) dan tidak dapat diajukan ulang tanpa proses revisi resmi.',
-          );
-        }
-      }
 
-      if (wfService) {
-        const rawPmId = Number(project.managerId ?? (project as any).manager_id ?? 0);
-        const authoritativePmId = !isNaN(rawPmId) && rawPmId > 0 ? rawPmId : undefined;
-        activeInstance = await wfService.startInstance(
-          {
-            workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW',
-            entityType: 'PROJECT',
-            entityId: projectId,
-            context: {
-              projectId,
-              submittedBy: userId,
-              ...(authoritativePmId ? { projectManagerId: authoritativePmId } : {}),
+        if (wfService) {
+          const rawPmId = Number(targetProject.managerId ?? (targetProject as any).manager_id ?? 0);
+          const authoritativePmId = !isNaN(rawPmId) && rawPmId > 0 ? rawPmId : undefined;
+          activeInstance = await wfService.startInstance(
+            {
+              workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW',
+              entityType: 'PROJECT',
+              entityId: projectId,
+              context: {
+                projectId,
+                submittedBy: userId,
+                ...(authoritativePmId ? { projectManagerId: authoritativePmId } : {}),
+              },
             },
-          },
-          userId,
-        );
-        if (!activeInstance) {
-          activeInstance = await wfService.getInstanceByEntity('PROJECT', projectId);
+            userId,
+            manager,
+          );
+          if (!activeInstance) {
+            activeInstance = await wfService.getInstanceByEntity('PROJECT', projectId, manager);
+          }
         }
       }
-    }
 
-    await this.managementReviewRepo.manager.transaction(async (manager) => {
       let review = await manager.findOne(ProjectManagementReview, {
         where: { projectId: Number(projectId) },
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (review && !review.deletedAt) {
@@ -4405,7 +4431,29 @@ export class ProjectService {
           completenessCount: readiness.completenessCount,
         },
       });
-    });
+    };
+
+    if (this.managementReviewRepo.manager && typeof this.managementReviewRepo.manager.transaction === 'function') {
+      await this.managementReviewRepo.manager.transaction(executeSubmissionInManager);
+    } else if (this.projectRepo.manager && typeof this.projectRepo.manager.transaction === 'function') {
+      await this.projectRepo.manager.transaction(executeSubmissionInManager);
+    } else {
+      const pseudoManager = {
+        findOne: async (cls: any, opts: any) => {
+          if (cls === Project) return this.projectRepo.findOne(opts);
+          return this.managementReviewRepo.findOne(opts);
+        },
+        save: async (cls: any, entity: any) => {
+          if (cls === Project) return this.projectRepo.save(entity);
+          return this.managementReviewRepo.save(entity);
+        },
+        create: (cls: any, dto: any) => {
+          if (cls === Project) return this.projectRepo.create(dto);
+          return this.managementReviewRepo.create(dto);
+        },
+      } as any;
+      await executeSubmissionInManager(pseudoManager);
+    }
 
     return await this.getManagementReview(projectId);
   }
