@@ -837,6 +837,13 @@ export class FinanceService {
         );
       }
 
+      // 1.b Validate Payment Term Identity between PRQ and Invoice (Invariant 1)
+      if (invoice.paymentTermId && prq.paymentTermId && Number(prq.paymentTermId) !== Number(invoice.paymentTermId)) {
+        throw new BadRequestException(
+          'Payment Request tidak sesuai dengan payment term pada invoice.'
+        );
+      }
+
       // 2. Validate Invoice Match / Verification Status (MATCHED or VERIFIED)
       if (invoice.matchStatus !== 'MATCHED' && invoice.matchStatus !== 'VERIFIED') {
         throw new BadRequestException('Invoice belum disetujui untuk pembayaran');
@@ -851,6 +858,26 @@ export class FinanceService {
       const paymentAmount = Number(dto.paymentAmount ?? dto.amount);
       if (!paymentAmount || isNaN(paymentAmount) || paymentAmount <= 0 || !isFinite(paymentAmount)) {
         throw new BadRequestException('Payment amount harus lebih besar dari 0');
+      }
+
+      // 4.b Validate Director Approved Amount Ceiling (CRIT-01 Enforcement)
+      const approvedAmount = Number(prq.approvedAmount);
+      if (
+        prq.approvedAmount === null ||
+        prq.approvedAmount === undefined ||
+        isNaN(approvedAmount) ||
+        approvedAmount <= 0 ||
+        !isFinite(approvedAmount)
+      ) {
+        throw new BadRequestException(
+          'Nominal persetujuan Direktur (approvedAmount) tidak valid pada Payment Request ini.'
+        );
+      }
+
+      if (Math.round(paymentAmount * 100) / 100 > Math.round(approvedAmount * 100) / 100 + 0.001) {
+        throw new BadRequestException(
+          `Payment amount (${paymentAmount}) melebihi nominal yang disetujui Direktur (${approvedAmount})`
+        );
       }
 
       // 5. Calculate Already Paid & Remaining on Invoice
@@ -919,6 +946,10 @@ export class FinanceService {
           throw new BadRequestException('Payment term tidak ditemukan');
         }
 
+        if (paymentTerm.poId && invoice.poId && Number(paymentTerm.poId) !== Number(invoice.poId)) {
+          throw new BadRequestException('Payment term bukan milik Purchase Order dari invoice ini.');
+        }
+
         if (paymentTerm.status === PaymentTermStatus.PAID) {
           throw new BadRequestException('Payment term sudah lunas (PAID)');
         }
@@ -927,6 +958,19 @@ export class FinanceService {
           throw new BadRequestException(
             `Pembayaran termin hanya dapat diproses untuk termin berstatus VERIFIED (status saat ini: ${paymentTerm.status})`
           );
+        }
+
+        // Invariant 2 & 4: Enforce authoritative Procurement Payment Term amount
+        // Finance must execute the exact amount defined by the authoritative Procurement Payment Term
+        if (paymentTerm.amount !== undefined && paymentTerm.amount !== null) {
+          const expectedTermTarget = Math.round(Number(paymentTerm.amount) * 100) / 100;
+          const roundedPayment = Math.round(paymentAmount * 100) / 100;
+
+          if (Math.abs(roundedPayment - expectedTermTarget) > 0.001) {
+            throw new BadRequestException(
+              `Payment amount (${paymentAmount}) harus sesuai dengan nilai termin pembayaran Procurement (${expectedTermTarget}). Pembayaran dengan nominal berbeda dari jadwal termin Procurement tidak diizinkan.`
+            );
+          }
         }
       }
 
@@ -2451,6 +2495,28 @@ export class FinanceService {
         );
       }
 
+      // 4.b Validate Payment Term Identity & PO Ownership (Invariant 1)
+      const termId = invoice.paymentTermId
+        ? Number(invoice.paymentTermId)
+        : (dto.paymentTermId ? Number(dto.paymentTermId) : null);
+
+      if (dto.paymentTermId && invoice.paymentTermId && Number(dto.paymentTermId) !== Number(invoice.paymentTermId)) {
+        throw new BadRequestException('Payment term pengajuan pembayaran tidak sesuai dengan payment term pada invoice.');
+      }
+
+      let termEntity = invoice.paymentTerm;
+      if (!termEntity && termId) {
+        termEntity = await queryRunner.manager.findOne(PoPaymentTerm, { where: { id: termId } });
+      }
+
+      if (termId && !termEntity) {
+        throw new BadRequestException('Payment term tidak ditemukan.');
+      }
+
+      if (termEntity && termEntity.poId && invoice.poId && Number(termEntity.poId) !== Number(invoice.poId)) {
+        throw new BadRequestException('Payment term bukan milik Purchase Order dari invoice ini.');
+      }
+
       // 5. Calculate remaining unpaid balance
       const existingPayments = await queryRunner.manager.find(Payment, {
         where: { invoiceId: invoice.id },
@@ -2465,11 +2531,19 @@ export class FinanceService {
       const totalAmount = Number(invoice.totalAmount);
       const remainingBalance = Math.round((totalAmount - alreadyPaid) * 100) / 100;
 
+      // Invariant 2 & Item 4/5: Procurement Schedule Integrity
+      // A payment term cannot be split into unauthorized residual Payment Requests after an earlier underpayment
+      if (termEntity && alreadyPaid > 0) {
+        throw new BadRequestException(
+          `Invoice termin ini telah memiliki pembayaran sebelumnya (Rp ${alreadyPaid.toLocaleString('id-ID')}). Termin pembayaran Procurement tidak dapat dipecah menjadi cicilan tambahan tanpa amandemen PO Procurement.`,
+        );
+      }
+
       // 6. Validate requested amount
       const requestedAmount =
         dto.requestedAmount !== undefined && dto.requestedAmount !== null
           ? Number(dto.requestedAmount)
-          : remainingBalance;
+          : (termEntity ? Number(termEntity.amount) : remainingBalance);
 
       if (isNaN(requestedAmount) || requestedAmount <= 0) {
         throw new BadRequestException('Jumlah yang diajukan harus lebih besar dari 0.');
@@ -2479,6 +2553,17 @@ export class FinanceService {
         throw new BadRequestException(
           `Jumlah yang diajukan (Rp ${requestedAmount.toLocaleString('id-ID')}) melebihi sisa tagihan invoice (Rp ${remainingBalance.toLocaleString('id-ID')}).`,
         );
+      }
+
+      // Invariant 2: Procurement Schedule Integrity
+      // If invoice is bound to a Payment Term, requested amount must match the authoritative term amount
+      if (termEntity) {
+        const authorizedTermAmount = Math.round(Number(termEntity.amount) * 100) / 100;
+        if (Math.round(requestedAmount * 100) / 100 !== authorizedTermAmount) {
+          throw new BadRequestException(
+            `Nominal pengajuan pembayaran (Rp ${requestedAmount.toLocaleString('id-ID')}) tidak sesuai dengan nilai termin pembayaran Procurement (Rp ${authorizedTermAmount.toLocaleString('id-ID')}). Pengajuan sebagian di luar termin tidak diizinkan.`,
+          );
+        }
       }
 
       // 7. Generate PRQ Number: PRQ-YYYYMMDD-XXX
@@ -2514,8 +2599,8 @@ export class FinanceService {
         invoiceAmount: totalAmount,
         invoiceVersion: invoice.version || 1,
         invoiceUpdatedAt: invoice.updatedAt ? invoice.updatedAt.toISOString() : undefined,
-        paymentTermId: paymentTerm?.id ? Number(paymentTerm.id) : (dto.paymentTermId ? Number(dto.paymentTermId) : null),
-        paymentTermName: paymentTerm?.termName || null,
+        paymentTermId: termId,
+        paymentTermName: termEntity?.termName || paymentTerm?.termName || null,
         requestedAmount: requestedAmount,
         vendorId: vendor?.id ? Number(vendor.id) : null,
         vendorName: vendor?.name || null,
@@ -2532,9 +2617,7 @@ export class FinanceService {
       const prq = queryRunner.manager.create(PaymentRequest, {
         requestNumber,
         invoiceId: invoice.id,
-        paymentTermId: dto.paymentTermId
-          ? Number(dto.paymentTermId)
-          : (invoice.paymentTermId ? Number(invoice.paymentTermId) : null),
+        paymentTermId: termId,
         requestedAmount,
         status: PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL,
         requestedBy: userId,
@@ -2694,6 +2777,23 @@ export class FinanceService {
       const oldStatus = prq.status;
 
       if (dto.action === DirectorDecisionAction.APPROVE) {
+        if (dto.approvedAmount !== undefined && dto.approvedAmount !== null) {
+          const appAmt = Number(dto.approvedAmount);
+          if (isNaN(appAmt) || appAmt <= 0) {
+            throw new BadRequestException('Nominal persetujuan Direktur harus lebih besar dari 0.');
+          }
+          const reqAmt = Number(prq.requestedAmount);
+          if (Math.round(appAmt * 100) / 100 < Math.round(reqAmt * 100) / 100 - 0.001) {
+            throw new BadRequestException(
+              `Persetujuan pembayaran dengan nominal (Rp ${appAmt.toLocaleString('id-ID')}) lebih kecil dari jumlah yang diajukan (Rp ${reqAmt.toLocaleString('id-ID')}) tidak diizinkan. Direktur harus menggunakan aksi RETURN (Minta Revisi) jika nominal perlu disesuaikan melalui amandemen PO Procurement.`,
+            );
+          }
+          if (Math.round(appAmt * 100) / 100 > Math.round(reqAmt * 100) / 100 + 0.001) {
+            throw new BadRequestException(
+              `Nominal persetujuan Direktur (${appAmt}) melebihi jumlah yang diajukan (${reqAmt}).`,
+            );
+          }
+        }
         prq.status = PaymentRequestStatus.APPROVED_FOR_PAYMENT;
         prq.approvedBy = userId;
         prq.approvedAt = new Date();

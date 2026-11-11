@@ -105,6 +105,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     terms?: any[];
     multiPos?: any[];
     prStatus?: string;
+    paymentTermId?: number | null;
   }) => {
     const totalAmount = overrides?.totalAmount ?? 100000000;
     const poStatus = overrides?.poStatus ?? 'COMPLETED';
@@ -133,7 +134,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       id: 301,
       invoiceNumber: 'INV-P77-TEST',
       poId: mockPo.id,
-      paymentTermId: mockTerm.id,
+      paymentTermId: overrides?.paymentTermId !== undefined ? overrides.paymentTermId : mockTerm.id,
       totalAmount,
       matchStatus: 'VERIFIED',
       paymentStatus: 'UNPAID',
@@ -163,9 +164,10 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
         return found ? { ...found } : null;
       }
       if (entityClass === PoPaymentTerm) {
-        if (opts?.where?.id === mockTerm.id) return { ...mockTerm };
         const found = terms.find((t) => t.id === opts?.where?.id);
-        return found ? { ...found } : null;
+        if (found) return { ...found };
+        if (opts?.where?.id === mockTerm.id) return { ...mockTerm };
+        return null;
       }
       if (entityClass === PurchaseRequest) {
         return { ...mockPr };
@@ -188,6 +190,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
           invoiceId: mockInvoice.id,
           status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
           approvedBy: checkerId,
+          approvedAmount: 100000000,
           deletedAt: null,
         };
       }
@@ -253,7 +256,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
         return { id: 701, table_name: 'purchase_orders', record_id: 101, action: 'FINANCIAL_CLOSE' };
       }
       if (entityClass === Invoice) return { id: 301, poId: 101, paymentTermId: 201, totalAmount: 100, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
-      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, deletedAt: null };
+      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, approvedAmount: 100, deletedAt: null };
       if (entityClass === PurchaseOrder) return { id: 101, totalAmount: 100, status: 'COMPLETED', purchaseRequestId: 501 };
       if (entityClass === PoPaymentTerm) return { id: 201, poId: 101, amount: 100, status: PaymentTermStatus.VERIFIED };
       return null;
@@ -279,7 +282,9 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
   // P77-03: Partial payment does NOT close PO
   it('P77-03: should not trigger PO financial closure on partial payment', async () => {
-    setupDefaultEntities({ totalAmount: 100000000 });
+    const term1 = { id: 201, poId: 101, sequence: 1, amount: 60000000, status: PaymentTermStatus.VERIFIED };
+    const term2 = { id: 202, poId: 101, sequence: 2, amount: 40000000, status: PaymentTermStatus.PENDING };
+    setupDefaultEntities({ totalAmount: 100000000, terms: [term1, term2] });
 
     const dto = {
       invoiceId: 301,
@@ -301,13 +306,12 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
   // P77-04: One unpaid term prevents PO financial closure
   it('P77-04: should block PO closure if one of multiple payment terms remains unpaid', async () => {
-    const term1 = { id: 201, poId: 101, sequence: 1, amount: 60000000, status: PaymentTermStatus.PAID };
-    const term2 = { id: 202, poId: 101, sequence: 2, amount: 40000000, status: PaymentTermStatus.PENDING }; // Unpaid term!
+    const term1 = { id: 201, poId: 101, sequence: 1, amount: 40000000, status: PaymentTermStatus.VERIFIED };
+    const term2 = { id: 202, poId: 101, sequence: 2, amount: 60000000, status: PaymentTermStatus.PENDING }; // Unpaid term!
 
     setupDefaultEntities({
       totalAmount: 100000000,
       terms: [term1, term2],
-      existingPayments: [{ id: 1, invoiceId: 301, amount: 60000000, deletedAt: null }],
     });
 
     const dto = {
@@ -356,7 +360,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
   // P77-06: payment_processed contains authoritative amount & paymentAmount
   it('P77-06: should emit finance.payment_processed with both amount and paymentAmount', async () => {
-    setupDefaultEntities();
+    setupDefaultEntities({ totalAmount: 50000000 });
 
     const dto = {
       invoiceId: 301,
@@ -381,7 +385,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
   // P77-07: Maker CAN pay own term-based invoice if independently verified
   it('P77-07: should allow payment when actor is the invoice Maker (invoice.createdBy) but invoice is term-based and independently verified', async () => {
-    setupDefaultEntities({ makerId: MAKER_ID, checkerId: CHECKER_ID });
+    setupDefaultEntities({ makerId: MAKER_ID, checkerId: CHECKER_ID, totalAmount: 10000000 });
 
     const dto = {
       invoiceId: 301,
@@ -509,7 +513,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
   // P77-10: Independent Payer can perform partial payment
   it('P77-10: should allow independent payer to perform partial payment', async () => {
-    setupDefaultEntities({ totalAmount: 100000000 });
+    setupDefaultEntities({ totalAmount: 100000000, paymentTermId: null });
 
     const dto = {
       invoiceId: 301,
@@ -643,7 +647,13 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 0, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R1' }, INDEPENDENT_PAYER_ID),
     ).rejects.toThrow('Payment amount harus lebih besar dari 0');
 
-    // 2. Overpayment rejection
+    // 2. Overpayment rejection (approved amount is sufficient, but invoice balance is exceeded)
+    queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any) => {
+      if (entityClass === Invoice) return { id: 301, poId: 101, paymentTermId: 201, totalAmount: 100000000, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
+      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, approvedAmount: 200000000 };
+      if (entityClass === PurchaseOrder) return { id: 101, totalAmount: 200000000, status: 'COMPLETED' };
+      return null;
+    });
     await expect(
       service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 150000000, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R2' }, INDEPENDENT_PAYER_ID),
     ).rejects.toThrow('melebihi sisa tagihan invoice');
@@ -651,7 +661,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     // 3. Already paid rejection
     queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any) => {
       if (entityClass === Invoice) return { id: 301, paymentStatus: 'PAID', matchStatus: 'VERIFIED', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
-      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999 };
+      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, approvedAmount: 100000000 };
       return null;
     });
     await expect(

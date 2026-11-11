@@ -51,6 +51,7 @@ import {
 } from '@/services/project.service';
 import { useAuth } from '@/context/AuthContext';
 import { getPackageStatusTag } from '@/components/procurement/ProcurementPackageDetailDrawer';
+import styles from './PmProcurementPackageModal.module.css';
 
 const { Title, Text, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -551,15 +552,94 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
     },
   ];
 
+  const isServicePackage = (r: ProcurementPackage) =>
+    (r.items || []).some((i) =>
+      SERVICE_FAMILY_CATEGORIES.includes(i.costItem?.categoryKey || '')
+    );
+
+  const renderPackageActions = (r: ProcurementPackage) => (
+    <Space size={4} wrap>
+      {r.status === 'DRAFT' && (
+        <>
+          <Button size="small" icon={<EditOutlined />} onClick={() => handleOpenEditForm(r)}>
+            Ubah
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            icon={<SendOutlined />}
+            style={{ backgroundColor: '#2563eb' }}
+            onClick={() => handleSubmitPackage(r.id)}
+          >
+            Ajukan
+          </Button>
+          <Popconfirm title="Hapus draf paket ini?" onConfirm={() => handleDeleteDraft(r.id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </>
+      )}
+
+      {r.status === 'RETURNED' && (
+        <>
+          <Button size="small" icon={<EditOutlined />} onClick={() => handleOpenEditForm(r)}>
+            Revisi
+          </Button>
+          <Button
+            size="small"
+            type="primary"
+            icon={<SendOutlined />}
+            style={{ backgroundColor: '#059669', borderColor: '#059669' }}
+            onClick={() => handleResubmitPackage(r.id)}
+          >
+            Ajukan Ulang
+          </Button>
+          <Button size="small" danger onClick={() => handleCancelPackage(r.id)}>
+            Batal
+          </Button>
+        </>
+      )}
+
+      {r.status === 'SUBMITTED' && (
+        <Popconfirm title="Batalkan pengajuan paket ini?" onConfirm={() => handleCancelPackage(r.id)}>
+          <Button size="small" danger icon={<StopOutlined />}>
+            Batalkan
+          </Button>
+        </Popconfirm>
+      )}
+
+      {(r.status === 'PR_CREATED' || r.status === 'CLOSED') && (
+        <Tag color="green" style={{ fontWeight: 600 }}>
+          PR: {r.purchaseRequest?.prNumber || 'Diterbitkan'}
+        </Tag>
+      )}
+    </Space>
+  );
+
+  const renderEmptyPackageList = () => (
+    <Empty
+      image={Empty.PRESENTED_IMAGE_SIMPLE}
+      description={
+        <div style={{ padding: '16px 0' }}>
+          <div style={{ fontWeight: 600, color: '#475569' }}>
+            {isServiceMode
+              ? 'Belum ada paket pengadaan jasa untuk proyek ini'
+              : 'Belum ada paket pengadaan material untuk proyek ini'}
+          </div>
+          <Text type="secondary" style={{ fontSize: 11.5 }}>
+            Klik &ldquo;{isServiceMode ? 'Buat Pengadaan Jasa Baru' : 'Buat Paket Pengadaan Baru'}&rdquo; untuk memilih item dari RAB yang telah disetujui.
+          </Text>
+        </div>
+      }
+    />
+  );
+
   const packageListColumns = [
     {
       title: 'Nomor Paket',
       key: 'packageNumber',
       width: 180,
       render: (_: any, r: ProcurementPackage) => {
-        const isService = (r.items || []).some((i) =>
-          SERVICE_FAMILY_CATEGORIES.includes(i.costItem?.categoryKey || '')
-        );
+        const isService = isServicePackage(r);
         return (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -616,69 +696,16 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       key: 'action',
       width: 240,
       align: 'center' as const,
-      render: (_: any, r: ProcurementPackage) => (
-        <Space size={4} wrap>
-          {r.status === 'DRAFT' && (
-            <>
-              <Button size="small" icon={<EditOutlined />} onClick={() => handleOpenEditForm(r)}>
-                Ubah
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<SendOutlined />}
-                style={{ backgroundColor: '#2563eb' }}
-                onClick={() => handleSubmitPackage(r.id)}
-              >
-                Ajukan
-              </Button>
-              <Popconfirm title="Hapus draf paket ini?" onConfirm={() => handleDeleteDraft(r.id)}>
-                <Button size="small" danger icon={<DeleteOutlined />} />
-              </Popconfirm>
-            </>
-          )}
-
-          {r.status === 'RETURNED' && (
-            <>
-              <Button size="small" icon={<EditOutlined />} onClick={() => handleOpenEditForm(r)}>
-                Revisi
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<SendOutlined />}
-                style={{ backgroundColor: '#059669', borderColor: '#059669' }}
-                onClick={() => handleResubmitPackage(r.id)}
-              >
-                Ajukan Ulang
-              </Button>
-              <Button size="small" danger onClick={() => handleCancelPackage(r.id)}>
-                Batal
-              </Button>
-            </>
-          )}
-
-          {r.status === 'SUBMITTED' && (
-            <Popconfirm title="Batalkan pengajuan paket ini?" onConfirm={() => handleCancelPackage(r.id)}>
-              <Button size="small" danger icon={<StopOutlined />}>
-                Batalkan
-              </Button>
-            </Popconfirm>
-          )}
-
-          {(r.status === 'PR_CREATED' || r.status === 'CLOSED') && (
-            <Tag color="green" style={{ fontWeight: 600 }}>
-              PR: {r.purchaseRequest?.prNumber || 'Diterbitkan'}
-            </Tag>
-          )}
-        </Space>
-      ),
+      render: (_: any, r: ProcurementPackage) => renderPackageActions(r),
     },
   ];
+
+  const contractCode = project?.project_code || project?.code;
 
   return (
     <Modal
       open={open}
+      className={styles.modalRoot}
       onCancel={() => {
         if (viewMode === 'form') {
           setViewMode('list');
@@ -689,79 +716,162 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
       width="min(1200px, 95vw)"
       centered
       title={
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {isServiceMode ? (
-            <ToolOutlined style={{ color: '#7c3aed', fontSize: 18 }} />
-          ) : (
-            <ShoppingCartOutlined style={{ color: '#2563eb', fontSize: 18 }} />
-          )}
-          <span style={{ fontWeight: 700, fontSize: 16 }}>
-            {isServiceMode ? 'Pengadaan Jasa Proyek' : 'Paket Pengadaan Material Proyek'} — {project?.project_name || project?.name || `Proyek #${projectId}`}
-          </span>
-          {project?.project_code && (
-            <Tag color={isServiceMode ? 'purple' : 'blue'} style={{ fontFamily: 'monospace' }}>{project.project_code}</Tag>
-          )}
+        <div className={styles.modalHeader} data-testid="procurement-package-modal-header">
+          <div
+            className={`${styles.modalHeaderIcon} ${
+              isServiceMode ? styles.modalHeaderIconService : styles.modalHeaderIconMaterial
+            }`}
+          >
+            {isServiceMode ? (
+              <ToolOutlined style={{ color: '#7c3aed', fontSize: 18 }} />
+            ) : (
+              <ShoppingCartOutlined style={{ color: '#2563eb', fontSize: 18 }} />
+            )}
+          </div>
+          <div className={styles.modalHeaderContent}>
+            <div className={styles.modalHeaderTitleRow}>
+              <span className={styles.modalHeaderTitle} data-testid="procurement-package-modal-title">
+                {isServiceMode ? 'Pengadaan Jasa Proyek' : 'Paket Pengadaan Material Proyek'} — {project?.project_name || project?.name || `Proyek #${projectId}`}
+              </span>
+              {contractCode && (
+                <Tag
+                  color={isServiceMode ? 'purple' : 'blue'}
+                  className={styles.contractCodeBadge}
+                  data-testid="procurement-package-contract-badge"
+                >
+                  {contractCode}
+                </Tag>
+              )}
+            </div>
+          </div>
         </div>
       }
       footer={null}
     >
       {viewMode === 'list' ? (
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-            <div>
-              <Text strong style={{ fontSize: 13.5, color: '#0f172a' }}>
+          <div className={styles.listToolbarSection} data-testid="package-list-toolbar">
+            <div className={styles.descriptionSection} data-testid="package-list-description">
+              <Text strong className={styles.descriptionHeading}>
                 {isServiceMode
                   ? 'Daftar Paket Pengadaan Jasa (Service Procurement Packages)'
                   : 'Daftar Paket Pengadaan Material (Material Procurement Packages)'}
               </Text>
-              <div style={{ fontSize: 11.5, color: '#64748b' }}>
+              <div className={styles.descriptionText}>
                 {isServiceMode
                   ? 'Paket pengadaan jasa (Subkontraktor, Sewa Alat, Operasional) dibentuk dari item RAB yang disetujui, diajukan oleh PM, dan diproses oleh tim Procurement hingga penerbitan Service PO & SPK/WO.'
                   : 'Paket pengadaan material dibentuk dari item RAB yang disetujui, diajukan oleh PM, dan diproses oleh tim Procurement hingga penerbitan PO Material & Goods Receipt.'}
               </div>
             </div>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={handleOpenCreateForm}
-              style={{ backgroundColor: isServiceMode ? '#7c3aed' : '#2563eb', borderColor: isServiceMode ? '#7c3aed' : '#2563eb', fontWeight: 600 }}
-            >
-              {isServiceMode ? 'Buat Pengadaan Jasa Baru' : 'Buat Paket Pengadaan Baru'}
-            </Button>
+            <div className={styles.primaryActionRow} data-testid="package-list-action-row">
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={handleOpenCreateForm}
+                className={styles.primaryCreateBtn}
+                style={{
+                  backgroundColor: isServiceMode ? '#7c3aed' : '#2563eb',
+                  borderColor: isServiceMode ? '#7c3aed' : '#2563eb',
+                  fontWeight: 600,
+                }}
+              >
+                {isServiceMode ? 'Buat Pengadaan Jasa Baru' : 'Buat Paket Pengadaan Baru'}
+              </Button>
+            </div>
           </div>
 
-          <Table
-            size="small"
-            columns={packageListColumns}
-            dataSource={displayedPackages}
-            rowKey="id"
-            loading={loadingPackages}
-            pagination={false}
-            locale={{
-              emptyText: (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={
-                    <div style={{ padding: '16px 0' }}>
-                      <div style={{ fontWeight: 600, color: '#475569' }}>
-                        {isServiceMode
-                          ? 'Belum ada paket pengadaan jasa untuk proyek ini'
-                          : 'Belum ada paket pengadaan material untuk proyek ini'}
+          <div className={styles.desktopTableWrapper} data-testid="package-list-desktop-table">
+            <Table
+              size="small"
+              columns={packageListColumns}
+              dataSource={displayedPackages}
+              rowKey="id"
+              loading={loadingPackages}
+              pagination={false}
+              locale={{
+                emptyText: renderEmptyPackageList(),
+              }}
+            />
+          </div>
+
+          <div className={styles.mobileCardsWrapper} data-testid="package-list-mobile-cards">
+            {loadingPackages ? (
+              <div className={styles.mobileEmptyCard}>
+                <Spin tip="Memuat daftar paket..." />
+              </div>
+            ) : displayedPackages.length === 0 ? (
+              <div className={styles.mobileEmptyCard}>
+                {renderEmptyPackageList()}
+              </div>
+            ) : (
+              displayedPackages.map((r) => {
+                const isService = isServicePackage(r);
+                return (
+                  <div
+                    key={r.id}
+                    className={styles.mobilePackageCard}
+                    data-testid={`mobile-package-card-${r.id}`}
+                  >
+                    <div className={styles.mobileCardTopRow}>
+                      <div className={styles.mobileCardCodeGroup}>
+                        <span className={styles.mobileCardPackageNumber}>{r.packageNumber}</span>
+                        <Tag
+                          color={isService ? 'purple' : 'cyan'}
+                          style={{ fontSize: 10, lineHeight: '16px', margin: 0, fontWeight: 700 }}
+                        >
+                          {isService ? 'JASA' : 'MATERIAL'}
+                        </Tag>
                       </div>
-                      <Text type="secondary" style={{ fontSize: 11.5 }}>
-                        Klik &ldquo;{isServiceMode ? 'Buat Pengadaan Jasa Baru' : 'Buat Paket Pengadaan Baru'}&rdquo; untuk memilih item dari RAB yang telah disetujui.
-                      </Text>
+                      <div className={styles.mobileCardStatusWrap}>
+                        {getPackageStatusTag(r.status)}
+                      </div>
                     </div>
-                  }
-                />
-              ),
-            }}
-          />
+
+                    <div className={styles.mobileCardBodySection}>
+                      <span className={styles.mobileCardFieldLabel}>Nama / Keterangan Paket</span>
+                      <div className={styles.mobileCardTitle}>{r.title}</div>
+                      {r.description && (
+                        <div className={styles.mobileCardDescription}>{r.description}</div>
+                      )}
+                    </div>
+
+                    <div className={styles.mobileCardSpecsGrid}>
+                      <div className={styles.mobileCardSpecItem}>
+                        <span className={styles.mobileCardFieldLabel}>Kebutuhan / Spesifikasi</span>
+                        <span className={styles.mobileCardSpecValue}>
+                          {r.requiredDate ? dayjs(r.requiredDate).format('DD MMM YYYY') : '—'}
+                        </span>
+                      </div>
+                      <div className={styles.mobileCardSpecItem}>
+                        <span className={styles.mobileCardFieldLabel}>Item</span>
+                        <div>
+                          <Tag color="blue" style={{ margin: 0, fontWeight: 600 }}>
+                            {(r.items || []).length} Item
+                          </Tag>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className={styles.mobileCardTotalRow}>
+                      <span className={styles.mobileCardFieldLabel}>Total Estimasi</span>
+                      <span className={styles.mobileCardTotalValue}>
+                        Rp {Number(r.totalEstimatedAmount || 0).toLocaleString('id-ID')}
+                      </span>
+                    </div>
+
+                    <div className={styles.mobileCardActionsRow}>
+                      {renderPackageActions(r)}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
         </div>
       ) : (
         <div>
           {/* Form Create / Edit */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div className={styles.formHeaderRow}>
             <Title level={5} style={{ margin: 0 }}>
               {editingPackage
                 ? `Ubah / Revisi ${isServiceMode ? 'Pengadaan Jasa' : 'Paket'} ${editingPackage.packageNumber}`
@@ -784,7 +894,7 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
           )}
 
           <Form form={form} layout="vertical">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+            <div className={styles.formTopGrid}>
               <Form.Item
                 label={`Judul ${isServiceMode ? 'Pengadaan Jasa' : 'Paket Pengadaan'}`}
                 name="title"
@@ -815,7 +925,7 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
 
             <Divider style={{ margin: '12px 0' }} />
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div className={styles.costItemHeaderRow}>
               <div>
                 <Text strong style={{ fontSize: 13, color: '#0f172a' }}>
                   {isServiceMode
@@ -846,44 +956,46 @@ export const PmProcurementPackageModal: React.FC<PmProcurementPackageModalProps>
             <Checkbox checked={showAllocatedItems} onChange={event => setShowAllocatedItems(event.target.checked)} style={{ marginBottom: 8 }}>
               Tampilkan item sudah dialokasikan
             </Checkbox>
-            <Table
-              size="small"
-              columns={costItemColumns}
-              dataSource={eligibleCostItems}
-              rowKey="id"
-              loading={loadingAvailability}
-              locale={{
-                emptyText:
-                  !isServiceMode && hasDirectMaterial && eligibleCostItems.length === 0
-                    ? 'Material belum dirinci dan belum dapat dimasukkan ke Paket Pengadaan.'
-                    : isServiceMode
-                    ? 'Tidak ada item RAB jasa (Subkontraktor/Alat/Operasional) dengan sisa kuota pengadaan.'
-                    : 'Tidak ada item RAB dengan sisa kuota pengadaan.',
-              }}
-              pagination={false}
-              scroll={{ x: 1100, y: 260 }}
-              rowSelection={{
-                selectedRowKeys: selectedCostItemIds,
-                getCheckboxProps: (record) => ({ disabled: record.availableQty <= 0 && !selectedCostItemIds.includes(record.id) }),
-                onChange: (selectedKeys) => {
-                  setSelectedCostItemIds(selectedKeys);
-                  // Initialize default quantity if not set
-                  setQuantitiesMap((prev) => {
-                    const next = { ...prev };
-                    selectedKeys.forEach((key) => {
-                      const id = Number(key);
-                      if (next[id] === undefined) {
-                        const it = eligibleCostItems.find((ci) => ci.id === id);
-                        next[id] = Number(it?.availableQty || 0);
-                      }
+            <div className={styles.tableScrollWrapper}>
+              <Table
+                size="small"
+                columns={costItemColumns}
+                dataSource={eligibleCostItems}
+                rowKey="id"
+                loading={loadingAvailability}
+                locale={{
+                  emptyText:
+                    !isServiceMode && hasDirectMaterial && eligibleCostItems.length === 0
+                      ? 'Material belum dirinci dan belum dapat dimasukkan ke Paket Pengadaan.'
+                      : isServiceMode
+                      ? 'Tidak ada item RAB jasa (Subkontraktor/Alat/Operasional) dengan sisa kuota pengadaan.'
+                      : 'Tidak ada item RAB dengan sisa kuota pengadaan.',
+                }}
+                pagination={false}
+                scroll={{ x: 1100, y: 260 }}
+                rowSelection={{
+                  selectedRowKeys: selectedCostItemIds,
+                  getCheckboxProps: (record) => ({ disabled: record.availableQty <= 0 && !selectedCostItemIds.includes(record.id) }),
+                  onChange: (selectedKeys) => {
+                    setSelectedCostItemIds(selectedKeys);
+                    // Initialize default quantity if not set
+                    setQuantitiesMap((prev) => {
+                      const next = { ...prev };
+                      selectedKeys.forEach((key) => {
+                        const id = Number(key);
+                        if (next[id] === undefined) {
+                          const it = eligibleCostItems.find((ci) => ci.id === id);
+                          next[id] = Number(it?.availableQty || 0);
+                        }
+                      });
+                      return next;
                     });
-                    return next;
-                  });
-                },
-              }}
-            />
+                  },
+                }}
+              />
+            </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+            <div className={styles.formFooterActions}>
               <Button onClick={() => setViewMode('list')}>Batal</Button>
               <Button disabled={availabilityError || loadingAvailability} loading={submitting} onClick={() => handleSavePackage(false)}>
                 Simpan Draf

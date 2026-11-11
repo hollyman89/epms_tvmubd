@@ -166,18 +166,25 @@ describe('EPMS UBD & TVM — PWA Branding Implementation Suite', () => {
       expect(protectedRouteContent).not.toContain('setTimeout');
     });
 
-    it('ensures LoginPage renders neutral session loader during initial loading and branded initializing screen only when confirmed authenticated', () => {
+    it('ensures LoginPage never renders EpmsWelcomeScreen, renders login form immediately when unauthenticated, and consolidates post-login navigation with localized button loading', () => {
       const loginPageContent = fs.readFileSync(loginPagePath, 'utf8');
 
-      // Initial loading state uses neutral Spin loader on #f8fafc canvas
+      // LoginPage must never import or render EpmsWelcomeScreen in any mode
+      expect(loginPageContent).not.toContain('EpmsWelcomeScreen');
+      expect(loginPageContent).not.toContain('mode="welcome"');
+      expect(loginPageContent).not.toContain('mode="initializing"');
+      expect(loginPageContent).not.toContain('router.push(');
+
+      // Preserves minimal neutral redirect loader only for stored session restoration or already-authenticated direct visit
       expect(loginPageContent).toContain('data-testid="login-session-loader"');
       expect(loginPageContent).toContain('Memverifikasi sesi...');
-      expect(loginPageContent).not.toContain('mode="welcome"');
+      expect(loginPageContent).toContain('hasStoredSession');
+      expect(loginPageContent).toContain('shouldShowSessionRedirectState');
 
-      // Confirmed authenticated user redirecting to workspace retains branded initializing screen
-      expect(loginPageContent).toContain('EpmsWelcomeScreen');
-      expect(loginPageContent).toContain('mode="initializing"');
-      expect(loginPageContent).toContain('Menyiapkan workspace...');
+      // Prevents duplicate navigation during active submission and keeps loading localized on Sign In button
+      expect(loginPageContent).toContain('isSubmittingRef');
+      expect(loginPageContent).toContain('!isSubmittingRef.current');
+      expect(loginPageContent).toContain('router.replace(targetRoute)');
     });
   });
 });

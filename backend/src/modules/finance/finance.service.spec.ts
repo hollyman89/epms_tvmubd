@@ -12,6 +12,7 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { MismatchCode } from './finance.types';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { PaymentRequest, PaymentRequestStatus } from '../../entities/payment-request.entity';
+import { DirectorDecisionAction } from './dto/decide-payment-request.dto';
 
 describe('FinanceService', () => {
   let service: FinanceService;
@@ -635,9 +636,11 @@ describe('FinanceService', () => {
       const resolvedPrq = paymentRequest !== null ? paymentRequest : {
         id: 100,
         invoiceId: invoice.id || 1,
+        paymentTermId: invoice.paymentTermId ?? null,
         status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
         approvedBy: 999, // Checker is different from maker (10)
-        requestedAmount: 50,
+        requestedAmount: Math.max(100479990, Number(invoice.totalAmount || 0)),
+        approvedAmount: Math.max(100479990, Number(invoice.totalAmount || 0)),
         deletedAt: null,
       };
 
@@ -855,6 +858,7 @@ describe('FinanceService', () => {
           invoiceId: inv.id,
           status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
           approvedBy: 2,
+          approvedAmount: 100,
         };
         setupPaymentMocks({ invoice: inv, paymentRequest: prqApproved });
         const result = await service.createPayment(makeDto({ paymentAmount: 100 }), 3);
@@ -862,6 +866,624 @@ describe('FinanceService', () => {
         expect(prqApproved.status).toBe(PaymentRequestStatus.PAID);
         expect(inv.paymentStatus).toBe('PAID');
         expect(mockQueryRunner.commitTransaction).toHaveBeenCalled();
+      });
+    });
+
+    describe('CRIT-01: Director-Approved Payment Ceiling Enforcement', () => {
+      it('CRIT01-01: Payment amount equals approved amount -> PASS', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 100 };
+        const prq = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 70,
+          approvedAmount: 70,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq });
+        const result = await service.createPayment(makeDto({ paymentAmount: 70, paymentRequestId: 101 }), 3);
+        expect(result.paymentNumber).toBeDefined();
+        expect(prq.status).toBe(PaymentRequestStatus.PAID);
+        expect(inv.paymentStatus).toBe('PARTIALLY_PAID');
+      });
+
+      it('CRIT01-02: Payment amount exceeds approved amount -> REJECT', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 100 };
+        const prq = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 100,
+          approvedAmount: 70, // Director reduced to 70M
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq });
+        await expect(service.createPayment(makeDto({ paymentAmount: 100, paymentRequestId: 101 }), 3)).rejects.toThrow(
+          'Payment amount (100) melebihi nominal yang disetujui Direktur (70)'
+        );
+      });
+
+      it('CRIT01-03: Payment amount is below approved amount -> PASS, subject to existing rules', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 100 };
+        const prq = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 70,
+          approvedAmount: 70,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq });
+        const result = await service.createPayment(makeDto({ paymentAmount: 50, paymentRequestId: 101 }), 3);
+        expect(result.paymentNumber).toBeDefined();
+        expect(prq.status).toBe(PaymentRequestStatus.PAID);
+        expect(inv.paymentStatus).toBe('PARTIALLY_PAID');
+      });
+
+      it('CRIT01-04: Payment amount exceeds remaining Invoice balance -> REJECT', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'PARTIALLY_PAID', totalAmount: 100 };
+        const existingPayments = [{ id: 1, invoiceId: inv.id, amount: 80, deletedAt: null }];
+        const prq = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 30,
+          approvedAmount: 30, // Approved is 30, but remaining invoice balance is only 20
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq, existingPayments });
+        await expect(service.createPayment(makeDto({ paymentAmount: 25, paymentRequestId: 101 }), 3)).rejects.toThrow(
+          'Payment amount (25) melebihi sisa tagihan invoice (20)'
+        );
+      });
+
+      it('CRIT01-05: Approved amount is null or invalid -> REJECT', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 100 };
+        const prqNull = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          approvedAmount: null,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqNull });
+        await expect(service.createPayment(makeDto({ paymentAmount: 50, paymentRequestId: 101 }), 3)).rejects.toThrow(
+          'Nominal persetujuan Direktur (approvedAmount) tidak valid pada Payment Request ini.'
+        );
+
+        const prqZero = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          approvedAmount: 0,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqZero });
+        await expect(service.createPayment(makeDto({ paymentAmount: 50, paymentRequestId: 101 }), 3)).rejects.toThrow(
+          'Nominal persetujuan Direktur (approvedAmount) tidak valid pada Payment Request ini.'
+        );
+      });
+
+      it('CRIT01-06: PaymentRequest already PAID -> REJECT', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'PARTIALLY_PAID', totalAmount: 100 };
+        const prqPaid = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.PAID,
+          approvedBy: 2,
+          approvedAmount: 50,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqPaid });
+        await expect(service.createPayment(makeDto({ paymentAmount: 50, paymentRequestId: 101 }), 3)).rejects.toThrow(
+          'Pembayaran ditolak: Payment Request sudah dibayar (PAID).'
+        );
+      });
+
+      it('CRIT01-07: PaymentRequest not approved -> REJECT', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 100 };
+        const prqPending = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL,
+          approvedBy: null,
+          approvedAmount: null,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prqPending });
+        await expect(service.createPayment(makeDto({ paymentAmount: 50, paymentRequestId: 101 }), 3)).rejects.toThrow(
+          'Pembayaran ditolak: Payment Request belum disetujui oleh Direktur (APPROVED_FOR_PAYMENT).'
+        );
+      });
+
+      it('CRIT01-08: Director attempts to execute own approved request -> REJECT under existing SoD', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 100 };
+        const prq = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2, // Director ID = 2
+          approvedAmount: 70,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq });
+        await expect(service.createPayment(makeDto({ paymentAmount: 70, paymentRequestId: 101 }), 2)).rejects.toThrow(
+          'Prinsip Segregation of Duties (SoD) melarang penyetuju Payment Request (Checker/Direktur) mengeksekusi pembayaran.'
+        );
+      });
+
+      it('CRIT01-09: First partial Invoice payment is completed -> PASS', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 100 };
+        const prq1 = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 70,
+          approvedAmount: 70,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq1 });
+        const result = await service.createPayment(makeDto({ paymentAmount: 70, paymentRequestId: 101 }), 3);
+        expect(result.paymentNumber).toBeDefined();
+        expect(prq1.status).toBe(PaymentRequestStatus.PAID);
+        expect(inv.paymentStatus).toBe('PARTIALLY_PAID');
+      });
+
+      it('CRIT01-10: New PaymentRequest submitted for remaining Invoice balance -> PASS', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'PARTIALLY_PAID', totalAmount: 100 };
+        const existingPayments = [{ id: 1, invoiceId: inv.id, amount: 70, deletedAt: null }];
+
+        mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
+          if (entityClass === Invoice) return inv;
+          if (entityClass === PaymentRequest) return null;
+          return null;
+        });
+        mockQueryRunner.manager.find.mockImplementation(async (entityClass: any) => {
+          if (entityClass === Payment) return existingPayments;
+          return [];
+        });
+        mockQueryRunner.manager.createQueryBuilder = jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnThis(),
+          getCount: jest.fn().mockResolvedValue(0),
+        });
+        mockQueryRunner.manager.create.mockImplementation((entityClass: any, data: any) => data);
+        mockQueryRunner.manager.save.mockImplementation(async (entityClass: any, data: any) => ({ id: 102, ...data }));
+        jest.spyOn(service, 'getPaymentRequestById').mockResolvedValue({
+          id: 102,
+          invoiceId: 1,
+          requestedAmount: 30,
+          status: PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL,
+        } as any);
+
+        const submitDto = { invoiceId: 1, requestedAmount: 30 };
+        const newPrq = await service.submitPaymentRequest(submitDto, 3);
+        expect(newPrq).toBeDefined();
+        expect(newPrq.requestedAmount).toBe(30);
+        expect(newPrq.status).toBe(PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL);
+      });
+
+      it('CRIT01-11: Second PaymentRequest approved and executed -> PASS', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'PARTIALLY_PAID', totalAmount: 100 };
+        const existingPayments = [{ id: 1, invoiceId: inv.id, amount: 70, deletedAt: null }];
+        const prq2 = {
+          id: 102,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 30,
+          approvedAmount: 30,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq2, existingPayments });
+        const result = await service.createPayment(makeDto({ paymentAmount: 30, paymentRequestId: 102 }), 3);
+        expect(result.paymentNumber).toBeDefined();
+        expect(prq2.status).toBe(PaymentRequestStatus.PAID);
+        expect(inv.paymentStatus).toBe('PAID');
+      });
+
+      it('CRIT01-12: Concurrent execution of the same PaymentRequest -> Only one execution succeeds', async () => {
+        const inv = { ...defaultInvoice, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 100 };
+        const prq = {
+          id: 101,
+          invoiceId: inv.id,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 70,
+          approvedAmount: 70,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq });
+
+        const result1 = await service.createPayment(makeDto({ paymentAmount: 70, paymentRequestId: 101 }), 3);
+        expect(result1).toBeDefined();
+        expect(prq.status).toBe(PaymentRequestStatus.PAID);
+
+        await expect(service.createPayment(makeDto({ paymentAmount: 70, paymentRequestId: 101 }), 3)).rejects.toThrow(
+          'Pembayaran ditolak: Payment Request sudah dibayar (PAID).'
+        );
+      });
+    });
+
+    describe('Payment Term Integrity Enforcement (Invariants 1-5 & Procurement Integration)', () => {
+      // 1. Valid payment matching the Procurement Payment Term
+      it('SCENARIO-01: Valid payment matching Procurement Payment Term -> PASS', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const term = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14397000,
+          approvedAmount: 14397000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prq });
+        const result = await service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14397000 }), 3);
+        expect(result.paymentNumber).toBeDefined();
+        expect(prq.status).toBe(PaymentRequestStatus.PAID);
+        expect(inv.paymentStatus).toBe('PAID');
+        expect(term.status).toBe(PaymentTermStatus.PAID);
+      });
+
+      // 2. Payment Request referencing a different term from its Invoice
+      it('SCENARIO-02: Payment Request referencing a different term from Invoice -> REJECT', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const term = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prqMismatchTerm = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 999, // Mismatched paymentTermId
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14397000,
+          approvedAmount: 14397000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prqMismatchTerm });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14397000 }), 3)
+        ).rejects.toThrow('Payment Request tidak sesuai dengan payment term pada invoice.');
+      });
+
+      // 3. Payment Term belonging to a different PO
+      it('SCENARIO-03: Payment Term belonging to a different PO -> REJECT', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const termWrongPo = { id: 201, poId: 999, amount: 14397000, status: PaymentTermStatus.VERIFIED }; // PO mismatch
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14397000,
+          approvedAmount: 14397000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: termWrongPo, paymentRequest: prq });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14397000 }), 3)
+        ).rejects.toThrow('Payment term bukan milik Purchase Order dari invoice ini.');
+      });
+
+      // 4. Requested amount inconsistent with Payment Term in submitPaymentRequest
+      it('SCENARIO-04: submitPaymentRequest with requestedAmount inconsistent with Payment Term -> REJECT', async () => {
+        const inv = {
+          id: 10,
+          poId: 5,
+          invoiceNumber: 'INV-001',
+          paymentTermId: 201,
+          matchStatus: 'VERIFIED',
+          paymentStatus: 'UNPAID',
+          totalAmount: 14397000,
+          purchaseOrder: { id: 5, poNumber: 'PO-001', vendor: { id: 1, name: 'Vendor' } },
+          paymentTerm: { id: 201, poId: 5, amount: 14397000, termName: 'Pelunasan 100%' },
+        };
+        mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
+          if (entityClass === Invoice) return inv;
+          if (entityClass === PaymentRequest) return null; // no active request
+          if (entityClass === PoPaymentTerm) return inv.paymentTerm;
+          return null;
+        });
+        mockQueryRunner.manager.find.mockResolvedValue([]); // no prior payments
+
+        // Attempting to submit 14,000,000 instead of authoritative term 14,397,000
+        await expect(
+          service.submitPaymentRequest(
+            { invoiceId: 10, requestedAmount: 14000000 },
+            5
+          )
+        ).rejects.toThrow(
+          'Nominal pengajuan pembayaran (Rp 14.000.000) tidak sesuai dengan nilai termin pembayaran Procurement (Rp 14.397.000). Pengajuan sebagian di luar termin tidak diizinkan.'
+        );
+      });
+
+      // 5. Finance attempting arbitrary underpayment against a single full-payment term in createPayment
+      it('SCENARIO-05: Finance arbitrary underpayment against full-payment term (e.g. 14M vs 14.397M) -> REJECT', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const term = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14397000,
+          approvedAmount: 14397000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prq });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14000000 }), 3)
+        ).rejects.toThrow(
+          'Payment amount (14000000) harus sesuai dengan nilai termin pembayaran Procurement (14397000). Pembayaran dengan nominal berbeda dari jadwal termin Procurement tidak diizinkan.'
+        );
+      });
+
+      it('SCENARIO-05B: Term Rp14,397,000; approved Rp10,000,000; payment Rp10,000,000 -> must not execute', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const term = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14397000,
+          approvedAmount: 10000000, // Reduced Director approval
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prq });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 10000000 }), 3)
+        ).rejects.toThrow(
+          'Payment amount (10000000) harus sesuai dengan nilai termin pembayaran Procurement (14397000). Pembayaran dengan nominal berbeda dari jadwal termin Procurement tidak diizinkan.'
+        );
+      });
+
+      // 6. Payment exceeding Director-approved amount (CRIT-01 preserved)
+      it('SCENARIO-06: Payment exceeding Director-approved amount -> REJECT', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const term = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 10000000,
+          approvedAmount: 10000000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prq });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14397000 }), 3)
+        ).rejects.toThrow('melebihi nominal yang disetujui Direktur');
+      });
+
+      // 7. Payment exceeding Invoice outstanding balance
+      it('SCENARIO-07: Payment exceeding Invoice outstanding balance -> REJECT', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'PARTIALLY_PAID', totalAmount: 100 };
+        const term = { id: 201, poId: 5, amount: 100, status: PaymentTermStatus.VERIFIED };
+        const existingPayments = [{ id: 1, invoiceId: 10, amount: 80, deletedAt: null }];
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 50,
+          approvedAmount: 50,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prq, existingPayments });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 25 }), 3)
+        ).rejects.toThrow('melebihi sisa tagihan invoice');
+      });
+
+      // 8. Payment against an already completed term
+      it('SCENARIO-08: Payment against an already completed term (status PAID) -> REJECT', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const termPaid = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.PAID };
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14397000,
+          approvedAmount: 14397000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: termPaid, paymentRequest: prq });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14397000 }), 3)
+        ).rejects.toThrow('Payment term sudah lunas (PAID)');
+      });
+
+      // 9. Duplicate Payment Request execution
+      it('SCENARIO-09: Duplicate Payment Request execution -> REJECT', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const term = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prqAlreadyPaid = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.PAID, // already paid
+          approvedBy: 2,
+          requestedAmount: 14397000,
+          approvedAmount: 14397000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prqAlreadyPaid });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14397000 }), 3)
+        ).rejects.toThrow('Pembayaran ditolak: Payment Request sudah dibayar (PAID).');
+      });
+
+      // 10. Concurrent execution and locking behavior
+      it('SCENARIO-10: Payment execution employs pessimistic write locks on Invoice and PaymentTerm', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const term = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14397000,
+          approvedAmount: 14397000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prq });
+        await service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14397000 }), 3);
+
+        // Verify pessimistic_write locks on Invoice, PaymentRequest, and PoPaymentTerm
+        const findOneCalls = mockQueryRunner.manager.findOne.mock.calls;
+        const invoiceLock = findOneCalls.find((call: any) => call[0] === Invoice && call[1]?.lock?.mode === 'pessimistic_write');
+        const prqLock = findOneCalls.find((call: any) => call[0] === PaymentRequest && call[1]?.lock?.mode === 'pessimistic_write');
+        const termLock = findOneCalls.find((call: any) => call[0] === PoPaymentTerm && call[1]?.lock?.mode === 'pessimistic_write');
+
+        expect(invoiceLock).toBeDefined();
+        expect(prqLock).toBeDefined();
+        expect(termLock).toBeDefined();
+      });
+
+      // 11. Multiple Procurement-defined terms in one PO
+      it('SCENARIO-11: Multiple Procurement-defined terms in one PO (e.g. DP 30% followed by Final 70%) execute independently', async () => {
+        const po = { id: 5, poNumber: 'PO-MULTI', totalAmount: 100000000, deletedAt: null };
+        // Term 1: DP 30%
+        const inv1 = { ...defaultInvoice, id: 101, poId: 5, paymentTermId: 11, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 30000000 };
+        const term1 = { id: 11, poId: 5, amount: 30000000, status: PaymentTermStatus.VERIFIED };
+        const prq1 = {
+          id: 201,
+          invoiceId: 101,
+          paymentTermId: 11,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 30000000,
+          approvedAmount: 30000000,
+        };
+        setupPaymentMocks({ invoice: inv1, po, paymentTerm: term1, paymentRequest: prq1 });
+        const res1 = await service.createPayment(makeDto({ invoiceId: 101, paymentRequestId: 201, paymentAmount: 30000000 }), 3);
+        expect(res1.paymentNumber).toBeDefined();
+        expect(inv1.paymentStatus).toBe('PAID');
+        expect(term1.status).toBe(PaymentTermStatus.PAID);
+        expect(prq1.status).toBe(PaymentRequestStatus.PAID);
+
+        // Term 2: Final 70%
+        const inv2 = { ...defaultInvoice, id: 102, poId: 5, paymentTermId: 12, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 70000000 };
+        const term2 = { id: 12, poId: 5, amount: 70000000, status: PaymentTermStatus.VERIFIED };
+        const prq2 = {
+          id: 202,
+          invoiceId: 102,
+          paymentTermId: 12,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 70000000,
+          approvedAmount: 70000000,
+        };
+        const existingPoPayments = [{ id: 1, invoiceId: 101, amount: 30000000, deletedAt: null }];
+        setupPaymentMocks({ invoice: inv2, po, paymentTerm: term2, paymentRequest: prq2, existingPoPayments });
+        const res2 = await service.createPayment(makeDto({ invoiceId: 102, paymentRequestId: 202, paymentAmount: 70000000 }), 3);
+        expect(res2.paymentNumber).toBeDefined();
+        expect(inv2.paymentStatus).toBe('PAID');
+        expect(term2.status).toBe(PaymentTermStatus.PAID);
+        expect(prq2.status).toBe(PaymentRequestStatus.PAID);
+      });
+
+      // 12. Payment Request, Invoice, Payment, and Payment Term status consistency
+      it('SCENARIO-12: Full payment execution transitions all entities consistently (PRQ=PAID, Invoice=PAID, Term=PAID, Payment recorded)', async () => {
+        const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const term = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14397000,
+          approvedAmount: 14397000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prq });
+        const result = await service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14397000 }), 3);
+
+        expect(result.paymentNumber).toBeDefined();
+        expect(result.amount).toBe(14397000);
+        expect((result as any).paymentStatus).toBe('PAID');
+        expect((result as any).isFullyPaid).toBe(true);
+        expect(prq.status).toBe(PaymentRequestStatus.PAID);
+        expect(inv.paymentStatus).toBe('PAID');
+        expect(term.status).toBe(PaymentTermStatus.PAID);
+      });
+
+      // 13. Director approval validation: cannot approve less or more than requested amount, RETURN remains available
+      it('SCENARIO-13: Term Rp14,397,000; Director attempts reduced approval Rp10,000,000 -> APPROVE rejected; RETURN remains available', async () => {
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          status: PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL,
+          requestedAmount: 14397000,
+        };
+        mockQueryRunner.manager.findOne.mockResolvedValue(prq);
+        mockQueryRunner.manager.save.mockImplementation(async (a: any, b: any) => {
+          const ent = b || a;
+          return { ...ent, id: ent?.id || 501 };
+        });
+        jest.spyOn(service, 'getPaymentRequestById').mockImplementation(async () => prq as any);
+
+        // A. APPROVE with reduced amount 10,000,000 -> REJECT
+        await expect(
+          service.decidePaymentRequest(
+            501,
+            { action: DirectorDecisionAction.APPROVE, approvedAmount: 10000000 },
+            2
+          )
+        ).rejects.toThrow(
+          'Persetujuan pembayaran dengan nominal (Rp 10.000.000) lebih kecil dari jumlah yang diajukan (Rp 14.397.000) tidak diizinkan. Direktur harus menggunakan aksi RETURN (Minta Revisi) jika nominal perlu disesuaikan melalui amandemen PO Procurement.'
+        );
+
+        // B. APPROVE with amount > requested -> REJECT
+        await expect(
+          service.decidePaymentRequest(
+            501,
+            { action: DirectorDecisionAction.APPROVE, approvedAmount: 20000000 },
+            2
+          )
+        ).rejects.toThrow('Nominal persetujuan Direktur (20000000) melebihi jumlah yang diajukan (14397000)');
+
+        // C. RETURN (Minta Revisi) remains available for Director to request commercial schedule revision
+        const returnResult = await service.decidePaymentRequest(
+          501,
+          { action: DirectorDecisionAction.RETURN, revisionNotes: 'Mohon sesuaikan nominal termin melalui amandemen PO Procurement' },
+          2
+        );
+        expect(returnResult.status).toBe(PaymentRequestStatus.NEEDS_REVISION);
+        expect(returnResult.revisionNotes).toBe('Mohon sesuaikan nominal termin melalui amandemen PO Procurement');
+      });
+
+      // 14. A residual Payment Request must not bypass the original full-payment term
+      it('SCENARIO-14: A residual Payment Request must not bypass original full-payment term after earlier underpayment', async () => {
+        const inv = {
+          id: 10,
+          poId: 5,
+          invoiceNumber: 'INV-001',
+          paymentTermId: 201,
+          matchStatus: 'VERIFIED',
+          paymentStatus: 'PARTIALLY_PAID',
+          totalAmount: 14397000,
+          purchaseOrder: { id: 5, poNumber: 'PO-001', vendor: { id: 1, name: 'Vendor' } },
+          paymentTerm: { id: 201, poId: 5, amount: 14397000, termName: 'Pelunasan 100%' },
+        };
+        const priorPayments = [{ id: 1, invoiceId: 10, amount: 14000000, deletedAt: null }];
+
+        mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
+          if (entityClass === Invoice) return inv;
+          if (entityClass === PaymentRequest) return null; // no active request
+          if (entityClass === PoPaymentTerm) return inv.paymentTerm;
+          return null;
+        });
+        mockQueryRunner.manager.find.mockImplementation(async (entityClass: any) => {
+          if (entityClass === Payment) return priorPayments;
+          return [];
+        });
+
+        // Finance attempts to submit residual PRQ for Rp 397,000
+        await expect(
+          service.submitPaymentRequest(
+            { invoiceId: 10, requestedAmount: 397000 },
+            5
+          )
+        ).rejects.toThrow(
+          'Invoice termin ini telah memiliki pembayaran sebelumnya (Rp 14.000.000). Termin pembayaran Procurement tidak dapat dipecah menjadi cicilan tambahan tanpa amandemen PO Procurement.'
+        );
       });
     });
 
@@ -1111,6 +1733,7 @@ describe('FinanceService', () => {
             invoiceId: defaultInvoice.id,
             status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
             approvedBy: 999,
+            approvedAmount: 100,
             deletedAt: null,
           };
         }
@@ -1245,6 +1868,7 @@ describe('FinanceService', () => {
             invoiceId: mockInvoice.id,
             status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
             approvedBy: 999,
+            approvedAmount: 30000000,
             deletedAt: null,
           };
         }
@@ -1287,6 +1911,7 @@ describe('FinanceService', () => {
             invoiceId: defaultInvoice.id,
             status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
             approvedBy: 999,
+            approvedAmount: 100,
             deletedAt: null,
           };
         }

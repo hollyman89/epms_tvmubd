@@ -1,17 +1,17 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Form, Input, Button, Checkbox, Divider, message, Spin } from 'antd';
 import { UserOutlined, LockOutlined, SafetyCertificateOutlined, BarChartOutlined, TeamOutlined } from '@ant-design/icons';
 import { useRouter } from 'next/navigation';
 import { apiClient } from '@/lib/axios';
 import { useAuth } from '@/context/AuthContext';
 import { getCanonicalRoleLandingRoute } from '@/constants/menuConfig';
-import { EpmsWelcomeScreen } from '@/components/common/EpmsWelcomeScreen';
 
 export default function LoginPage() {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
+  const isSubmittingRef = useRef(false);
   const router = useRouter();
   const { login, isAuthenticated, user, isLoading } = useAuth();
 
@@ -19,14 +19,36 @@ export default function LoginPage() {
     return getCanonicalRoleLandingRoute(userObj?.roles || []);
   };
 
-  // Redirect only if user arrived at /login while already authenticated (initial mount)
+  // Redirect only if user arrived at /login while already authenticated (not during active form submit)
   useEffect(() => {
-    if (!isLoading && isAuthenticated && user) {
+    if (!isLoading && isAuthenticated && user && !isSubmittingRef.current) {
       router.replace(getTargetRouteForUser(user));
     }
   }, [isLoading, isAuthenticated, user, router]);
 
-  if (isLoading) {
+  // Release submit lock if an unhandled navigation error occurs while transitioning
+  useEffect(() => {
+    const handleNavigationFailure = () => {
+      if (isSubmittingRef.current) {
+        isSubmittingRef.current = false;
+        setLoading(false);
+      }
+    };
+    window.addEventListener('unhandledrejection', handleNavigationFailure);
+    return () => {
+      window.removeEventListener('unhandledrejection', handleNavigationFailure);
+    };
+  }, []);
+
+  const hasStoredSession =
+    typeof window !== 'undefined' &&
+    Boolean(localStorage.getItem('token') && localStorage.getItem('user'));
+
+  const shouldShowSessionRedirectState =
+    !isSubmittingRef.current &&
+    ((isLoading && hasStoredSession) || (isAuthenticated && Boolean(user)));
+
+  if (shouldShowSessionRedirectState) {
     return (
       <div
         style={{
@@ -43,35 +65,44 @@ export default function LoginPage() {
     );
   }
 
-  if (isAuthenticated && user) {
-    return <EpmsWelcomeScreen mode="initializing" statusText="Menyiapkan workspace..." />;
-  }
-
   const onFinish = async (values: any) => {
+    if (loading || isSubmittingRef.current) {
+      return;
+    }
+
+    isSubmittingRef.current = true;
+    setLoading(true);
+
     try {
-      setLoading(true);
       const res = await apiClient.post('/auth/login', {
         email: values.email,
         password: values.password,
       });
 
-      const payload = res.data.data || res.data;
-      const token = payload.access_token || payload.accessToken;
-      const loggedInUser = payload.user;
+      const payload = res.data?.data || res.data;
+      const token = payload?.access_token || payload?.accessToken;
+      const loggedInUser = payload?.user;
+
+      if (!token || !loggedInUser) {
+        isSubmittingRef.current = false;
+        setLoading(false);
+        message.error('Respons autentikasi tidak lengkap. Silakan coba lagi.');
+        return;
+      }
 
       login(token, loggedInUser);
       message.success(`Selamat datang, ${loggedInUser.email}`);
-      
+
       const targetRoute = getTargetRouteForUser(loggedInUser);
-      router.push(targetRoute);
+      router.replace(targetRoute);
     } catch (error: any) {
+      isSubmittingRef.current = false;
+      setLoading(false);
       const errorMsg = error.response?.data?.message;
       const msg = Array.isArray(errorMsg)
         ? errorMsg[0]
         : errorMsg || 'Login gagal. Periksa email dan password Anda.';
       message.error(msg);
-    } finally {
-      setLoading(false);
     }
   };
 
