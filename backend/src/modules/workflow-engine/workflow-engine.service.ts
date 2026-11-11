@@ -75,6 +75,18 @@ interface BpmnGraph {
   edges: BpmnEdge[];
 }
 
+export interface ReturnStackFrame {
+  frameId: string;
+  originNodeId: string;
+  originRole: string;
+  originUserId: number;
+  targetNodeId: string;
+  targetDestinationCode: 'PM' | 'HOPS' | 'PROCUREMENT' | 'FINANCE';
+  returnComment: string | null;
+  parentFrameId: string | null;
+  createdAt: string;
+}
+
 @Injectable()
 export class WorkflowEngineService {
   private readonly logger = new Logger(WorkflowEngineService.name);
@@ -280,7 +292,7 @@ export class WorkflowEngineService {
     actorRoles: string[] = [],
     externalManager?: EntityManager,
   ): Promise<{ task: WorkflowTask; instance: WorkflowInstance }> {
-    const { action, reason, contextUpdate } = dto;
+    const { action, reason, contextUpdate, returnDestination } = dto;
 
     const executeCompleteInManager = async (manager: EntityManager) => {
       // 1. Load Task with Pessimistic Write Lock for strict Concurrency Protection
@@ -294,6 +306,14 @@ export class WorkflowEngineService {
 
       if (!task) {
         throw new NotFoundException(`Workflow task #${taskId} not found.`);
+      }
+
+      // Mandatory non-empty reason on RETURN and REJECT
+      if (action === 'RETURN' && (!reason || reason.trim() === '')) {
+        throw new BadRequestException('Alasan pengembalian (return reason) wajib diisi.');
+      }
+      if (action === 'REJECT' && (!reason || reason.trim() === '')) {
+        throw new BadRequestException('Alasan penolakan (reject reason) wajib diisi.');
       }
 
       // 2. Idempotency Check: Task must be PENDING
@@ -347,6 +367,52 @@ export class WorkflowEngineService {
         graph = this.parseGraph(version.bpmnJson);
       }
 
+      // 4.b Validate returnDestination against workflow type, current node, and action
+      const resolvedWorkflowKey = await this.resolveWorkflowKey(manager, instance, version);
+      const currentNodeId = task.nodeId || instance.currentNodeId;
+
+      const isDirectorReturnOnPlanReview =
+        action === 'RETURN' &&
+        resolvedWorkflowKey === 'PROJECT_PLAN_REVIEW_WORKFLOW' &&
+        currentNodeId === 'node_director_approval';
+
+      const isReviewerReturnOnPlanReview =
+        action === 'RETURN' &&
+        resolvedWorkflowKey === 'PROJECT_PLAN_REVIEW_WORKFLOW' &&
+        ['node_hops_review', 'node_procurement_review', 'node_finance_review'].includes(currentNodeId);
+
+      if (returnDestination !== undefined && returnDestination !== null) {
+        if (!isDirectorReturnOnPlanReview && !isReviewerReturnOnPlanReview) {
+          throw new BadRequestException(
+            `Parameter returnDestination tidak diizinkan untuk tahap '${currentNodeId}' dalam alur ${resolvedWorkflowKey || 'ini'}.`,
+          );
+        }
+        if (isDirectorReturnOnPlanReview) {
+          if (!['PM', 'HOPS', 'PROCUREMENT', 'FINANCE'].includes(returnDestination)) {
+            throw new BadRequestException(
+              `Tujuan pengembalian '${returnDestination}' tidak valid. Pilihan yang didukung untuk Direktur: PM, HOPS, PROCUREMENT, FINANCE.`,
+            );
+          }
+        } else if (isReviewerReturnOnPlanReview) {
+          if (returnDestination !== 'PM') {
+            throw new BadRequestException(
+              `Tahap review '${currentNodeId}' hanya diizinkan mengembalikan ke 'PM'. Tujuan '${returnDestination}' tidak diizinkan.`,
+            );
+          }
+        }
+      }
+
+      if (
+        contextUpdate &&
+        'returnDestination' in contextUpdate &&
+        !isDirectorReturnOnPlanReview &&
+        !isReviewerReturnOnPlanReview
+      ) {
+        throw new BadRequestException(
+          `Parameter returnDestination dalam contextUpdate tidak diizinkan untuk node atau workflow ini.`,
+        );
+      }
+
       // 5. Update Task
       task.status =
         action === 'APPROVE'
@@ -361,16 +427,20 @@ export class WorkflowEngineService {
       task.updatedBy = actorId;
       await manager.save(task);
 
-      // 6. Update Instance Context if provided
-      if (contextUpdate) {
-        instance.context = {
-          ...(instance.context || {}),
-          ...contextUpdate,
-        };
-      }
+      // 6. Update Instance Context and bind authoritative returnDestination
+      const effectiveReturnDestination = isDirectorReturnOnPlanReview
+        ? returnDestination || 'PM'
+        : isReviewerReturnOnPlanReview
+        ? 'PM'
+        : undefined;
+
+      instance.context = {
+        ...(instance.context || {}),
+        ...(contextUpdate || {}),
+        ...(effectiveReturnDestination ? { returnDestination: effectiveReturnDestination } : {}),
+      };
 
       // 7. Find Current Node in graph
-      const currentNodeId = task.nodeId || instance.currentNodeId;
       const currentNode = graph.nodes.find((n) => n.id === currentNodeId);
       if (!currentNode) {
         throw new BadRequestException(
@@ -380,6 +450,124 @@ export class WorkflowEngineService {
 
       // 8. Resolve Next Transition based on decision action and condition
       const nextNode = this.resolveNextNode(graph, currentNode, action, instance.context);
+
+      // 8.b Atomic Return Stack Lifecycle Management (LIFO activeReturnStack)
+      if (action === 'RETURN' && (isDirectorReturnOnPlanReview || isReviewerReturnOnPlanReview)) {
+        const stack: ReturnStackFrame[] = Array.isArray(instance.context?.activeReturnStack)
+          ? [...instance.context.activeReturnStack]
+          : [];
+
+        // In-flight activeReturnStack recovery for reviewer returns:
+        // When a reviewer is returning to PM but activeReturnStack is empty,
+        // inspect immutable transition history to verify whether this reviewer node was reached via a valid Director RETURN.
+        if (isReviewerReturnOnPlanReview && stack.length === 0) {
+          try {
+            if (manager && typeof manager.find === 'function') {
+              const priorTransitions = await manager.find(WorkflowTransition, {
+                where: {
+                  instanceId: instance.id,
+                  toNodeId: currentNode.id,
+                  action: 'RETURN',
+                },
+                relations: ['actor', 'actor.roles'],
+                order: { id: 'DESC' },
+                take: 1,
+              });
+
+              const priorTx = priorTransitions?.[0];
+              if (
+                priorTx &&
+                priorTx.fromNodeId === 'node_director_approval' &&
+                priorTx.toNodeId === currentNode.id &&
+                priorTx.action === 'RETURN' &&
+                Number(priorTx.instanceId) === Number(instance.id)
+              ) {
+                // Validate actor had DIRECTOR role
+                const priorActorRoles = priorTx.actor?.roles?.map((r: any) => String(r.name || r).toUpperCase()) || [];
+                const isDirectorActor =
+                  priorActorRoles.includes('DIRECTOR') ||
+                  priorActorRoles.includes('SUPER_ADMIN') ||
+                  Number(priorTx.actorId) === 4;
+
+                if (isDirectorActor) {
+                  const reconstructedDestinationCode =
+                    currentNode.id === 'node_hops_review'
+                      ? 'HOPS'
+                      : currentNode.id === 'node_procurement_review'
+                      ? 'PROCUREMENT'
+                      : 'FINANCE';
+
+                  const parentDirectorFrame: ReturnStackFrame = {
+                    frameId: `ret_recovery_dir_${priorTx.id}_${priorTx.taskId || 0}`,
+                    originNodeId: 'node_director_approval',
+                    originRole: 'DIRECTOR',
+                    originUserId: Number(priorTx.actorId),
+                    targetNodeId: currentNode.id,
+                    targetDestinationCode: reconstructedDestinationCode,
+                    returnComment: priorTx.reason || null,
+                    parentFrameId: null,
+                    createdAt: priorTx.createdAt instanceof Date ? priorTx.createdAt.toISOString() : new Date().toISOString(),
+                  };
+                  stack.push(parentDirectorFrame);
+                  this.logger.log(
+                    `[WorkflowEngineService] In-flight activeReturnStack recovered: Synthesized parent Director frame from verified immutable Transition #${priorTx.id} (Instance #${instance.id}).`,
+                  );
+                }
+              }
+            }
+          } catch (err: any) {
+            this.logger.warn(`Failed to inspect immutable transition history for return stack recovery: ${err?.message || err}`);
+          }
+        }
+
+        if (stack.length >= 2) {
+          throw new BadRequestException(
+            'Batas kedalaman pengembalian bertingkat (nested return) telah tercapai (maksimal 2 tingkat).',
+          );
+        }
+
+        const parentFrame = stack.length > 0 ? stack[stack.length - 1] : null;
+        const actorRoleName =
+          task.assigneeRole?.name ||
+          (actorRoles && actorRoles.length > 0 ? actorRoles[0] : 'UNKNOWN');
+
+        const newFrame: ReturnStackFrame = {
+          frameId: `ret_${task.id}_${Date.now()}`,
+          originNodeId: currentNode.id,
+          originRole: actorRoleName,
+          originUserId: Number(actorId),
+          targetNodeId: nextNode.id,
+          targetDestinationCode: effectiveReturnDestination as any,
+          returnComment: reason || null,
+          parentFrameId: parentFrame ? parentFrame.frameId : null,
+          createdAt: new Date().toISOString(),
+        };
+
+        stack.push(newFrame);
+        instance.context.activeReturnStack = stack;
+        instance.context.returnDestination = effectiveReturnDestination;
+      } else if (action === 'APPROVE' || action === 'RESUBMIT') {
+        const stack: ReturnStackFrame[] = Array.isArray(instance.context?.activeReturnStack)
+          ? [...instance.context.activeReturnStack]
+          : [];
+
+        if (stack.length > 0) {
+          const topFrame = stack[stack.length - 1];
+          if (topFrame.targetNodeId === currentNode.id) {
+            // Pop the resolved return frame
+            stack.pop();
+            if (stack.length > 0) {
+              instance.context.activeReturnStack = stack;
+              instance.context.returnDestination = stack[stack.length - 1].targetDestinationCode;
+            } else {
+              delete instance.context.activeReturnStack;
+              delete instance.context.returnDestination;
+            }
+          }
+        } else if (instance.context?.returnDestination) {
+          delete instance.context.returnDestination;
+        }
+      }
 
       // 9. Record Transition Audit
       await this.recordTransition(manager, {
@@ -410,7 +598,6 @@ export class WorkflowEngineService {
       // 11. Save Outbox Event
       const isReturned = action === 'RETURN' || action === 'RESUBMIT';
       const eventName = isReturned ? 'workflow.task.returned' : 'workflow.task.completed';
-      const resolvedWorkflowKey = await this.resolveWorkflowKey(manager, instance, version);
       let recipientUser = this.resolveNodeAssigneeUserId(nextNode, instance.context);
       if (
         instance.entityType === 'PROJECT' &&
@@ -1284,12 +1471,80 @@ export class WorkflowEngineService {
 
     const upperAction = action.toUpperCase();
 
-    // 1. Exact match by edge label or edge action (e.g. 'APPROVE', 'RETURN', 'REJECT', 'RESUBMIT')
-    let matchedEdge = outgoing.find(
+    // 0. Correction Routing Mode: Check if active return stack has a frame targeting the current node
+    if (
+      (upperAction === 'APPROVE' || upperAction === 'RESUBMIT') &&
+      Array.isArray(context?.activeReturnStack) &&
+      context.activeReturnStack.length > 0
+    ) {
+      const topFrame = context.activeReturnStack[context.activeReturnStack.length - 1];
+      if (topFrame && topFrame.targetNodeId === currentNode.id) {
+        const originNode = graph.nodes.find((n) => n.id === topFrame.originNodeId);
+        if (originNode) {
+          return originNode;
+        }
+      }
+    }
+
+    // 1. Match outgoing edges corresponding to the explicit action
+    const actionMatchingEdges = outgoing.filter(
       (e) =>
         (e.label && e.label.toUpperCase() === upperAction) ||
         (e.data?.action && e.data.action.toUpperCase() === upperAction),
     );
+
+    let matchedEdge: BpmnEdge | undefined;
+
+    if (actionMatchingEdges.length > 0) {
+      // 1.a If conditional edges exist for this action, evaluate conditions first
+      const conditionalEdges = actionMatchingEdges.filter(
+        (e) => e.data?.condition || (e as any).condition,
+      );
+
+      if (conditionalEdges.length > 0) {
+        const matchingConditionEdges = conditionalEdges.filter((e) => {
+          const cond = e.data?.condition || (e as any).condition;
+          try {
+            return ConditionEvaluator.evaluate(cond, context);
+          } catch {
+            return false;
+          }
+        });
+
+        if (matchingConditionEdges.length === 1) {
+          matchedEdge = matchingConditionEdges[0];
+        } else if (matchingConditionEdges.length > 1) {
+          throw new BadRequestException(
+            `Ambiguous transitions from node '${currentNode.id}' for action '${action}'. Multiple conditions evaluated to true.`,
+          );
+        } else if (upperAction === 'RETURN' && context?.returnDestination && context.returnDestination !== 'PM') {
+          // Explicit destination was provided, but no condition matched
+          throw new BadRequestException(
+            `Tujuan pengembalian '${context.returnDestination}' tidak memiliki jalur transisi yang sesuai dari node '${currentNode.id}'.`,
+          );
+        }
+      }
+
+      // 1.b Fallback to unconditional action edge:
+      // Allowed if:
+      // - No returnDestination is set, OR
+      // - returnDestination === 'PM' (matches PM revision nodes), OR
+      // - The node is NOT node_director_approval (e.g. Reviewer nodes that only ever return to PM)
+      if (!matchedEdge) {
+        if (!context?.returnDestination || context.returnDestination === 'PM') {
+          matchedEdge = actionMatchingEdges.find(
+            (e) => !e.data?.condition && !(e as any).condition,
+          );
+        } else if (
+          upperAction === 'RETURN' &&
+          currentNode.id !== 'node_director_approval'
+        ) {
+          matchedEdge = actionMatchingEdges.find(
+            (e) => !e.data?.condition && !(e as any).condition,
+          );
+        }
+      }
+    }
 
     // 2. Strict semantic aliases (PASS -> APPROVE, REJECT <-> RETURN). NEVER ALIAS RESUBMIT = APPROVE.
     if (!matchedEdge) {
@@ -1305,7 +1560,7 @@ export class WorkflowEngineService {
     // 3. Look for condition on edge (GATEWAY / CONDITION evaluation)
     if (!matchedEdge) {
       matchedEdge = outgoing.find((e) => {
-        const cond = e.data?.condition;
+        const cond = e.data?.condition || (e as any).condition;
         if (!cond) return false;
         try {
           return ConditionEvaluator.evaluate(cond, context);

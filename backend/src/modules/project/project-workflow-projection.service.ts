@@ -67,6 +67,19 @@ export interface ProjectPlanWorkflowProjection {
   } | null;
   lastApprovedRole: string | null;
   lastApprovedAt: string | Date | null;
+  activeReturnFrame?: {
+    frameId: string;
+    originNodeId: string;
+    originRole: string;
+    originUserId: number;
+    targetNodeId: string;
+    targetDestinationCode: string;
+    returnComment: string | null;
+    parentFrameId: string | null;
+    depth: number;
+  } | null;
+  activeReturnStack?: any[];
+  isCorrectionMode?: boolean;
   // Compatibility fields for legacy consumers
   instanceId?: number | null;
   currentNodeId?: string | null;
@@ -107,7 +120,15 @@ export class ProjectWorkflowProjectionService {
       history,
       instance.createdAt || (instance as any)?.created_at,
       (review as any)?.submittedByName || review?.submitter?.fullName || (instance.context as any)?.submittedByName,
+      instance.context,
     );
+
+    const activeReturnStack = Array.isArray(instance.context?.activeReturnStack)
+      ? instance.context.activeReturnStack
+      : [];
+    const activeReturnFrame = activeReturnStack.length > 0
+      ? activeReturnStack[activeReturnStack.length - 1]
+      : null;
 
     return {
       workflowInstanceId: Number(instance.id),
@@ -122,6 +143,27 @@ export class ProjectWorkflowProjectionService {
       lastApprovedBy,
       lastApprovedRole,
       lastApprovedAt,
+      activeReturnFrame: activeReturnFrame
+        ? {
+            frameId: activeReturnFrame.frameId,
+            originNodeId: activeReturnFrame.originNodeId,
+            originRole: activeReturnFrame.originRole,
+            originUserId: activeReturnFrame.originUserId,
+            targetNodeId: activeReturnFrame.targetNodeId,
+            targetDestinationCode: activeReturnFrame.targetDestinationCode,
+            returnComment: activeReturnFrame.returnComment,
+            parentFrameId: activeReturnFrame.parentFrameId,
+            depth: activeReturnStack.length,
+          }
+        : null,
+      activeReturnStack: activeReturnStack.map((f: any) => ({
+        frameId: f.frameId,
+        originNodeId: f.originNodeId,
+        originRole: f.originRole,
+        targetNodeId: f.targetNodeId,
+        targetDestinationCode: f.targetDestinationCode,
+      })),
+      isCorrectionMode: activeReturnStack.length > 0,
     };
   }
 
@@ -321,8 +363,23 @@ export class ProjectWorkflowProjectionService {
     history: WorkflowTransitionHistoryItem[],
     submissionTime?: Date | string,
     submitterName?: string,
+    instanceContext?: Record<string, any>,
   ): WorkflowStepProjection[] {
     const isCompleted = currentNodeId === 'node_end' || instanceStatus === 'COMPLETED';
+
+    // Determine current active canonical stage
+    let activeStage = 1;
+    if (currentNodeId === 'node_hops_review' || currentNodeId === 'node_pm_revision_hops') {
+      activeStage = 2;
+    } else if (currentNodeId === 'node_procurement_review' || currentNodeId === 'node_pm_revision_procurement') {
+      activeStage = 3;
+    } else if (currentNodeId === 'node_finance_review' || currentNodeId === 'node_pm_revision_finance') {
+      activeStage = 4;
+    } else if (currentNodeId === 'node_director_approval' || currentNodeId === 'node_pm_revision_director') {
+      activeStage = 5;
+    } else if (isCompleted) {
+      activeStage = 6;
+    }
 
     // Find approval transitions for each node
     const hopsApproval = history.find((h) => h.fromNode === 'node_hops_review' && h.action === 'APPROVE');
@@ -335,6 +392,11 @@ export class ProjectWorkflowProjectionService {
     const procRevision = history.find((h) => h.fromNode === 'node_procurement_review' && h.action === 'RETURN');
     const finRevision = history.find((h) => h.fromNode === 'node_finance_review' && h.action === 'RETURN');
     const dirRevision = history.find((h) => h.fromNode === 'node_director_approval' && h.action === 'RETURN');
+
+    const hasDirectorReturnOrigin = Boolean(
+      Array.isArray(instanceContext?.activeReturnStack) &&
+      instanceContext.activeReturnStack.some((f: any) => f.originNodeId === 'node_director_approval'),
+    );
 
     // 1. PM Step
     const isPmRevision = currentNodeId.startsWith('node_pm_revision');
@@ -357,17 +419,22 @@ export class ProjectWorkflowProjectionService {
     let hoaActor = hopsApproval?.actorName;
     let hoaTime = hopsApproval?.createdAt ? new Date(hopsApproval.createdAt).toISOString() : undefined;
 
-    if (hopsApproval || procApproval || finApproval || dirApproval || isCompleted) {
+    if (isCompleted || (activeStage > 2 && (hopsApproval || procApproval || finApproval || dirApproval))) {
       hoaStatus = 'COMPLETED';
       hoaLabel = 'Disetujui';
     } else if (currentNodeId === 'node_hops_review') {
       hoaStatus = 'ACTIVE';
       hoaLabel = 'Sedang Review';
-    } else if (currentNodeId === 'node_pm_revision_hops' || hopsRevision) {
+      hoaActor = undefined;
+      hoaTime = undefined;
+    } else if (currentNodeId === 'node_pm_revision_hops' || (activeStage === 2 && hopsRevision)) {
       hoaStatus = 'REVISION_REQUESTED';
       hoaLabel = 'Revision Requested';
       hoaActor = hopsRevision?.actorName;
       hoaTime = hopsRevision?.createdAt ? new Date(hopsRevision.createdAt).toISOString() : undefined;
+    } else if (hasDirectorReturnOrigin && hopsApproval) {
+      hoaStatus = 'COMPLETED';
+      hoaLabel = 'Disetujui';
     }
 
     const hoaStep: WorkflowStepProjection = {
@@ -390,17 +457,22 @@ export class ProjectWorkflowProjectionService {
     let procActor = procApproval?.actorName;
     let procTime = procApproval?.createdAt ? new Date(procApproval.createdAt).toISOString() : undefined;
 
-    if (procApproval || finApproval || dirApproval || isCompleted) {
+    if (isCompleted || (activeStage > 3 && (procApproval || finApproval || dirApproval))) {
       procStatus = 'COMPLETED';
       procLabel = 'Disetujui';
     } else if (currentNodeId === 'node_procurement_review') {
       procStatus = 'ACTIVE';
       procLabel = 'Sedang Review';
-    } else if (currentNodeId === 'node_pm_revision_procurement' || procRevision) {
+      procActor = undefined;
+      procTime = undefined;
+    } else if (currentNodeId === 'node_pm_revision_procurement' || (activeStage === 3 && procRevision)) {
       procStatus = 'REVISION_REQUESTED';
       procLabel = 'Revision Requested';
       procActor = procRevision?.actorName;
       procTime = procRevision?.createdAt ? new Date(procRevision.createdAt).toISOString() : undefined;
+    } else if (hasDirectorReturnOrigin && procApproval) {
+      procStatus = 'COMPLETED';
+      procLabel = 'Disetujui';
     }
 
     const procStep: WorkflowStepProjection = {
@@ -423,17 +495,22 @@ export class ProjectWorkflowProjectionService {
     let finActor = finApproval?.actorName;
     let finTime = finApproval?.createdAt ? new Date(finApproval.createdAt).toISOString() : undefined;
 
-    if (finApproval || dirApproval || isCompleted) {
+    if (isCompleted || (activeStage > 4 && (finApproval || dirApproval))) {
       finStatus = 'COMPLETED';
       finLabel = 'Disetujui';
     } else if (currentNodeId === 'node_finance_review') {
       finStatus = 'ACTIVE';
       finLabel = 'Sedang Review';
-    } else if (currentNodeId === 'node_pm_revision_finance' || finRevision) {
+      finActor = undefined;
+      finTime = undefined;
+    } else if (currentNodeId === 'node_pm_revision_finance' || (activeStage === 4 && finRevision)) {
       finStatus = 'REVISION_REQUESTED';
       finLabel = 'Revision Requested';
       finActor = finRevision?.actorName;
       finTime = finRevision?.createdAt ? new Date(finRevision.createdAt).toISOString() : undefined;
+    } else if (hasDirectorReturnOrigin && finApproval) {
+      finStatus = 'COMPLETED';
+      finLabel = 'Disetujui';
     }
 
     const finStep: WorkflowStepProjection = {
@@ -456,13 +533,15 @@ export class ProjectWorkflowProjectionService {
     let dirActor = dirApproval?.actorName;
     let dirTime = dirApproval?.createdAt ? new Date(dirApproval.createdAt).toISOString() : undefined;
 
-    if (dirApproval || isCompleted) {
+    if (isCompleted || (activeStage > 5 && dirApproval)) {
       dirStatus = 'COMPLETED';
       dirLabel = 'Disetujui Final';
     } else if (currentNodeId === 'node_director_approval') {
       dirStatus = 'ACTIVE';
       dirLabel = 'Final Approval';
-    } else if (currentNodeId === 'node_pm_revision_director' || dirRevision) {
+      dirActor = undefined;
+      dirTime = undefined;
+    } else if (currentNodeId === 'node_pm_revision_director' || (activeStage === 5 && dirRevision)) {
       dirStatus = 'REVISION_REQUESTED';
       dirLabel = 'Revision Requested';
       dirActor = dirRevision?.actorName;

@@ -146,7 +146,11 @@ describe('ProjectService & ProjectController — Phase R11.1.5-C2 (Initial Condi
     };
 
     mockContractRepo = { findOne: jest.fn() };
-    mockUserRepo = { findOne: jest.fn() };
+    mockUserRepo = {
+      findOne: jest.fn().mockImplementation(({ where }) =>
+        Promise.resolve({ id: where?.id || 1, roles: [{ name: 'PROJECT_MANAGER' }] }),
+      ),
+    };
 
     eventEmitter = new EventEmitter2();
     jest.spyOn(eventEmitter, 'emit');
@@ -323,11 +327,12 @@ describe('ProjectService & ProjectController — Phase R11.1.5-C2 (Initial Condi
     });
 
     it('13. actor from JWT → uses authenticated user ID for audit columns', async () => {
+      mockProjectRepo.findOne.mockResolvedValueOnce({ ...mockProject, managerId: 42 });
       mockInitialConditionRepo.findOne.mockResolvedValue(null);
       mockInitialConditionRepo.create.mockReturnValue({ id: 501, projectId: 10, createdBy: 42, updatedBy: 42 });
       mockInitialConditionRepo.save.mockResolvedValue({ id: 501, projectId: 10, createdBy: 42, updatedBy: 42 });
 
-      const res = await service.saveInitialCondition(10, validInitialConditionDto, 42, ['SUPER_ADMIN']);
+      const res = await service.saveInitialCondition(10, validInitialConditionDto, 42, ['PROJECT_MANAGER']);
       expect(res.createdBy).toBe(42);
     });
 
@@ -377,13 +382,18 @@ describe('ProjectService & ProjectController — Phase R11.1.5-C2 (Initial Condi
         submittedBy: 1,
         submittedAt: new Date(),
       });
-      mockManager.save.mockResolvedValue({
-        id: 601,
-        projectId: 10,
-        status: 'REVIEW_PENDING',
-        submittedBy: 1,
-        submittedAt: new Date(),
+      mockManager.save.mockImplementation(async (entityClass, entity) => {
+        const saved = {
+          id: 601,
+          projectId: 10,
+          status: 'REVIEW_PENDING',
+          submittedBy: 1,
+          submittedAt: new Date(),
+        };
+        mockManagementReviewRepo.findOne.mockResolvedValue(saved);
+        return saved;
       });
+      mockManagementReviewRepo.findOne.mockResolvedValue(null);
 
       const res = await service.submitManagementReview(10, 1, ['PROJECT_MANAGER']);
       expect(res.status).toBe('REVIEW_PENDING');
@@ -398,10 +408,9 @@ describe('ProjectService & ProjectController — Phase R11.1.5-C2 (Initial Condi
     });
 
     it('18. unauthorized submit → controller guards enforce PROJECT_MANAGER / SUPER_ADMIN roles', async () => {
-      // Controller has @Roles('PROJECT_MANAGER', 'SUPER_ADMIN')
+      // Controller has @Roles('PROJECT_MANAGER') per Policy Option A
       expect(Reflect.getMetadata('roles', ProjectController.prototype.submitManagementReview)).toEqual([
         'PROJECT_MANAGER',
-        'SUPER_ADMIN',
       ]);
     });
 
@@ -487,7 +496,6 @@ describe('ProjectService & ProjectController — Phase R11.1.5-C2 (Initial Condi
         'HEAD_OF_OPERATIONS',
         'GENERAL_MANAGER',
         'DIRECTOR',
-        'SUPER_ADMIN',
       ]);
     });
 

@@ -11,6 +11,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, In } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import * as crypto from 'crypto';
 import { WorkflowDefinition } from '../../entities/workflow-definition.entity';
 import { WorkflowVersion } from '../../entities/workflow-version.entity';
 import {
@@ -29,6 +30,41 @@ export const PROTECTED_CANONICAL_WORKFLOW_KEYS = Object.freeze([
   'PROJECT_PLAN_REVIEW_WORKFLOW',
   'PURCHASE_REQUEST_WORKFLOW',
 ]);
+
+/**
+ * Deterministic SHA-256 canonical hash computation for BPMN graphs.
+ * Sorts nodes and edges by ID and normalizes structure for immutable integrity verification.
+ */
+export function computeCanonicalBpmnGraphHash(bpmnJson: any): string {
+  if (!bpmnJson || typeof bpmnJson !== 'object') {
+    return '';
+  }
+
+  const nodes = Array.isArray(bpmnJson.nodes)
+    ? [...bpmnJson.nodes]
+        .map((n: any) => ({
+          id: String(n.id || ''),
+          type: n.type || null,
+          data: n.data || null,
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id))
+    : [];
+
+  const edges = Array.isArray(bpmnJson.edges)
+    ? [...bpmnJson.edges]
+        .map((e: any) => ({
+          id: String(e.id || ''),
+          source: String(e.source || ''),
+          target: String(e.target || ''),
+          label: e.label || null,
+          data: e.data || null,
+        }))
+        .sort((a, b) => a.id.localeCompare(b.id))
+    : [];
+
+  const canonicalObj = { nodes, edges };
+  return crypto.createHash('sha256').update(JSON.stringify(canonicalObj)).digest('hex');
+}
 
 @Injectable()
 export class WorkflowDefinitionService implements OnModuleInit {
@@ -435,16 +471,7 @@ export class WorkflowDefinitionService implements OnModuleInit {
 
   async ensureProjectGovernanceWorkflow(): Promise<WorkflowDefinition | null> {
     try {
-      const existing = await this.definitionRepo.findOne({
-        where: { workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW' },
-        relations: ['versions'],
-      });
-
-      if (existing && existing.activeVersion && existing.status === 'PUBLISHED') {
-        return existing;
-      }
-
-      const bpmnJson = {
+      const bpmnJsonV2 = {
         nodes: [
           {
             id: 'node_start',
@@ -529,20 +556,54 @@ export class WorkflowDefinitionService implements OnModuleInit {
         ],
         edges: [
           { id: 'e_start_to_hops', source: 'node_start', target: 'node_hops_review' },
-          { id: 'e_hops_to_proc', source: 'node_hops_review', target: 'node_procurement_review', label: 'APPROVE' },
-          { id: 'e_hops_to_rev', source: 'node_hops_review', target: 'node_pm_revision_hops', label: 'RETURN' },
-          { id: 'e_rev_hops_to_hops', source: 'node_pm_revision_hops', target: 'node_hops_review', label: 'RESUBMIT' },
-          { id: 'e_proc_to_fin', source: 'node_procurement_review', target: 'node_finance_review', label: 'APPROVE' },
-          { id: 'e_proc_to_rev', source: 'node_procurement_review', target: 'node_pm_revision_procurement', label: 'RETURN' },
-          { id: 'e_rev_proc_to_proc', source: 'node_pm_revision_procurement', target: 'node_procurement_review', label: 'RESUBMIT' },
-          { id: 'e_fin_to_dir', source: 'node_finance_review', target: 'node_director_approval', label: 'APPROVE' },
-          { id: 'e_fin_to_rev', source: 'node_finance_review', target: 'node_pm_revision_finance', label: 'RETURN' },
-          { id: 'e_rev_fin_to_fin', source: 'node_pm_revision_finance', target: 'node_finance_review', label: 'RESUBMIT' },
-          { id: 'e_dir_to_end', source: 'node_director_approval', target: 'node_end', label: 'APPROVE' },
-          { id: 'e_dir_to_rev', source: 'node_director_approval', target: 'node_pm_revision_director', label: 'RETURN' },
-          { id: 'e_rev_dir_to_dir', source: 'node_pm_revision_director', target: 'node_director_approval', label: 'RESUBMIT' },
+          { id: 'e_hops_to_proc', source: 'node_hops_review', target: 'node_procurement_review', label: 'APPROVE', data: { action: 'APPROVE' } },
+          { id: 'e_hops_to_rev', source: 'node_hops_review', target: 'node_pm_revision_hops', label: 'RETURN', data: { action: 'RETURN' } },
+          { id: 'e_rev_hops_to_hops', source: 'node_pm_revision_hops', target: 'node_hops_review', label: 'RESUBMIT', data: { action: 'RESUBMIT' } },
+          { id: 'e_proc_to_fin', source: 'node_procurement_review', target: 'node_finance_review', label: 'APPROVE', data: { action: 'APPROVE' } },
+          { id: 'e_proc_to_rev', source: 'node_procurement_review', target: 'node_pm_revision_procurement', label: 'RETURN', data: { action: 'RETURN' } },
+          { id: 'e_rev_proc_to_proc', source: 'node_pm_revision_procurement', target: 'node_procurement_review', label: 'RESUBMIT', data: { action: 'RESUBMIT' } },
+          { id: 'e_fin_to_dir', source: 'node_finance_review', target: 'node_director_approval', label: 'APPROVE', data: { action: 'APPROVE' } },
+          { id: 'e_fin_to_rev', source: 'node_finance_review', target: 'node_pm_revision_finance', label: 'RETURN', data: { action: 'RETURN' } },
+          { id: 'e_rev_fin_to_fin', source: 'node_pm_revision_finance', target: 'node_finance_review', label: 'RESUBMIT', data: { action: 'RESUBMIT' } },
+          { id: 'e_dir_to_end', source: 'node_director_approval', target: 'node_end', label: 'APPROVE', data: { action: 'APPROVE' } },
+          {
+            id: 'e_dir_to_rev',
+            source: 'node_director_approval',
+            target: 'node_pm_revision_director',
+            label: 'RETURN',
+            data: { action: 'RETURN', condition: "returnDestination == 'PM'" },
+          },
+          {
+            id: 'e_dir_to_hops',
+            source: 'node_director_approval',
+            target: 'node_hops_review',
+            label: 'RETURN',
+            data: { action: 'RETURN', condition: "returnDestination == 'HOPS'" },
+          },
+          {
+            id: 'e_dir_to_proc',
+            source: 'node_director_approval',
+            target: 'node_procurement_review',
+            label: 'RETURN',
+            data: { action: 'RETURN', condition: "returnDestination == 'PROCUREMENT'" },
+          },
+          {
+            id: 'e_dir_to_fin',
+            source: 'node_director_approval',
+            target: 'node_finance_review',
+            label: 'RETURN',
+            data: { action: 'RETURN', condition: "returnDestination == 'FINANCE'" },
+          },
+          { id: 'e_rev_dir_to_dir', source: 'node_pm_revision_director', target: 'node_director_approval', label: 'RESUBMIT', data: { action: 'RESUBMIT' } },
         ],
       };
+
+      const canonicalHashV2 = computeCanonicalBpmnGraphHash(bpmnJsonV2);
+
+      const existing = await this.definitionRepo.findOne({
+        where: { workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW' },
+        relations: ['versions'],
+      });
 
       if (!existing) {
         await this.createDefinition({
@@ -551,26 +612,120 @@ export class WorkflowDefinitionService implements OnModuleInit {
           description: 'Canonical Project Governance Review Flow (HOPS -> Procurement -> Finance -> Director -> Ready for Kickoff)',
           domain: 'PROJECT',
         });
-        await this.updateVersion('PROJECT_PLAN_REVIEW_WORKFLOW', 1, bpmnJson);
+        await this.updateVersion('PROJECT_PLAN_REVIEW_WORKFLOW', 1, bpmnJsonV2);
         await this.publishVersion('PROJECT_PLAN_REVIEW_WORKFLOW', 1);
-        this.logger.log('Successfully registered and published PROJECT_PLAN_REVIEW_WORKFLOW v1.');
+        this.logger.log('Successfully registered and published PROJECT_PLAN_REVIEW_WORKFLOW v1 on initial bootstrap.');
         return await this.getDefinitionByKey('PROJECT_PLAN_REVIEW_WORKFLOW');
-      } else {
-        let v1 = existing.versions?.find((v) => v.version === 1);
-        if (!v1) {
-          v1 = await this.createVersion('PROJECT_PLAN_REVIEW_WORKFLOW', { bpmnJson });
-        } else if (v1.status !== 'PUBLISHED') {
-          await this.updateVersion('PROJECT_PLAN_REVIEW_WORKFLOW', 1, bpmnJson);
-        }
-        if (v1.status !== 'PUBLISHED') {
-          await this.publishVersion('PROJECT_PLAN_REVIEW_WORKFLOW', 1);
-          return await this.getDefinitionByKey('PROJECT_PLAN_REVIEW_WORKFLOW');
-        }
-        return existing;
       }
-    } catch (err) {
-      this.logger.warn(`ensureProjectGovernanceWorkflow warning: ${err.message}`);
-      return null;
+
+      // FAST-PATH IDEMPOTENT CHECK: If activeVersion === 2 and published v2 matches canonical hash
+      if (existing.activeVersion === 2 && existing.status === 'PUBLISHED') {
+        const v2 = existing.versions?.find((v) => v.version === 2 && v.status === 'PUBLISHED');
+        if (v2) {
+          const persistedHash = computeCanonicalBpmnGraphHash(v2.bpmnJson);
+          if (persistedHash === canonicalHashV2) {
+            return existing;
+          } else {
+            const errorMsg = `[WORKFLOW INTEGRITY ERROR] PROJECT_PLAN_REVIEW_WORKFLOW v2 is published with unexpected graph hash (Expected: ${canonicalHashV2}, Found: ${persistedHash}). System aborted bootstrap to prevent silent mutation of published version.`;
+            this.logger.error(errorMsg);
+            throw new Error(errorMsg);
+          }
+        }
+      }
+
+      // ATOMIC TRANSACTIONAL CREATION & PUBLICATION OF V2 WITH PESSIMISTIC LOCKING
+      return await this.dataSource.transaction(async (manager) => {
+        const lockedDef = await manager.findOne(WorkflowDefinition, {
+          where: { id: existing.id },
+          relations: ['versions'],
+          lock: { mode: 'pessimistic_write' },
+        });
+
+        if (!lockedDef) {
+          return null;
+        }
+
+        let v2 = lockedDef.versions?.find((v) => v.version === 2);
+
+        if (!v2) {
+          // State 1: v2 does not exist -> Create and publish v2 atomically
+          v2 = manager.create(WorkflowVersion, {
+            workflowDefinitionId: lockedDef.id,
+            version: 2,
+            bpmnJson: bpmnJsonV2,
+            status: 'PUBLISHED',
+            publishedAt: new Date(),
+            createdBy: lockedDef.createdBy || null,
+          });
+          await manager.save(WorkflowVersion, v2);
+
+          await manager.update(WorkflowDefinition, lockedDef.id, {
+            activeVersion: 2,
+            status: 'PUBLISHED',
+            updatedBy: lockedDef.createdBy || null,
+          });
+          lockedDef.activeVersion = 2;
+          lockedDef.status = 'PUBLISHED';
+          lockedDef.updatedBy = lockedDef.createdBy || null;
+          this.logger.log(`Successfully registered and published PROJECT_PLAN_REVIEW_WORKFLOW v2 (ID: ${v2.id}, Hash: ${canonicalHashV2}). Version 1 remains unchanged.`);
+          return lockedDef;
+        }
+
+        const persistedHash = computeCanonicalBpmnGraphHash(v2.bpmnJson);
+
+        if (v2.status === 'DRAFT') {
+          // State 2: v2 exists as DRAFT
+          if (persistedHash !== canonicalHashV2) {
+            const errorMsg = `[WORKFLOW INTEGRITY ERROR] PROJECT_PLAN_REVIEW_WORKFLOW v2 DRAFT has invalid graph hash (Expected: ${canonicalHashV2}, Found: ${persistedHash}). Bootstrap halted.`;
+            this.logger.error(errorMsg);
+            throw new Error(errorMsg);
+          }
+          v2.status = 'PUBLISHED';
+          v2.publishedAt = new Date();
+          v2.updatedBy = lockedDef.createdBy || null;
+          await manager.save(WorkflowVersion, v2);
+
+          await manager.update(WorkflowDefinition, lockedDef.id, {
+            activeVersion: 2,
+            status: 'PUBLISHED',
+            updatedBy: lockedDef.createdBy || null,
+          });
+          lockedDef.activeVersion = 2;
+          lockedDef.status = 'PUBLISHED';
+          lockedDef.updatedBy = lockedDef.createdBy || null;
+          this.logger.log(`Promoted PROJECT_PLAN_REVIEW_WORKFLOW v2 DRAFT to PUBLISHED.`);
+          return lockedDef;
+        }
+
+        if (v2.status === 'PUBLISHED') {
+          // Verify hash
+          if (persistedHash !== canonicalHashV2) {
+            // State 5: Inconsistent published graph
+            const errorMsg = `[WORKFLOW INTEGRITY ERROR] Cannot mutate published version 2 with mismatched graph hash (Expected: ${canonicalHashV2}, Found: ${persistedHash}).`;
+            this.logger.error(errorMsg);
+            throw new Error(errorMsg);
+          }
+
+          if (lockedDef.activeVersion !== 2) {
+            // State 3: v2 is PUBLISHED but not active
+            await manager.update(WorkflowDefinition, lockedDef.id, {
+              activeVersion: 2,
+              status: 'PUBLISHED',
+              updatedBy: lockedDef.createdBy || null,
+            });
+            lockedDef.activeVersion = 2;
+            lockedDef.status = 'PUBLISHED';
+            lockedDef.updatedBy = lockedDef.createdBy || null;
+            this.logger.log(`Activated existing PUBLISHED PROJECT_PLAN_REVIEW_WORKFLOW v2.`);
+          }
+          return lockedDef;
+        }
+
+        return lockedDef;
+      });
+    } catch (err: any) {
+      this.logger.error(`ensureProjectGovernanceWorkflow error: ${err.message}`, err.stack);
+      throw err;
     }
   }
 

@@ -22,6 +22,7 @@ import {
   Descriptions,
   Timeline,
   Radio,
+  Divider,
   Tooltip,
 } from 'antd';
 import {
@@ -664,6 +665,7 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
   const [isApproveConfirmOpen, setIsApproveConfirmOpen] = useState<boolean>(false);
   const [isReturnModalOpen, setIsReturnModalOpen] = useState<boolean>(false);
   const [returnReason, setReturnReason] = useState<string>('');
+  const [returnDestination, setReturnDestination] = useState<'PM' | 'HOPS' | 'PROCUREMENT' | 'FINANCE'>('PM');
   const [submittingAction, setSubmittingAction] = useState<boolean>(false);
 
   // Stable Action Context States (Independent of Review Modal Lifecycle)
@@ -1119,6 +1121,7 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
     }
     const ctx = buildGovernanceActionContext(selectedTask, currentStageInfo, closureData);
     setReturnActionContext(ctx);
+    setReturnDestination('PM');
     setIsReturnModalOpen(true);
   };
 
@@ -1126,6 +1129,7 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
     setIsReturnModalOpen(false);
     setReturnActionContext(null);
     setReturnReason('');
+    setReturnDestination('PM');
   };
 
   // ── 3. APPROVE Action ──────────────────────────────────────────────────────
@@ -1258,6 +1262,9 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
         }
       } else {
         const stageLabel = returnActionContext.currentStageLabel;
+        const isDirectorReturn =
+          returnActionContext.nodeId === 'node_director_approval' &&
+          (userRoles.includes('DIRECTOR') || userRoles.includes('SUPER_ADMIN'));
 
         await WorkflowEngineService.completeTask(
           Number(returnActionContext.workflowInstanceId),
@@ -1265,12 +1272,25 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
           {
             action: 'RETURN',
             reason: returnReason.trim(),
+            ...(isDirectorReturn ? { returnDestination } : {}),
           },
         );
 
-        message.warning(
-          `Rencana operasional dikembalikan ke Project Manager untuk perbaikan (${stageLabel}).`,
-        );
+        if (isDirectorReturn) {
+          const destinationLabels: Record<string, string> = {
+            PM: 'Project Manager untuk perbaikan teknis',
+            HOPS: 'Head of Operations untuk review ulang',
+            PROCUREMENT: 'Procurement untuk review ulang',
+            FINANCE: 'Finance untuk review ulang',
+          };
+          message.warning(
+            `Rencana operasional berhasil dikembalikan ke ${destinationLabels[returnDestination] || returnDestination}.`,
+          );
+        } else {
+          message.warning(
+            `Rencana operasional dikembalikan ke Project Manager untuk perbaikan (${stageLabel}).`,
+          );
+        }
       }
 
       handleCloseReturnModal();
@@ -1290,6 +1310,14 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
   };
 
   const wbsTreeData = useMemo(() => buildWbsTree(wbsData), [wbsData]);
+
+  const activeReturnFrame = useMemo(() => {
+    const stack = (selectedTask?.workflowInstance?.context as any)?.activeReturnStack;
+    if (Array.isArray(stack) && stack.length > 0) {
+      return stack[stack.length - 1];
+    }
+    return null;
+  }, [selectedTask]);
 
   // Helper to render Project References suppressing duplicate chips
   const renderProjectReferences = (record: EnrichedGovernanceTask) => {
@@ -1914,6 +1942,10 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                       {selectedTask?.isClosure &&
                       selectedTask.nodeId === 'node_director_approval'
                         ? 'Setujui Final'
+                        : activeReturnFrame?.originNodeId === 'node_director_approval'
+                        ? 'Setujui & Kirim ke Direktur'
+                        : activeReturnFrame
+                        ? `Setujui & Kirim ke ${activeReturnFrame.originRole || 'Peninjau'}`
                         : 'Setujui & Lanjutkan'}
                     </Button>
                   </Space>
@@ -1930,6 +1962,10 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                     {selectedTask?.isClosure &&
                     selectedTask.nodeId === 'node_director_approval'
                       ? 'Setujui Final'
+                      : activeReturnFrame?.originNodeId === 'node_director_approval'
+                      ? 'Setujui & Kirim ke Direktur'
+                      : activeReturnFrame
+                      ? `Setujui & Kirim ke ${activeReturnFrame.originRole || 'Peninjau'}`
                       : 'Setujui & Lanjutkan'}
                   </Button>
                   <div className={styles.mobileSecondaryRow}>
@@ -2035,6 +2071,26 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
                 message="Akses Pemantauan (Read-Only)"
                 description={`Anda login dengan peran [${userRoles.join(', ')}]. Tugas ini berada pada tahap ${currentStageInfo?.label} yang memerlukan wewenang peran ${currentStageInfo?.requiredRoleLabel || currentStageInfo?.requiredRole}. Anda dapat meninjau seluruh data rencana operasional, namun keputusan persetujuan/perbaikan hanya dapat dilakukan oleh peran yang berwenang.`}
                 style={{ borderRadius: 6 }}
+              />
+            )}
+
+            {/* Active Correction Mode Banner */}
+            {activeReturnFrame && (
+              <Alert
+                type="info"
+                showIcon
+                message={`Mode Perbaikan Aktif — Dikembalikan oleh ${activeReturnFrame.originRole || 'Atasan'}`}
+                description={
+                  <div>
+                    <div><strong>Catatan Perbaikan:</strong> {activeReturnFrame.returnComment || 'Tidak ada catatan khusus.'}</div>
+                    <div style={{ marginTop: 4, fontSize: 12, color: '#475569' }}>
+                      {activeReturnFrame.originNodeId === 'node_director_approval'
+                        ? 'Tugas ini dikembalikan oleh Direktur untuk verifikasi terarah. Setelah selesai diverifikasi, alur kerja akan dikirimkan kembali langsung ke Direktur.'
+                        : 'Tugas ini dikembalikan untuk perbaikan. Setelah selesai diverifikasi, alur kerja akan dikembalikan langsung ke peninjau sebelumnya.'}
+                    </div>
+                  </div>
+                }
+                style={{ borderRadius: 6, border: '1px solid #bae6fd', backgroundColor: '#f0f9ff' }}
               />
             )}
 
@@ -3746,6 +3802,10 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
             ? approvalActionContext.nodeId === 'node_director_approval'
               ? 'Ya, Setujui Final'
               : 'Ya, Setujui'
+            : activeReturnFrame?.originNodeId === 'node_director_approval'
+            ? 'Ya, Kirim ke Direktur'
+            : activeReturnFrame
+            ? `Ya, Kirim ke ${activeReturnFrame.originRole || 'Peninjau'}`
             : 'Setujui & Lanjutkan'
         }
         cancelText="Batal"
@@ -3827,6 +3887,9 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
             >
               {returnActionContext?.isClosure
                 ? 'Kembalikan Pengajuan Penutupan Proyek ke PM?'
+                : returnActionContext?.nodeId === 'node_director_approval' &&
+                  (userRoles.includes('DIRECTOR') || userRoles.includes('SUPER_ADMIN'))
+                ? 'Kembalikan Rencana Operasional Proyek'
                 : 'Minta Perbaikan Rencana Operasional?'}
             </span>
           </Space>
@@ -3835,14 +3898,29 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
         onCancel={handleCloseReturnModal}
         onOk={handleReturn}
         confirmLoading={submittingAction}
-        okText={returnActionContext?.isClosure ? 'Kembalikan ke PM' : 'Kirim Catatan Perbaikan'}
+        okText={
+          returnActionContext?.isClosure
+            ? 'Kembalikan ke PM'
+            : returnActionContext?.nodeId === 'node_director_approval' &&
+              (userRoles.includes('DIRECTOR') || userRoles.includes('SUPER_ADMIN'))
+            ? `Kembalikan ke ${
+                returnDestination === 'PM'
+                  ? 'PM'
+                  : returnDestination === 'HOPS'
+                  ? 'Head of Operations'
+                  : returnDestination === 'PROCUREMENT'
+                  ? 'Procurement'
+                  : 'Finance'
+              }`
+            : 'Kirim Catatan Perbaikan'
+        }
         cancelText="Batal"
         okButtonProps={{
           danger: true,
           disabled: !returnActionContext || !returnActionContext.projectId || !returnActionContext.taskId,
           style: { fontWeight: 600 },
         }}
-        width={520}
+        width={560}
         style={{ maxWidth: 'calc(100vw - 24px)', margin: '12px auto' }}
       >
         {!returnActionContext || !returnActionContext.projectId || !returnActionContext.taskId ? (
@@ -3855,8 +3933,82 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
           />
         ) : (
           <div style={{ marginTop: 8 }}>
-            <p style={{ fontSize: 13, color: '#334155' }}>
-              Tuliskan catatan perbaikan yang jelas untuk Project Manager (PM):
+            {returnActionContext.nodeId === 'node_director_approval' &&
+              !returnActionContext.isClosure &&
+              (userRoles.includes('DIRECTOR') || userRoles.includes('SUPER_ADMIN')) && (
+                <div style={{ marginBottom: 16 }}>
+                  <label
+                    style={{
+                      display: 'block',
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#0f172a',
+                      marginBottom: 8,
+                    }}
+                  >
+                    Pilih Tujuan Pengembalian (Tahap Workflow):
+                  </label>
+                  <Radio.Group
+                    value={returnDestination}
+                    onChange={(e) => setReturnDestination(e.target.value)}
+                    style={{ width: '100%' }}
+                  >
+                    <Space direction="vertical" style={{ width: '100%' }} size={10}>
+                      <Radio value="PM" style={{ display: 'flex', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: '#0f172a' }}>
+                            Project Manager (PM)
+                          </div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            Revisi teknis dokumen rencana operasional oleh PM (setelah revisi kembali langsung ke Direktur).
+                          </div>
+                        </div>
+                      </Radio>
+
+                      <Radio value="HOPS" style={{ display: 'flex', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: '#0f172a' }}>
+                            Head of Operations
+                          </div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            Ulangi review operasional oleh Head of Operations (melanjutkan ke Procurement, Finance, hingga Direktur).
+                          </div>
+                        </div>
+                      </Radio>
+
+                      <Radio value="PROCUREMENT" style={{ display: 'flex', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: '#0f172a' }}>
+                            Purchasing / Procurement
+                          </div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            Ulangi review pengadaan oleh tim Procurement (melanjutkan ke Finance hingga Direktur).
+                          </div>
+                        </div>
+                      </Radio>
+
+                      <Radio value="FINANCE" style={{ display: 'flex', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 13, color: '#0f172a' }}>
+                            Finance
+                          </div>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>
+                            Ulangi review anggaran & keuangan oleh tim Finance (melanjutkan langsung ke Direktur).
+                          </div>
+                        </div>
+                      </Radio>
+                    </Space>
+                  </Radio.Group>
+                  <Divider style={{ margin: '14px 0' }} />
+                </div>
+              )}
+
+            <p style={{ fontSize: 13, color: '#334155', fontWeight: 500, marginBottom: 6 }}>
+              {returnActionContext.nodeId === 'node_director_approval' &&
+              !returnActionContext.isClosure &&
+              (userRoles.includes('DIRECTOR') || userRoles.includes('SUPER_ADMIN'))
+                ? 'Catatan Pengembalian (Wajib diisi untuk tahap tujuan):'
+                : 'Tuliskan catatan perbaikan yang jelas untuk Project Manager (PM):'}
             </p>
             <TextArea
               rows={4}
@@ -3865,15 +4017,27 @@ export const ProjectGovernanceTaskCenter: React.FC = () => {
               placeholder={
                 returnActionContext.isClosure
                   ? 'Contoh: Laporan penutupan belum menyertakan lampiran pengujian performa sistem...'
+                  : returnActionContext.nodeId === 'node_director_approval' &&
+                    !returnActionContext.isClosure &&
+                    (userRoles.includes('DIRECTOR') || userRoles.includes('SUPER_ADMIN'))
+                  ? 'Contoh: Rencana alokasi anggaran dan pengadaan subkontrak perlu ditinjau kembali karena melebihi batas...'
                   : 'Contoh: Estimasi anggaran pada kategori X melebihi acuan pasar, mohon periksa kembali kesesuaian spesifikasi item...'
               }
               maxLength={1000}
               showCount
             />
             <div style={{ fontSize: 11, color: '#64748b', marginTop: 8 }}>
-              Alur kerja akan kembali ke Project Manager (
-              {returnActionContext.returnNodeLabel || 'Dikembalikan ke PM'}) untuk direvisi dan diajukan
-              ulang.
+              {returnActionContext.nodeId === 'node_director_approval' &&
+              !returnActionContext.isClosure &&
+              (userRoles.includes('DIRECTOR') || userRoles.includes('SUPER_ADMIN'))
+                ? returnDestination === 'PM'
+                  ? 'Alur kerja akan kembali ke Project Manager untuk direvisi dan diajukan ulang langsung ke Direktur.'
+                  : returnDestination === 'HOPS'
+                  ? 'Alur kerja akan kembali ke Head of Operations dan melanjutkan proses review berjenjang hingga Direktur.'
+                  : returnDestination === 'PROCUREMENT'
+                  ? 'Alur kerja akan kembali ke Procurement dan melanjutkan proses review berjenjang hingga Direktur.'
+                  : 'Alur kerja akan kembali ke Finance dan melanjutkan proses review langsung ke Direktur.'
+                : `Alur kerja akan kembali ke Project Manager (${returnActionContext.returnNodeLabel || 'Dikembalikan ke PM'}) untuk direvisi dan diajukan ulang.`}
             </div>
           </div>
         )}

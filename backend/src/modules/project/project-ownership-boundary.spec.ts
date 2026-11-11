@@ -22,6 +22,7 @@ import { SaveWbsTreeDto } from './dto/save-wbs-tree.dto';
 import { SaveCostEstimateDto } from './dto/save-cost-estimate.dto';
 import { SaveProjectScheduleDto } from './dto/save-project-schedule.dto';
 import { SaveInitialConditionDto } from './dto/save-initial-condition.dto';
+import { WorkflowEngineService } from '../workflow-engine/workflow-engine.service';
 
 describe('SEC-02 & SEC-03: Project Planning PM Ownership Boundaries', () => {
   let service: ProjectService;
@@ -32,16 +33,35 @@ describe('SEC-02 & SEC-03: Project Planning PM Ownership Boundaries', () => {
   let costEstimateRepoMock: any;
   let initialConditionRepoMock: any;
   let managementReviewRepoMock: any;
+  let workflowEngineServiceMock: any;
 
   const ASSIGNED_PM_ID = 101;
   const UNASSIGNED_PM_ID = 202;
   const SUPER_ADMIN_ID = 999;
   const PROJECT_ID = 10;
+  const LEGACY_PROJECT_ID = 99;
+  const OTHER_WF_PROJECT_ID = 88;
 
   const mockProject: Partial<Project> = {
     id: PROJECT_ID,
     code: 'PRJ-2026-FTTH-01',
     name: 'FTTH Jakarta Timur',
+    managerId: ASSIGNED_PM_ID,
+    status: 'PLANNING',
+  };
+
+  const mockLegacyProject: Partial<Project> = {
+    id: LEGACY_PROJECT_ID,
+    code: 'PRJ-LEGACY-01',
+    name: 'Legacy Project',
+    managerId: ASSIGNED_PM_ID,
+    status: 'PLANNING',
+  };
+
+  const mockOtherWfProject: Partial<Project> = {
+    id: OTHER_WF_PROJECT_ID,
+    code: 'PRJ-OTHER-01',
+    name: 'Other Workflow Project',
     managerId: ASSIGNED_PM_ID,
     status: 'PLANNING',
   };
@@ -91,7 +111,36 @@ describe('SEC-02 & SEC-03: Project Planning PM Ownership Boundaries', () => {
     projectRepoMock = {
       findOne: jest.fn().mockImplementation(({ where }) => {
         if (where.id === PROJECT_ID) return Promise.resolve({ ...mockProject });
+        if (where.id === LEGACY_PROJECT_ID) return Promise.resolve({ ...mockLegacyProject });
+        if (where.id === OTHER_WF_PROJECT_ID) return Promise.resolve({ ...mockOtherWfProject });
         return Promise.resolve(null);
+      }),
+    };
+
+    workflowEngineServiceMock = {
+      getInstanceByEntity: jest.fn().mockImplementation((entityType: string, entityId: number) => {
+        if (entityType === 'PROJECT' && Number(entityId) === PROJECT_ID) {
+          return Promise.resolve({
+            id: 106,
+            status: 'ACTIVE',
+            currentNodeId: 'node_pm_planning',
+            workflowDefinition: { workflowKey: 'PROJECT_PLAN_REVIEW_WORKFLOW' },
+          });
+        }
+        if (entityType === 'PROJECT' && Number(entityId) === OTHER_WF_PROJECT_ID) {
+          return Promise.resolve({
+            id: 107,
+            status: 'ACTIVE',
+            currentNodeId: 'node_pm_planning',
+            workflowDefinition: { workflowKey: 'OTHER_PROJECT_WORKFLOW' },
+          });
+        }
+        return Promise.resolve(null);
+      }),
+      startInstance: jest.fn().mockResolvedValue({
+        id: 106,
+        status: 'ACTIVE',
+        currentNodeId: 'node_hops_review',
       }),
     };
 
@@ -125,7 +174,13 @@ describe('SEC-02 & SEC-03: Project Planning PM Ownership Boundaries', () => {
         }
         return Promise.resolve(null);
       }),
-      save: jest.fn().mockImplementation((cls, data) => Promise.resolve({ ...data, id: data?.id || 1 })),
+      save: jest.fn().mockImplementation((cls, data) => {
+        const saved = { ...data, id: data?.id || 1 };
+        if (cls === ProjectManagementReview) {
+          managementReviewRepoMock.findOne.mockResolvedValue(saved);
+        }
+        return Promise.resolve(saved);
+      }),
       create: jest.fn().mockImplementation((cls, data) => ({ ...data, id: 1 })),
     };
 
@@ -187,13 +242,14 @@ describe('SEC-02 & SEC-03: Project Planning PM Ownership Boundaries', () => {
         { provide: getRepositoryToken(ProjectManagementReview), useValue: managementReviewRepoMock },
         { provide: getRepositoryToken(PurchaseRequest), useValue: { find: jest.fn().mockResolvedValue([]) } },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        { provide: WorkflowEngineService, useValue: workflowEngineServiceMock },
       ],
     }).compile();
 
     service = module.get<ProjectService>(ProjectService);
   });
 
-  describe('SEC-02: saveWbsTree PM Ownership', () => {
+  describe('SEC-02: saveWbsTree PM Ownership & Gate 3G Conditional Scoping', () => {
     it('Assigned PM dapat edit WBS tree', async () => {
       const res = await service.saveWbsTree(PROJECT_ID, validWbsDto, ASSIGNED_PM_ID, ['PROJECT_MANAGER']);
       expect(res).toBeDefined();
@@ -210,14 +266,26 @@ describe('SEC-02 & SEC-03: Project Planning PM Ownership Boundaries', () => {
       ).rejects.toThrow(/Anda bukan Project Manager yang ditugaskan/);
     });
 
-    it('SUPER_ADMIN tetap dapat edit WBS tree', async () => {
-      const res = await service.saveWbsTree(PROJECT_ID, validWbsDto, SUPER_ADMIN_ID, ['SUPER_ADMIN']);
+    it('SUPER_ADMIN ditolak ForbiddenException jika bukan assigned PM pada PROJECT_PLAN_REVIEW_WORKFLOW (Policy Option A: Strict Business Owner Rule)', async () => {
+      await expect(
+        service.saveWbsTree(PROJECT_ID, validWbsDto, SUPER_ADMIN_ID, ['SUPER_ADMIN'])
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('SUPER_ADMIN diizinkan mengedit WBS pada legacy project tanpa PROJECT_PLAN_REVIEW_WORKFLOW (Gate 3G Branch B baseline restore)', async () => {
+      const res = await service.saveWbsTree(LEGACY_PROJECT_ID, validWbsDto, SUPER_ADMIN_ID, ['SUPER_ADMIN']);
+      expect(res).toBeDefined();
+      expect(res.statusCode).toBe(200);
+    });
+
+    it('SUPER_ADMIN diizinkan mengedit WBS pada project dengan workflow lain (Gate 3G Branch B baseline restore)', async () => {
+      const res = await service.saveWbsTree(OTHER_WF_PROJECT_ID, validWbsDto, SUPER_ADMIN_ID, ['SUPER_ADMIN']);
       expect(res).toBeDefined();
       expect(res.statusCode).toBe(200);
     });
   });
 
-  describe('SEC-03: saveCostEstimate PM Ownership', () => {
+  describe('SEC-03: saveCostEstimate PM Ownership & Gate 3G Conditional Scoping', () => {
     it('Assigned PM berhasil simpan Cost Estimate (RAB)', async () => {
       const res = await service.saveCostEstimate(PROJECT_ID, validCostDto, ASSIGNED_PM_ID, ['PROJECT_MANAGER']);
       expect(res).toBeDefined();
@@ -227,6 +295,17 @@ describe('SEC-02 & SEC-03: Project Planning PM Ownership Boundaries', () => {
       await expect(
         service.saveCostEstimate(PROJECT_ID, validCostDto, UNASSIGNED_PM_ID, ['PROJECT_MANAGER'])
       ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('SUPER_ADMIN ditolak ForbiddenException jika bukan assigned PM pada PROJECT_PLAN_REVIEW_WORKFLOW (Policy Option A)', async () => {
+      await expect(
+        service.saveCostEstimate(PROJECT_ID, validCostDto, SUPER_ADMIN_ID, ['SUPER_ADMIN'])
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('SUPER_ADMIN diizinkan simpan Cost Estimate pada legacy project (Gate 3G Branch B baseline restore)', async () => {
+      const res = await service.saveCostEstimate(LEGACY_PROJECT_ID, validCostDto, SUPER_ADMIN_ID, ['SUPER_ADMIN']);
+      expect(res).toBeDefined();
     });
   });
 
@@ -258,6 +337,7 @@ describe('SEC-02 & SEC-03: Project Planning PM Ownership Boundaries', () => {
 
   describe('SEC-03: submitManagementReview PM Ownership', () => {
     beforeEach(() => {
+      workflowEngineServiceMock.getInstanceByEntity.mockResolvedValue(null);
       // Mock getOperationalReadiness to return READY for submit test
       jest.spyOn(service, 'getOperationalReadiness').mockResolvedValue({
         overallStatus: 'READY',
@@ -279,6 +359,9 @@ describe('SEC-02 & SEC-03: Project Planning PM Ownership Boundaries', () => {
   });
 
   describe('PHASE 4B: Unified Planning Freeze Matrix & Lifecycle Boundary', () => {
+    beforeEach(() => {
+      workflowEngineServiceMock.getInstanceByEntity.mockResolvedValue(null);
+    });
     // 1. Minimal Matrix for Cost/RAB
     describe('Cost/RAB Freeze Matrix', () => {
       it('NOT_SUBMITTED -> ALLOW', async () => {

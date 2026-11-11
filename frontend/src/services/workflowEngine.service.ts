@@ -85,6 +85,7 @@ export interface CompleteWorkflowTaskPayload {
   action: 'APPROVE' | 'REJECT' | 'RETURN' | string;
   reason?: string;
   contextUpdate?: Record<string, any>;
+  returnDestination?: 'PM' | 'HOPS' | 'PROCUREMENT' | 'FINANCE';
 }
 
 function extractData<T>(res: any): T {

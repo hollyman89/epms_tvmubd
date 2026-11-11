@@ -3199,9 +3199,20 @@ export class CanonicalNotificationConsumer {
     // Branch 1: PROJECT_PLAN_REVIEW_WORKFLOW
     if (
       workflowKey === 'PROJECT_PLAN_REVIEW_WORKFLOW' ||
-      (!workflowKey && entityType === 'PROJECT' && CanonicalNotificationConsumer.MANAGEMENT_REVIEW_RETURN_STAGE_LABELS[toNode])
+      (!workflowKey &&
+        entityType === 'PROJECT' &&
+        (CanonicalNotificationConsumer.MANAGEMENT_REVIEW_RETURN_STAGE_LABELS[toNode] ||
+          ['node_hops_review', 'node_procurement_review', 'node_finance_review'].includes(toNode)))
     ) {
-      const reviewerStageLabel = CanonicalNotificationConsumer.MANAGEMENT_REVIEW_RETURN_STAGE_LABELS[toNode];
+      const isReviewerDirectReturn = ['node_hops_review', 'node_procurement_review', 'node_finance_review'].includes(toNode);
+      const reviewerStageLabel = isReviewerDirectReturn
+        ? toNode === 'node_hops_review'
+          ? 'Head of Operations'
+          : toNode === 'node_procurement_review'
+          ? 'Procurement'
+          : 'Finance'
+        : CanonicalNotificationConsumer.MANAGEMENT_REVIEW_RETURN_STAGE_LABELS[toNode];
+
       if (!reviewerStageLabel) {
         return this.markIntentionallyIgnored(
           `PROJECT_PLAN_REVIEW_WORKFLOW return to unrecognized revision node '${toNode}'`,
@@ -3218,6 +3229,81 @@ export class CanonicalNotificationConsumer {
       const reason = payload.reason ? String(payload.reason).trim() : '';
 
       const projectCtx = await this.resolveProjectContext(projectId);
+
+      // Direct inter-reviewer return: notify department reviewer role users
+      if (isReviewerDirectReturn) {
+        let targetRoles: string[] = [];
+        let purpose = '';
+        if (toNode === 'node_hops_review') {
+          targetRoles = ['HEAD_OF_OPERATIONS'];
+          purpose = 'MANAGEMENT_REVIEW_RETURNED_TO_HOPS';
+        } else if (toNode === 'node_procurement_review') {
+          targetRoles = ['PROCUREMENT', 'PURCHASING'];
+          purpose = 'MANAGEMENT_REVIEW_RETURNED_TO_PROCUREMENT';
+        } else if (toNode === 'node_finance_review') {
+          targetRoles = ['FINANCE'];
+          purpose = 'MANAGEMENT_REVIEW_RETURNED_TO_FINANCE';
+        }
+
+        const roleUserIds = await this.resolveRoleUserIds(targetRoles);
+        const recipientSet = new Set<number>(roleUserIds);
+        if (Array.isArray(event.routing?.userIds)) {
+          for (const uid of event.routing.userIds) {
+            if (Number(uid) > 0) recipientSet.add(Number(uid));
+          }
+        }
+        if (actorId && actorId > 0) {
+          recipientSet.delete(actorId);
+        }
+
+        const recipientIds = Array.from(recipientSet);
+        if (recipientIds.length === 0) {
+          this.logger.warn(
+            `[CanonicalNotificationConsumer] No eligible recipients for direct review RETURN on Project #${projectId} (toNode: ${toNode}, roles: ${targetRoles.join(',')}). Notification skipped.`,
+          );
+          return [];
+        }
+
+        const rawName = payload.projectName || projectCtx.projectName;
+        const safeProjectName =
+          rawName && !String(rawName).match(/^Proyek\s*#\d+$/i) ? String(rawName) : undefined;
+        const displayProjectName =
+          safeProjectName || (projectCtx.projectCode ? projectCtx.projectCode : `Proyek #${projectId}`);
+
+        const title = `Rencana Operasional Proyek Dikembalikan ke ${reviewerStageLabel}`;
+        const message = reason
+          ? `Rencana Operasional Proyek "${displayProjectName}" dikembalikan oleh Direktur ke ${reviewerStageLabel} untuk review ulang. Catatan: ${reason}`
+          : `Rencana Operasional Proyek "${displayProjectName}" dikembalikan oleh Direktur ke ${reviewerStageLabel} untuk review ulang. Silakan lakukan peninjauan kembali.`;
+
+        return this.projectEventToNotifications(
+          { ...event, eventId },
+          {
+            purpose,
+            type: 'ALERT',
+            title,
+            message,
+            actionTarget: `/governance/tasks?projectId=${projectId}`,
+            recipientIds,
+            metaData: {
+              category: 'PROJECT',
+              priority: 'HIGH',
+              reference_type: 'WORKFLOW_TASK',
+              reference_id: taskId,
+              taskId,
+              projectId,
+              projectName: safeProjectName,
+              instanceId: payload.instanceId,
+              fromNode,
+              toNode,
+              reviewerStage: reviewerStageLabel,
+              reason: reason || undefined,
+              actionType: 'MANAGEMENT_REVIEW_RETURNED',
+            },
+          },
+        );
+      }
+
+      // Default: Return to PM for technical plan revision
       const pmUserId = await this.resolveAuthoritativeProjectPm(projectCtx);
 
       if (!pmUserId || (actorId && pmUserId === actorId)) {

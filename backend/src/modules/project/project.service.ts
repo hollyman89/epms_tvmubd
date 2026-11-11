@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
   ForbiddenException,
   ConflictException,
+  InternalServerErrorException,
   Optional,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
@@ -383,9 +384,60 @@ export class ProjectService {
   }
 
   /**
-   * Helper to validate Project Manager ownership for project operations (SEC-02 & SEC-03).
-   * Project Managers can only modify projects assigned to them (project.managerId === userId).
-   * SUPER_ADMIN bypasses this ownership constraint.
+   * Resolves whether the given project is actively or formally associated with PROJECT_PLAN_REVIEW_WORKFLOW.
+   * Fails closed with InternalServerErrorException if workflow context cannot be reliably determined.
+   */
+  private async isProjectPlanReviewWorkflow(projectId: number): Promise<boolean> {
+    const wfService = this.getWorkflowEngineService();
+    if (!wfService) {
+      return false;
+    }
+
+    try {
+      const instance = await wfService.getInstanceByEntity('PROJECT', projectId);
+      if (!instance) {
+        return false;
+      }
+
+      // Check workflow definition key from eager relation
+      const defKey = instance.workflowDefinition?.workflowKey;
+      if (defKey) {
+        return String(defKey).trim() === 'PROJECT_PLAN_REVIEW_WORKFLOW';
+      }
+
+      // Check version's definition key
+      const versionDefKey = instance.workflowVersion?.workflowDefinition?.workflowKey;
+      if (versionDefKey) {
+        return String(versionDefKey).trim() === 'PROJECT_PLAN_REVIEW_WORKFLOW';
+      }
+
+      // Check instance context workflowKey
+      const ctxKey = instance.context?.workflowKey;
+      if (ctxKey) {
+        return String(ctxKey).trim() === 'PROJECT_PLAN_REVIEW_WORKFLOW';
+      }
+
+      // Fallback to definition ID if loaded (ID 25 is PROJECT_PLAN_REVIEW_WORKFLOW in EPMS)
+      if (instance.workflowDefinitionId && Number(instance.workflowDefinitionId) === 25) {
+        return true;
+      }
+
+      return false;
+    } catch (err: any) {
+      this.logger.error(`Failed to reliably resolve workflow context for project #${projectId}: ${err?.message || err}`);
+      throw new InternalServerErrorException(
+        'Gagal memverifikasi konteks alur kerja proyek: status alur kerja tidak dapat ditentukan.',
+      );
+    }
+  }
+
+  /**
+   * Helper to validate Project Manager ownership for project operations (Conditional Policy Option A).
+   * - Branch A (PROJECT_PLAN_REVIEW_WORKFLOW): Strict Business Owner Rule.
+   *   Only the explicitly assigned Project Manager (holding PROJECT_MANAGER role and project.managerId === userId)
+   *   may modify Operational Plan data. SUPER_ADMIN does NOT bypass this constraint.
+   * - Branch B (Legacy projects or projects without PROJECT_PLAN_REVIEW_WORKFLOW):
+   *   Preserves baseline authorization behavior where SUPER_ADMIN bypass is restored.
    */
   private async validateProjectManagerOwnership(
     project: Project,
@@ -394,25 +446,58 @@ export class ProjectService {
   ): Promise<void> {
     const currentUserId = Number(userId);
 
-    // 1. Direct role check (from token / JWT payload if forwarded)
+    // 1. Resolve roles from JWT or DB fallback
     let isSuperAdmin =
       Array.isArray(roles) &&
       roles.some((r) => String(r).toUpperCase() === 'SUPER_ADMIN');
 
-    // 2. Fallback to DB role check if userRepo exists and not already verified as SUPER_ADMIN
-    if (!isSuperAdmin && this.userRepo && currentUserId) {
+    let hasPmRole =
+      Array.isArray(roles) &&
+      roles.some((r) => String(r).toUpperCase() === 'PROJECT_MANAGER');
+
+    if (this.userRepo && currentUserId && (!isSuperAdmin || !hasPmRole)) {
       try {
         const user = await this.userRepo.findOne({
           where: { id: currentUserId },
           relations: ['roles'],
         });
-        const dbRoles = user?.roles?.map((r) => String(r.name).toUpperCase()) || [];
-        isSuperAdmin = dbRoles.includes('SUPER_ADMIN');
+        const dbRoles = user?.roles?.map((r: any) => String(r.name || r).toUpperCase()) || [];
+        if (!isSuperAdmin && dbRoles.includes('SUPER_ADMIN')) {
+          isSuperAdmin = true;
+        }
+        if (!hasPmRole && dbRoles.includes('PROJECT_MANAGER')) {
+          hasPmRole = true;
+        }
       } catch (err) {
         // Ignore DB query errors during mock testing
       }
     }
 
+    // 2. Resolve workflow context for this project
+    const isPlanReviewWorkflow = await this.isProjectPlanReviewWorkflow(Number(project.id));
+
+    // Branch A: PROJECT_PLAN_REVIEW_WORKFLOW -> Strict Policy Option A
+    if (isPlanReviewWorkflow) {
+      if (!hasPmRole) {
+        throw new ForbiddenException(
+          'Akses ditolak: Anda tidak memiliki peran PROJECT_MANAGER untuk mengedit Rencana Operasional',
+        );
+      }
+
+      const assignedPmId =
+        project.managerId !== undefined && project.managerId !== null
+          ? Number(project.managerId)
+          : null;
+
+      if (!assignedPmId || assignedPmId !== currentUserId) {
+        throw new ForbiddenException(
+          'Akses ditolak: Anda bukan Project Manager yang ditugaskan untuk proyek ini',
+        );
+      }
+      return;
+    }
+
+    // Branch B: Legacy project or project without PROJECT_PLAN_REVIEW_WORKFLOW -> Restore baseline SUPER_ADMIN bypass
     if (isSuperAdmin) {
       return;
     }

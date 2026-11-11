@@ -38,4 +38,14 @@ export class CompleteWorkflowTaskDto {
   @IsObject()
   @IsOptional()
   contextUpdate?: Record<string, any>;
+
+  @ApiPropertyOptional({
+    description: 'Selectable return destination for Director in PROJECT_PLAN_REVIEW_WORKFLOW',
+    enum: ['PM', 'HOPS', 'PROCUREMENT', 'FINANCE'],
+    example: 'HOPS',
+  })
+  @IsString()
+  @IsOptional()
+  @IsIn(['PM', 'HOPS', 'PROCUREMENT', 'FINANCE'])
+  returnDestination?: 'PM' | 'HOPS' | 'PROCUREMENT' | 'FINANCE';
 }
