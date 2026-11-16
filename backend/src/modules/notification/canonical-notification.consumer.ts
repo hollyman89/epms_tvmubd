@@ -15,6 +15,7 @@ import {
   CanonicalNotificationResult,
   CanonicalProjectionConfig,
 } from './canonical-notification.contract';
+import { diffInJakartaCalendarDays } from '../marketing/tender-followup.helper';
 
 @Injectable()
 export class CanonicalNotificationConsumer {
@@ -115,8 +116,35 @@ export class CanonicalNotificationConsumer {
   }
 
   /**
+   * Helper: Formats original Marketing prospect owner PIC attribution string.
+   * If original PIC is reliably resolved: `"Nama User".`
+   * If unidentifiable or missing: `Belum teridentifikasi.`
+   */
+  private formatMarketingPicAttribution(picFullName?: string | null): string {
+    if (!picFullName || typeof picFullName !== 'string') {
+      return 'Belum teridentifikasi.';
+    }
+    const trimmed = picFullName.trim();
+    if (
+      !trimmed ||
+      trimmed.toLowerCase() === 'belum teridentifikasi' ||
+      trimmed.toLowerCase() === 'belum teridentifikasi.' ||
+      trimmed.toLowerCase() === 'marketing pic' ||
+      trimmed.toLowerCase() === 'unassigned' ||
+      trimmed.toLowerCase() === 'system' ||
+      trimmed.toLowerCase() === 'unknown' ||
+      /^user\s*#\d+$/i.test(trimmed)
+    ) {
+      return 'Belum teridentifikasi.';
+    }
+    return `"${trimmed}".`;
+  }
+
+  /**
    * Phase FOLLOWUP-P1: Canonical Bell Projection for Director Inactivity Escalation.
    * Projected strictly to explicit recipients (all active Directors).
+   * Refined Director-facing executive wording & original Marketing prospect owner PIC attribution.
+   * Informs Directors for executive oversight only (no WorkflowTask/To-Do created).
    * Deduplication guaranteed via: <eventId>:<recipientId>:MARKETING_DIRECTOR_ESCALATION.
    */
   @OnEvent('marketing.tender.director_escalation')
@@ -129,19 +157,92 @@ export class CanonicalNotificationConsumer {
     }
 
     const p = event.payload;
-    const daysInactive = p?.calendarDaysInactive || 2;
-    const picName = p?.picFullName || 'Marketing PIC';
+    const daysInactive =
+      p?.calendarDaysInactive !== undefined && p?.calendarDaysInactive !== null
+        ? Number(p.calendarDaysInactive)
+        : 2;
+
+    let daysPastDeadline: number | null = null;
+    if (p?.daysPastDeadline !== undefined && p?.daysPastDeadline !== null) {
+      daysPastDeadline = Number(p.daysPastDeadline);
+    } else if (p?.daysOverdue !== undefined && p?.daysOverdue !== null) {
+      daysPastDeadline = Number(p.daysOverdue);
+    } else if (p?.bidSubmissionDeadline) {
+      try {
+        daysPastDeadline = Math.max(0, diffInJakartaCalendarDays(new Date(), p.bidSubmissionDeadline));
+      } catch {
+        daysPastDeadline = null;
+      }
+    }
+
+    if (daysPastDeadline === null && p?.reason) {
+      const match = String(p.reason).match(/(?:telah lewat|terlewati)\s+(\d+)\s+hari/i);
+      if (match) {
+        daysPastDeadline = parseInt(match[1], 10);
+      }
+    }
+
+    if (daysPastDeadline === null || isNaN(daysPastDeadline)) {
+      daysPastDeadline = 0;
+    }
+
+    let picFullName: string | null =
+      p?.picFullName && typeof p.picFullName === 'string' ? p.picFullName.trim() : null;
+
+    // Database lookup fallback for authoritative original prospect owner if payload omitted it
+    if (!picFullName && this.dataSource && event.aggregateId) {
+      try {
+        const tenderRows = await this.dataSource.query(
+          `SELECT t.marketing_pic_id, t.created_by,
+                  u_pic.full_name AS pic_full_name,
+                  u_creator.full_name AS creator_full_name
+           FROM tenders t
+           LEFT JOIN users u_pic ON u_pic.id = t.marketing_pic_id
+             AND (u_pic.is_active = 1 OR u_pic.is_active = true)
+             AND u_pic.deleted_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM user_roles ur_pic
+               JOIN roles r_pic ON r_pic.id = ur_pic.role_id
+               WHERE ur_pic.user_id = u_pic.id AND r_pic.name = 'MARKETING' AND r_pic.deleted_at IS NULL
+             )
+           LEFT JOIN users u_creator ON u_creator.id = t.created_by
+             AND (u_creator.is_active = 1 OR u_creator.is_active = true)
+             AND u_creator.deleted_at IS NULL
+             AND EXISTS (
+               SELECT 1 FROM user_roles ur_cr
+               JOIN roles r_cr ON r_cr.id = ur_cr.role_id
+               WHERE ur_cr.user_id = u_creator.id AND r_cr.name = 'MARKETING' AND r_cr.deleted_at IS NULL
+             )
+           WHERE t.id = ? AND t.deleted_at IS NULL
+           LIMIT 1`,
+          [event.aggregateId],
+        );
+        if (tenderRows && tenderRows.length > 0) {
+          const row = tenderRows[0];
+          picFullName = row.pic_full_name || row.creator_full_name || null;
+        }
+      } catch (err: any) {
+        this.logger.debug(
+          `[CanonicalNotificationConsumer] Could not resolve original PIC from DB for Tender #${event.aggregateId}: ${err?.message}`,
+        );
+      }
+    }
+
+    const tenderTitle = p?.title || `Tender #${event.aggregateId}`;
+    const picAttribution = this.formatMarketingPicAttribution(picFullName);
+    const message = `Tender "${tenderTitle}" belum memiliki pembaruan status maupun catatan tindak lanjut selama ${daysInactive} hari kalender. Batas akhir pengajuan penawaran telah terlewati ${daysPastDeadline} hari. PIC Marketing: ${picAttribution}`;
 
     return this.projectEventToNotifications(event, {
       purpose: 'MARKETING_DIRECTOR_ESCALATION',
       type: 'ALERT',
-      title: `Eskalasi Tender: Tidak Ada Kemajuan (${daysInactive} Hari)`,
-      message: `Tender "${p?.title || `Tender #${event.aggregateId}`}" (${picName}) tidak mengalami aktivitas bermakna selama ${daysInactive} hari kalender. Alasan: ${p?.reason || 'Perlu Perhatian'}.`,
+      title: 'Perhatian: Tender Belum Mengalami Tindak Lanjut',
+      message,
       actionTarget: `/sales?tab=1&tenderId=${event.aggregateId}`,
       metaData: {
         tenderId: event.aggregateId,
         conditionType: p?.conditionType,
         calendarDaysInactive: daysInactive,
+        daysPastDeadline,
         actionType: 'DIRECTOR_ESCALATION',
       },
     });

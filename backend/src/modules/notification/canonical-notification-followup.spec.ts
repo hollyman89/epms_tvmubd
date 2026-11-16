@@ -132,9 +132,9 @@ describe('Phase FOLLOWUP-P1: Marketing Follow-Up Reminder & Escalation Canonical
     expect(inMemoryNotifications).toHaveLength(1); // Still exactly 1 row
   });
 
-  it('3. marketing.tender.director_escalation projects Bell to all active Directors', async () => {
+  it('3. marketing.tender.director_escalation projects Bell to all active Directors with exact executive title & body', async () => {
     const event: BusinessEvent = {
-      eventId: 'marketing-escalation:160:2026-10-19',
+      eventId: 'marketing-escalation:160:2026-10-19:cycle-0',
       eventName: 'marketing.tender.director_escalation',
       eventVersion: 1,
       occurredAt: new Date().toISOString(),
@@ -149,6 +149,7 @@ describe('Phase FOLLOWUP-P1: Marketing Follow-Up Reminder & Escalation Canonical
         picFullName: 'Budi Marketing',
         reason: 'Batas waktu pengajuan penawaran telah lewat 3 hari.',
         calendarDaysInactive: 3,
+        daysPastDeadline: 3,
         inactivityReferenceDate: '2026-10-19',
       },
     };
@@ -160,13 +161,17 @@ describe('Phase FOLLOWUP-P1: Marketing Follow-Up Reminder & Escalation Canonical
     expect(inMemoryNotifications).toHaveLength(2);
     expect(inMemoryNotifications.map((n) => n.userId).sort()).toEqual([1, 2]);
     expect(inMemoryNotifications[0].actionLink).toBe('/sales?tab=1&tenderId=160');
-    expect(inMemoryNotifications[0].title).toBe('Eskalasi Tender: Tidak Ada Kemajuan (3 Hari)');
-    expect(inMemoryNotifications[0].message).toContain('Budi Marketing');
+    // Requirement 1: Exact notification title
+    expect(inMemoryNotifications[0].title).toBe('Perhatian: Tender Belum Mengalami Tindak Lanjut');
+    // Requirement 2 & 3: Exact notification body with dynamic tender name, day values, and original PIC
+    expect(inMemoryNotifications[0].message).toBe(
+      'Tender "Tender Fiber Optik" belum memiliki pembaruan status maupun catatan tindak lanjut selama 3 hari kalender. Batas akhir pengajuan penawaran telah terlewati 3 hari. PIC Marketing: "Budi Marketing".',
+    );
   });
 
   it('4. Duplicate director escalation for the same cycle is suppressed', async () => {
     const event: BusinessEvent = {
-      eventId: 'marketing-escalation:160:2026-10-19',
+      eventId: 'marketing-escalation:160:2026-10-19:cycle-0',
       eventName: 'marketing.tender.director_escalation',
       eventVersion: 1,
       occurredAt: new Date().toISOString(),
@@ -178,6 +183,7 @@ describe('Phase FOLLOWUP-P1: Marketing Follow-Up Reminder & Escalation Canonical
         title: 'Tender Fiber Optik',
         picFullName: 'Budi Marketing',
         calendarDaysInactive: 3,
+        daysPastDeadline: 3,
       },
     };
 
@@ -186,5 +192,338 @@ describe('Phase FOLLOWUP-P1: Marketing Follow-Up Reminder & Escalation Canonical
 
     expect(retryResults[0].status).toBe('DUPLICATE_SUPPRESSED');
     expect(inMemoryNotifications).toHaveLength(1);
+  });
+
+  describe('Comprehensive Director Tender Escalation Notification Wording & PIC Attribution Verification', () => {
+    it('Requirement 1 & 2: Exact notification title & body template with dynamic tender name and day values', async () => {
+      const event: BusinessEvent = {
+        eventId: 'marketing-escalation:301:2026-11-10:cycle-1',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 301,
+        routing: { userIds: [100] },
+        payload: {
+          tenderId: 301,
+          title: 'Pengadaan CCTV & Access Door Bandara',
+          picUserId: 15,
+          picFullName: 'Lukas Kurniawan',
+          calendarDaysInactive: 5,
+          daysPastDeadline: 4,
+        },
+      };
+
+      const results = await consumer.handleMarketingDirectorEscalation(event);
+      expect(results[0].status).toBe('PERSISTED');
+
+      const notif = inMemoryNotifications.find((n) => n.userId === 100);
+      expect(notif).toBeDefined();
+      expect(notif!.title).toBe('Perhatian: Tender Belum Mengalami Tindak Lanjut');
+      expect(notif!.message).toBe(
+        'Tender "Pengadaan CCTV & Access Door Bandara" belum memiliki pembaruan status maupun catatan tindak lanjut selama 5 hari kalender. Batas akhir pengajuan penawaran telah terlewati 4 hari. PIC Marketing: "Lukas Kurniawan".',
+      );
+    });
+
+    it('Requirement 4: Last-updated-by user is never substituted for the original PIC', async () => {
+      const event: BusinessEvent = {
+        eventId: 'marketing-escalation:302:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 302,
+        routing: { userIds: [100] },
+        payload: {
+          tenderId: 302,
+          title: 'Pembangunan Menara BTS Palapa',
+          picUserId: 15,
+          picFullName: 'Lukas Kurniawan', // Original marketing PIC
+          updatedBy: 'Admin Pengubah (SUPER_ADMIN)',
+          updaterId: 999, // Another user who updated the tender
+          calendarDaysInactive: 2,
+          daysPastDeadline: 1,
+        },
+      };
+
+      await consumer.handleMarketingDirectorEscalation(event);
+
+      const notif = inMemoryNotifications.find((n) => n.userId === 100);
+      expect(notif).toBeDefined();
+      expect(notif!.message).toContain('PIC Marketing: "Lukas Kurniawan".');
+      expect(notif!.message).not.toContain('Admin Pengubah');
+      expect(notif!.message).not.toContain('999');
+    });
+
+    it('Requirement 5: Escalation-triggering user is never substituted for the original PIC', async () => {
+      const event: BusinessEvent = {
+        eventId: 'marketing-escalation:303:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 303,
+        actor: { userId: 88, roles: ['DIRECTOR', 'GENERAL_MANAGER'] }, // Escalation triggerer
+        routing: { userIds: [100] },
+        payload: {
+          tenderId: 303,
+          title: 'Pengadaan Switch Core',
+          picUserId: 22,
+          picFullName: 'Rina Marketing',
+          calendarDaysInactive: 3,
+          daysPastDeadline: 2,
+        },
+      };
+
+      await consumer.handleMarketingDirectorEscalation(event);
+
+      const notif = inMemoryNotifications.find((n) => n.userId === 100);
+      expect(notif).toBeDefined();
+      expect(notif!.message).toContain('PIC Marketing: "Rina Marketing".');
+      expect(notif!.message).not.toContain('88');
+      expect(notif!.message).not.toContain('GENERAL_MANAGER');
+    });
+
+    it('Requirement 6: Missing or unidentifiable original PIC uses neutral fallback without quotes', async () => {
+      // Test A: picFullName is undefined
+      const eventWithoutPic: BusinessEvent = {
+        eventId: 'marketing-escalation:304:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 304,
+        routing: { userIds: [100] },
+        payload: {
+          tenderId: 304,
+          title: 'Modernisasi Data Center',
+          calendarDaysInactive: 4,
+          daysPastDeadline: 2,
+        },
+      };
+
+      await consumer.handleMarketingDirectorEscalation(eventWithoutPic);
+      const notifA = inMemoryNotifications.find((n) => n.dedupeKey?.includes('304'));
+      expect(notifA).toBeDefined();
+      expect(notifA!.message).toBe(
+        'Tender "Modernisasi Data Center" belum memiliki pembaruan status maupun catatan tindak lanjut selama 4 hari kalender. Batas akhir pengajuan penawaran telah terlewati 2 hari. PIC Marketing: Belum teridentifikasi.',
+      );
+
+      // Test B: picFullName is generic placeholder like 'Marketing PIC' or 'User #45'
+      const eventWithPlaceholder: BusinessEvent = {
+        eventId: 'marketing-escalation:305:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 305,
+        routing: { userIds: [100] },
+        payload: {
+          tenderId: 305,
+          title: 'Pengadaan Genset Cadangan',
+          picFullName: 'User #45',
+          calendarDaysInactive: 2,
+          daysPastDeadline: 1,
+        },
+      };
+
+      await consumer.handleMarketingDirectorEscalation(eventWithPlaceholder);
+      const notifB = inMemoryNotifications.find((n) => n.dedupeKey?.includes('305'));
+      expect(notifB).toBeDefined();
+      expect(notifB!.message).toBe(
+        'Tender "Pengadaan Genset Cadangan" belum memiliki pembaruan status maupun catatan tindak lanjut selama 2 hari kalender. Batas akhir pengajuan penawaran telah terlewati 1 hari. PIC Marketing: Belum teridentifikasi.',
+      );
+    });
+
+    it('Requirement 7: Different tenders correctly display their respective original PICs', async () => {
+      const eventTenderA: BusinessEvent = {
+        eventId: 'marketing-escalation:306:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 306,
+        routing: { userIds: [100] },
+        payload: {
+          tenderId: 306,
+          title: 'Tender Fiber Optik Jalur Barat',
+          picFullName: 'Siti Marketing',
+          calendarDaysInactive: 3,
+          daysPastDeadline: 2,
+        },
+      };
+
+      const eventTenderB: BusinessEvent = {
+        eventId: 'marketing-escalation:307:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 307,
+        routing: { userIds: [100] },
+        payload: {
+          tenderId: 307,
+          title: 'Tender Radio Link Jalur Timur',
+          picFullName: 'Andi Sales',
+          calendarDaysInactive: 6,
+          daysPastDeadline: 5,
+        },
+      };
+
+      await consumer.handleMarketingDirectorEscalation(eventTenderA);
+      await consumer.handleMarketingDirectorEscalation(eventTenderB);
+
+      const notifA = inMemoryNotifications.find((n) => n.dedupeKey?.includes('306'));
+      const notifB = inMemoryNotifications.find((n) => n.dedupeKey?.includes('307'));
+
+      expect(notifA!.message).toContain('Tender "Tender Fiber Optik Jalur Barat"');
+      expect(notifA!.message).toContain('PIC Marketing: "Siti Marketing".');
+
+      expect(notifB!.message).toContain('Tender "Tender Radio Link Jalur Timur"');
+      expect(notifB!.message).toContain('PIC Marketing: "Andi Sales".');
+    });
+
+    it('Requirement 9: Director receives notification but no WorkflowTask/To-Do is created', async () => {
+      const event: BusinessEvent = {
+        eventId: 'marketing-escalation:308:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 308,
+        routing: { userIds: [101] }, // Director user
+        payload: {
+          tenderId: 308,
+          title: 'Proyek Relokasi Kabel Bawah Laut',
+          picFullName: 'Dwi Ragil Pribadi',
+          calendarDaysInactive: 2,
+          daysPastDeadline: 1,
+        },
+      };
+
+      const results = await consumer.handleMarketingDirectorEscalation(event);
+
+      // Notification is projected strictly as an ALERT notification
+      expect(results).toHaveLength(1);
+      expect(results[0].status).toBe('PERSISTED');
+
+      const savedNotif = inMemoryNotifications.find((n) => n.userId === 101);
+      expect(savedNotif).toBeDefined();
+      expect(savedNotif!.notificationType).toBe('ALERT'); // Strictly informational ALERT, never TASK
+      expect(savedNotif!.actionLink).toBe('/sales?tab=1&tenderId=308');
+      // Purpose is informational MARKETING_DIRECTOR_ESCALATION
+      expect(savedNotif!.dedupeKey).toContain('MARKETING_DIRECTOR_ESCALATION');
+    });
+
+    it('Requirement 10: Existing notification deduplication and delivery behavior remain intact', async () => {
+      const event: BusinessEvent = {
+        eventId: 'marketing-escalation:309:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 309,
+        routing: { userIds: [102, 103] }, // Multiple Directors
+        payload: {
+          tenderId: 309,
+          title: 'Pengadaan Server Cloud 2026',
+          picFullName: 'Budi Marketing',
+          calendarDaysInactive: 2,
+          daysPastDeadline: 2,
+        },
+      };
+
+      // First delivery: both directors receive notification
+      const firstResults = await consumer.handleMarketingDirectorEscalation(event);
+      expect(firstResults).toHaveLength(2);
+      expect(firstResults.every((r) => r.status === 'PERSISTED')).toBe(true);
+
+      // Sockets pushed to both directors
+      expect(socketPushes.filter((s) => s.userId === 102 || s.userId === 103)).toHaveLength(2);
+
+      // Second delivery with identical eventId: suppressed as DUPLICATE_SUPPRESSED
+      const secondResults = await consumer.handleMarketingDirectorEscalation(event);
+      expect(secondResults).toHaveLength(2);
+      expect(secondResults.every((r) => r.status === 'DUPLICATE_SUPPRESSED')).toBe(true);
+
+      // Database count remains 2 (no duplicate row added)
+      const notifs309 = inMemoryNotifications.filter((n) => n.dedupeKey?.includes('309'));
+      expect(notifs309).toHaveLength(2);
+    });
+
+    it('Requirement 3 & 4 (DB Fallback): Authoritative original prospect owner resolved from DB when payload omits it', async () => {
+      const mockDataSource = {
+        query: jest.fn().mockImplementation(async (sql: string, params: any[]) => {
+          if (params[0] === 310) {
+            return [
+              {
+                marketing_pic_id: 15,
+                created_by: 12,
+                pic_full_name: 'Lukas Kurniawan',
+                creator_full_name: 'Budi Marketing',
+              },
+            ];
+          }
+          if (params[0] === 311) {
+            // Null marketing_pic_id, falls back to creator
+            return [
+              {
+                marketing_pic_id: null,
+                created_by: 12,
+                pic_full_name: null,
+                creator_full_name: 'Budi Marketing',
+              },
+            ];
+          }
+          return [];
+        }),
+      } as any;
+
+      const consumerWithDb = new CanonicalNotificationConsumer(writer, mockDataSource);
+
+      // Event without picFullName in payload for Tender 310
+      const event310: BusinessEvent = {
+        eventId: 'marketing-escalation:310:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 310,
+        routing: { userIds: [100] },
+        payload: {
+          tenderId: 310,
+          title: 'Pengadaan Fiber Optik Segmen 2',
+          calendarDaysInactive: 2,
+          daysPastDeadline: 1,
+        },
+      };
+
+      await consumerWithDb.handleMarketingDirectorEscalation(event310);
+      const notif310 = inMemoryNotifications.find((n) => n.dedupeKey?.includes('310'));
+      expect(notif310).toBeDefined();
+      expect(notif310!.message).toContain('PIC Marketing: "Lukas Kurniawan".');
+
+      // Event without picFullName in payload for Tender 311 (creator fallback)
+      const event311: BusinessEvent = {
+        eventId: 'marketing-escalation:311:2026-11-10:cycle-0',
+        eventName: 'marketing.tender.director_escalation',
+        eventVersion: 1,
+        occurredAt: new Date().toISOString(),
+        aggregateType: 'Tender',
+        aggregateId: 311,
+        routing: { userIds: [100] },
+        payload: {
+          tenderId: 311,
+          title: 'Pengadaan DWDM Surabaya',
+          calendarDaysInactive: 3,
+          daysPastDeadline: 2,
+        },
+      };
+
+      await consumerWithDb.handleMarketingDirectorEscalation(event311);
+      const notif311 = inMemoryNotifications.find((n) => n.dedupeKey?.includes('311'));
+      expect(notif311).toBeDefined();
+      expect(notif311!.message).toContain('PIC Marketing: "Budi Marketing".');
+    });
   });
 });

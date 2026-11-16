@@ -961,7 +961,14 @@ export class TenderScheduler {
                       [responsibleUserId]
                     );
                     const picFullName =
-                      picUser && picUser[0]?.full_name ? picUser[0].full_name : `User #${responsibleUserId}`;
+                      picUser && picUser[0]?.full_name && String(picUser[0].full_name).trim().length > 0
+                        ? String(picUser[0].full_name).trim()
+                        : null;
+
+                    const daysOverdue =
+                      currentEval.daysOverdue !== undefined && currentEval.daysOverdue !== null
+                        ? currentEval.daysOverdue
+                        : (tender.bid_submission_deadline ? Math.max(0, diffInJakartaCalendarDays(new Date(), tender.bid_submission_deadline)) : 0);
 
                     const escalationEvent: BusinessEvent = {
                       eventId: escalationEventId,
@@ -982,6 +989,8 @@ export class TenderScheduler {
                         conditionType: currentEval.conditionType,
                         reason: currentEval.reason,
                         bidSubmissionDeadline: tender.bid_submission_deadline,
+                        daysOverdue,
+                        daysPastDeadline: daysOverdue,
                         lastMeaningfulFollowUp: latestMeaningfulDate ? latestMeaningfulDate.toISOString() : null,
                         calendarDaysInactive,
                         inactivityReferenceDate: cycleRefDateStr,

@@ -393,62 +393,86 @@ export const NotificationBell: React.FC = () => {
         String(item.actionType || '').startsWith('PROJECT_CLOSURE');
 
       return (
-        <List.Item
+        <div
           key={item.todoId}
-          style={{
-            backgroundColor: '#ffffff',
-            cursor: isActionAvailable ? 'pointer' : 'default',
-            padding: '12px 16px',
-            marginBottom: '6px',
-            borderRadius: '8px',
-            border: '1px solid #e2e8f0',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            transition: 'all 0.2s ease',
-          }}
           onClick={() => {
             if (targetUrl) {
-              router.push(targetUrl);
+              navigateTodoAction(targetUrl, router);
               setOpen(false);
             }
           }}
+          style={{
+            backgroundColor: '#ffffff',
+            border: '1px solid #e2e8f0',
+            borderRadius: 12,
+            padding: '12px 14px',
+            marginBottom: 10,
+            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)',
+            cursor: isActionAvailable ? 'pointer' : 'default',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'flex-start',
+            transition: 'all 0.15s ease',
+          }}
           onMouseEnter={(e) => {
             if (isActionAvailable) {
-              e.currentTarget.style.backgroundColor = '#f8fafc';
+              e.currentTarget.style.borderColor = '#cbd5e1';
+              e.currentTarget.style.boxShadow = '0 3px 8px rgba(0, 0, 0, 0.05)';
             }
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = '#ffffff';
+            e.currentTarget.style.borderColor = '#e2e8f0';
+            e.currentTarget.style.boxShadow = '0 1px 3px rgba(0, 0, 0, 0.02)';
           }}
         >
-          <div style={{ flex: 1 }}>
+          {/* Document icon in soft red rounded box */}
+          <div
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              backgroundColor: '#fef2f2',
+              border: '1px solid #fee2e2',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              marginTop: 2,
+            }}
+          >
+            <FileTextOutlined style={{ color: '#ef4444', fontSize: 18 }} />
+          </div>
+
+          {/* Details */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Badges row */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
               {isGoNoGoApproval ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                  <Tag color="green" style={{ fontSize: '10px' }}>TENDER</Tag>
-                  <Tag color="gold" style={{ fontSize: '10px' }}>Direktur</Tag>
-                </div>
+                <>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '1px 6px', borderRadius: 4 }}>TENDER</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: '#d97706', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', padding: '1px 6px', borderRadius: 4 }}>Direktur</span>
+                </>
               ) : isGoNoGoRevision ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                  <Tag color="green" style={{ fontSize: '10px' }}>TENDER</Tag>
-                  <Tag color="gold" style={{ fontSize: '10px' }}>Marketing</Tag>
-                </div>
+                <>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '1px 6px', borderRadius: 4 }}>TENDER</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: '#d97706', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', padding: '1px 6px', borderRadius: 4 }}>Marketing</span>
+                </>
               ) : isClosureTask ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                  <Tag color="purple" style={{ fontSize: '10px' }}>Penutupan Proyek</Tag>
+                <>
+                  <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>Penutupan Proyek</Tag>
                   {item.assignedRole && (
-                    <Tag color="gold" style={{ fontSize: '10px' }}>
+                    <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>
                       {formatRoleName(item.assignedRole)}
                     </Tag>
                   )}
-                </div>
+                </>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '4px', flexWrap: 'wrap' }}>
-                  <Tag color={getEntityTagColor(item.entityType)} style={{ fontSize: '10px' }}>
+                <>
+                  <Tag color={getEntityTagColor(item.entityType)} style={{ fontSize: 10, margin: 0 }}>
                     {formatEntityLabel(item.entityType)}
                   </Tag>
                   {item.assignedRole && (
-                    <Tag color="gold" style={{ fontSize: '10px' }}>
+                    <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>
                       {formatRoleName(item.assignedRole)}
                     </Tag>
                   )}
@@ -456,38 +480,50 @@ export const NotificationBell: React.FC = () => {
                     <Tag
                       color={isOverdue ? 'error' : 'warning'}
                       icon={<ClockCircleOutlined />}
-                      style={{ fontSize: '10px', fontWeight: 600 }}
+                      style={{ fontSize: 10, fontWeight: 600, margin: 0 }}
                     >
                       {isOverdue ? 'Terlambat' : dayjs(item.dueAt).fromNow()}
                     </Tag>
                   )}
-                </div>
+                </>
               )}
+            </div>
 
-              <div style={{ marginBottom: '2px' }}>
-                <Text strong style={{ fontSize: '13px', color: '#0f172a', display: 'block' }}>
-                  {formatTaskTitle(item.title, item)}
-                </Text>
+            {/* Task title */}
+            <div style={{ marginBottom: 4 }}>
+              <Text strong style={{ fontSize: 13.5, color: '#0f172a', display: 'block', lineHeight: 1.35 }}>
+                {formatTaskTitle(item.title, item)}
+              </Text>
+            </div>
+
+            {/* Business context */}
+            {isClosureTask ? (
+              <div style={{ marginBottom: 4, fontSize: 12, color: '#334155', lineHeight: '1.4' }}>
+                {formatTaskDescription(item)}
+              </div>
+            ) : (
+              renderBellBusinessContextBlock(item)
+            )}
+
+            {/* Timestamp & Action Button */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginTop: 6,
+                paddingTop: 6,
+                borderTop: '1px dashed #f1f5f9',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#94a3b8' }}>
+                <ClockCircleOutlined style={{ fontSize: 11 }} />
+                <span>{dayjs(item.createdAt).fromNow()}</span>
               </div>
 
-              {isClosureTask ? (
-                <div style={{ marginBottom: '4px', fontSize: '12px', color: '#334155', lineHeight: '1.4' }}>
-                  {formatTaskDescription(item)}
-                </div>
-              ) : (
-                renderBellBusinessContextBlock(item)
-              )}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
-              <Text type="secondary" style={{ fontSize: '10px', color: '#94a3b8' }}>
-                {dayjs(item.createdAt).fromNow()}
-              </Text>
-              <Button
-                type="link"
-                size="small"
+              <button
+                type="button"
                 disabled={!isActionAvailable}
-                icon={isActionAvailable ? <ArrowRightOutlined /> : undefined}
-                style={{ fontSize: '11px', padding: 0, height: 'auto' }}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (targetUrl) {
@@ -495,12 +531,27 @@ export const NotificationBell: React.FC = () => {
                     setOpen(false);
                   }
                 }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  padding: '3px 10px',
+                  borderRadius: 6,
+                  border: isActionAvailable ? '1px solid #bfdbfe' : '1px solid #e2e8f0',
+                  backgroundColor: isActionAvailable ? '#eff6ff' : '#f8fafc',
+                  color: isActionAvailable ? '#2563eb' : '#94a3b8',
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  cursor: isActionAvailable ? 'pointer' : 'default',
+                  transition: 'all 0.15s ease',
+                }}
               >
-                {isActionAvailable ? formatContextualCta(item) : 'Aksi Belum Tersedia'}
-              </Button>
+                <span>{isActionAvailable ? formatContextualCta(item) : 'Aksi Belum Tersedia'}</span>
+                {isActionAvailable && <ArrowRightOutlined style={{ fontSize: 10 }} />}
+              </button>
             </div>
           </div>
-        </List.Item>
+        </div>
       );
     },
     [router]
@@ -514,20 +565,8 @@ export const NotificationBell: React.FC = () => {
       const targetUrl = resolveNotificationTarget(item);
 
       return (
-        <List.Item
+        <div
           key={item.id}
-          style={{
-            backgroundColor: item.isRead ? '#ffffff' : '#f8fafc',
-            cursor: targetUrl ? 'pointer' : 'default',
-            padding: '12px 16px',
-            marginBottom: '6px',
-            borderRadius: '8px',
-            border: `1px solid ${item.isRead ? 'transparent' : '#e2e8f0'}`,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            transition: 'all 0.2s ease',
-          }}
           onClick={async () => {
             if (!item.isRead) {
               await markAsRead(item.id);
@@ -537,55 +576,98 @@ export const NotificationBell: React.FC = () => {
               setOpen(false);
             }
           }}
+          style={{
+            backgroundColor: '#ffffff',
+            border: item.isRead ? '1px solid #f1f5f9' : '1px solid #cbd5e1',
+            borderRadius: 12,
+            padding: '12px 14px',
+            marginBottom: 10,
+            boxShadow: item.isRead ? '0 1px 2px rgba(0, 0, 0, 0.02)' : '0 2px 5px rgba(37, 99, 235, 0.06)',
+            cursor: targetUrl ? 'pointer' : 'default',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'flex-start',
+            transition: 'all 0.15s ease',
+          }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.backgroundColor = '#f1f5f9';
+            e.currentTarget.style.borderColor = '#94a3b8';
+            e.currentTarget.style.boxShadow = '0 3px 8px rgba(0, 0, 0, 0.05)';
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.backgroundColor = item.isRead ? '#ffffff' : '#f8fafc';
+            e.currentTarget.style.borderColor = item.isRead ? '#f1f5f9' : '#cbd5e1';
+            e.currentTarget.style.boxShadow = item.isRead ? '0 1px 2px rgba(0, 0, 0, 0.02)' : '0 2px 5px rgba(37, 99, 235, 0.06)';
           }}
         >
-          <div style={{ flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '4px', marginBottom: '4px' }}>
+          {/* Bell icon in rounded box */}
+          <div
+            style={{
+              width: 38,
+              height: 38,
+              borderRadius: 10,
+              backgroundColor: item.isRead ? '#f8fafc' : '#eff6ff',
+              border: `1px solid ${item.isRead ? '#e2e8f0' : '#dbeafe'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              marginTop: 2,
+            }}
+          >
+            <BellOutlined style={{ color: item.isRead ? '#94a3b8' : '#2563eb', fontSize: 17 }} />
+          </div>
+
+          {/* Details */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {/* Badges */}
+            <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 4 }}>
               {renderCategoryTag(category)}
               {renderPriorityBadge(priority)}
-              {isWon && <Tag color="success" style={{ fontWeight: 'bold', fontSize: '10px' }}>WON</Tag>}
+              {isWon && <Tag color="success" style={{ fontWeight: 'bold', fontSize: 10, margin: 0 }}>WON</Tag>}
             </div>
 
+            {/* Notification Title */}
             {item.title && (
-              <div style={{ marginBottom: '2px' }}>
-                <Text strong style={{ fontSize: '13px', color: item.isRead ? '#475569' : '#0f172a', display: 'block' }}>
+              <div style={{ marginBottom: 3 }}>
+                <Text strong style={{ fontSize: 13.5, color: item.isRead ? '#475569' : '#0f172a', display: 'block', lineHeight: 1.35 }}>
                   {formatNotificationTitle(item.title)}
                 </Text>
               </div>
             )}
 
+            {/* Business context */}
             {renderBellBusinessContextBlock(item)}
 
-            <div style={{ marginBottom: '4px' }}>
-              <Text style={{ display: 'block', fontSize: '12px', color: item.isRead ? '#64748b' : '#334155', lineHeight: '1.4' }}>
+            {/* Message Body */}
+            <div style={{ marginBottom: 6 }}>
+              <Text style={{ display: 'block', fontSize: 12, color: item.isRead ? '#64748b' : '#334155', lineHeight: 1.45 }}>
                 {renderSmartMessage(formatNotificationMessage(item.message), item.isRead)}
               </Text>
             </div>
 
-            <Text type="secondary" style={{ fontSize: '10px', color: '#94a3b8' }}>
-              {dayjs(item.createdAt).fromNow()}
-            </Text>
+            {/* Timestamp */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#94a3b8' }}>
+              <ClockCircleOutlined style={{ fontSize: 11 }} />
+              <span>{dayjs(item.createdAt).fromNow()}</span>
+            </div>
           </div>
 
-          {!item.isRead && (
-            <div style={{ paddingLeft: '8px', paddingTop: '4px' }}>
+          {/* Unread dot or chevron */}
+          {!item.isRead ? (
+            <div style={{ paddingLeft: 4, paddingTop: 4, flexShrink: 0 }}>
               <div
                 style={{
-                  width: '8px',
-                  height: '8px',
+                  width: 8,
+                  height: 8,
                   borderRadius: '50%',
-                  backgroundColor: '#3b82f6',
-                  boxShadow: '0 0 0 3px rgba(59, 130, 246, 0.15)',
+                  backgroundColor: '#2563eb',
+                  boxShadow: '0 0 0 3px rgba(37, 99, 235, 0.15)',
                 }}
               />
             </div>
+          ) : (
+            <RightOutlined style={{ color: '#cbd5e1', fontSize: 12, flexShrink: 0, marginTop: 4 }} />
           )}
-        </List.Item>
+        </div>
       );
     },
     [markAsRead, router]
@@ -595,8 +677,15 @@ export const NotificationBell: React.FC = () => {
     (item: TodoItem) => {
       const targetUrl = resolveTodoActionTarget(item);
       const isActionAvailable = Boolean(targetUrl);
+      const dueTime = item.dueAt ? new Date(item.dueAt).getTime() : null;
+      const isOverdue = dueTime !== null && dueTime < Date.now();
       const isGoNoGoApproval = item.actionType === 'GO_NOGO_APPROVAL';
       const isGoNoGoRevision = item.actionType === 'GO_NOGO_REVISION';
+      const isClosureTask =
+        item.entityType === 'PROJECT_CLOSURE' ||
+        item.entityType === 'PENUTUPAN PROYEK' ||
+        item.sourceType === 'DOMAIN_PROJECT_CLOSURE' ||
+        String(item.actionType || '').startsWith('PROJECT_CLOSURE');
       const ctx = extractItemBusinessContext(item);
 
       return (
@@ -610,14 +699,14 @@ export const NotificationBell: React.FC = () => {
           }}
           style={{
             backgroundColor: '#ffffff',
-            border: '1px solid #f1f5f9',
+            border: '1px solid #e2e8f0',
             borderRadius: 14,
-            padding: '14px',
+            padding: '13px 14px',
             marginBottom: 10,
             boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)',
             cursor: isActionAvailable ? 'pointer' : 'default',
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             gap: 12,
             transition: 'background-color 0.15s ease',
           }}
@@ -625,8 +714,8 @@ export const NotificationBell: React.FC = () => {
           {/* Red document icon in soft red rounded box */}
           <div
             style={{
-              width: 42,
-              height: 42,
+              width: 40,
+              height: 40,
               borderRadius: 10,
               backgroundColor: '#fef2f2',
               border: '1px solid #fee2e2',
@@ -634,9 +723,10 @@ export const NotificationBell: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
+              marginTop: 2,
             }}
           >
-            <FileTextOutlined style={{ color: '#ef4444', fontSize: 20 }} />
+            <FileTextOutlined style={{ color: '#ef4444', fontSize: 19 }} />
           </div>
 
           {/* Middle details */}
@@ -653,6 +743,15 @@ export const NotificationBell: React.FC = () => {
                   <span style={{ fontSize: 10, fontWeight: 700, color: '#16a34a', backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '1px 6px', borderRadius: 4 }}>TENDER</span>
                   <span style={{ fontSize: 10, fontWeight: 600, color: '#d97706', backgroundColor: '#fffbeb', border: '1px solid #fef3c7', padding: '1px 6px', borderRadius: 4 }}>Marketing</span>
                 </>
+              ) : isClosureTask ? (
+                <>
+                  <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>Penutupan Proyek</Tag>
+                  {item.assignedRole && (
+                    <Tag color="gold" style={{ fontSize: 10, margin: 0 }}>
+                      {formatRoleName(item.assignedRole)}
+                    </Tag>
+                  )}
+                </>
               ) : (
                 <>
                   <Tag color={getEntityTagColor(item.entityType)} style={{ fontSize: 10, margin: 0 }}>
@@ -663,26 +762,40 @@ export const NotificationBell: React.FC = () => {
                       {formatRoleName(item.assignedRole)}
                     </Tag>
                   )}
+                  {item.dueAt && (
+                    <Tag
+                      color={isOverdue ? 'error' : 'warning'}
+                      icon={<ClockCircleOutlined />}
+                      style={{ fontSize: 10, fontWeight: 600, margin: 0 }}
+                    >
+                      {isOverdue ? 'Terlambat' : dayjs(item.dueAt).fromNow()}
+                    </Tag>
+                  )}
                 </>
               )}
             </div>
 
             {/* Task title */}
-            <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a', lineHeight: 1.3, marginBottom: 4 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: '#0f172a', lineHeight: 1.35, marginBottom: 4 }}>
               {formatTaskTitle(item.title, item)}
             </div>
 
-            {/* Customer name */}
+            {/* Context details */}
+            {ctx.projectName && (
+              <div style={{ fontSize: 12, fontWeight: 500, color: '#1e293b', marginBottom: 2 }}>
+                {ctx.projectName}
+              </div>
+            )}
+
             {ctx.customerName && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#64748b', marginBottom: 2 }}>
                 <AppstoreOutlined style={{ fontSize: 11, color: '#94a3b8' }} />
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span>
                   Pelanggan: <strong style={{ fontWeight: 500, color: '#475569' }}>{ctx.customerName}</strong>
                 </span>
               </div>
             )}
 
-            {/* Submitter info */}
             {item.submittedByName && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#64748b', marginBottom: 2 }}>
                 <UserOutlined style={{ fontSize: 11, color: '#94a3b8' }} />
@@ -690,15 +803,19 @@ export const NotificationBell: React.FC = () => {
               </div>
             )}
 
-            {/* Timestamp */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#94a3b8' }}>
-              <ClockCircleOutlined style={{ fontSize: 11 }} />
-              <span>{dayjs(item.createdAt).fromNow()}</span>
+            {/* Bottom row: timestamp & actionable Tinjau affordance */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 6, paddingTop: 6, borderTop: '1px dashed #f1f5f9' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#94a3b8' }}>
+                <ClockCircleOutlined style={{ fontSize: 11 }} />
+                <span>{dayjs(item.createdAt).fromNow()}</span>
+              </div>
+
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: '#2563eb', fontSize: 11.5, fontWeight: 600 }}>
+                <span>{isActionAvailable ? formatContextualCta(item) : 'Lihat Detail'}</span>
+                <RightOutlined style={{ fontSize: 10, color: '#2563eb' }} />
+              </div>
             </div>
           </div>
-
-          {/* Navigation affordance */}
-          <RightOutlined style={{ color: '#2563eb', fontSize: 13, flexShrink: 0 }} />
         </div>
       );
     },
@@ -725,33 +842,35 @@ export const NotificationBell: React.FC = () => {
             }
           }}
           style={{
-            backgroundColor: item.isRead ? '#ffffff' : '#f8fafc',
-            border: `1px solid ${item.isRead ? '#f1f5f9' : '#e2e8f0'}`,
+            backgroundColor: '#ffffff',
+            border: item.isRead ? '1px solid #f1f5f9' : '1px solid #cbd5e1',
             borderRadius: 14,
-            padding: '14px',
+            padding: '13px 14px',
             marginBottom: 10,
-            boxShadow: '0 1px 3px rgba(0, 0, 0, 0.02)',
+            boxShadow: item.isRead ? '0 1px 2px rgba(0, 0, 0, 0.02)' : '0 2px 5px rgba(37, 99, 235, 0.06)',
             cursor: targetUrl ? 'pointer' : 'default',
             display: 'flex',
-            alignItems: 'center',
+            alignItems: 'flex-start',
             gap: 12,
+            transition: 'background-color 0.15s ease',
           }}
         >
           {/* Bell Icon in rounded box */}
           <div
             style={{
-              width: 42,
-              height: 42,
+              width: 40,
+              height: 40,
               borderRadius: 10,
-              backgroundColor: '#eff6ff',
-              border: '1px solid #dbeafe',
+              backgroundColor: item.isRead ? '#f8fafc' : '#eff6ff',
+              border: `1px solid ${item.isRead ? '#e2e8f0' : '#dbeafe'}`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               flexShrink: 0,
+              marginTop: 2,
             }}
           >
-            <BellOutlined style={{ color: '#2563eb', fontSize: 18 }} />
+            <BellOutlined style={{ color: item.isRead ? '#94a3b8' : '#2563eb', fontSize: 18 }} />
           </div>
 
           {/* Middle info */}
@@ -765,7 +884,7 @@ export const NotificationBell: React.FC = () => {
 
             {/* Notification Title */}
             {item.title && (
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: item.isRead ? '#475569' : '#0f172a', lineHeight: 1.3, marginBottom: 2 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: item.isRead ? '#475569' : '#0f172a', lineHeight: 1.35, marginBottom: 3 }}>
                 {formatNotificationTitle(item.title)}
               </div>
             )}
@@ -774,7 +893,7 @@ export const NotificationBell: React.FC = () => {
             {renderBellBusinessContextBlock(item)}
 
             {/* Message */}
-            <div style={{ fontSize: 12, color: item.isRead ? '#64748b' : '#334155', lineHeight: 1.4, marginBottom: 4 }}>
+            <div style={{ fontSize: 12, color: item.isRead ? '#64748b' : '#334155', lineHeight: 1.45, marginBottom: 6 }}>
               {renderSmartMessage(formatNotificationMessage(item.message), item.isRead)}
             </div>
 
@@ -787,18 +906,19 @@ export const NotificationBell: React.FC = () => {
 
           {/* Unread indicator or chevron */}
           {!item.isRead ? (
-            <div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: '50%',
-                backgroundColor: '#2563eb',
-                boxShadow: '0 0 0 3px rgba(37, 99, 235, 0.15)',
-                flexShrink: 0,
-              }}
-            />
+            <div style={{ paddingTop: 4, flexShrink: 0 }}>
+              <div
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  backgroundColor: '#2563eb',
+                  boxShadow: '0 0 0 3px rgba(37, 99, 235, 0.15)',
+                }}
+              />
+            </div>
           ) : (
-            <RightOutlined style={{ color: '#94a3b8', fontSize: 12, flexShrink: 0 }} />
+            <RightOutlined style={{ color: '#cbd5e1', fontSize: 12, flexShrink: 0, marginTop: 4 }} />
           )}
         </div>
       );
@@ -810,58 +930,107 @@ export const NotificationBell: React.FC = () => {
     () => (
       <div
         style={{
-          width: 'calc(100vw - 32px)',
-          maxWidth: 380,
-          maxHeight: 650,
+          width: 440,
+          maxWidth: 'calc(100vw - 32px)',
+          maxHeight: 'min(640px, calc(100vh - 90px))',
           display: 'flex',
           flexDirection: 'column',
+          backgroundColor: '#ffffff',
           overflow: 'hidden',
         }}
       >
-        <div style={{ padding: '16px 20px 0 20px', borderBottom: `1px solid #f1f5f9`, backgroundColor: '#ffffff' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <Text style={{ fontSize: '18px', fontWeight: 700, color: '#0f172a' }}>{INBOX_PAGE_CONFIG.TITLE}</Text>
-            <PushNotificationToggle />
+        <div style={{ padding: '14px 18px 0 18px', borderBottom: `1px solid #f1f5f9`, backgroundColor: '#ffffff', flexShrink: 0 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px', gap: 12 }}>
+            <Text style={{ fontSize: '16px', fontWeight: 700, color: '#0f172a', whiteSpace: 'nowrap' }}>{INBOX_PAGE_CONFIG.TITLE}</Text>
+            <PushNotificationToggle compact />
           </div>
-          <Tabs
-            activeKey={activeTab}
-            onChange={(key) => setActiveTab(key as 'todo' | 'notifications')}
-            size="small"
-            tabBarStyle={{ marginBottom: 0, borderBottom: 'none' }}
-            items={[
-              {
-                key: 'todo',
-                label: (
-                  <span style={{ fontWeight: activeTab === 'todo' ? 600 : 400 }}>
-                    {INBOX_TABS.TODO} ({todoCount})
-                  </span>
-                ),
-              },
-              {
-                key: 'notifications',
-                label: (
-                  <span style={{ fontWeight: activeTab === 'notifications' ? 600 : 400 }}>
-                    {INBOX_TABS.NOTIFICATIONS} ({unreadNotificationCount})
-                  </span>
-                ),
-              },
-            ]}
-          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={() => setActiveTab('todo')}
+              style={{
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === 'todo' ? '2px solid #2563eb' : '2px solid transparent',
+                padding: '6px 12px 8px 12px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                color: activeTab === 'todo' ? '#2563eb' : '#64748b',
+                fontWeight: activeTab === 'todo' ? 600 : 500,
+                fontSize: 13.5,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span>{INBOX_TABS.TODO}</span>
+              <span
+                style={{
+                  borderRadius: 12,
+                  padding: '1px 8px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  backgroundColor: activeTab === 'todo' ? '#2563eb' : '#f1f5f9',
+                  color: activeTab === 'todo' ? '#ffffff' : '#64748b',
+                }}
+              >
+                {todoCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('notifications')}
+              style={{
+                background: 'none',
+                border: 'none',
+                borderBottom: activeTab === 'notifications' ? '2px solid #2563eb' : '2px solid transparent',
+                padding: '6px 12px 8px 12px',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                color: activeTab === 'notifications' ? '#2563eb' : '#64748b',
+                fontWeight: activeTab === 'notifications' ? 600 : 500,
+                fontSize: 13.5,
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span>{INBOX_TABS.NOTIFICATIONS}</span>
+              <span
+                style={{
+                  borderRadius: 12,
+                  padding: '1px 8px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  backgroundColor: activeTab === 'notifications' ? '#2563eb' : '#f1f5f9',
+                  color: activeTab === 'notifications' ? '#ffffff' : '#64748b',
+                }}
+              >
+                {unreadNotificationCount}
+              </span>
+            </button>
+          </div>
         </div>
 
-        <div style={{ flex: 1, overflowY: 'auto', minHeight: 200, padding: '12px 16px', backgroundColor: '#ffffff' }}>
+        <div
+          style={{
+            flex: '1 1 auto',
+            minHeight: 0,
+            overflowY: 'auto',
+            padding: '12px 16px',
+            backgroundColor: '#f8fafc',
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#cbd5e1 transparent',
+          }}
+        >
           {activeTab === 'todo' ? (
             loadingTodos && todos.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /></div>
             ) : todos.length === 0 ? (
               <Empty description={INBOX_EMPTY_STATES.TODO} style={{ margin: '40px 0' }} />
             ) : (
-              <List
-                itemLayout="horizontal"
-                dataSource={todos}
-                renderItem={renderTodoItem}
-                split={false}
-              />
+              todos.map(renderTodoItem)
             )
           ) : (
             loadingNotifications && notifications.length === 0 ? (
@@ -869,18 +1038,23 @@ export const NotificationBell: React.FC = () => {
             ) : notifications.length === 0 ? (
               <Empty description={INBOX_EMPTY_STATES.NOTIFICATIONS} style={{ margin: '40px 0' }} />
             ) : (
-              <List
-                itemLayout="horizontal"
-                dataSource={notifications}
-                renderItem={renderNotificationItem}
-                split={false}
-              />
+              notifications.map(renderNotificationItem)
             )
           )}
         </div>
 
-        <div style={{ padding: '10px 16px', borderTop: `1px solid #f1f5f9`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#ffffff' }}>
-          <Space size={12}>
+        <div
+          style={{
+            padding: '11px 16px',
+            borderTop: `1px solid #f1f5f9`,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            backgroundColor: '#ffffff',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Button
               type="link"
               size="small"
@@ -888,11 +1062,11 @@ export const NotificationBell: React.FC = () => {
                 router.push(INBOX_PAGE_CONFIG.ROUTE);
                 setOpen(false);
               }}
-              style={{ padding: 0 }}
+              style={{ padding: 0, fontSize: 12.5, fontWeight: 600, color: '#2563eb' }}
             >
               Lihat Semua {INBOX_PAGE_CONFIG.TITLE}
             </Button>
-            <span style={{ color: '#cbd5e1' }}>•</span>
+            <span style={{ color: '#cbd5e1', fontSize: 12 }}>•</span>
             <Button
               type="link"
               size="small"
@@ -904,7 +1078,7 @@ export const NotificationBell: React.FC = () => {
             >
               Kelola Perangkat
             </Button>
-          </Space>
+          </div>
 
           {activeTab === 'notifications' && notifications.length > 0 && (
             <Button
@@ -912,7 +1086,7 @@ export const NotificationBell: React.FC = () => {
               size="small"
               onClick={markAllAsRead}
               icon={<CheckOutlined />}
-              style={{ color: '#3b82f6', fontWeight: 500, padding: 0 }}
+              style={{ color: '#2563eb', fontWeight: 500, fontSize: 12, padding: 0 }}
             >
               Tandai semua dibaca
             </Button>
@@ -946,15 +1120,24 @@ export const NotificationBell: React.FC = () => {
 
   const mobileSheetContent = useMemo(
     () => (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxHeight: '82vh' }}>
         {/* Top drag handle indicator */}
-        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 4, paddingBottom: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 2, paddingBottom: 8, flexShrink: 0 }}>
           <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: '#cbd5e1' }} />
         </div>
 
         {/* Header: Title, PushToggle, and Close button */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <Text style={{ fontSize: 18, fontWeight: 700, color: '#0f172a' }}>{INBOX_PAGE_CONFIG.TITLE}</Text>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 10,
+            flexShrink: 0,
+            gap: 8,
+          }}
+        >
+          <Text style={{ fontSize: 17, fontWeight: 700, color: '#0f172a' }}>{INBOX_PAGE_CONFIG.TITLE}</Text>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <PushNotificationToggle compact />
             <Button
@@ -969,7 +1152,7 @@ export const NotificationBell: React.FC = () => {
         </div>
 
         {/* Clean Benchmark Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #f1f5f9', marginBottom: 12 }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid #f1f5f9', marginBottom: 10, flexShrink: 0 }}>
           <button
             type="button"
             onClick={() => setActiveTab('todo')}
@@ -1036,7 +1219,16 @@ export const NotificationBell: React.FC = () => {
         </div>
 
         {/* Scrollable items */}
-        <div style={{ flex: 1, overflowY: 'auto', maxHeight: 'calc(75vh - 160px)', paddingRight: 2 }}>
+        <div
+          style={{
+            flex: '1 1 auto',
+            minHeight: 0,
+            overflowY: 'auto',
+            paddingRight: 2,
+            scrollbarWidth: 'thin',
+            scrollbarColor: '#cbd5e1 transparent',
+          }}
+        >
           {activeTab === 'todo' ? (
             loadingTodos && todos.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 0' }}><Spin /></div>
@@ -1072,45 +1264,46 @@ export const NotificationBell: React.FC = () => {
         </div>
 
         {/* Full-width benchmark bottom CTA */}
-        <div
-          onClick={() => {
-            router.push(INBOX_PAGE_CONFIG.ROUTE);
-            setOpen(false);
-          }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            backgroundColor: '#eff6ff',
-            border: '1px solid #bfdbfe',
-            borderRadius: 12,
-            padding: '12px 16px',
-            cursor: 'pointer',
-            marginTop: 12,
-            color: '#2563eb',
-            fontWeight: 600,
-            fontSize: 14,
-            boxShadow: '0 1px 2px rgba(37, 99, 235, 0.05)',
-          }}
-        >
-          <UnorderedListOutlined style={{ fontSize: 16 }} />
-          <span style={{ flex: 1, textAlign: 'center' }}>Lihat Semua {INBOX_PAGE_CONFIG.TITLE}</span>
-          <RightOutlined style={{ fontSize: 12 }} />
-        </div>
-
-        <div style={{ textAlign: 'center', marginTop: 10, paddingBottom: 4 }}>
-          <Button
-            type="link"
-            size="small"
+        <div style={{ flexShrink: 0, paddingTop: 10, backgroundColor: '#ffffff' }}>
+          <div
             onClick={() => {
-              router.push('/profile');
+              router.push(INBOX_PAGE_CONFIG.ROUTE);
               setOpen(false);
             }}
-            style={{ color: '#64748b', fontSize: 12, padding: 0 }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 8,
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: 12,
+              padding: '11px 16px',
+              cursor: 'pointer',
+              color: '#2563eb',
+              fontWeight: 600,
+              fontSize: 13.5,
+              boxShadow: '0 1px 2px rgba(37, 99, 235, 0.05)',
+            }}
           >
-            Pengaturan Notifikasi & Perangkat Mobile
-          </Button>
+            <UnorderedListOutlined style={{ fontSize: 15 }} />
+            <span style={{ flex: 1, textAlign: 'center' }}>Lihat Semua {INBOX_PAGE_CONFIG.TITLE}</span>
+            <RightOutlined style={{ fontSize: 12 }} />
+          </div>
+
+          <div style={{ textAlign: 'center', marginTop: 8 }}>
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                router.push('/profile');
+                setOpen(false);
+              }}
+              style={{ color: '#64748b', fontSize: 12, padding: 0 }}
+            >
+              Pengaturan Notifikasi & Perangkat Mobile
+            </Button>
+          </div>
         </div>
       </div>
     ),
@@ -1195,15 +1388,18 @@ export const NotificationBell: React.FC = () => {
           onOpenChange={setOpen}
           overlayInnerStyle={{
             padding: 0,
-            borderRadius: '12px',
+            borderRadius: '16px',
             overflow: 'hidden',
-            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+            boxShadow: '0 12px 32px -4px rgba(15, 23, 42, 0.12), 0 4px 12px -2px rgba(15, 23, 42, 0.08)',
+            border: '1px solid #e2e8f0',
           }}
           arrow={false}
         >
-          <Badge count={attentionCount} overflowCount={99} size="small" style={{ cursor: 'pointer' }}>
-            <BellOutlined style={{ fontSize: '20px', cursor: 'pointer', color: token.colorTextSecondary }} />
-          </Badge>
+          <div style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer', padding: '4px' }}>
+            <Badge count={attentionCount} overflowCount={99} size="small" style={{ cursor: 'pointer' }}>
+              <BellOutlined style={{ fontSize: '20px', cursor: 'pointer', color: token.colorTextSecondary }} />
+            </Badge>
+          </div>
         </Popover>
       )}
     </>
