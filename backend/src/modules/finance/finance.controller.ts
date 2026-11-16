@@ -1,11 +1,17 @@
-import { Controller, Post, Body, UseGuards, Request, Get, Param, ParseIntPipe, Query } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Request, Get, Param, ParseIntPipe, Query, Patch } from '@nestjs/common';
 import { FinanceService } from './finance.service';
-import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { CreateInvoiceDto, CreateInvoiceTaxDto } from './dto/create-invoice.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { VerifyInvoiceDto } from './dto/verify-invoice.dto';
 import { SubmitPaymentRequestDto } from './dto/submit-payment-request.dto';
 import { DecidePaymentRequestDto, DirectorDecisionAction } from './dto/decide-payment-request.dto';
 import { ResubmitPaymentRequestDto } from './dto/resubmit-payment-request.dto';
+import {
+  CreateCompanyBankAccountDto,
+  UpdateCompanyBankAccountDto,
+  ChangeCompanyBankAccountStatusDto,
+  QueryCompanyBankAccountDto,
+} from './dto/company-bank-account.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -28,6 +34,33 @@ export class FinanceController {
     return {
       message: 'Invoice created successfully',
       data: invoice
+    };
+  }
+
+  @Get('invoices/:id/tax')
+  @ApiOperation({ summary: 'Get tax administration details for an invoice (PPN & PPh)' })
+  @ApiResponse({ status: 200, description: 'Tax information retrieved successfully.' })
+  async getInvoiceTax(@Param('id', ParseIntPipe) id: number) {
+    const data = await this.financeService.getInvoiceTaxDetails(id);
+    return {
+      message: 'Tax information retrieved successfully',
+      data,
+    };
+  }
+
+  @Patch('invoices/:id/tax')
+  @Roles('FINANCE')
+  @ApiOperation({ summary: 'Update or record tax administration data for an existing invoice (PPN & PPh)' })
+  @ApiResponse({ status: 200, description: 'Tax information updated successfully.' })
+  async updateInvoiceTax(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: CreateInvoiceTaxDto,
+    @Request() req,
+  ) {
+    const invoice = await this.financeService.updateInvoiceTax(id, dto, req.user.id);
+    return {
+      message: 'Tax information updated successfully',
+      data: invoice,
     };
   }
 
@@ -259,6 +292,150 @@ export class FinanceController {
     return {
       message: 'PO payment summary retrieved successfully',
       data: summary,
+    };
+  }
+
+  // =========================================================================
+  // COMPANY BANK ACCOUNT MASTER DATA ENDPOINTS
+  // =========================================================================
+
+  @Post('company-bank-accounts')
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Create new Company Bank Account (SUPER_ADMIN / ADMIN only)' })
+  @ApiResponse({ status: 201, description: 'Company bank account created successfully.' })
+  @ApiResponse({ status: 400, description: 'Bad Request (validation failure or missing reason).' })
+  @ApiResponse({ status: 409, description: 'Conflict (duplicate account per legal entity).' })
+  async createCompanyBankAccount(@Body() dto: CreateCompanyBankAccountDto, @Request() req) {
+    const result = await this.financeService.createCompanyBankAccount(dto, req.user.id);
+    return {
+      message: 'Rekening bank perusahaan berhasil didaftarkan',
+      data: result,
+    };
+  }
+
+  @Get('company-bank-accounts/eligible')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'FINANCE')
+  @ApiOperation({ summary: 'Get eligible active Company Bank Accounts for payment execution' })
+  @ApiResponse({ status: 200, description: 'Eligible accounts retrieved successfully.' })
+  async getEligibleCompanyBankAccounts(@Query('companyCode') companyCode?: string) {
+    const result = await this.financeService.getEligibleCompanyBankAccounts(companyCode);
+    return {
+      message: 'Daftar rekening bank perusahaan yang eligible berhasil diambil',
+      data: result,
+    };
+  }
+
+  @Get('company-bank-accounts')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'DIRECTOR', 'FINANCE', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS')
+  @ApiOperation({ summary: 'Get list of Company Bank Accounts' })
+  @ApiResponse({ status: 200, description: 'Company bank accounts retrieved successfully.' })
+  async getCompanyBankAccounts(@Query() query: QueryCompanyBankAccountDto) {
+    const result = await this.financeService.getCompanyBankAccounts(query);
+    return {
+      message: 'Daftar rekening bank perusahaan berhasil diambil',
+      data: result,
+    };
+  }
+
+  @Get('company-bank-accounts/:id')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'DIRECTOR', 'FINANCE', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS')
+  @ApiOperation({ summary: 'Get Company Bank Account by ID' })
+  @ApiResponse({ status: 200, description: 'Account retrieved successfully.' })
+  @ApiResponse({ status: 404, description: 'Account not found.' })
+  async getCompanyBankAccountById(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.financeService.getCompanyBankAccountById(id);
+    return {
+      message: 'Detail rekening bank perusahaan berhasil diambil',
+      data: result,
+    };
+  }
+
+  @Patch('company-bank-accounts/:id')
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Update Company Bank Account metadata (SUPER_ADMIN / ADMIN only)' })
+  @ApiResponse({ status: 200, description: 'Account updated successfully.' })
+  @ApiResponse({ status: 400, description: 'Bad Request (validation error or missing change reason).' })
+  @ApiResponse({ status: 409, description: 'Conflict (duplicate account).' })
+  async updateCompanyBankAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateCompanyBankAccountDto,
+    @Request() req,
+  ) {
+    const result = await this.financeService.updateCompanyBankAccount(id, dto, req.user.id);
+    return {
+      message: 'Data rekening bank perusahaan berhasil diperbarui',
+      data: result,
+    };
+  }
+
+  @Post('company-bank-accounts/:id/activate')
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Activate Company Bank Account' })
+  async activateCompanyBankAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ChangeCompanyBankAccountStatusDto,
+    @Request() req,
+  ) {
+    const result = await this.financeService.activateCompanyBankAccount(id, dto.changeReason, req.user.id);
+    return {
+      message: 'Rekening bank perusahaan berhasil diaktifkan',
+      data: result,
+    };
+  }
+
+  @Post('company-bank-accounts/:id/deactivate')
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Deactivate Company Bank Account' })
+  async deactivateCompanyBankAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ChangeCompanyBankAccountStatusDto,
+    @Request() req,
+  ) {
+    const result = await this.financeService.deactivateCompanyBankAccount(id, dto.changeReason, req.user.id);
+    return {
+      message: 'Rekening bank perusahaan berhasil dinonaktifkan',
+      data: result,
+    };
+  }
+
+  @Post('company-bank-accounts/:id/block')
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Block Company Bank Account' })
+  async blockCompanyBankAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ChangeCompanyBankAccountStatusDto,
+    @Request() req,
+  ) {
+    const result = await this.financeService.blockCompanyBankAccount(id, dto.changeReason, req.user.id);
+    return {
+      message: 'Rekening bank perusahaan berhasil diblokir',
+      data: result,
+    };
+  }
+
+  @Post('company-bank-accounts/:id/set-default')
+  @Roles('SUPER_ADMIN', 'ADMIN')
+  @ApiOperation({ summary: 'Designate default Company Bank Account for legal entity' })
+  async setDefaultCompanyBankAccount(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ChangeCompanyBankAccountStatusDto,
+    @Request() req,
+  ) {
+    const result = await this.financeService.setDefaultCompanyBankAccount(id, dto.changeReason, req.user.id);
+    return {
+      message: 'Rekening utama (default) berhasil ditetapkan',
+      data: result,
+    };
+  }
+
+  @Get('company-bank-accounts/:id/history')
+  @Roles('SUPER_ADMIN', 'ADMIN', 'DIRECTOR', 'FINANCE', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS')
+  @ApiOperation({ summary: 'Get audit history for Company Bank Account' })
+  async getCompanyBankAccountHistory(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.financeService.getCompanyBankAccountHistory(id);
+    return {
+      message: 'Riwayat perubahan rekening bank perusahaan berhasil diambil',
+      data: result,
     };
   }
 }

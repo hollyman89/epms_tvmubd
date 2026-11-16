@@ -13,7 +13,20 @@
 
 import React from 'react';
 import ReactDOMServer from 'react-dom/server';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaymentRequestDto, InvoiceDto } from '@/services/finance.service';
+
+const testQueryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+    },
+  },
+});
+
+const withQueryClient = (node: React.ReactElement) => {
+  return React.createElement(QueryClientProvider, { client: testQueryClient }, node);
+};
 
 // Mock antd Modal and components to inspect rendered props & static output
 let capturedModalProps: any[] = [];
@@ -89,8 +102,9 @@ describe('Finance & Director Approval Modals Mobile Responsiveness', () => {
   const mockInvoice: InvoiceDto = {
     id: 201,
     invoiceNumber: 'INV-20261103-001',
-    purchaseOrderId: 301,
+    poId: 301,
     invoiceDate: '2026-11-03',
+    createdAt: '2026-11-03T00:00:00.000Z',
     totalAmount: 125000000,
     status: 'UNPAID',
     matchStatus: 'MATCHED',
@@ -125,7 +139,7 @@ describe('Finance & Director Approval Modals Mobile Responsiveness', () => {
 
       expect(capturedModalProps.length).toBeGreaterThan(0);
       const modalProp = capturedModalProps[0];
-      expect(modalProp.width).toBe('min(800px, calc(100vw - 24px))');
+      expect(modalProp.width).toBe('min(880px, calc(100vw - 24px))');
       expect(modalProp.style).toEqual(expect.objectContaining({ maxWidth: '100vw' }));
     });
 
@@ -222,47 +236,53 @@ describe('Finance & Director Approval Modals Mobile Responsiveness', () => {
   describe('4. ProcessPaymentModal', () => {
     it('uses responsive width and maxWidth on main modal when authorized', () => {
       ReactDOMServer.renderToStaticMarkup(
-        React.createElement(ProcessPaymentModal, {
-          open: true,
-          onClose: jest.fn(),
-          invoice: mockInvoice,
-          canProcessPayment: true,
-        })
+        withQueryClient(
+          React.createElement(ProcessPaymentModal, {
+            open: true,
+            onClose: jest.fn(),
+            invoice: mockInvoice,
+            canProcessPayment: true,
+          })
+        )
       );
 
       expect(capturedModalProps.length).toBeGreaterThan(0);
       const modalProp = capturedModalProps[0];
-      expect(modalProp.width).toBe('min(860px, calc(100vw - 24px))');
+      expect(modalProp.width).toBe('min(980px, calc(100vw - 24px))');
       expect(modalProp.style).toEqual(expect.objectContaining({ maxWidth: '100vw' }));
     });
 
     it('uses responsive width and maxWidth on access denied submodal when unauthorized', () => {
       ReactDOMServer.renderToStaticMarkup(
-        React.createElement(ProcessPaymentModal, {
-          open: true,
-          onClose: jest.fn(),
-          invoice: mockInvoice,
-          canProcessPayment: false,
-        })
+        withQueryClient(
+          React.createElement(ProcessPaymentModal, {
+            open: true,
+            onClose: jest.fn(),
+            invoice: mockInvoice,
+            canProcessPayment: false,
+          })
+        )
       );
 
       expect(capturedModalProps.length).toBeGreaterThan(0);
       const modalProp = capturedModalProps[0];
-      expect(modalProp.width).toBe('min(480px, calc(100vw - 24px))');
+      expect(modalProp.width).toBe('min(500px, calc(100vw - 24px))');
       expect(modalProp.style).toEqual(expect.objectContaining({ maxWidth: '100vw' }));
     });
 
     it('renders wrapped header title, footer, and amount helper', () => {
       const html = ReactDOMServer.renderToStaticMarkup(
-        React.createElement(ProcessPaymentModal, {
-          open: true,
-          onClose: jest.fn(),
-          invoice: mockInvoice,
-          canProcessPayment: true,
-        })
+        withQueryClient(
+          React.createElement(ProcessPaymentModal, {
+            open: true,
+            onClose: jest.fn(),
+            invoice: mockInvoice,
+            canProcessPayment: true,
+          })
+        )
       );
 
-      expect(html).toContain('Eksekusi Pembayaran Tagihan');
+      expect(html).toContain('Eksekusi Pembayaran Kas/Bank');
       expect(html).toContain('word-break:break-word');
       expect(html).toContain('flex-wrap:wrap');
       expect(html).toContain('btn-submit-process-payment');

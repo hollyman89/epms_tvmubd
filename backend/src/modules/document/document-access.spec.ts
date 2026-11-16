@@ -8,6 +8,7 @@ import { Document } from '../../entities/document.entity';
 import { Project } from '../../entities/project.entity';
 import { Contract } from '../../entities/contract.entity';
 import { Tender } from '../../entities/tender.entity';
+import { Invoice } from '../../entities/invoice.entity';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { ROLES_KEY } from '../auth/decorators/roles.decorator';
 import { S3Client } from '@aws-sdk/client-s3';
@@ -36,6 +37,7 @@ describe('SEC-06, SEC-07, SEC-08 & SEC-09: Document Access Boundary Hardening', 
   const MARKETING_PIC_ID = 201;
   const OTHER_MARKETING_ID = 202;
   const STAFF_ID = 301;
+  const FINANCE_ID = 401;
 
   const mockProject: Partial<Project> = {
     id: 10,
@@ -62,6 +64,22 @@ describe('SEC-06, SEC-07, SEC-08 & SEC-09: Document Access Boundary Hardening', 
     title: 'Pengadaan Infrastruktur FO 2026',
     marketing_pic_id: MARKETING_PIC_ID,
     created_by: MARKETING_PIC_ID,
+  };
+
+  const mockInvoice: Partial<Invoice> = {
+    id: 40,
+    invoiceNumber: 'INV-2026-0040',
+    createdBy: FINANCE_ID,
+    purchaseOrder: {
+      id: 50,
+      purchaseRequest: {
+        id: 60,
+        project: {
+          id: 10,
+          managerId: ASSIGNED_PM_ID,
+        },
+      },
+    } as any,
   };
 
   const sampleDocumentList: Partial<Document>[] = [
@@ -185,6 +203,18 @@ describe('SEC-06, SEC-07, SEC-08 & SEC-09: Document Access Boundary Hardening', 
             createdBy: ASSIGNED_PM_ID,
           });
         }
+        if (id === 9) {
+          return Promise.resolve({
+            id: 9,
+            entityType: 'INVOICE',
+            entityId: 40,
+            fileName: 'Faktur_Pajak.pdf',
+            filePath: 'invoice/1700000000-Faktur_Pajak.pdf',
+            fileSize: 1024,
+            mimeType: 'application/pdf',
+            createdBy: FINANCE_ID,
+          });
+        }
         return Promise.resolve(null);
       }),
       create: jest.fn((dto) => dto),
@@ -202,6 +232,10 @@ describe('SEC-06, SEC-07, SEC-08 & SEC-09: Document Access Boundary Hardening', 
           }
           if (entityClass === Tender) {
             if (id === 30) return Promise.resolve({ ...mockTender });
+            return Promise.resolve(null);
+          }
+          if (entityClass === Invoice) {
+            if (id === 40) return Promise.resolve({ ...mockInvoice });
             return Promise.resolve(null);
           }
           return Promise.resolve(null);
@@ -465,6 +499,35 @@ describe('SEC-06, SEC-07, SEC-08 & SEC-09: Document Access Boundary Hardening', 
       });
     });
 
+    // --- INVOICE TESTS ---
+    describe('INVOICE Entity Boundaries', () => {
+      it('Role FINANCE dapat akses document invoice', async () => {
+        const res = await service.getFilesByEntity('INVOICE', 40, FINANCE_ID, ['FINANCE']);
+        expect(res).toBeDefined();
+      });
+
+      it('Role DIRECTOR dapat akses document invoice', async () => {
+        const res = await service.getFilesByEntity('INVOICE', 40, DIRECTOR_ID, ['DIRECTOR']);
+        expect(res).toBeDefined();
+      });
+
+      it('SUPER_ADMIN dapat override document invoice', async () => {
+        const res = await service.getFilesByEntity('INVOICE', 40, SUPER_ADMIN_ID, ['SUPER_ADMIN']);
+        expect(res).toBeDefined();
+      });
+
+      it('Assigned PM terkait invoice PO project dapat akses document invoice', async () => {
+        const res = await service.getFilesByEntity('INVOICE', 40, ASSIGNED_PM_ID, ['PROJECT_MANAGER']);
+        expect(res).toBeDefined();
+      });
+
+      it('User tanpa hak akses (e.g. MARKETING / STAFF) ditolak ForbiddenException', async () => {
+        await expect(
+          service.getFilesByEntity('INVOICE', 40, STAFF_ID, ['STAFF']),
+        ).rejects.toThrow(ForbiddenException);
+      });
+    });
+
     // --- GENERAL TESTS ---
     describe('GENERAL & Edge Cases', () => {
       it('Missing JWT identity (userId 0) → UnauthorizedException', async () => {
@@ -704,6 +767,33 @@ describe('SEC-06, SEC-07, SEC-08 & SEC-09: Document Access Boundary Hardening', 
         const result = await service.uploadFile('TENDER', 30, mockFile, SUPER_ADMIN_ID, ['SUPER_ADMIN']);
         expect(result).toBeDefined();
         expect(result.createdBy).toBe(SUPER_ADMIN_ID);
+      });
+    });
+
+    // --- INVOICE MUTATION BOUNDARIES ---
+    describe('INVOICE Mutation Boundaries', () => {
+      it('Role FINANCE dapat upload document invoice', async () => {
+        const result = await service.uploadFile('INVOICE', 40, mockFile, FINANCE_ID, ['FINANCE']);
+        expect(result).toBeDefined();
+        expect(result.createdBy).toBe(FINANCE_ID);
+      });
+
+      it('Role DIRECTOR dapat upload document invoice', async () => {
+        const result = await service.uploadFile('INVOICE', 40, mockFile, DIRECTOR_ID, ['DIRECTOR']);
+        expect(result).toBeDefined();
+        expect(result.createdBy).toBe(DIRECTOR_ID);
+      });
+
+      it('SUPER_ADMIN dapat override upload document invoice', async () => {
+        const result = await service.uploadFile('INVOICE', 40, mockFile, SUPER_ADMIN_ID, ['SUPER_ADMIN']);
+        expect(result).toBeDefined();
+        expect(result.createdBy).toBe(SUPER_ADMIN_ID);
+      });
+
+      it('User tanpa hak akses (e.g. STAFF) ditolak ForbiddenException saat upload document invoice', async () => {
+        await expect(
+          service.uploadFile('INVOICE', 40, mockFile, STAFF_ID, ['STAFF']),
+        ).rejects.toThrow(ForbiddenException);
       });
     });
 

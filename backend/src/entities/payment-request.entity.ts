@@ -30,14 +30,36 @@ export interface ApprovalSnapshot {
   paymentTermId?: number | null;
   paymentTermName?: string | null;
   requestedAmount: number;
+  dppAmount?: number | null;
+  ppnAmount?: number | null;
+  ppnRate?: number | null;
+  grossAmount?: number | null;
+  pphAmount?: number | null;
+  pphType?: string | null;
+  pphRate?: number | null;
+  wapuAmount?: number | null;
+  priorDeductionsAmount?: number | null;
+  netPayableAmount?: number | null;
+  fakturPajakNumber?: string | null;
+  fakturPajakDate?: string | null;
+  buktiPotongNumber?: string | null;
+  buktiPotongDate?: string | null;
   vendorId?: number | null;
   vendorName?: string | null;
   vendorBankAccount?: string | null;
   vendorBankName?: string | null;
+  vendorBankAccountHolder?: string | null;
   goodsReceiptId?: number | null;
   goodsReceiptNumber?: string | null;
+  serviceClaimId?: number | null;
+  serviceClaimNumber?: string | null;
   poId?: number | null;
   poNumber?: string | null;
+  projectName?: string | null;
+  matchStatus?: string | null;
+  verifiedBy?: number | null;
+  verifiedByName?: string | null;
+  verifiedAt?: string | null;
   timestamp: string;
 }
 
@@ -45,6 +67,9 @@ export interface ApprovalSnapshot {
 export class PaymentRequest {
   @PrimaryGeneratedColumn({ type: "bigint", unsigned: true })
   id: number;
+
+  @Column({ name: "company_code", type: "varchar", length: 10, nullable: true })
+  companyCode?: string; // 'UBD' | 'TVM' (DEC-TAX-07)
 
   @Column({
     name: "request_number",

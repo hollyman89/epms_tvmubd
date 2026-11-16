@@ -13,6 +13,7 @@
 .modalRoot :global(.ant-modal) {
   max-width: calc(100vw - 24px);
   margin: 16px auto;
+  top: 16px !important;
   padding-bottom: 0 !important;
   box-sizing: border-box;
 }

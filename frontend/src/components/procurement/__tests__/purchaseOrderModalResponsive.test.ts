@@ -343,6 +343,8 @@ describe('PurchaseOrderModal Mobile Responsiveness & Input Fidelity', () => {
       React.createElement(PurchaseOrderModal, {
         open: true,
         onClose: jest.fn(),
+        comparison: null,
+        rfq: null,
         existingPo: mockExistingPo as any,
         viewOnly: true,
       })

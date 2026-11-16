@@ -12,6 +12,13 @@ import {
   Tabs,
   Empty,
   Tooltip,
+  Tag,
+  Input,
+  Select,
+  Modal,
+  message,
+  Space,
+  Radio,
 } from 'antd';
 import {
   DollarCircleOutlined,
@@ -24,6 +31,11 @@ import {
   ExclamationCircleOutlined,
   CloseCircleOutlined,
   SyncOutlined,
+  EditOutlined,
+  StarOutlined,
+  HistoryOutlined,
+  PlusOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import { formatNumber, formatCurrency, formatDate } from '@/lib/formatters';
 import { useAuth } from '@/context/AuthContext';
@@ -33,6 +45,7 @@ import {
   InvoiceDto,
   PaymentDto,
   PaymentRequestDto,
+  CompanyBankAccountDto,
 } from '@/services/finance.service';
 import dynamic from 'next/dynamic';
 import styles from './PaymentsPage.module.css';
@@ -53,11 +66,22 @@ const ResubmitPaymentRequestModal = dynamic(
   () => import('@/components/finance/ResubmitPaymentRequestModal').then((m) => m.ResubmitPaymentRequestModal),
   { ssr: false }
 );
+const ManageCompanyBankAccountModal = dynamic(
+  () => import('@/components/finance/ManageCompanyBankAccountModal').then((m) => m.ManageCompanyBankAccountModal),
+  { ssr: false }
+);
+const CompanyBankAccountHistoryModal = dynamic(
+  () => import('@/components/finance/CompanyBankAccountHistoryModal').then((m) => m.CompanyBankAccountHistoryModal),
+  { ssr: false }
+);
 
 const { Title, Text } = Typography;
+const { Option } = Select;
 
 function PaymentsPageContent() {
-  const { user, isFinance, isDirector } = useAuth();
+  const { user, isFinance, isDirector, isSuperAdmin } = useAuth();
+  const isAdmin = useMemo(() => (user?.roles || []).some(r => String(r).toUpperCase() === 'ADMIN'), [user]);
+  const canManageAccounts = isSuperAdmin || isAdmin;
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -86,6 +110,18 @@ function PaymentsPageContent() {
 
   const [selectedRequestForResubmit, setSelectedRequestForResubmit] = useState<PaymentRequestDto | null>(null);
   const [isResubmitModalOpen, setIsResubmitModalOpen] = useState<boolean>(false);
+
+  // Company Bank Account Master Data States
+  const [selectedAccountForEdit, setSelectedAccountForEdit] = useState<CompanyBankAccountDto | null>(null);
+  const [isManageAccountModalOpen, setIsManageAccountModalOpen] = useState<boolean>(false);
+  const [selectedAccountForHistory, setSelectedAccountForHistory] = useState<CompanyBankAccountDto | null>(null);
+  const [isAccountHistoryModalOpen, setIsAccountHistoryModalOpen] = useState<boolean>(false);
+  const [accountSearchText, setAccountSearchText] = useState<string>('');
+  const [accountEntityFilter, setAccountEntityFilter] = useState<string>('ALL');
+  const [accountStatusFilter, setAccountStatusFilter] = useState<string>('ALL');
+  const [statusActionTarget, setStatusActionTarget] = useState<{ id: number; action: string; title: string } | null>(null);
+  const [statusChangeReason, setStatusChangeReason] = useState<string>('');
+  const [submittingStatus, setSubmittingStatus] = useState<boolean>(false);
 
   const queryClient = useQueryClient();
 
@@ -117,15 +153,74 @@ function PaymentsPageContent() {
     staleTime: 60000,
   });
 
+  // 4. Fetch Company Bank Accounts via TanStack Query
+  const {
+    data: companyBankAccounts = [],
+    isLoading: loadingAccounts,
+  } = useQuery<CompanyBankAccountDto[]>({
+    queryKey: ['finance', 'company-bank-accounts'],
+    queryFn: () => FinanceService.getCompanyBankAccounts(),
+    staleTime: 60000,
+  });
+
   // Invalidate helper to refresh all finance payment queries on mutation
   const fetchData = useCallback(async () => {
     await Promise.allSettled([
       queryClient.invalidateQueries({ queryKey: ['finance', 'payment-requests'] }),
       queryClient.invalidateQueries({ queryKey: ['finance', 'payments'] }),
       queryClient.invalidateQueries({ queryKey: ['finance', 'invoices'] }),
+      queryClient.invalidateQueries({ queryKey: ['finance', 'company-bank-accounts'] }),
       queryClient.invalidateQueries({ queryKey: ['inbox', 'todos'] }),
     ]);
   }, [queryClient]);
+
+  const filteredCompanyBankAccounts = useMemo(() => {
+    return companyBankAccounts.filter((acc) => {
+      if (accountEntityFilter !== 'ALL' && acc.companyCode !== accountEntityFilter) return false;
+      if (accountStatusFilter !== 'ALL' && acc.status !== accountStatusFilter) return false;
+      if (accountSearchText.trim().length > 0) {
+        const term = accountSearchText.trim().toLowerCase();
+        const match =
+          acc.bankName.toLowerCase().includes(term) ||
+          acc.accountNumber.toLowerCase().includes(term) ||
+          acc.accountHolderName.toLowerCase().includes(term);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [companyBankAccounts, accountEntityFilter, accountStatusFilter, accountSearchText]);
+
+  const handleStatusActionSubmit = async () => {
+    if (!statusActionTarget) return;
+    if (!statusChangeReason || statusChangeReason.trim().length < 5) {
+      message.error('Alasan perubahan wajib diisi minimal 5 karakter untuk rekam audit');
+      return;
+    }
+    setSubmittingStatus(true);
+    try {
+      if (statusActionTarget.action === 'ACTIVATE') {
+        await FinanceService.activateCompanyBankAccount(statusActionTarget.id, statusChangeReason.trim());
+        message.success('Rekening bank berhasil diaktifkan');
+      } else if (statusActionTarget.action === 'DEACTIVATE') {
+        await FinanceService.deactivateCompanyBankAccount(statusActionTarget.id, statusChangeReason.trim());
+        message.success('Rekening bank berhasil dinonaktifkan');
+      } else if (statusActionTarget.action === 'BLOCK') {
+        await FinanceService.blockCompanyBankAccount(statusActionTarget.id, statusChangeReason.trim());
+        message.success('Rekening bank berhasil diblokir');
+      } else if (statusActionTarget.action === 'SET_DEFAULT') {
+        await FinanceService.setDefaultCompanyBankAccount(statusActionTarget.id, statusChangeReason.trim());
+        message.success('Rekening utama (default) berhasil ditetapkan');
+      }
+      setStatusActionTarget(null);
+      setStatusChangeReason('');
+      fetchData();
+    } catch (err: any) {
+      const msg = err.response?.data?.message || err.message || 'Gagal mengubah status rekening';
+      message.error(msg);
+    } finally {
+      setSubmittingStatus(false);
+    }
+  };
 
   // Deep-link handler
   useEffect(() => {
@@ -701,6 +796,187 @@ function PaymentsPageContent() {
     []
   );
 
+  const companyBankAccountColumns = useMemo(
+    () => [
+      {
+        title: 'ENTITAS',
+        dataIndex: 'companyCode',
+        key: 'companyCode',
+        width: 110,
+        render: (code: string) =>
+          code === 'TVM' ? (
+            <Tag color="cyan" style={{ fontWeight: 700 }}>
+              PT TVM
+            </Tag>
+          ) : (
+            <Tag color="blue" style={{ fontWeight: 700 }}>
+              PT UBD
+            </Tag>
+          ),
+      },
+      {
+        title: 'BANK & NOMOR REKENING',
+        key: 'bankAndAccount',
+        width: 260,
+        render: (_: any, record: CompanyBankAccountDto) => {
+          const masked =
+            record.accountNumber.length > 4
+              ? '••••••' + record.accountNumber.slice(-4)
+              : record.accountNumber;
+          return (
+            <div>
+              <div style={{ fontWeight: 700, color: '#0f172a', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {record.bankName}
+                {record.isDefault && (
+                  <Tag color="gold" style={{ fontSize: 10, margin: 0, padding: '0 4px', lineHeight: '16px' }}>
+                    UTAMA
+                  </Tag>
+                )}
+              </div>
+              <div style={{ fontFamily: 'monospace', color: '#1d4ed8', fontSize: 13, fontWeight: 600 }}>
+                {masked}
+              </div>
+              {record.bankCode && (
+                <div style={{ fontSize: 11, color: '#64748b' }}>Kode Bank: {record.bankCode}</div>
+              )}
+            </div>
+          );
+        },
+      },
+      {
+        title: 'ATAS NAMA (PEMILIK)',
+        dataIndex: 'accountHolderName',
+        key: 'accountHolderName',
+        width: 200,
+        render: (val: string) => (
+          <span style={{ fontWeight: 600, color: '#334155', fontSize: 12.5 }}>{val}</span>
+        ),
+      },
+      {
+        title: 'JENIS & PERUNTUKAN',
+        key: 'typeAndPurpose',
+        width: 200,
+        render: (_: any, record: CompanyBankAccountDto) => (
+          <div>
+            <Tag color="geekblue" style={{ fontSize: 11, margin: '2px 0' }}>
+              {record.accountPurpose}
+            </Tag>
+            <div style={{ fontSize: 11, color: '#64748b' }}>{record.accountType} ({record.currency})</div>
+          </div>
+        ),
+      },
+      {
+        title: 'MASA BERLAKU',
+        key: 'validity',
+        width: 170,
+        render: (_: any, record: CompanyBankAccountDto) => (
+          <div style={{ fontSize: 11.5, color: '#475569' }}>
+            <div>Sejak: {formatDate(record.effectiveDate)}</div>
+            <div>
+              Sampai: {record.expiryDate ? formatDate(record.expiryDate) : <span style={{ color: '#059669', fontWeight: 600 }}>Tanpa Batas</span>}
+            </div>
+          </div>
+        ),
+      },
+      {
+        title: 'STATUS',
+        dataIndex: 'status',
+        key: 'status',
+        width: 120,
+        render: (status: string) => {
+          if (status === 'ACTIVE') return <Tag color="success" style={{ fontWeight: 700 }}>AKTIF</Tag>;
+          if (status === 'INACTIVE') return <Tag color="warning" style={{ fontWeight: 700 }}>NONAKTIF</Tag>;
+          return <Tag color="error" style={{ fontWeight: 700 }}>DIBLOKIR</Tag>;
+        },
+      },
+      {
+        title: 'AKSI',
+        key: 'action',
+        width: 200,
+        render: (_: any, record: CompanyBankAccountDto) => (
+          <Space size={4} wrap>
+            <Button
+              size="small"
+              icon={<HistoryOutlined />}
+              onClick={() => {
+                setSelectedAccountForHistory(record);
+                setIsAccountHistoryModalOpen(true);
+              }}
+              style={{ borderRadius: 4, fontSize: 11 }}
+            >
+              Riwayat
+            </Button>
+            {canManageAccounts && (
+              <>
+                <Button
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => {
+                    setSelectedAccountForEdit(record);
+                    setIsManageAccountModalOpen(true);
+                  }}
+                  style={{ borderRadius: 4, fontSize: 11 }}
+                >
+                  Edit
+                </Button>
+                {record.status === 'ACTIVE' && !record.isDefault && (
+                  <Button
+                    size="small"
+                    icon={<StarOutlined />}
+                    onClick={() => {
+                      setStatusActionTarget({
+                        id: record.id,
+                        action: 'SET_DEFAULT',
+                        title: `Jadikan Rekening Utama — ${record.bankName} (${record.accountNumber})`,
+                      });
+                      setStatusChangeReason('');
+                    }}
+                    style={{ borderRadius: 4, fontSize: 11, color: '#d97706', borderColor: '#fcd34d' }}
+                  >
+                    Utama
+                  </Button>
+                )}
+                {record.status === 'ACTIVE' ? (
+                  <Button
+                    size="small"
+                    danger
+                    onClick={() => {
+                      setStatusActionTarget({
+                        id: record.id,
+                        action: 'DEACTIVATE',
+                        title: `Nonaktifkan Rekening — ${record.bankName} (${record.accountNumber})`,
+                      });
+                      setStatusChangeReason('');
+                    }}
+                    style={{ borderRadius: 4, fontSize: 11 }}
+                  >
+                    Nonaktif
+                  </Button>
+                ) : (
+                  <Button
+                    size="small"
+                    style={{ borderRadius: 4, fontSize: 11, color: '#059669', borderColor: '#a7f3d0' }}
+                    onClick={() => {
+                      setStatusActionTarget({
+                        id: record.id,
+                        action: 'ACTIVATE',
+                        title: `Aktifkan Rekening — ${record.bankName} (${record.accountNumber})`,
+                      });
+                      setStatusChangeReason('');
+                    }}
+                  >
+                    Aktifkan
+                  </Button>
+                )}
+              </>
+            )}
+          </Space>
+        ),
+      },
+    ],
+    [canManageAccounts]
+  );
+
   return (
     <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'ADMIN', 'FINANCE', 'DIRECTOR', 'GENERAL_MANAGER', 'HEAD_OF_OPERATIONS', 'MANAGER']}>
       <div className={styles.pageContainer}>
@@ -978,6 +1254,103 @@ function PaymentsPageContent() {
                   </div>
                 ),
               },
+              {
+                key: 'company_bank_accounts',
+                label: (
+                  <span>
+                    <BankOutlined style={{ marginRight: 6 }} />
+                    Rekening Bank Perusahaan
+                    <span className={`${styles.tabBadge} ${activeTabKey === 'company_bank_accounts' ? styles.tabBadgeActive : styles.tabBadgeInactive}`}>
+                      {companyBankAccounts.length}
+                    </span>
+                  </span>
+                ),
+                children: (
+                  <div>
+                    <div className={styles.tabDescBar} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                      <div>
+                        Master data rekening kas/bank resmi <strong>PT UBD</strong> dan <strong>PT TVM</strong> sebagai sumber dana eksekusi pembayaran vendor.
+                      </div>
+                      {canManageAccounts && (
+                        <Button
+                          type="primary"
+                          icon={<PlusOutlined />}
+                          onClick={() => {
+                            setSelectedAccountForEdit(null);
+                            setIsManageAccountModalOpen(true);
+                          }}
+                          style={{ background: '#2563EB', borderColor: '#2563EB', fontWeight: 600 }}
+                        >
+                          Tambah Rekening
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Filter and Search Bar */}
+                    <div style={{ background: '#F8FAFC', padding: '12px 16px', borderRadius: 8, marginBottom: 16, border: '1px solid #E2E8F0', display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Entitas:</span>
+                        <Radio.Group
+                          value={accountEntityFilter}
+                          onChange={(e) => setAccountEntityFilter(e.target.value)}
+                          size="small"
+                          buttonStyle="solid"
+                        >
+                          <Radio.Button value="ALL">Semua</Radio.Button>
+                          <Radio.Button value="UBD">PT UBD</Radio.Button>
+                          <Radio.Button value="TVM">PT TVM</Radio.Button>
+                        </Radio.Group>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: '#475569' }}>Status:</span>
+                        <Radio.Group
+                          value={accountStatusFilter}
+                          onChange={(e) => setAccountStatusFilter(e.target.value)}
+                          size="small"
+                          buttonStyle="solid"
+                        >
+                          <Radio.Button value="ALL">Semua</Radio.Button>
+                          <Radio.Button value="ACTIVE">Aktif</Radio.Button>
+                          <Radio.Button value="INACTIVE">Nonaktif</Radio.Button>
+                          <Radio.Button value="BLOCKED">Diblokir</Radio.Button>
+                        </Radio.Group>
+                      </div>
+
+                      <div style={{ flex: 1, minWidth: 200 }}>
+                        <Input
+                          placeholder="Cari bank, nomor rekening, atau pemilik..."
+                          value={accountSearchText}
+                          onChange={(e) => setAccountSearchText(e.target.value)}
+                          allowClear
+                          size="small"
+                          prefix={<SearchOutlined style={{ color: '#94A3B8' }} />}
+                        />
+                      </div>
+                    </div>
+
+                    <div className={styles.tableContainer}>
+                      <Table
+                        className={styles.paymentsTable}
+                        columns={companyBankAccountColumns}
+                        dataSource={filteredCompanyBankAccounts}
+                        rowKey="id"
+                        loading={loadingAccounts}
+                        pagination={{ pageSize: 8, showSizeChanger: false }}
+                        scroll={{ x: 1100 }}
+                        locale={{
+                          emptyText: (
+                            <Empty
+                              image={Empty.PRESENTED_IMAGE_SIMPLE}
+                              description={<span style={{ color: '#64748B', fontSize: 13 }}>Belum ada data rekening bank perusahaan yang cocok.</span>}
+                            />
+                          ),
+                        }}
+                      />
+                    </div>
+                  </div>
+                ),
+              },
             ]}
           />
         </div>
@@ -1047,6 +1420,62 @@ function PaymentsPageContent() {
             }}
           />
         )}
+
+        {/* STATUS ACTION REASON MODAL */}
+        <Modal
+          title={statusActionTarget?.title || 'Konfirmasi Tindakan'}
+          open={!!statusActionTarget}
+          onOk={handleStatusActionSubmit}
+          onCancel={() => {
+            setStatusActionTarget(null);
+            setStatusChangeReason('');
+          }}
+          confirmLoading={submittingStatus}
+          okText="Konfirmasi"
+          cancelText="Batal"
+          okButtonProps={{ danger: statusActionTarget?.action === 'DEACTIVATE' || statusActionTarget?.action === 'BLOCK' }}
+          destroyOnClose
+        >
+          <div style={{ padding: '8px 0' }}>
+            <p style={{ color: '#475569', fontSize: 13, marginBottom: 12 }}>
+              Perubahan status rekening kas/bank perusahaan wajib disertai alasan bisnis yang sah untuk dicatat dalam log audit resmi.
+            </p>
+            <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: '#0F172A' }}>
+              Alasan Perubahan <span style={{ color: '#DC2626' }}>*</span>
+            </div>
+            <Input.TextArea
+              rows={3}
+              value={statusChangeReason}
+              onChange={(e) => setStatusChangeReason(e.target.value)}
+              placeholder="Contoh: Rekening telah ditutup oleh pihak bank / pergantian rekening operasional..."
+              maxLength={500}
+              showCount
+            />
+          </div>
+        </Modal>
+
+        {/* MANAGE COMPANY BANK ACCOUNT MODAL (CREATE / EDIT) */}
+        <ManageCompanyBankAccountModal
+          open={isManageAccountModalOpen}
+          onClose={() => {
+            setIsManageAccountModalOpen(false);
+            setSelectedAccountForEdit(null);
+          }}
+          account={selectedAccountForEdit}
+          onSaved={() => {
+            fetchData();
+          }}
+        />
+
+        {/* COMPANY BANK ACCOUNT AUDIT HISTORY MODAL */}
+        <CompanyBankAccountHistoryModal
+          open={isAccountHistoryModalOpen}
+          onClose={() => {
+            setIsAccountHistoryModalOpen(false);
+            setSelectedAccountForHistory(null);
+          }}
+          account={selectedAccountForHistory}
+        />
       </div>
     </ProtectedRoute>
   );

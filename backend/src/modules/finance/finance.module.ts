@@ -11,6 +11,13 @@ import { PoPaymentTerm } from '../../entities/po-payment-term.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { PaymentRequest } from '../../entities/payment-request.entity';
 import { Notification } from '../../entities/notification.entity';
+import { InvoiceTaxDetail } from '../../entities/invoice-tax-detail.entity';
+import { PpnMasukanRecord } from '../../entities/ppn-masukan-record.entity';
+import { PphWithholdingRecord } from '../../entities/pph-withholding-record.entity';
+import { StatutoryTaxLiability } from '../../entities/statutory-tax-liability.entity';
+import { TaxRegimeRule } from '../../entities/tax-regime-rule.entity';
+import { TaxSupportingDocument } from '../../entities/tax-supporting-document.entity';
+import { CompanyBankAccount } from '../../entities/company-bank-account.entity';
 
 @Module({
   imports: [
@@ -24,6 +31,13 @@ import { Notification } from '../../entities/notification.entity';
       AuditLog,
       PaymentRequest,
       Notification,
+      InvoiceTaxDetail,
+      PpnMasukanRecord,
+      PphWithholdingRecord,
+      StatutoryTaxLiability,
+      TaxRegimeRule,
+      TaxSupportingDocument,
+      CompanyBankAccount,
     ])
   ],
   controllers: [FinanceController],

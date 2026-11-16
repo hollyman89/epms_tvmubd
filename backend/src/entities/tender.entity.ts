@@ -38,6 +38,9 @@ export class Tender {
   @PrimaryGeneratedColumn('increment', { type: 'bigint', unsigned: true })
   id: number;
 
+  @Column({ name: 'company_code', type: 'varchar', length: 10, nullable: true })
+  companyCode?: string; // 'UBD' | 'TVM' (DEC-TAX-07)
+
   @VersionColumn()
   version: number;
 

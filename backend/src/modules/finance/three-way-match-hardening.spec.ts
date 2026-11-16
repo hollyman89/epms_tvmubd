@@ -3,9 +3,10 @@ import { FinanceService } from './finance.service';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Invoice } from '../../entities/invoice.entity';
 import { Payment } from '../../entities/payment.entity';
-import { PurchaseOrder } from '../../entities/purchase-order.entity';
+import { PurchaseOrder, PurchaseOrderType } from '../../entities/purchase-order.entity';
 import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { PoPaymentTerm, PaymentTermStatus, PaymentTermType } from '../../entities/po-payment-term.entity';
+import { ServiceClaim, ServiceClaimStatus } from '../../entities/service-claim.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { DataSource } from 'typeorm';
 import { BadRequestException } from '@nestjs/common';
@@ -423,6 +424,7 @@ describe('FinanceService - 3-Way Match Hardening (P7.6 Part 3)', () => {
 
       mockQueryRunner.manager.findOne.mockImplementation(async (entity: any) => {
         if (entity === Invoice) return invoice;
+        if (entity === ServiceClaim) return (invoice as any).serviceClaim;
         return null;
       });
       mockQueryRunner.manager.find.mockImplementation(async (entity: any) => {
@@ -452,6 +454,324 @@ describe('FinanceService - 3-Way Match Hardening (P7.6 Part 3)', () => {
           totalAmount: 1000
         })
       });
+    });
+
+    it('MATCH-16: CP1.2 DEF-CP1.2-03: Should verify 3-way match when multi-item invoice and GR have fractional prices that sum with per-item rounding', async () => {
+      // 4 items with qty 1.25 and unitPrice 10.01 (product = 12.5125 per line -> rounded = 12.51)
+      // Total invoice = 50.04 (4 * 12.51).
+      // Previously, unrounded GR accumulation gave 50.05, causing spurious THREE_WAY_MISMATCH because |50.04 - 50.05| < 0.01 evaluated to false.
+      const invoice = {
+        id: 2,
+        poId: 2,
+        createdBy: 100,
+        matchStatus: 'PENDING',
+        purchaseOrder: {
+          id: 2,
+          totalAmount: 50.04,
+          vendorId: 10,
+          status: 'COMPLETED',
+          items: [
+            { id: 21, unitPrice: 10.01, receivedQuantity: 1.25 },
+            { id: 22, unitPrice: 10.01, receivedQuantity: 1.25 },
+            { id: 23, unitPrice: 10.01, receivedQuantity: 1.25 },
+            { id: 24, unitPrice: 10.01, receivedQuantity: 1.25 },
+          ],
+        },
+        totalAmount: 50.04,
+      };
+      const gr = {
+        id: 2,
+        poId: 2,
+        items: [
+          { poItemId: 21, receivedQuantity: 1.25 },
+          { poItemId: 22, receivedQuantity: 1.25 },
+          { poItemId: 23, receivedQuantity: 1.25 },
+          { poItemId: 24, receivedQuantity: 1.25 },
+        ],
+      };
+
+      mockQueryRunner.manager.findOne.mockImplementation(async (entity: any) => {
+        if (entity === Invoice) return invoice;
+        if (entity === ServiceClaim) return (invoice as any).serviceClaim;
+        return null;
+      });
+      mockQueryRunner.manager.find.mockImplementation(async (entity: any) => {
+        if (entity === GoodsReceipt) return [gr];
+        return [];
+      });
+      mockQueryRunner.manager.save.mockImplementation(async (entity: any, val: any) => val);
+
+      const result = await service.verifyInvoice(2, { approved: true } as any, 101);
+      expect(result.matchStatus).toBe('VERIFIED');
+    });
+
+    it('MATCH-17: CP1.2-03: Material 3-way match discrepancy of exactly Rp0.01 must fail verification', async () => {
+      // Transaction where invoicedAmount = 50.04 and GR items total 50.05 (diff = 0.01)
+      const invoice = {
+        id: 3,
+        poId: 3,
+        createdBy: 100,
+        matchStatus: 'PENDING',
+        purchaseOrder: {
+          id: 3,
+          totalAmount: 50.04,
+          vendorId: 10,
+          status: 'COMPLETED',
+          items: [
+            { id: 31, unitPrice: 50.05, receivedQuantity: 1 },
+          ],
+        },
+        totalAmount: 50.04,
+      };
+      const gr = {
+        id: 3,
+        poId: 3,
+        items: [
+          { poItemId: 31, receivedQuantity: 1 }, // Total GR = 50.05, diff = 0.01
+        ],
+      };
+
+      mockQueryRunner.manager.findOne.mockImplementation(async (entity: any) => {
+        if (entity === Invoice) return invoice;
+        if (entity === ServiceClaim) return (invoice as any).serviceClaim;
+        return null;
+      });
+      mockQueryRunner.manager.find.mockImplementation(async (entity: any) => {
+        if (entity === GoodsReceipt) return [gr];
+        return [];
+      });
+      mockQueryRunner.manager.save.mockImplementation(async (entity: any, val: any) => val);
+
+      try {
+        await service.verifyInvoice(3, { approved: true } as any, 101);
+        throw new Error('Should have thrown BadRequestException');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        const resp = err.getResponse();
+        expect(resp.mismatches.some((m: any) => m.code === MismatchCode.THREE_WAY_MISMATCH)).toBe(true);
+        expect(resp.message).toContain('3-Way Matching gagal');
+      }
+      expect(invoice.matchStatus).toBe('MISMATCHED');
+    });
+
+    it('MATCH-18: CP1.2-03: Material 3-way match discrepancy greater than Rp0.01 must fail verification', async () => {
+      const invoice = {
+        id: 4,
+        poId: 4,
+        createdBy: 100,
+        matchStatus: 'PENDING',
+        purchaseOrder: {
+          id: 4,
+          totalAmount: 1000.00,
+          vendorId: 10,
+          status: 'COMPLETED',
+          items: [
+            { id: 41, unitPrice: 1050.00, receivedQuantity: 1 },
+          ],
+        },
+        totalAmount: 1000.00,
+      };
+      const gr = {
+        id: 4,
+        poId: 4,
+        items: [
+          { poItemId: 41, receivedQuantity: 1 }, // Total GR = 1050.00, diff = 50.00
+        ],
+      };
+
+      mockQueryRunner.manager.findOne.mockImplementation(async (entity: any) => {
+        if (entity === Invoice) return invoice;
+        if (entity === ServiceClaim) return (invoice as any).serviceClaim;
+        return null;
+      });
+      mockQueryRunner.manager.find.mockImplementation(async (entity: any) => {
+        if (entity === GoodsReceipt) return [gr];
+        return [];
+      });
+      mockQueryRunner.manager.save.mockImplementation(async (entity: any, val: any) => val);
+
+      try {
+        await service.verifyInvoice(4, { approved: true } as any, 101);
+        throw new Error('Should have thrown BadRequestException');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        const resp = err.getResponse();
+        expect(resp.mismatches.some((m: any) => m.code === MismatchCode.THREE_WAY_MISMATCH)).toBe(true);
+      }
+      expect(invoice.matchStatus).toBe('MISMATCHED');
+    });
+
+    it('MATCH-19: CP1.2-03: Service PO / Service Claim discrepancy of exactly Rp0.01 must fail verification', async () => {
+      const invoice = {
+        id: 5,
+        poId: 5,
+        serviceClaimId: 50,
+        createdBy: 100,
+        matchStatus: 'PENDING',
+        purchaseOrder: {
+          id: 5,
+          orderType: PurchaseOrderType.SERVICE,
+          totalAmount: 1000000.00,
+          vendorId: 10,
+          status: 'COMPLETED',
+          items: [],
+        },
+        serviceClaim: {
+          id: 50,
+          poId: 5,
+          status: ServiceClaimStatus.APPROVED_FOR_INVOICE,
+          approvedClaimAmount: 1000000.01, // Diff = 0.01
+        },
+        totalAmount: 1000000.00,
+      };
+
+      mockQueryRunner.manager.findOne.mockImplementation(async (entity: any) => {
+        if (entity === Invoice) return invoice;
+        if (entity === ServiceClaim) return (invoice as any).serviceClaim;
+        return null;
+      });
+      mockQueryRunner.manager.find.mockImplementation(async (entity: any) => {
+        return [];
+      });
+      mockQueryRunner.manager.save.mockImplementation(async (entity: any, val: any) => val);
+
+      try {
+        await service.verifyInvoice(5, { approved: true } as any, 101);
+        throw new Error('Should have thrown BadRequestException');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        const resp = err.getResponse();
+        expect(resp.mismatches.some((m: any) => m.code === MismatchCode.THREE_WAY_MISMATCH)).toBe(true);
+        expect(resp.message).toContain('Rekonsiliasi Jasa gagal');
+      }
+      expect(invoice.matchStatus).toBe('MISMATCHED');
+    });
+
+    it('MATCH-20: CP1.2-03: Older-dated transaction with Rp0.01 discrepancy must follow strict reconciliation and must not be silently accepted', async () => {
+      // Older-dated transaction (e.g. historical timestamps) with Rp0.01 difference must follow universal strict reconciliation rule without legacy bypass
+      const invoice = {
+        id: 6,
+        poId: 6,
+        createdBy: 100,
+        matchStatus: 'PENDING',
+        createdAt: new Date('2024-01-01'),
+        purchaseOrder: {
+          id: 6,
+          totalAmount: 50000.00,
+          vendorId: 10,
+          status: 'COMPLETED',
+          createdAt: new Date('2023-12-01'),
+          items: [
+            { id: 61, unitPrice: 50000.01, receivedQuantity: 1 },
+          ],
+        },
+        totalAmount: 50000.00,
+      };
+      const gr = {
+        id: 6,
+        poId: 6,
+        createdAt: new Date('2023-12-15'),
+        items: [
+          { poItemId: 61, receivedQuantity: 1 }, // Total GR = 50000.01, diff = 0.01
+        ],
+      };
+
+      mockQueryRunner.manager.findOne.mockImplementation(async (entity: any) => {
+        if (entity === Invoice) return invoice;
+        if (entity === ServiceClaim) return (invoice as any).serviceClaim;
+        return null;
+      });
+      mockQueryRunner.manager.find.mockImplementation(async (entity: any) => {
+        if (entity === GoodsReceipt) return [gr];
+        return [];
+      });
+      mockQueryRunner.manager.save.mockImplementation(async (entity: any, val: any) => val);
+
+      try {
+        await service.verifyInvoice(6, { approved: true } as any, 101);
+        throw new Error('Should have thrown BadRequestException');
+      } catch (err: any) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        const resp = err.getResponse();
+        expect(resp.mismatches.some((m: any) => m.code === MismatchCode.THREE_WAY_MISMATCH)).toBe(true);
+      }
+      expect(invoice.matchStatus).toBe('MISMATCHED');
+    });
+
+    it('MATCH-21: CP1.2-03: Exact monetary match on Material PO and Service PO must verify successfully', async () => {
+      // Material PO with exact matching amounts
+      const matInvoice = {
+        id: 7,
+        poId: 7,
+        createdBy: 100,
+        matchStatus: 'PENDING',
+        purchaseOrder: {
+          id: 7,
+          totalAmount: 50.04,
+          vendorId: 10,
+          status: 'COMPLETED',
+          items: [
+            { id: 71, unitPrice: 50.04, receivedQuantity: 1 },
+          ],
+        },
+        totalAmount: 50.04,
+      };
+      const matGr = {
+        id: 7,
+        poId: 7,
+        items: [
+          { poItemId: 71, receivedQuantity: 1 },
+        ],
+      };
+
+      mockQueryRunner.manager.findOne.mockImplementation(async (entity: any) => {
+        if (entity === Invoice) return matInvoice;
+        return null;
+      });
+      mockQueryRunner.manager.find.mockImplementation(async (entity: any) => {
+        if (entity === GoodsReceipt) return [matGr];
+        return [];
+      });
+      mockQueryRunner.manager.save.mockImplementation(async (entity: any, val: any) => val);
+
+      const matResult = await service.verifyInvoice(7, { approved: true } as any, 101);
+      expect(matResult.matchStatus).toBe('VERIFIED');
+
+      // Service PO with exact matching amounts
+      const srvInvoice = {
+        id: 8,
+        poId: 8,
+        serviceClaimId: 80,
+        createdBy: 100,
+        matchStatus: 'PENDING',
+        purchaseOrder: {
+          id: 8,
+          orderType: PurchaseOrderType.SERVICE,
+          totalAmount: 1000000.00,
+          vendorId: 10,
+          status: 'COMPLETED',
+          items: [],
+        },
+        serviceClaim: {
+          id: 80,
+          poId: 8,
+          status: ServiceClaimStatus.APPROVED_FOR_INVOICE,
+          approvedClaimAmount: 1000000.00,
+        },
+        totalAmount: 1000000.00,
+      };
+
+      mockQueryRunner.manager.findOne.mockImplementation(async (entity: any) => {
+        if (entity === Invoice) return srvInvoice;
+        if (entity === ServiceClaim) return srvInvoice.serviceClaim;
+        return null;
+      });
+      mockQueryRunner.manager.find.mockImplementation(async (entity: any) => {
+        return [];
+      });
+
+      const srvResult = await service.verifyInvoice(8, { approved: true } as any, 101);
+      expect(srvResult.matchStatus).toBe('VERIFIED');
     });
   });
 });

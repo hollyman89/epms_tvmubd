@@ -386,6 +386,7 @@ describe('VendorQuotationModal Mobile Responsiveness & Input Fidelity', () => {
       items: [
         {
           key: 'item_with_route',
+          categoryName: 'Jasa',
           prItemId: 101,
           itemName: 'Item Dengan Rincian Rute Spesifik',
           routeDetails: 'Segmen Jalur Timur KM 10 s/d KM 15',
@@ -397,6 +398,7 @@ describe('VendorQuotationModal Mobile Responsiveness & Input Fidelity', () => {
         },
         {
           key: 'item_without_route',
+          categoryName: 'Material',
           prItemId: 102,
           itemName: 'Item Standar Tanpa Rincian Rute',
           routeDetails: undefined,
@@ -445,6 +447,7 @@ describe('VendorQuotationModal Mobile Responsiveness & Input Fidelity', () => {
       items: [
         {
           key: 'item_long',
+          categoryName: 'Material',
           prItemId: 101,
           itemName: 'SUPER-LONG-UNBROKEN-ITEM-NAME-SERIAL-1122334455667788990011223344556677889900-SPEC-CODE-XYZ',
           quantity: 1,

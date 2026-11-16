@@ -20,6 +20,9 @@ export class PurchaseOrder {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({ name: 'company_code', type: 'varchar', length: 10, nullable: true })
+  companyCode?: string; // 'UBD' | 'TVM' (DEC-TAX-07)
+
   @VersionColumn()
   version: number;
 

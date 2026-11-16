@@ -115,9 +115,25 @@ export const ResubmitPaymentRequestModal: React.FC<ResubmitPaymentRequestModalPr
             <Descriptions.Item label="Vendor">
               {paymentRequest.invoice?.purchaseOrder?.vendor?.name || '—'}
             </Descriptions.Item>
-            <Descriptions.Item label="Nilai Invoice">
-              {formatCurrency(Number(paymentRequest.invoice?.totalAmount || 0))}
+            <Descriptions.Item label="Kas Bersih Disetujui / Diajukan">
+              <span style={{ fontWeight: 700, color: '#059669' }}>
+                {formatCurrency(Number((paymentRequest.invoice as any)?.invoiceTaxDetail?.netVendorCashPayable ?? paymentRequest.approvalSnapshot?.netPayableAmount ?? paymentRequest.requestedAmount ?? 0))}
+              </span>
             </Descriptions.Item>
+            {((paymentRequest.invoice as any)?.invoiceTaxDetail?.grossCommercialLiability != null || paymentRequest.approvalSnapshot?.grossAmount != null) && (
+              <Descriptions.Item label="Total Tagihan Bruto">
+                <span style={{ fontWeight: 600, color: '#1d4ed8' }}>
+                  {formatCurrency(Number((paymentRequest.invoice as any)?.invoiceTaxDetail?.grossCommercialLiability ?? paymentRequest.approvalSnapshot?.grossAmount ?? paymentRequest.invoice?.totalAmount ?? 0))}
+                </span>
+              </Descriptions.Item>
+            )}
+            {((paymentRequest.invoice as any)?.invoiceTaxDetail?.pphWithholdingAmount != null || paymentRequest.approvalSnapshot?.pphAmount != null) && (
+              <Descriptions.Item label="Potongan PPh">
+                <span style={{ fontWeight: 600, color: '#dc2626' }}>
+                  - {formatCurrency(Number((paymentRequest.invoice as any)?.invoiceTaxDetail?.pphWithholdingAmount ?? paymentRequest.approvalSnapshot?.pphAmount ?? 0))}
+                </span>
+              </Descriptions.Item>
+            )}
           </Descriptions>
         </Card>
 
@@ -131,6 +147,10 @@ export const ResubmitPaymentRequestModal: React.FC<ResubmitPaymentRequestModalPr
                 validator: async (_, value) => {
                   if (value && value <= 0) {
                     return Promise.reject(new Error('Jumlah harus lebih besar dari 0'));
+                  }
+                  const maxNet = Number((paymentRequest.invoice as any)?.invoiceTaxDetail?.netVendorCashPayable ?? paymentRequest.approvalSnapshot?.netPayableAmount ?? paymentRequest.requestedAmount ?? 0);
+                  if (maxNet > 0 && value && value > maxNet) {
+                    return Promise.reject(new Error(`Jumlah melebihi sisa kas bersih yang dapat dibayarkan ke vendor (${formatCurrency(maxNet)})`));
                   }
                   return Promise.resolve();
                 },

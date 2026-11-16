@@ -13,6 +13,7 @@ import { MismatchCode } from './finance.types';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { PaymentRequest, PaymentRequestStatus } from '../../entities/payment-request.entity';
 import { DirectorDecisionAction } from './dto/decide-payment-request.dto';
+import { CompanyBankAccount, CompanyBankAccountStatus } from '../../entities/company-bank-account.entity';
 
 describe('FinanceService', () => {
   let service: FinanceService;
@@ -276,7 +277,7 @@ describe('FinanceService', () => {
       await expect(service.createInvoice(dto, 1)).rejects.toThrow('Payment term sudah memiliki invoice aktif.');
     });
 
-    it('H. Client sends fake amount -> server strictly uses paymentTerm.amount', async () => {
+    it('H. Client sends fake amount -> rejected because item details do not reconcile with paymentTerm.amount', async () => {
       mockQueryRunner.manager.findOne
         .mockResolvedValueOnce({ ...baselinePo })
         .mockResolvedValueOnce(null)
@@ -284,7 +285,6 @@ describe('FinanceService', () => {
         .mockResolvedValueOnce(null);
       mockQueryRunner.manager.count.mockResolvedValueOnce(0);
       mockQueryRunner.manager.find.mockResolvedValueOnce([]);
-      mockQueryRunner.manager.save.mockImplementation((entityOrTarget, entity) => entity || entityOrTarget);
 
       const dto = {
         purchaseOrderId: 1,
@@ -293,12 +293,12 @@ describe('FinanceService', () => {
         items: [{ poItemId: 10, quantity: 1, unitPrice: 99999999, totalPrice: 99999999 }],
       };
 
-      const result = await service.createInvoice(dto, 1);
-      // Even if item totalPrice was 99,999,999, invoice.totalAmount is authoritative from paymentTerm.amount
-      expect(result.totalAmount).toBe(30143997);
+      await expect(service.createInvoice(dto, 1)).rejects.toThrow(
+        /Total rincian item invoice .* tidak sesuai dengan nominal termin pembayaran/
+      );
     });
 
-    it('I. Client sends smaller item amount -> invoice totalAmount remains paymentTerm.amount', async () => {
+    it('I. Client sends smaller item amount -> rejected because item details do not reconcile with paymentTerm.amount', async () => {
       mockQueryRunner.manager.findOne
         .mockResolvedValueOnce({ ...baselinePo })
         .mockResolvedValueOnce(null)
@@ -306,7 +306,6 @@ describe('FinanceService', () => {
         .mockResolvedValueOnce(null);
       mockQueryRunner.manager.count.mockResolvedValueOnce(0);
       mockQueryRunner.manager.find.mockResolvedValueOnce([]);
-      mockQueryRunner.manager.save.mockImplementation((entityOrTarget, entity) => entity || entityOrTarget);
 
       const dto = {
         purchaseOrderId: 1,
@@ -315,11 +314,12 @@ describe('FinanceService', () => {
         items: [{ poItemId: 10, quantity: 1, unitPrice: 15000000, totalPrice: 15000000 }],
       };
 
-      const result = await service.createInvoice(dto, 1);
-      expect(result.totalAmount).toBe(30143997);
+      await expect(service.createInvoice(dto, 1)).rejects.toThrow(
+        /Total rincian item invoice .* tidak sesuai dengan nominal termin pembayaran/
+      );
     });
 
-    it('J. Client sends larger item amount -> does not over-bill, strictly uses paymentTerm.amount', async () => {
+    it('J. Client sends larger item amount -> rejected because item details do not reconcile with paymentTerm.amount', async () => {
       mockQueryRunner.manager.findOne
         .mockResolvedValueOnce({ ...baselinePo })
         .mockResolvedValueOnce(null)
@@ -327,7 +327,6 @@ describe('FinanceService', () => {
         .mockResolvedValueOnce(null);
       mockQueryRunner.manager.count.mockResolvedValueOnce(0);
       mockQueryRunner.manager.find.mockResolvedValueOnce([]);
-      mockQueryRunner.manager.save.mockImplementation((entityOrTarget, entity) => entity || entityOrTarget);
 
       const dto = {
         purchaseOrderId: 1,
@@ -336,8 +335,9 @@ describe('FinanceService', () => {
         items: [{ poItemId: 10, quantity: 1, unitPrice: 50000000, totalPrice: 50000000 }],
       };
 
-      const result = await service.createInvoice(dto, 1);
-      expect(result.totalAmount).toBe(30143997);
+      await expect(service.createInvoice(dto, 1)).rejects.toThrow(
+        /Total rincian item invoice .* tidak sesuai dengan nominal termin pembayaran/
+      );
     });
 
     it('K. Legacy invoice without paymentTermId -> existing behavior passes', async () => {
@@ -599,6 +599,7 @@ describe('FinanceService', () => {
       id: 1,
       invoiceNumber: 'INV-20260904-001',
       poId: 1,
+      companyCode: 'UBD',
       paymentTermId: null,
       matchStatus: 'MATCHED',
       paymentStatus: 'UNPAID',
@@ -611,7 +612,25 @@ describe('FinanceService', () => {
     const defaultPo = {
       id: 1,
       poNumber: 'PO-20260904-001',
+      companyCode: 'UBD',
       totalAmount: 100,
+      deletedAt: null,
+    };
+
+    const defaultCba = {
+      id: 1,
+      companyCode: 'UBD',
+      bankName: 'Bank Mandiri',
+      bankCode: '008',
+      accountNumber: '1234567890',
+      accountHolderName: 'PT Utama Bangun Dananjaya',
+      accountType: 'GIRO',
+      accountPurpose: 'OPERATIONAL',
+      currency: 'IDR',
+      status: CompanyBankAccountStatus.ACTIVE,
+      isDefault: true,
+      effectiveDate: '2026-01-01',
+      expiryDate: null,
       deletedAt: null,
     };
 
@@ -626,16 +645,24 @@ describe('FinanceService', () => {
       verifyAuditLog = null as any,
       paymentRequest = null as any,
     } = {}) => {
+      if (po !== null && !po.companyCode) {
+        po.companyCode = 'UBD';
+      }
       const resolvedPo = po !== null ? po : {
         id: invoice.poId || 1,
         poNumber: 'PO-20260904-001',
+        companyCode: 'UBD',
         totalAmount: Math.max(100479990, Number(invoice.totalAmount || 0)),
         deletedAt: null,
       };
 
+      if (paymentRequest !== null && !paymentRequest.companyCode) {
+        paymentRequest.companyCode = 'UBD';
+      }
       const resolvedPrq = paymentRequest !== null ? paymentRequest : {
         id: 100,
         invoiceId: invoice.id || 1,
+        companyCode: 'UBD',
         paymentTermId: invoice.paymentTermId ?? null,
         status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
         approvedBy: 999, // Checker is different from maker (10)
@@ -645,11 +672,15 @@ describe('FinanceService', () => {
       };
 
       mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any, options: any) => {
-        if (entityClass === Invoice) return invoice;
+        if (entityClass === Invoice) {
+          if (invoice && !invoice.companyCode) invoice.companyCode = 'UBD';
+          return invoice;
+        }
         if (entityClass === PaymentRequest) return resolvedPrq;
         if (entityClass === AuditLog) return verifyAuditLog;
         if (entityClass === PurchaseOrder) return resolvedPo;
         if (entityClass === PoPaymentTerm) return paymentTerm;
+        if (entityClass === CompanyBankAccount) return defaultCba;
         if (entityClass === Payment) {
           if (existingPaymentNumber && options?.where?.paymentNumber === existingPaymentNumber) {
             return { id: 999, paymentNumber: existingPaymentNumber };
@@ -683,6 +714,7 @@ describe('FinanceService', () => {
     const makeDto = (overrides: any = {}): any => ({
       invoiceId: 1,
       paymentRequestId: 100,
+      companyBankAccountId: 1,
       paymentAmount: 50,
       paymentDate: '2026-09-08',
       paymentMethod: 'BANK_TRANSFER',
@@ -1232,6 +1264,46 @@ describe('FinanceService', () => {
         );
       });
 
+      it('SCENARIO-05C: Payment amount differing by exactly Rp0.01 from payment term -> REJECT', async () => {
+        // Case 1: Underpayment by Rp0.01 (14,396,999.99 vs 14,397,000.00)
+        const inv1 = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
+        const term1 = { id: 201, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prq1 = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14396999.99,
+          approvedAmount: 14396999.99,
+        };
+        setupPaymentMocks({ invoice: inv1, paymentTerm: term1, paymentRequest: prq1 });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 14396999.99 }), 3)
+        ).rejects.toThrow(
+          'Payment amount (14396999.99) harus sesuai dengan nilai termin pembayaran Procurement (14397000). Pembayaran dengan nominal berbeda dari jadwal termin Procurement tidak diizinkan.'
+        );
+
+        // Case 2: Overpayment by Rp0.01 (14,397,000.01 vs 14,397,000.00) where invoice remaining capacity is sufficient
+        const inv2 = { ...defaultInvoice, id: 11, poId: 5, paymentTermId: 202, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 20000000 };
+        const term2 = { id: 202, poId: 5, amount: 14397000, status: PaymentTermStatus.VERIFIED };
+        const prq2 = {
+          id: 502,
+          invoiceId: 11,
+          paymentTermId: 202,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 14397000.01,
+          approvedAmount: 14397000.01,
+        };
+        setupPaymentMocks({ invoice: inv2, paymentTerm: term2, paymentRequest: prq2 });
+        await expect(
+          service.createPayment(makeDto({ invoiceId: 11, paymentRequestId: 502, paymentAmount: 14397000.01 }), 3)
+        ).rejects.toThrow(
+          'Payment amount (14397000.01) harus sesuai dengan nilai termin pembayaran Procurement (14397000). Pembayaran dengan nominal berbeda dari jadwal termin Procurement tidak diizinkan.'
+        );
+      });
+
       // 6. Payment exceeding Director-approved amount (CRIT-01 preserved)
       it('SCENARIO-06: Payment exceeding Director-approved amount -> REJECT', async () => {
         const inv = { ...defaultInvoice, id: 10, poId: 5, paymentTermId: 201, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', totalAmount: 14397000 };
@@ -1484,6 +1556,97 @@ describe('FinanceService', () => {
         ).rejects.toThrow(
           'Invoice termin ini telah memiliki pembayaran sebelumnya (Rp 14.000.000). Termin pembayaran Procurement tidak dapat dipecah menjadi cicilan tambahan tanpa amandemen PO Procurement.'
         );
+      });
+
+      // 15. Finding 2 Remediation: Dual-Entry Net Cash Payment with PPh Withholding transitions Invoice and PaymentTerm to PAID
+      it('SCENARIO-15: Dual-Entry Net Cash Payment with PPh Withholding (D_cash = Term - W_tax) transitions Invoice and PaymentTerm to PAID', async () => {
+        const inv = {
+          ...defaultInvoice,
+          id: 10,
+          poId: 5,
+          paymentTermId: 201,
+          matchStatus: 'VERIFIED',
+          paymentStatus: 'UNPAID',
+          totalAmount: 30000000,
+          invoiceTaxDetail: { pphWithholdingAmount: 600000, wapuPpnWithheldAmount: 0, priorDeductionsAmount: 0 },
+        };
+        const term = { id: 201, poId: 5, amount: 30000000, status: PaymentTermStatus.VERIFIED };
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          paymentTermId: 201,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 29400000,
+          approvedAmount: 29400000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentTerm: term, paymentRequest: prq });
+        const result = await service.createPayment(
+          makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 29400000 }),
+          3
+        );
+        expect(result.paymentNumber).toBeDefined();
+        expect(prq.status).toBe(PaymentRequestStatus.PAID);
+        expect(inv.paymentStatus).toBe('PAID');
+        expect(term.status).toBe(PaymentTermStatus.PAID);
+      });
+
+      // 16. Finding 2 Remediation: Partial net cash payment transitions Invoice to PARTIALLY_PAID
+      it('SCENARIO-16: Partial Net Cash Payment on Invoice with PPh Withholding transitions Invoice to PARTIALLY_PAID', async () => {
+        const inv = {
+          ...defaultInvoice,
+          id: 10,
+          poId: 5,
+          matchStatus: 'VERIFIED',
+          paymentStatus: 'UNPAID',
+          totalAmount: 30000000,
+          invoiceTaxDetail: { pphWithholdingAmount: 600000, wapuPpnWithheldAmount: 0, priorDeductionsAmount: 0 },
+        };
+        const prq = {
+          id: 501,
+          invoiceId: 10,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 10000000,
+          approvedAmount: 10000000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq });
+        const result = await service.createPayment(
+          makeDto({ invoiceId: 10, paymentRequestId: 501, paymentAmount: 10000000 }),
+          3
+        );
+        expect(result.paymentNumber).toBeDefined();
+        expect(inv.paymentStatus).toBe('PARTIALLY_PAID');
+      });
+
+      // 17. Finding 2 Remediation: Subsequent net cash payment completing settlement transitions Invoice to PAID
+      it('SCENARIO-17: Subsequent Net Cash Payment completing settlement transitions Invoice to PAID', async () => {
+        const inv = {
+          ...defaultInvoice,
+          id: 10,
+          poId: 5,
+          matchStatus: 'VERIFIED',
+          paymentStatus: 'PARTIALLY_PAID',
+          totalAmount: 30000000,
+          invoiceTaxDetail: { pphWithholdingAmount: 600000, wapuPpnWithheldAmount: 0, priorDeductionsAmount: 0 },
+        };
+        const existingPayments = [{ id: 1, invoiceId: 10, amount: 10000000, deletedAt: null }];
+        const prq2 = {
+          id: 502,
+          invoiceId: 10,
+          status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+          approvedBy: 2,
+          requestedAmount: 19400000,
+          approvedAmount: 19400000,
+        };
+        setupPaymentMocks({ invoice: inv, paymentRequest: prq2, existingPayments });
+        const result = await service.createPayment(
+          makeDto({ invoiceId: 10, paymentRequestId: 502, paymentAmount: 19400000 }),
+          3
+        );
+        expect(result.paymentNumber).toBeDefined();
+        expect(prq2.status).toBe(PaymentRequestStatus.PAID);
+        expect(inv.paymentStatus).toBe('PAID');
       });
     });
 
@@ -1738,6 +1901,7 @@ describe('FinanceService', () => {
           };
         }
         if (entityClass === PurchaseOrder) return defaultPo;
+        if (entityClass === CompanyBankAccount) return defaultCba;
         if (entityClass === Payment) {
           callCount++;
           if (callCount === 1) {
@@ -1859,20 +2023,22 @@ describe('FinanceService', () => {
 
     // Section T: Concurrency Simulation
     it('Section T: Concurrency Simulation (Rp30M invoice, concurrent 20M payments)', async () => {
-      const mockInvoice = { id: 1, poId: 1, matchStatus: 'MATCHED', paymentStatus: 'UNPAID', totalAmount: 30000000, version: 1 };
+      const mockInvoice = { id: 1, poId: 1, companyCode: 'UBD', matchStatus: 'MATCHED', paymentStatus: 'UNPAID', totalAmount: 30000000, version: 1 };
       mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
         if (entityClass === Invoice) return mockInvoice;
         if (entityClass === PaymentRequest) {
           return {
             id: 100,
             invoiceId: mockInvoice.id,
+            companyCode: 'UBD',
             status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
             approvedBy: 999,
             approvedAmount: 30000000,
             deletedAt: null,
           };
         }
-        if (entityClass === PurchaseOrder) return { id: 1, totalAmount: 30000000 };
+        if (entityClass === PurchaseOrder) return { id: 1, companyCode: 'UBD', totalAmount: 30000000 };
+        if (entityClass === CompanyBankAccount) return defaultCba;
         return null;
       });
       mockQueryRunner.manager.find.mockResolvedValue([]);
@@ -1904,18 +2070,20 @@ describe('FinanceService', () => {
       let seq = 0;
       const numbers: string[] = [];
       mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any, options: any) => {
-        if (entityClass === Invoice) return { ...defaultInvoice, totalAmount: 1000 };
+        if (entityClass === Invoice) return { ...defaultInvoice, companyCode: 'UBD', totalAmount: 1000 };
         if (entityClass === PaymentRequest) {
           return {
             id: 100,
             invoiceId: defaultInvoice.id,
+            companyCode: 'UBD',
             status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
             approvedBy: 999,
             approvedAmount: 100,
             deletedAt: null,
           };
         }
-        if (entityClass === PurchaseOrder) return { id: 1, totalAmount: 1000 };
+        if (entityClass === PurchaseOrder) return { id: 1, companyCode: 'UBD', totalAmount: 1000 };
+        if (entityClass === CompanyBankAccount) return defaultCba;
         if (entityClass === Payment) {
           if (numbers.includes(options?.where?.paymentNumber)) {
             return { id: 99, paymentNumber: options.where.paymentNumber };
@@ -2575,6 +2743,7 @@ describe('FinanceService', () => {
           'purchaseOrder.purchaseRequest',
           'purchaseOrder.purchaseRequest.project',
           'paymentTerm',
+          'invoiceTaxDetail',
         ],
       });
       // Verifies no write operations occur during read
@@ -2620,6 +2789,7 @@ describe('FinanceService', () => {
           'purchaseOrder.purchaseRequest.project',
           'paymentTerm',
           'payments',
+          'invoiceTaxDetail',
         ],
       });
       // Verifies no mutation occurs
@@ -2669,7 +2839,9 @@ describe('FinanceService', () => {
           'invoice.purchaseOrder.vendor',
           'invoice.purchaseOrder.purchaseRequest',
           'invoice.purchaseOrder.purchaseRequest.project',
+          'companyBankAccount',
         ],
+        order: { id: 'DESC' },
       });
 
       // 1. getPayments loads: invoice.purchaseOrder
@@ -3054,7 +3226,7 @@ describe('FinanceService', () => {
       mockQueryRunner.manager.findOne
         .mockResolvedValueOnce({ ...livePo })
         .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce({ ...term2Progress })
+        .mockResolvedValueOnce({ ...term2Progress, amount: 49999995 })
         .mockResolvedValueOnce({ ...liveGr1 })
         .mockResolvedValueOnce(null);
       mockQueryRunner.manager.count.mockResolvedValueOnce(0);

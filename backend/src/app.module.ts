@@ -21,6 +21,7 @@ import { QueueModule } from './modules/queue/queue.module';
 import { SystemModule } from './modules/system/system.module';
 import { InboxModule } from './modules/inbox/inbox.module';
 import { ExecutiveAnalyticsReadModule, ExecutiveAnalyticsWorkerModule } from './modules/executive-analytics/executive-analytics.module';
+import { TaxModule } from './modules/tax/tax.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { ExecutiveAnalyticsReadModule, ExecutiveAnalyticsWorkerModule } from './
     InboxModule,
     ExecutiveAnalyticsReadModule,
     ExecutiveAnalyticsWorkerModule,
+    TaxModule,
   ],
   controllers: [],
   providers: [],

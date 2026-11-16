@@ -6,6 +6,7 @@ import {
   Button,
   Form,
   Input,
+  InputNumber,
   DatePicker,
   Table,
   Tag,
@@ -18,6 +19,9 @@ import {
   Card,
   Select,
   Spin,
+  Upload,
+  Tooltip,
+  Divider,
 } from 'antd';
 import {
   FileTextOutlined,
@@ -31,6 +35,11 @@ import {
   ExclamationCircleOutlined,
   InboxOutlined,
   CloseCircleOutlined,
+  UploadOutlined,
+  DeleteOutlined,
+  FilePdfOutlined,
+  CalculatorOutlined,
+  DollarOutlined,
 } from '@ant-design/icons';
 import dayjs, { Dayjs } from 'dayjs';
 import { PurchaseOrder, PoPaymentTermRecord, ProcurementService } from '@/services/procurement.service';
@@ -39,6 +48,20 @@ import { ResponsiveFinanceModal } from './ResponsiveFinanceModal';
 import styles from './CreateInvoiceModal.module.css';
 
 const { Text } = Typography;
+
+export const PPH_TYPE_OPTIONS = [
+  { value: 'PPH_23_JASA', label: 'PPh 23 — Jasa Teknik/Manajemen/Konsultan' },
+  { value: 'PPH_23_SEWA', label: 'PPh 23 — Sewa & Penggunaan Harta' },
+  { value: 'PPH_4_2_KONSTRUKSI_KECIL', label: 'PPh 4(2) — Konstruksi Pelaksanaan Kecil' },
+  { value: 'PPH_4_2_KONSTRUKSI_MENENGAH_BESAR', label: 'PPh 4(2) — Konstruksi Pelaksanaan Menengah/Besar' },
+  { value: 'PPH_4_2_KONSTRUKSI_TANPA_KUALIFIKASI', label: 'PPh 4(2) — Konstruksi Pelaksanaan Tanpa Kualifikasi' },
+  { value: 'PPH_4_2_KONSULTANSI_KUALIFIKASI', label: 'PPh 4(2) — Konsultansi Konstruksi Kualifikasi' },
+  { value: 'PPH_4_2_KONSULTANSI_NON_KUALIFIKASI', label: 'PPh 4(2) — Konsultansi Konstruksi Non-Kualifikasi' },
+  { value: 'PPH_4_2_SEWA_BANGUNAN', label: 'PPh 4(2) — Sewa Tanah dan/atau Bangunan' },
+  { value: 'PPH_21_TENAGA_AHLI', label: 'PPh 21 — Imbalan Tenaga Ahli / Orang Pribadi' },
+  { value: 'PPH_NON_POTONG', label: 'Bebas PPh / Tidak Ada Potongan' },
+  { value: 'PPH_LAINNYA', label: 'Lainnya / Tarif Kustom' },
+];
 
 // 1. MODAL PROPS
 
@@ -92,6 +115,23 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   // Authoritative Existing Invoices for PO (Phase GR-8C)
   const [existingInvoices, setExistingInvoices] = useState<InvoiceDto[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState<boolean>(false);
+
+  // Supporting Tax Document Files (Section 9 Mandate)
+  const [fakturPajakFile, setFakturPajakFile] = useState<File | null>(null);
+  const [buktiPotongFile, setBuktiPotongFile] = useState<File | null>(null);
+
+  // Semi-Automatic Tax Calculation & Manual Override States
+  const [isPpnOverridden, setIsPpnOverridden] = useState<boolean>(false);
+  const [isPphOverridden, setIsPphOverridden] = useState<boolean>(false);
+
+  // Watch form fields for live settlement parity calculation
+  const dppAmountWatch = Form.useWatch('dppAmount', form);
+  const ppnRateWatch = Form.useWatch('ppnRate', form);
+  const ppnAmountWatch = Form.useWatch('ppnAmount', form);
+  const pphTypeWatch = Form.useWatch('pphType', form);
+  const pphRateWatch = Form.useWatch('pphRate', form);
+  const taxableBaseWatch = Form.useWatch('taxableBase', form);
+  const withheldAmountWatch = Form.useWatch('withheldAmount', form);
 
   // Derived PO Metadata
   const poId = Number(po?.id || po?.poId || 0);
@@ -716,6 +756,11 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   useEffect(() => {
     if (open && po) {
       setSubmitError(null);
+      setIsPpnOverridden(false);
+      setIsPphOverridden(false);
+      setFakturPajakFile(null);
+      setBuktiPotongFile(null);
+
       if (paymentTerms.length > 0) {
         // Auto-select initialPaymentTermId if provided, else first PENDING term
         const matchedInitial = initialPaymentTermId
@@ -729,6 +774,15 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
           invoiceDate: dayjs(),
           taxInvoiceNumber: '',
           notes: '',
+          dppAmount: undefined,
+          ppnRate: undefined,
+          ppnAmount: undefined,
+          pphType: undefined,
+          pphRate: undefined,
+          taxableBase: undefined,
+          withheldAmount: undefined,
+          buktiPotongNumber: '',
+          buktiPotongDate: undefined,
         });
       } else {
         setSelectedTermId(undefined);
@@ -737,6 +791,15 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
           invoiceDate: dayjs(),
           taxInvoiceNumber: '',
           notes: '',
+          dppAmount: undefined,
+          ppnRate: undefined,
+          ppnAmount: undefined,
+          pphType: undefined,
+          pphRate: undefined,
+          taxableBase: undefined,
+          withheldAmount: undefined,
+          buktiPotongNumber: '',
+          buktiPotongDate: undefined,
         });
       }
     }
@@ -812,11 +875,99 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
         payload.evidenceRef = selectedGr.grNumber;
       }
 
+      // Build optional Tax payload (Section 9 Mandate)
+      const taxPayload: any = {};
+      const fpNum = values.taxInvoiceNumber || values.fakturPajakNumber;
+      const fpDate = values.fakturPajakDate;
+      const dpp = values.dppAmount != null && values.dppAmount !== '' ? Number(values.dppAmount) : undefined;
+      const ppnRateVal = values.ppnRate != null && values.ppnRate !== '' ? Number(values.ppnRate) : undefined;
+      const ppn = values.ppnAmount != null && values.ppnAmount !== '' ? Number(values.ppnAmount) : undefined;
+
+      if (fpNum || fpDate || dpp != null || ppnRateVal != null || ppn != null) {
+        const fpClean = fpNum ? String(fpNum).trim().replace(/[\.\-]/g, '') : '';
+        if (!fpClean) {
+          message.error('Nomor Faktur Pajak (NSFP) wajib diisi untuk pencatatan administrasi PPN.');
+          setIsSubmitting(false);
+          return;
+        }
+        if (!/^[0-9]{16}$/.test(fpClean)) {
+          message.error('Nomor Faktur Pajak (NSFP) tidak valid. NSFP harus terdiri dari tepat 16 digit angka (contoh: 010.000-26.12345678).');
+          setIsSubmitting(false);
+          return;
+        }
+        taxPayload.ppn = {
+          fakturPajakNumber: fpNum ? String(fpNum).trim() : undefined,
+          fakturPajakDate: fpDate ? dayjs(fpDate).format('YYYY-MM-DD') : undefined,
+          dppAmount: dpp,
+          ppnRate: ppnRateVal,
+          ppnAmount: ppn,
+        };
+      }
+
+      const pType = values.pphType;
+      const pphRateVal = values.pphRate != null && values.pphRate !== '' ? Number(values.pphRate) : undefined;
+      const tBase = values.taxableBase != null && values.taxableBase !== '' ? Number(values.taxableBase) : undefined;
+      const wAmt = values.withheldAmount != null && values.withheldAmount !== '' ? Number(values.withheldAmount) : undefined;
+      const bpNum = values.buktiPotongNumber;
+      const bpDate = values.buktiPotongDate;
+
+      if (pType || pphRateVal != null || tBase != null || wAmt != null || bpNum || bpDate) {
+        taxPayload.pph = {
+          pphType: pType || undefined,
+          rate: pphRateVal,
+          taxableBase: tBase,
+          withheldAmount: wAmt,
+          buktiPotongNumber: bpNum ? String(bpNum).trim() : undefined,
+          buktiPotongDate: bpDate ? dayjs(bpDate).format('YYYY-MM-DD') : undefined,
+        };
+      }
+
+      if (taxPayload.ppn || taxPayload.pph) {
+        payload.tax = taxPayload;
+      }
+
       const createdInvoice = await FinanceService.createInvoice(payload);
 
-      message.success(
-        `Invoice (${createdInvoice.invoiceNumber || 'Baru'}) berhasil diterbitkan ke Backend Finance.`
-      );
+      let uploadErrorOccurred = false;
+
+      // Upload tax supporting documents if attached
+      if (fakturPajakFile && createdInvoice?.id) {
+        try {
+          await FinanceService.uploadInvoiceDocument({
+            file: fakturPajakFile,
+            entityType: 'INVOICE',
+            entityId: createdInvoice.id,
+            category: 'FAKTUR_PAJAK',
+          });
+        } catch (uploadErr: any) {
+          uploadErrorOccurred = true;
+          message.error(`Gagal mengunggah Faktur Pajak: ${uploadErr?.message || 'Gagal menyimpan berkas di server'}`);
+        }
+      }
+
+      if (buktiPotongFile && createdInvoice?.id) {
+        try {
+          await FinanceService.uploadInvoiceDocument({
+            file: buktiPotongFile,
+            entityType: 'INVOICE',
+            entityId: createdInvoice.id,
+            category: 'BUKTI_POTONG',
+          });
+        } catch (uploadErr: any) {
+          uploadErrorOccurred = true;
+          message.error(`Gagal mengunggah Bukti Potong: ${uploadErr?.message || 'Gagal menyimpan berkas di server'}`);
+        }
+      }
+
+      if (!uploadErrorOccurred) {
+        message.success(
+          `Invoice (${createdInvoice.invoiceNumber || 'Baru'}) berhasil diterbitkan ke Backend Finance.`
+        );
+      } else {
+        message.warning(
+          `Invoice (${createdInvoice.invoiceNumber || 'Baru'}) berhasil diterbitkan, namun satu atau lebih berkas pajak gagal diunggah.`
+        );
+      }
 
       onInvoiceCreated?.(createdInvoice);
       onClose();
@@ -832,6 +983,173 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Helper: calculate PPN Amount = DPP * Rate / 100 with half-up integer rounding
+  const computePpnAmount = (dpp: any, rate: any): number | undefined => {
+    if (dpp === null || dpp === undefined || dpp === '' || rate === null || rate === undefined || rate === '') {
+      return undefined;
+    }
+    const numDpp = Number(dpp);
+    const numRate = Number(rate);
+    if (isNaN(numDpp) || isNaN(numRate)) return undefined;
+    return Math.round(numDpp * (numRate / 100));
+  };
+
+  // Helper: calculate PPh Withheld Amount = Taxable Base * Rate / 100 with half-up integer rounding
+  const computePphWithheld = (base: any, rate: any): number | undefined => {
+    if (base === null || base === undefined || base === '' || rate === null || rate === undefined || rate === '') {
+      return undefined;
+    }
+    const numBase = Number(base);
+    const numRate = Number(rate);
+    if (isNaN(numBase) || isNaN(numRate)) return undefined;
+    return Math.round(numBase * (numRate / 100));
+  };
+
+  // Helper to sync DPP with invoice total amount
+  const handleSyncDpp = () => {
+    form.setFieldsValue({
+      dppAmount: invoiceTotalAmount,
+    });
+    if (!isPpnOverridden) {
+      const rate = form.getFieldValue('ppnRate');
+      const calculated = computePpnAmount(invoiceTotalAmount, rate);
+      if (calculated !== undefined) {
+        form.setFieldsValue({ ppnAmount: calculated });
+      }
+    }
+  };
+
+  // Handlers for DPP and PPN Rate changes (Semi-Automatic PPN)
+  const handleDppChange = (val: number | null) => {
+    if (!isPpnOverridden) {
+      const rate = form.getFieldValue('ppnRate');
+      const calculated = computePpnAmount(val, rate);
+      if (calculated !== undefined) {
+        form.setFieldsValue({ ppnAmount: calculated });
+      }
+    }
+  };
+
+  const handlePpnRateChange = (rateVal: number | null) => {
+    if (!isPpnOverridden) {
+      const dpp = form.getFieldValue('dppAmount');
+      const calculated = computePpnAmount(dpp, rateVal);
+      if (calculated !== undefined) {
+        form.setFieldsValue({ ppnAmount: calculated });
+      }
+    }
+  };
+
+  const handlePpnAmountChange = (amtVal: number | null) => {
+    const dpp = form.getFieldValue('dppAmount');
+    const rate = form.getFieldValue('ppnRate');
+    const calculated = computePpnAmount(dpp, rate);
+    if (calculated !== undefined) {
+      if (amtVal !== null && amtVal !== undefined && amtVal !== calculated) {
+        setIsPpnOverridden(true);
+      } else if (amtVal === calculated) {
+        setIsPpnOverridden(false);
+      }
+    } else if (amtVal !== null && amtVal !== undefined) {
+      setIsPpnOverridden(true);
+    }
+  };
+
+  const handleResetPpnAuto = () => {
+    setIsPpnOverridden(false);
+    const dpp = form.getFieldValue('dppAmount');
+    const rate = form.getFieldValue('ppnRate');
+    const calculated = computePpnAmount(dpp, rate);
+    if (calculated !== undefined) {
+      form.setFieldsValue({ ppnAmount: calculated });
+    }
+  };
+
+  // Helper to sync PPh base with DPP / Invoice
+  const handleSyncPphBase = () => {
+    const base = form.getFieldValue('dppAmount') || invoiceTotalAmount;
+    form.setFieldsValue({ taxableBase: base });
+    if (!isPphOverridden) {
+      const rate = form.getFieldValue('pphRate');
+      const calculated = computePphWithheld(base, rate);
+      if (calculated !== undefined) {
+        form.setFieldsValue({ withheldAmount: calculated });
+      }
+    }
+  };
+
+  // Handlers for Taxable Base and PPh Rate changes (Semi-Automatic PPh)
+  const handleTaxableBaseChange = (baseVal: number | null) => {
+    if (!isPphOverridden) {
+      const rate = form.getFieldValue('pphRate');
+      const calculated = computePphWithheld(baseVal, rate);
+      if (calculated !== undefined) {
+        form.setFieldsValue({ withheldAmount: calculated });
+      }
+    }
+  };
+
+  const handlePphRateChange = (rateVal: number | null) => {
+    if (!isPphOverridden) {
+      const base = form.getFieldValue('taxableBase');
+      const calculated = computePphWithheld(base, rateVal);
+      if (calculated !== undefined) {
+        form.setFieldsValue({ withheldAmount: calculated });
+      }
+    }
+  };
+
+  const handleWithheldAmountChange = (amtVal: number | null) => {
+    const base = form.getFieldValue('taxableBase');
+    const rate = form.getFieldValue('pphRate');
+    const calculated = computePphWithheld(base, rate);
+    if (calculated !== undefined) {
+      if (amtVal !== null && amtVal !== undefined && amtVal !== calculated) {
+        setIsPphOverridden(true);
+      } else if (amtVal === calculated) {
+        setIsPphOverridden(false);
+      }
+    } else if (amtVal !== null && amtVal !== undefined) {
+      setIsPphOverridden(true);
+    }
+  };
+
+  const handleResetPphAuto = () => {
+    setIsPphOverridden(false);
+    const base = form.getFieldValue('taxableBase');
+    const rate = form.getFieldValue('pphRate');
+    const calculated = computePphWithheld(base, rate);
+    if (calculated !== undefined) {
+      form.setFieldsValue({ withheldAmount: calculated });
+    }
+  };
+
+  const handleFakturPajakUpload = (file: File) => {
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      message.error('Dokumen Faktur Pajak harus berformat PDF.');
+      return false;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      message.error('Ukuran berkas Faktur Pajak maksimal 10 MB.');
+      return false;
+    }
+    setFakturPajakFile(file);
+    return false;
+  };
+
+  const handleBuktiPotongUpload = (file: File) => {
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      message.error('Dokumen Bukti Potong harus berformat PDF.');
+      return false;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      message.error('Ukuran berkas Bukti Potong maksimal 10 MB.');
+      return false;
+    }
+    setBuktiPotongFile(file);
+    return false;
   };
 
   if (!po) return null;
@@ -962,51 +1280,7 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
           />
         )}
 
-        {/* PO & Vendor Context Strip */}
-        <div className={styles.poSummaryCard} data-testid="po-summary-card">
-          <div className={styles.poSummaryGrid} data-testid="po-summary-grid">
-            <div className={styles.poSummaryItem}>
-              <span className={styles.poSummaryLabel}>PROYEK</span>
-              <div className={styles.poSummaryValuePrimary}>{projectName}</div>
-              {projectId ? (
-                <Tag color="blue" className={styles.poSummaryTag}>Project ID #{projectId}</Tag>
-              ) : (
-                <Tag className={styles.poSummaryTag}>Project ID Tidak Tersedia</Tag>
-              )}
-            </div>
-
-            <div className={styles.poSummaryItem}>
-              <span className={styles.poSummaryLabel}>PURCHASE ORDER</span>
-              <div className={styles.poSummaryValuePo}>{poNumber}</div>
-              <Tag color="green" className={styles.poSummaryTagBold}>
-                ● {po.status || 'ACTIVE'}
-              </Tag>
-            </div>
-
-            <div className={styles.poSummaryItem}>
-              <span className={styles.poSummaryLabel}>VENDOR PENYEDIA</span>
-              <div className={styles.poSummaryValueVendor}>
-                <ShopOutlined style={{ marginRight: 4, flexShrink: 0 }} />
-                <span>{vendorName}</span>
-              </div>
-              {vendorCode && <Tag color="cyan" className={styles.poSummaryTag}>{vendorCode}</Tag>}
-            </div>
-
-            <div className={styles.poSummaryItem}>
-              <span className={styles.poSummaryLabel}>KONFIGURASI TERMIN</span>
-              <div className={styles.poSummaryValueTerm}>
-                {paymentTerms.length > 0
-                  ? `${paymentTerms.length} Jadwal Termin Terdaftar`
-                  : (typeof po.paymentTerms === 'string' ? po.paymentTerms : 'Full Delivery (100%)')}
-              </div>
-              <div className={styles.poSummarySubtext}>
-                {paymentTerms.length > 0 ? 'Pilih termin di formulir bawah' : 'Penagihan sekaligus (100%)'}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Invoice Metadata Form (Form Input Termin, Tanggal, & Dokumen Pajak) */}
+        {/* Form Container wrapping both Left and Right Columns for Responsive 2-Column Desktop / 1-Column Mobile Layout */}
         <Form
           form={form}
           layout="vertical"
@@ -1016,894 +1290,1393 @@ export const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
             invoiceDate: dayjs(),
             taxInvoiceNumber: '',
             notes: '',
+            pphType: undefined,
+            pphRate: undefined,
+            dppAmount: undefined,
+            ppnAmount: undefined,
+            taxableBase: undefined,
+            withheldAmount: undefined,
+            buktiPotongNumber: '',
           }}
           className={styles.formContainer}
         >
-          <Row gutter={16}>
-            {paymentTerms.length > 0 ? (
-              <Col xs={24} sm={12}>
-                <Form.Item
-                  label={<span className={styles.formLabel}>Pilih Termin Pembayaran PO</span>}
-                  name="paymentTermId"
-                  rules={[{ required: true, message: 'Termin pembayaran wajib dipilih' }]}
-                  className={styles.formItem}
-                >
-                  <Select
-                    placeholder="Pilih Termin Pembayaran..."
-                    className={styles.termSelect}
-                    popupMatchSelectWidth={false}
-                    data-testid="payment-term-select"
-                    onChange={(val) => setSelectedTermId(val)}
-                    options={paymentTerms.map((t) => {
-                      const elig = getTermEligibility(t);
-                      const isAlreadyProcessed = t.status && t.status !== 'PENDING';
-                      return {
-                        value: t.id,
-                        disabled: isAlreadyProcessed,
-                        label: (
-                          <div className={styles.termOptionItem}>
-                            <div className={styles.termOptionMain}>
-                              <strong>Termin #{t.sequence}: {t.termName}</strong> ({t.percentage}%)
-                            </div>
-                            <div className={styles.termOptionSub}>
-                              <span className={styles.termOptionAmount}>
-                                Rp {Number(t.amount).toLocaleString('id-ID')}
-                              </span>
-                              <span className={styles.termOptionTag} style={{ color: elig.isEligible ? '#0284c7' : '#ea580c' }}>
-                                {elig.statusTag}
-                              </span>
-                            </div>
-                          </div>
-                        ),
-                      };
-                    })}
-                  />
-                </Form.Item>
-              </Col>
-            ) : null}
-
-            <Col xs={24} sm={paymentTerms.length > 0 ? 12 : 8}>
-              <Form.Item
-                label={<span className={styles.formLabel}>Tanggal Faktur / Invoice</span>}
-                name="invoiceDate"
-                rules={[{ required: true, message: 'Tanggal invoice wajib diisi' }]}
-                className={styles.formItem}
-              >
-                <DatePicker
-                  className={styles.formDatePicker}
-                  format="DD MMMM YYYY"
-                  allowClear={false}
-                  disabledDate={(d) => d && d.isAfter(dayjs())}
-                />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={paymentTerms.length > 0 ? 12 : 8}>
-              <Form.Item
-                label={<span className={styles.formLabel}>Nomor Faktur Pajak / E-Faktur (Opsional)</span>}
-                name="taxInvoiceNumber"
-                className={styles.formItem}
-              >
-                <Input
-                  placeholder="Contoh: 010.000-26.12345678..."
-                  className={styles.formInput}
-                />
-              </Form.Item>
-            </Col>
-
-            <Col xs={24} sm={paymentTerms.length > 0 ? 12 : 8}>
-              <Form.Item
-                label={<span className={styles.formLabel}>Catatan Khusus Finance (Opsional)</span>}
-                name="notes"
-                className={styles.formItem}
-              >
-                <Input
-                  placeholder="Catatan perihal penagihan / rekening..."
-                  className={styles.formInput}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          {/* CANONICAL SERVICE CLAIM SELECTOR FOR SERVICE PO */}
-          {po?.orderType === 'SERVICE' && !isDpTerm && (
-            <Card
-              size="small"
-              style={{
-                marginBottom: 16,
-                borderRadius: 8,
-                border: '1px solid #93c5fd',
-                background: '#eff6ff',
-              }}
-              title={
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Space size={8}>
-                    <SafetyCertificateOutlined style={{ color: '#2563eb', fontSize: 16 }} />
-                    <span style={{ fontWeight: 700, fontSize: 13, color: '#1e3a8a' }}>
-                      Klaim Jasa Disetujui
-                    </span>
-                  </Space>
-                  <Tag color="blue" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
-                    VALIDASI CANONICAL SSOT
-                  </Tag>
-                </div>
-              }
-            >
-              {loadingClaims ? (
-                <div style={{ padding: '12px 0', textAlign: 'center' }}>
-                  <Spin size="small" />{' '}
-                  <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                    Memuat daftar Klaim Jasa yang disetujui...
-                  </Text>
-                </div>
-              ) : approvedServiceClaims.length === 0 ? (
-                <Alert
-                  type="warning"
-                  showIcon
-                  message="Belum Ada Klaim Jasa Disetujui (APPROVED_FOR_INVOICE) Pada PO Ini"
-                  description="Penagihan termin progress/final jasa memerlukan Klaim Jasa yang telah disetujui secara komersial oleh tim Procurement dan diverifikasi teknis oleh Project Manager."
-                  style={{ borderRadius: 6 }}
-                />
-              ) : (
-                <div>
-                  <div style={{ marginBottom: 6 }}>
-                    <Text strong style={{ fontSize: 12, color: '#1e3a8a' }}>
-                      Pilih Klaim Jasa yang Sah <span style={{ color: '#dc2626' }}>*</span>:
-                    </Text>
+          <Row gutter={[16, 16]} className={styles.columnsRow}>
+            {/* LEFT COLUMN: Existing Invoice Issuance Flow & Contract Evaluation */}
+            <Col xs={24} md={24} lg={13} xl={14} className={styles.leftColumn}>
+              {/* PO & Vendor Context Strip */}
+              <div className={styles.poSummaryCard} data-testid="po-summary-card">
+                <div className={styles.poSummaryGrid} data-testid="po-summary-grid">
+                  <div className={styles.poSummaryItem}>
+                    <span className={styles.poSummaryLabel}>PROYEK</span>
+                    <div className={styles.poSummaryValuePrimary}>{projectName}</div>
+                    {projectId ? (
+                      <Tag color="blue" className={styles.poSummaryTag}>Project ID #{projectId}</Tag>
+                    ) : (
+                      <Tag className={styles.poSummaryTag}>Project ID Tidak Tersedia</Tag>
+                    )}
                   </div>
-                  <Select
-                    placeholder="Pilih Klaim Jasa yang memvalidasi penagihan termin ini..."
-                    style={{ width: '100%', borderRadius: 6 }}
-                    value={selectedServiceClaimId}
-                    onChange={(val) => setSelectedServiceClaimId(val)}
-                    options={approvedServiceClaims.map((claim) => ({
-                      value: claim.id,
-                      label: `${claim.claimNumber} | Nilai Disetujui: Rp ${Number(claim.approvedClaimAmount || claim.totalClaimAmount || 0).toLocaleString('id-ID')} | Vendor: ${vendorName}${claim.acceptanceReference ? ` | Bukti: ${claim.acceptanceReference}` : ''}`,
-                    }))}
-                  />
 
-                  {selectedServiceClaimId && (
-                    <div
-                      style={{
-                        marginTop: 12,
-                        padding: '10px 14px',
-                        background: '#ffffff',
-                        borderRadius: 6,
-                        border: '1px solid #bfdbfe',
-                      }}
+                  <div className={styles.poSummaryItem}>
+                    <span className={styles.poSummaryLabel}>PURCHASE ORDER</span>
+                    <div className={styles.poSummaryValuePo}>{poNumber}</div>
+                    <Tag color="green" className={styles.poSummaryTagBold}>
+                      ● {po.status || 'ACTIVE'}
+                    </Tag>
+                  </div>
+
+                  <div className={styles.poSummaryItem}>
+                    <span className={styles.poSummaryLabel}>VENDOR PENYEDIA</span>
+                    <div className={styles.poSummaryValueVendor}>
+                      <ShopOutlined style={{ marginRight: 4, flexShrink: 0 }} />
+                      <span>{vendorName}</span>
+                    </div>
+                    {vendorCode && <Tag color="cyan" className={styles.poSummaryTag}>{vendorCode}</Tag>}
+                  </div>
+
+                  <div className={styles.poSummaryItem}>
+                    <span className={styles.poSummaryLabel}>KONFIGURASI TERMIN</span>
+                    <div className={styles.poSummaryValueTerm}>
+                      {paymentTerms.length > 0
+                        ? `${paymentTerms.length} Jadwal Termin Terdaftar`
+                        : (typeof po.paymentTerms === 'string' ? po.paymentTerms : 'Full Delivery (100%)')}
+                    </div>
+                    <div className={styles.poSummarySubtext}>
+                      {paymentTerms.length > 0 ? 'Pilih termin di formulir bawah' : 'Penagihan sekaligus (100%)'}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Invoice Metadata Form Inputs (Termin, Tanggal, & Catatan) */}
+              <Row gutter={16}>
+                {paymentTerms.length > 0 ? (
+                  <Col xs={24} sm={12}>
+                    <Form.Item
+                      label={<span className={styles.formLabel}>Pilih Termin Pembayaran PO</span>}
+                      name="paymentTermId"
+                      rules={[{ required: true, message: 'Termin pembayaran wajib dipilih' }]}
+                      className={styles.formItem}
                     >
-                      {(() => {
-                        const sc = approvedServiceClaims.find(c => Number(c.id) === Number(selectedServiceClaimId));
-                        if (!sc) return null;
-                        return (
+                      <Select
+                        placeholder="Pilih Termin Pembayaran..."
+                        className={styles.termSelect}
+                        popupMatchSelectWidth={false}
+                        data-testid="payment-term-select"
+                        onChange={(val) => setSelectedTermId(val)}
+                        options={paymentTerms.map((t) => {
+                          const elig = getTermEligibility(t);
+                          const isAlreadyProcessed = t.status && t.status !== 'PENDING';
+                          return {
+                            value: t.id,
+                            disabled: isAlreadyProcessed,
+                            label: (
+                              <div className={styles.termOptionItem}>
+                                <div className={styles.termOptionMain}>
+                                  <strong>Termin #{t.sequence}: {t.termName}</strong> ({t.percentage}%)
+                                </div>
+                                <div className={styles.termOptionSub}>
+                                  <span className={styles.termOptionAmount}>
+                                    Rp {Number(t.amount).toLocaleString('id-ID')}
+                                  </span>
+                                  <span className={styles.termOptionTag} style={{ color: elig.isEligible ? '#0284c7' : '#ea580c' }}>
+                                    {elig.statusTag}
+                                  </span>
+                                </div>
+                              </div>
+                            ),
+                          };
+                        })}
+                      />
+                    </Form.Item>
+                  </Col>
+                ) : null}
+
+                <Col xs={24} sm={paymentTerms.length > 0 ? 12 : 12}>
+                  <Form.Item
+                    label={<span className={styles.formLabel}>Tanggal Faktur / Invoice</span>}
+                    name="invoiceDate"
+                    rules={[{ required: true, message: 'Tanggal invoice wajib diisi' }]}
+                    className={styles.formItem}
+                  >
+                    <DatePicker
+                      className={styles.formDatePicker}
+                      format="DD MMMM YYYY"
+                      allowClear={false}
+                      disabledDate={(d) => d && d.isAfter(dayjs())}
+                    />
+                  </Form.Item>
+                </Col>
+
+                <Col xs={24} sm={24}>
+                  <Form.Item
+                    label={<span className={styles.formLabel}>Catatan Khusus Finance (Opsional)</span>}
+                    name="notes"
+                    className={styles.formItem}
+                  >
+                    <Input
+                      placeholder="Catatan perihal penagihan / nomor rekening vendor..."
+                      className={styles.formInput}
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              {/* CANONICAL SERVICE CLAIM SELECTOR FOR SERVICE PO */}
+              {po?.orderType === 'SERVICE' && !isDpTerm && (
+                <Card
+                  size="small"
+                  style={{
+                    marginBottom: 16,
+                    borderRadius: 8,
+                    border: '1px solid #93c5fd',
+                    background: '#eff6ff',
+                  }}
+                  title={
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Space size={8}>
+                        <SafetyCertificateOutlined style={{ color: '#2563eb', fontSize: 16 }} />
+                        <span style={{ fontWeight: 700, fontSize: 13, color: '#1e3a8a' }}>
+                          Klaim Jasa Disetujui
+                        </span>
+                      </Space>
+                      <Tag color="blue" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
+                        VALIDASI CANONICAL SSOT
+                      </Tag>
+                    </div>
+                  }
+                >
+                  {loadingClaims ? (
+                    <div style={{ padding: '12px 0', textAlign: 'center' }}>
+                      <Spin size="small" />{' '}
+                      <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                        Memuat daftar Klaim Jasa yang disetujui...
+                      </Text>
+                    </div>
+                  ) : approvedServiceClaims.length === 0 ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="Belum Ada Klaim Jasa Disetujui (APPROVED_FOR_INVOICE) Pada PO Ini"
+                      description="Penagihan termin progress/final jasa memerlukan Klaim Jasa yang telah disetujui secara komersial oleh tim Procurement dan diverifikasi teknis oleh Project Manager."
+                      style={{ borderRadius: 6 }}
+                    />
+                  ) : (
+                    <div>
+                      <div style={{ marginBottom: 6 }}>
+                        <Text strong style={{ fontSize: 12, color: '#1e3a8a' }}>
+                          Pilih Klaim Jasa yang Sah <span style={{ color: '#dc2626' }}>*</span>:
+                        </Text>
+                      </div>
+                      <Select
+                        placeholder="Pilih Klaim Jasa yang memvalidasi penagihan termin ini..."
+                        style={{ width: '100%', borderRadius: 6 }}
+                        value={selectedServiceClaimId}
+                        onChange={(val) => setSelectedServiceClaimId(val)}
+                        options={approvedServiceClaims.map((claim) => ({
+                          value: claim.id,
+                          label: `${claim.claimNumber} | Nilai Disetujui: Rp ${Number(claim.approvedClaimAmount || claim.totalClaimAmount || 0).toLocaleString('id-ID')} | Vendor: ${vendorName}${claim.acceptanceReference ? ` | Bukti: ${claim.acceptanceReference}` : ''}`,
+                        }))}
+                      />
+
+                      {selectedServiceClaimId && (
+                        <div
+                          style={{
+                            marginTop: 12,
+                            padding: '10px 14px',
+                            background: '#ffffff',
+                            borderRadius: 6,
+                            border: '1px solid #bfdbfe',
+                          }}
+                        >
+                          {(() => {
+                            const sc = approvedServiceClaims.find(c => Number(c.id) === Number(selectedServiceClaimId));
+                            if (!sc) return null;
+                            return (
+                              <Row gutter={[12, 8]} align="middle">
+                                <Col xs={24} sm={6}>
+                                  <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>NOMOR KLAIM:</Text>
+                                  <div style={{ fontWeight: 700, fontSize: 12.5, color: '#1e40af', fontFamily: 'monospace' }}>
+                                    {sc.claimNumber}
+                                  </div>
+                                </Col>
+                                <Col xs={24} sm={6}>
+                                  <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>PERIODE KLAIM:</Text>
+                                  <div style={{ fontWeight: 600, fontSize: 12, color: '#334155' }}>
+                                    {sc.claimPeriodStart && sc.claimPeriodEnd ? `${dayjs(sc.claimPeriodStart).format('DD/MM/YYYY')} - ${dayjs(sc.claimPeriodEnd).format('DD/MM/YYYY')}` : '—'}
+                                  </div>
+                                </Col>
+                                <Col xs={24} sm={6}>
+                                  <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>NILAI DISETUJUI:</Text>
+                                  <div style={{ fontWeight: 700, fontSize: 12.5, color: '#059669', fontFamily: 'monospace' }}>
+                                    Rp {Number(sc.approvedClaimAmount || sc.totalClaimAmount || 0).toLocaleString('id-ID')}
+                                  </div>
+                                </Col>
+                                <Col xs={24} sm={6}>
+                                  <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>REFERENSI BUKTI:</Text>
+                                  <div style={{ fontWeight: 600, fontSize: 12, color: '#334155' }}>
+                                    {sc.acceptanceReference || sc.acceptanceType || '—'}
+                                  </div>
+                                </Col>
+                              </Row>
+                            );
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {/* CANONICAL GOODS RECEIPT SELECTOR FOR PROGRESS TERMIN (MATERIAL PO ONLY) */}
+              {po?.orderType !== 'SERVICE' && isProgressTerm && (
+                <Card
+                  size="small"
+                  style={{
+                    marginBottom: 16,
+                    borderRadius: 8,
+                    border: '1px solid #93c5fd',
+                    background: '#eff6ff',
+                  }}
+                  title={
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Space size={8}>
+                        <InboxOutlined style={{ color: '#2563eb', fontSize: 16 }} />
+                        <span style={{ fontWeight: 700, fontSize: 13, color: '#1e3a8a' }}>
+                          Pilih Dokumen Goods Receipt (GR) — Bukti Fisik Penagihan Progress
+                        </span>
+                      </Space>
+                      <Tag color="blue" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
+                        VALIDASI CANONICAL SSOT
+                      </Tag>
+                    </div>
+                  }
+                >
+                  {loadingGrs ? (
+                    <div style={{ padding: '12px 0', textAlign: 'center' }}>
+                      <Spin size="small" />{' '}
+                      <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                        Memuat daftar Goods Receipt dari server...
+                      </Text>
+                    </div>
+                  ) : goodsReceipts.length === 0 ? (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message="Belum Ada Goods Receipt (GR) Aktif Pada PO Ini"
+                      description="Termin Progress wajib memiliki dasar penerimaan barang (Goods Receipt) aktual dari Procurement. Penagihan belum dapat diterbitkan hingga fisik barang/pekerjaan diterima."
+                      style={{ borderRadius: 6 }}
+                    />
+                  ) : (
+                    <div>
+                      <div style={{ marginBottom: 6 }}>
+                        <Text strong style={{ fontSize: 12, color: '#1e3a8a' }}>
+                          Pilih Goods Receipt yang Sah <span style={{ color: '#dc2626' }}>*</span>:
+                        </Text>
+                      </div>
+                      <Select
+                        placeholder="Pilih Goods Receipt yang memvalidasi penagihan termin ini..."
+                        style={{ width: '100%', borderRadius: 6 }}
+                        value={selectedGrId}
+                        onChange={(val) => setSelectedGrId(val)}
+                        options={goodsReceipts.map((gr) => ({
+                          value: gr.id,
+                          label: `${gr.grNumber} | Tanggal: ${dayjs(gr.receiptDate).format('DD/MM/YYYY')} | Nilai Fisik: Rp ${Number(gr.totalReceivedAmount || 0).toLocaleString('id-ID')}${gr.remarks ? ` — ${gr.remarks}` : ''}`,
+                        }))}
+                      />
+
+                      {selectedGr && (
+                        <div
+                          style={{
+                            marginTop: 12,
+                            padding: '10px 14px',
+                            background: '#ffffff',
+                            borderRadius: 6,
+                            border: '1px solid #bfdbfe',
+                          }}
+                        >
                           <Row gutter={[12, 8]} align="middle">
                             <Col xs={24} sm={6}>
-                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>NOMOR KLAIM:</Text>
+                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>NOMOR GR:</Text>
                               <div style={{ fontWeight: 700, fontSize: 12.5, color: '#1e40af', fontFamily: 'monospace' }}>
-                                {sc.claimNumber}
+                                {selectedGr.grNumber}
+                              </div>
+                              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                                Canonical GR ID: #{selectedGr.id}
                               </div>
                             </Col>
                             <Col xs={24} sm={6}>
-                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>PERIODE KLAIM:</Text>
+                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>TANGGAL PENERIMAAN:</Text>
                               <div style={{ fontWeight: 600, fontSize: 12, color: '#334155' }}>
-                                {sc.claimPeriodStart && sc.claimPeriodEnd ? `${dayjs(sc.claimPeriodStart).format('DD/MM/YYYY')} - ${dayjs(sc.claimPeriodEnd).format('DD/MM/YYYY')}` : '—'}
+                                {dayjs(selectedGr.receiptDate).format('DD MMMM YYYY')}
+                              </div>
+                              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                                Diterima oleh Gudang/PMO
                               </div>
                             </Col>
                             <Col xs={24} sm={6}>
-                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>NILAI DISETUJUI:</Text>
-                              <div style={{ fontWeight: 700, fontSize: 12.5, color: '#059669', fontFamily: 'monospace' }}>
-                                Rp {Number(sc.approvedClaimAmount || sc.totalClaimAmount || 0).toLocaleString('id-ID')}
+                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>TOTAL NILAI FISIK GR:</Text>
+                              <div style={{ fontWeight: 800, fontSize: 13.5, color: '#059669', fontFamily: 'monospace' }}>
+                                Rp {totalPhysicalDeliveryValue.toLocaleString('id-ID')}
+                              </div>
+                              <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                                Nilai Penerimaan GR Ini
                               </div>
                             </Col>
                             <Col xs={24} sm={6}>
-                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>REFERENSI BUKTI:</Text>
-                              <div style={{ fontWeight: 600, fontSize: 12, color: '#334155' }}>
-                                {sc.acceptanceReference || sc.acceptanceType || '—'}
-                              </div>
-                            </Col>
-                          </Row>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </div>
-              )}
-            </Card>
-          )}
-
-          {/* CANONICAL GOODS RECEIPT SELECTOR FOR PROGRESS TERMIN (MATERIAL PO ONLY) */}
-          {po?.orderType !== 'SERVICE' && isProgressTerm && (
-            <Card
-              size="small"
-              style={{
-                marginBottom: 16,
-                borderRadius: 8,
-                border: '1px solid #93c5fd',
-                background: '#eff6ff',
-              }}
-              title={
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Space size={8}>
-                    <InboxOutlined style={{ color: '#2563eb', fontSize: 16 }} />
-                    <span style={{ fontWeight: 700, fontSize: 13, color: '#1e3a8a' }}>
-                      Pilih Dokumen Goods Receipt (GR) — Bukti Fisik Penagihan Progress
-                    </span>
-                  </Space>
-                  <Tag color="blue" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
-                    VALIDASI CANONICAL SSOT
-                  </Tag>
-                </div>
-              }
-            >
-              {loadingGrs ? (
-                <div style={{ padding: '12px 0', textAlign: 'center' }}>
-                  <Spin size="small" />{' '}
-                  <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                    Memuat daftar Goods Receipt dari server...
-                  </Text>
-                </div>
-              ) : goodsReceipts.length === 0 ? (
-                <Alert
-                  type="warning"
-                  showIcon
-                  message="Belum Ada Goods Receipt (GR) Aktif Pada PO Ini"
-                  description="Termin Progress wajib memiliki dasar penerimaan barang (Goods Receipt) aktual dari Procurement. Penagihan belum dapat diterbitkan hingga fisik barang/pekerjaan diterima."
-                  style={{ borderRadius: 6 }}
-                />
-              ) : (
-                <div>
-                  <div style={{ marginBottom: 6 }}>
-                    <Text strong style={{ fontSize: 12, color: '#1e3a8a' }}>
-                      Pilih Goods Receipt yang Sah <span style={{ color: '#dc2626' }}>*</span>:
-                    </Text>
-                  </div>
-                  <Select
-                    placeholder="Pilih Goods Receipt yang memvalidasi penagihan termin ini..."
-                    style={{ width: '100%', borderRadius: 6 }}
-                    value={selectedGrId}
-                    onChange={(val) => setSelectedGrId(val)}
-                    options={goodsReceipts.map((gr) => ({
-                      value: gr.id,
-                      label: `${gr.grNumber} | Tanggal: ${dayjs(gr.receiptDate).format('DD/MM/YYYY')} | Nilai Fisik: Rp ${Number(gr.totalReceivedAmount || 0).toLocaleString('id-ID')}${gr.remarks ? ` — ${gr.remarks}` : ''}`,
-                    }))}
-                  />
-
-                  {selectedGr && (
-                    <div
-                      style={{
-                        marginTop: 12,
-                        padding: '10px 14px',
-                        background: '#ffffff',
-                        borderRadius: 6,
-                        border: '1px solid #bfdbfe',
-                      }}
-                    >
-                      <Row gutter={[12, 8]} align="middle">
-                        <Col xs={24} sm={6}>
-                          <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>NOMOR GR:</Text>
-                          <div style={{ fontWeight: 700, fontSize: 12.5, color: '#1e40af', fontFamily: 'monospace' }}>
-                            {selectedGr.grNumber}
-                          </div>
-                          <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
-                            Canonical GR ID: #{selectedGr.id}
-                          </div>
-                        </Col>
-                        <Col xs={24} sm={6}>
-                          <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>TANGGAL PENERIMAAN:</Text>
-                          <div style={{ fontWeight: 600, fontSize: 12, color: '#334155' }}>
-                            {dayjs(selectedGr.receiptDate).format('DD MMMM YYYY')}
-                          </div>
-                          <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
-                            Diterima oleh Gudang/PMO
-                          </div>
-                        </Col>
-                        <Col xs={24} sm={6}>
-                          <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>TOTAL NILAI FISIK GR:</Text>
-                          <div style={{ fontWeight: 800, fontSize: 13.5, color: '#059669', fontFamily: 'monospace' }}>
-                            Rp {totalPhysicalDeliveryValue.toLocaleString('id-ID')}
-                          </div>
-                          <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
-                            Nilai Penerimaan GR Ini
-                          </div>
-                        </Col>
-                        <Col xs={24} sm={6}>
-                          <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>DUKUNGAN TERMIN:</Text>
-                          <div style={{ marginTop: 2 }}>
-                            {isFinanciallySupported ? (
-                              <Tag color="success" style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}>
-                                <CheckCircleOutlined style={{ marginRight: 4 }} />
-                                KAPASITAS FISIK MEMADAI
-                              </Tag>
-                            ) : (
-                              <Tag color="error" style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}>
-                                <CloseCircleOutlined style={{ marginRight: 4 }} />
-                                KAPASITAS FISIK DEFISIT
-                              </Tag>
-                            )}
-                          </div>
-                          <div style={{ fontSize: 10, color: isFinanciallySupported ? '#64748b' : '#dc2626', marginTop: 2, fontWeight: isFinanciallySupported ? 400 : 600 }}>
-                            {isFinanciallySupported
-                              ? `Sisa Plafon: Rp ${remainingProgressCapacity.toLocaleString('id-ID')}`
-                              : `Defisit: Rp ${capacityDeficit.toLocaleString('id-ID')} (Sisa: Rp ${remainingProgressCapacity.toLocaleString('id-ID')})`}
-                          </div>
-                        </Col>
-                      </Row>
-
-                      {/* Cumulative Progress Capacity Breakdown Strip */}
-                      <div
-                        style={{
-                          marginTop: 10,
-                          padding: '8px 12px',
-                          background: isFinanciallySupported ? '#f0fdf4' : '#fff1f2',
-                          borderRadius: 6,
-                          border: `1px solid ${isFinanciallySupported ? '#bbf7d0' : '#fecdd3'}`,
-                          fontSize: 11,
-                        }}
-                      >
-                        <Row gutter={[8, 4]}>
-                          <Col xs={12} sm={6}>
-                            <Text type="secondary" style={{ fontSize: 9.5 }}>TOTAL FISIK GR PO:</Text>
-                            <div style={{ fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>
-                              Rp {totalPhysicalDeliveryValueAcrossPo.toLocaleString('id-ID')}
-                            </div>
-                          </Col>
-                          <Col xs={12} sm={6}>
-                            <Text type="secondary" style={{ fontSize: 9.5 }}>PROGRESS DITAGIHKAN:</Text>
-                            <div style={{ fontWeight: 700, color: '#334155', fontFamily: 'monospace' }}>
-                              Rp {previousProgressBilled.toLocaleString('id-ID')}
-                            </div>
-                          </Col>
-                          <Col xs={12} sm={6}>
-                            <Text type="secondary" style={{ fontSize: 9.5 }}>SISA PLAFON FISIK:</Text>
-                            <div style={{ fontWeight: 800, color: isFinanciallySupported ? '#059669' : '#dc2626', fontFamily: 'monospace' }}>
-                              Rp {remainingProgressCapacity.toLocaleString('id-ID')}
-                            </div>
-                          </Col>
-                          <Col xs={12} sm={6}>
-                            <Text type="secondary" style={{ fontSize: 9.5 }}>STATUS TERMIN INI:</Text>
-                            <div style={{ fontWeight: 700, color: isFinanciallySupported ? '#059669' : '#dc2626' }}>
-                              {isFinanciallySupported ? 'Memadai (≥ Termin)' : `Defisit Rp ${capacityDeficit.toLocaleString('id-ID')}`}
-                            </div>
-                          </Col>
-                        </Row>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </Card>
-          )}
-        </Form>
-
-        {/* FINANCIAL SUMMARY CARD */}
-        <Card
-          size="small"
-          style={{
-            borderRadius: 8,
-            border: '1px solid #cbd5e1',
-            background: '#f8fafc',
-          }}
-          title={
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Space size={8}>
-                <AuditOutlined style={{ color: '#2563eb', fontSize: 16 }} />
-                <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
-                  Ringkasan Penagihan &amp; Evaluasi Matching SSOT
-                </span>
-              </Space>
-              <Tag color="processing" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}>
-                EVALUASI OTOMATIS BACKEND
-              </Tag>
-            </div>
-          }
-        >
-          <Row gutter={[16, 12]} align="middle">
-            <Col xs={24} sm={8}>
-              <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>1. TOTAL KONTRAK PO</Text>
-                <div style={{ fontWeight: 800, fontSize: 15, color: '#1d4ed8', fontFamily: 'monospace', marginTop: 2 }}>
-                  Rp {totalPoAmount.toLocaleString('id-ID')}
-                </div>
-                <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
-                  {poItems.length} Item Terdaftar di Kontrak
-                </div>
-              </div>
-            </Col>
-            <Col xs={24} sm={8}>
-              <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  2. NILAI TAGIHAN INVOICE {activeTerm ? `(TERMIN #${activeTerm.sequence})` : '(FULL PO)'}
-                </Text>
-                <div style={{ fontWeight: 800, fontSize: 15, color: '#059669', fontFamily: 'monospace', marginTop: 2 }}>
-                  Rp {invoiceTotalAmount.toLocaleString('id-ID')}
-                </div>
-                <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
-                  {activeTerm
-                    ? `${activeTerm.percentage}% dari Total Kontrak (${activeTerm.termName})`
-                    : '100% Nilai Kontrak PO'}
-                </div>
-              </div>
-            </Col>
-            <Col xs={24} sm={8}>
-              <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
-                <Text type="secondary" style={{ fontSize: 11 }}>3. STATUS MATCHING &amp; VERIFIKASI</Text>
-                <div style={{ marginTop: 4 }}>
-                  {activeTerm && !activeTermEligibility.isEligible ? (
-                    <Tag color="error" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
-                      ● {activeTermEligibility.statusTag.replace(/[\[\]]/g, '')}
-                    </Tag>
-                  ) : (
-                    <Tag color="gold" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
-                      ● PENDING VERIFIKASI
-                    </Tag>
-                  )}
-                </div>
-                <div style={{ fontSize: 10.5, color: activeTerm && !activeTermEligibility.isEligible ? '#dc2626' : '#64748b', marginTop: 4 }}>
-                  {activeTerm && !activeTermEligibility.isEligible
-                    ? (activeTermEligibility.reasons[0] || 'Syarat penagihan belum terpenuhi')
-                    : po?.orderType === 'SERVICE'
-                    ? (selectedServiceClaimId ? 'Divalidasi dengan Klaim Jasa yang Disetujui' : isDpTerm ? 'Uang Muka / DP Disetujui Kontrak' : 'Menunggu pemilihan Klaim Jasa')
-                    : isProgressTerm
-                    ? (selectedGr ? `Divalidasi dengan ${selectedGr.grNumber}` : 'Menunggu pemilihan Goods Receipt')
-                    : 'Dievaluasi Matching Engine SSOT'}
-                </div>
-              </div>
-            </Col>
-          </Row>
-        </Card>
-
-        {/* ITEMS BREAKDOWN TABLE (For Progress Material: Justified GR Items; For Others/Service: Full PO Items) */}
-        <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
-          <div
-            style={{
-              padding: '8px 12px',
-              background: (isProgressTerm && po?.orderType !== 'SERVICE') ? '#f0fdf4' : '#f8fafc',
-              borderBottom: '1px solid #e2e8f0',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 8,
-            }}
-          >
-            <span style={{ fontWeight: 700, fontSize: 12.5, color: (isProgressTerm && po?.orderType !== 'SERVICE') ? '#166534' : '#334155' }}>
-              {(isProgressTerm && po?.orderType !== 'SERVICE')
-                ? `Rincian Item Yang Divalidasi GR #${selectedGr?.grNumber || '—'} (${progressInvoiceItems.length} Item Diterima Fisik)`
-                : `Daftar Item Kontrak PO: ${vendorName} (${poItems.length} Item)`}
-            </span>
-            <Tag color={(isProgressTerm && po?.orderType !== 'SERVICE') ? 'green' : (po?.orderType === 'SERVICE' ? 'purple' : 'cyan')} style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
-              {(isProgressTerm && po?.orderType !== 'SERVICE') ? 'KUANTITAS FISIK JUSTIFIKASI GR' : po?.orderType === 'SERVICE' ? 'RUANG LINGKUP JASA / SUBKON (READ-ONLY)' : 'HARGA & KUANTITAS KONTRAK (READ-ONLY)'}
-            </Tag>
-          </div>
-
-          {(isProgressTerm && po?.orderType !== 'SERVICE') ? (
-            <>
-              {/* Desktop Table View */}
-              <div className={styles.desktopTableView} data-testid="desktop-progress-items-table">
-                <Table
-                  size="small"
-                  rowKey="key"
-                  dataSource={progressInvoiceItems}
-                  pagination={false}
-                  scroll={{ x: 800, y: 220 }}
-                  locale={{ emptyText: selectedGrId ? 'Tidak ada item yang diterima pada Goods Receipt ini' : 'Pilih Goods Receipt terlebih dahulu' }}
-                  columns={[
-                    {
-                      title: 'No',
-                      key: 'index',
-                      width: 45,
-                      align: 'center' as const,
-                      render: (_: any, __: any, index: number) => (
-                        <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
-                      ),
-                    },
-                    {
-                      title: 'Nama Item & Spesifikasi',
-                      dataIndex: 'itemName',
-                      key: 'itemName',
-                      render: (name: string, it: any) => (
-                        <div style={{ minWidth: 160 }}>
-                          <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a', wordBreak: 'break-word', whiteSpace: 'normal' }}>{name}</div>
-                          {it.specification && (
-                            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2, wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                              {it.specification}
-                            </div>
-                          )}
-                          <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
-                            <Tag
-                              color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
-                              style={{ fontSize: 9, margin: 0, padding: '0 4px' }}
-                            >
-                              {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
-                            </Tag>
-                            {it.wbsNodeId && (
-                              <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
-                                WBS #{it.wbsNodeId}
-                              </Tag>
-                            )}
-                            {it.remarks && (
-                              <Tag style={{ fontSize: 9, margin: 0, padding: '0 4px', color: '#64748b' }}>
-                                {it.remarks}
-                              </Tag>
-                            )}
-                          </div>
-                        </div>
-                      ),
-                    },
-                    {
-                      title: 'Qty Kontrak',
-                      dataIndex: 'orderedQty',
-                      key: 'orderedQty',
-                      width: 85,
-                      align: 'center' as const,
-                      render: (qty: number) => <span style={{ color: '#64748b', fontSize: 11 }}>{qty}</span>,
-                    },
-                    {
-                      title: 'Qty Fisik (GR)',
-                      dataIndex: 'receivedQty',
-                      key: 'receivedQty',
-                      width: 95,
-                      align: 'center' as const,
-                      render: (qty: number) => (
-                        <Tag color="green" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
-                          {qty}
-                        </Tag>
-                      ),
-                    },
-                    {
-                      title: 'Sisa Outstanding',
-                      dataIndex: 'outstandingQty',
-                      key: 'outstandingQty',
-                      width: 100,
-                      align: 'center' as const,
-                      render: (qty: number) => (
-                        <span style={{ fontSize: 11, color: qty > 0 ? '#d97706' : '#16a34a', fontWeight: 600 }}>
-                          {qty}
-                        </span>
-                      ),
-                    },
-                    {
-                      title: 'Qty Ditagih',
-                      dataIndex: 'quantity',
-                      key: 'quantity',
-                      width: 90,
-                      align: 'center' as const,
-                      render: (qty: number) => (
-                        <span style={{ fontWeight: 700, color: '#0f172a', fontSize: 12 }}>
-                          {qty}
-                        </span>
-                      ),
-                    },
-                    {
-                      title: 'Satuan',
-                      dataIndex: 'uom',
-                      key: 'uom',
-                      width: 65,
-                      align: 'center' as const,
-                      render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
-                    },
-                    {
-                      title: 'Harga Satuan',
-                      dataIndex: 'unitPrice',
-                      key: 'unitPrice',
-                      width: 135,
-                      align: 'right' as const,
-                      render: (price: number) => (
-                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
-                          Rp {price.toLocaleString('id-ID')}
-                        </span>
-                      ),
-                    },
-                    {
-                      title: 'Subtotal Fisik',
-                      dataIndex: 'totalPrice',
-                      key: 'totalPrice',
-                      width: 150,
-                      align: 'right' as const,
-                      render: (subtotal: number) => (
-                        <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
-                          Rp {subtotal.toLocaleString('id-ID')}
-                        </span>
-                      ),
-                    },
-                  ]}
-                />
-              </div>
-
-              {/* Mobile Card View */}
-              <div className={styles.mobileCardView} data-testid="mobile-progress-items-cards">
-                {progressInvoiceItems.length === 0 ? (
-                  <div className={styles.emptyCardState}>
-                    {selectedGrId ? 'Tidak ada item yang diterima pada Goods Receipt ini' : 'Pilih Goods Receipt terlebih dahulu'}
-                  </div>
-                ) : (
-                  progressInvoiceItems.map((it, idx) => (
-                    <div key={it.key || idx} className={styles.mobileItemCard} data-testid={`progress-item-card-${idx}`}>
-                      <div className={styles.cardHeader}>
-                        <div className={styles.itemTitleBlock}>
-                          <span className={styles.itemIndexBadge}>{idx + 1}</span>
-                          <div>
-                            <div className={styles.itemNameText}>{it.itemName}</div>
-                            {it.specification && (
-                              <div className={styles.itemSpecificationText}>{it.specification}</div>
-                            )}
-                            <div className={styles.tagsRow}>
-                              <Tag
-                                color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
-                                style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}
-                              >
-                                {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
-                              </Tag>
-                              {it.wbsNodeId && (
-                                <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
-                                  WBS #{it.wbsNodeId}
-                                </Tag>
-                              )}
-                              {it.remarks && (
-                                <Tag style={{ fontSize: 9.5, margin: 0, padding: '0 4px', color: '#64748b' }}>
-                                  {it.remarks}
-                                </Tag>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className={styles.cardStatsGrid}>
-                        <div className={styles.statItem}>
-                          <span className={styles.statLabel}>Qty Kontrak:</span>
-                          <span className={styles.statValue}>{it.orderedQty} {it.uom}</span>
-                        </div>
-                        <div className={styles.statItem}>
-                          <span className={styles.statLabel}>Qty Fisik (GR):</span>
-                          <span className={styles.statValue}>
-                            <Tag color="green" style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}>
-                              {it.receivedQty} {it.uom}
-                            </Tag>
-                          </span>
-                        </div>
-                        <div className={styles.statItem}>
-                          <span className={styles.statLabel}>Sisa Outstanding:</span>
-                          <span style={{ fontSize: 12, color: it.outstandingQty > 0 ? '#d97706' : '#16a34a', fontWeight: 600 }}>
-                            {it.outstandingQty} {it.uom}
-                          </span>
-                        </div>
-                        <div className={styles.statItem}>
-                          <span className={styles.statLabel}>Qty Ditagih:</span>
-                          <span className={styles.statValueBold}>{it.quantity} {it.uom}</span>
-                        </div>
-                      </div>
-
-                      <div className={styles.cardFooter}>
-                        <div>
-                          <span className={styles.statLabel} style={{ display: 'block' }}>Harga Satuan:</span>
-                          <span className={styles.statValueMono}>Rp {Number(it.unitPrice).toLocaleString('id-ID')}</span>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <span className={styles.statLabel} style={{ display: 'block' }}>Subtotal Fisik:</span>
-                          <span className={styles.statValueEmerald}>Rp {Number(it.totalPrice).toLocaleString('id-ID')}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </>
-          ) : (
-            <>
-              {/* Desktop Table View */}
-              <div className={styles.desktopTableView} data-testid="desktop-po-items-table">
-                <Table
-                  size="small"
-                  rowKey="key"
-                  dataSource={poItems}
-                  pagination={false}
-                  scroll={{ x: 800, y: 220 }}
-                  columns={[
-                    {
-                      title: 'No',
-                      key: 'index',
-                      width: 45,
-                      align: 'center' as const,
-                      render: (_: any, __: any, index: number) => (
-                        <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
-                      ),
-                    },
-                    {
-                      title: 'Nama Item & Spesifikasi',
-                      dataIndex: 'itemName',
-                      key: 'itemName',
-                      render: (name: string, it: any) => (
-                        <div style={{ minWidth: 160 }}>
-                          <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a', wordBreak: 'break-word', whiteSpace: 'normal' }}>{name}</div>
-                          {it.specification && (
-                            <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2, wordBreak: 'break-word', whiteSpace: 'normal' }}>
-                              {it.specification}
-                            </div>
-                          )}
-                          <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
-                            <Tag
-                              color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
-                              style={{ fontSize: 9, margin: 0, padding: '0 4px' }}
-                            >
-                              {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
-                            </Tag>
-                            {it.wbsNodeId && (
-                              <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
-                                WBS #{it.wbsNodeId}
-                              </Tag>
-                            )}
-                          </div>
-                        </div>
-                      ),
-                    },
-                    {
-                      title: 'Qty Kontrak',
-                      dataIndex: 'quantity',
-                      key: 'quantity',
-                      width: 90,
-                      align: 'center' as const,
-                      render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
-                    },
-                    {
-                      title: po?.orderType === 'SERVICE' ? 'Status Realisasi' : 'Qty Diterima (GR)',
-                      dataIndex: 'receivedQuantity',
-                      key: 'receivedQuantity',
-                      width: po?.orderType === 'SERVICE' ? 140 : 110,
-                      align: 'center' as const,
-                      render: (rec: number, it: any) => {
-                        if (po?.orderType === 'SERVICE') {
-                          const approvedClaimTotal = (approvedServiceClaims || [])
-                            .reduce((acc: number, c: any) => acc + Number(c.approvedClaimAmount || c.totalClaimAmount || 0), 0);
-                          const isFullyApproved = approvedClaimTotal >= Number(po?.totalAmount || 0) && approvedClaimTotal > 0;
-                          const hasApproved = approvedClaimTotal > 0;
-                          return (
-                            <Tag
-                              color={isFullyApproved ? 'green' : hasApproved ? 'cyan' : 'default'}
-                              style={{ fontWeight: 700, fontSize: 11, margin: 0 }}
-                            >
-                              {isFullyApproved ? 'Klaim Disetujui' : hasApproved ? 'Klaim Parsial' : 'Menunggu Klaim'}
-                            </Tag>
-                          );
-                        }
-                        return (
-                          <Tag
-                            color={rec >= it.quantity ? 'green' : rec > 0 ? 'orange' : 'default'}
-                            style={{ fontWeight: 700, fontSize: 11, margin: 0 }}
-                          >
-                            {rec} / {it.quantity}
-                          </Tag>
-                        );
-                      },
-                    },
-                    {
-                      title: 'Satuan',
-                      dataIndex: 'uom',
-                      key: 'uom',
-                      width: 70,
-                      align: 'center' as const,
-                      render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
-                    },
-                    {
-                      title: 'Harga Satuan',
-                      dataIndex: 'unitPrice',
-                      key: 'unitPrice',
-                      width: 150,
-                      align: 'right' as const,
-                      render: (price: number) => (
-                        <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
-                          Rp {price.toLocaleString('id-ID')}
-                        </span>
-                      ),
-                    },
-                    {
-                      title: 'Subtotal Kontrak',
-                      dataIndex: 'totalPrice',
-                      key: 'totalPrice',
-                      width: 160,
-                      align: 'right' as const,
-                      render: (subtotal: number) => (
-                        <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
-                          Rp {subtotal.toLocaleString('id-ID')}
-                        </span>
-                      ),
-                    },
-                  ]}
-                />
-              </div>
-
-              {/* Mobile Card View */}
-              <div className={styles.mobileCardView} data-testid="mobile-po-items-cards">
-                {poItems.length === 0 ? (
-                  <div className={styles.emptyCardState}>
-                    Belum ada item kontrak PO
-                  </div>
-                ) : (
-                  poItems.map((it, idx) => {
-                    let realizationBadge: React.ReactNode;
-                    if (po?.orderType === 'SERVICE') {
-                      const approvedClaimTotal = (approvedServiceClaims || [])
-                        .reduce((acc: number, c: any) => acc + Number(c.approvedClaimAmount || c.totalClaimAmount || 0), 0);
-                      const isFullyApproved = approvedClaimTotal >= Number(po?.totalAmount || 0) && approvedClaimTotal > 0;
-                      const hasApproved = approvedClaimTotal > 0;
-                      realizationBadge = (
-                        <Tag
-                          color={isFullyApproved ? 'green' : hasApproved ? 'cyan' : 'default'}
-                          style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}
-                        >
-                          {isFullyApproved ? 'Klaim Disetujui' : hasApproved ? 'Klaim Parsial' : 'Menunggu Klaim'}
-                        </Tag>
-                      );
-                    } else {
-                      const rec = Number(it.receivedQuantity || 0);
-                      realizationBadge = (
-                        <Tag
-                          color={rec >= it.quantity ? 'green' : rec > 0 ? 'orange' : 'default'}
-                          style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}
-                        >
-                          {rec} / {it.quantity}
-                        </Tag>
-                      );
-                    }
-
-                    return (
-                      <div key={it.key || idx} className={styles.mobileItemCard} data-testid={`po-item-card-${idx}`}>
-                        <div className={styles.cardHeader}>
-                          <div className={styles.itemTitleBlock}>
-                            <span className={styles.itemIndexBadge}>{idx + 1}</span>
-                            <div>
-                              <div className={styles.itemNameText}>{it.itemName}</div>
-                              {it.specification && (
-                                <div className={styles.itemSpecificationText}>{it.specification}</div>
-                              )}
-                              <div className={styles.tagsRow}>
-                                <Tag
-                                  color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
-                                  style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}
-                                >
-                                  {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
-                                </Tag>
-                                {it.wbsNodeId && (
-                                  <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
-                                    WBS #{it.wbsNodeId}
+                              <Text type="secondary" style={{ fontSize: 10, textTransform: 'uppercase' }}>DUKUNGAN TERMIN:</Text>
+                              <div style={{ marginTop: 2 }}>
+                                {isFinanciallySupported ? (
+                                  <Tag color="success" style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}>
+                                    <CheckCircleOutlined style={{ marginRight: 4 }} />
+                                    KAPASITAS FISIK MEMADAI
+                                  </Tag>
+                                ) : (
+                                  <Tag color="error" style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}>
+                                    <CloseCircleOutlined style={{ marginRight: 4 }} />
+                                    KAPASITAS FISIK DEFISIT
                                   </Tag>
                                 )}
                               </div>
+                              <div style={{ fontSize: 10, color: isFinanciallySupported ? '#64748b' : '#dc2626', marginTop: 2, fontWeight: isFinanciallySupported ? 400 : 600 }}>
+                                {isFinanciallySupported
+                                  ? `Sisa Plafon: Rp ${remainingProgressCapacity.toLocaleString('id-ID')}`
+                                  : `Defisit: Rp ${capacityDeficit.toLocaleString('id-ID')} (Sisa: Rp ${remainingProgressCapacity.toLocaleString('id-ID')})`}
+                              </div>
+                            </Col>
+                          </Row>
+
+                          {/* Cumulative Progress Capacity Breakdown Strip */}
+                          <div
+                            style={{
+                              marginTop: 10,
+                              padding: '8px 12px',
+                              background: isFinanciallySupported ? '#f0fdf4' : '#fff1f2',
+                              borderRadius: 6,
+                              border: `1px solid ${isFinanciallySupported ? '#bbf7d0' : '#fecdd3'}`,
+                              fontSize: 11,
+                            }}
+                          >
+                            <Row gutter={[8, 4]}>
+                              <Col xs={12} sm={6}>
+                                <Text type="secondary" style={{ fontSize: 9.5 }}>TOTAL FISIK GR PO:</Text>
+                                <div style={{ fontWeight: 700, color: '#0f172a', fontFamily: 'monospace' }}>
+                                  Rp {totalPhysicalDeliveryValueAcrossPo.toLocaleString('id-ID')}
+                                </div>
+                              </Col>
+                              <Col xs={12} sm={6}>
+                                <Text type="secondary" style={{ fontSize: 9.5 }}>PROGRESS DITAGIHKAN:</Text>
+                                <div style={{ fontWeight: 700, color: '#334155', fontFamily: 'monospace' }}>
+                                  Rp {previousProgressBilled.toLocaleString('id-ID')}
+                                </div>
+                              </Col>
+                              <Col xs={12} sm={6}>
+                                <Text type="secondary" style={{ fontSize: 9.5 }}>SISA PLAFON FISIK:</Text>
+                                <div style={{ fontWeight: 800, color: isFinanciallySupported ? '#059669' : '#dc2626', fontFamily: 'monospace' }}>
+                                  Rp {remainingProgressCapacity.toLocaleString('id-ID')}
+                                </div>
+                              </Col>
+                              <Col xs={12} sm={6}>
+                                <Text type="secondary" style={{ fontSize: 9.5 }}>STATUS TERMIN INI:</Text>
+                                <div style={{ fontWeight: 700, color: isFinanciallySupported ? '#059669' : '#dc2626' }}>
+                                  {isFinanciallySupported ? 'Memadai (≥ Termin)' : `Defisit Rp ${capacityDeficit.toLocaleString('id-ID')}`}
+                                </div>
+                              </Col>
+                            </Row>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              )}
+
+              {/* FINANCIAL SUMMARY CARD */}
+              <Card
+                size="small"
+                style={{
+                  borderRadius: 8,
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                }}
+                title={
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Space size={8}>
+                      <AuditOutlined style={{ color: '#2563eb', fontSize: 16 }} />
+                      <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
+                        Ringkasan Penagihan &amp; Evaluasi Matching SSOT
+                      </span>
+                    </Space>
+                    <Tag color="processing" style={{ fontWeight: 700, fontSize: 11, borderRadius: 4, margin: 0 }}>
+                      EVALUASI OTOMATIS BACKEND
+                    </Tag>
+                  </div>
+                }
+              >
+                <Row gutter={[16, 12]} align="middle">
+                  <Col xs={24} sm={8}>
+                    <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>1. TOTAL KONTRAK PO</Text>
+                      <div style={{ fontWeight: 800, fontSize: 15, color: '#1d4ed8', fontFamily: 'monospace', marginTop: 2 }}>
+                        Rp {totalPoAmount.toLocaleString('id-ID')}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
+                        {poItems.length} Item Terdaftar di Kontrak
+                      </div>
+                    </div>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        2. NILAI TAGIHAN INVOICE {activeTerm ? `(TERMIN #${activeTerm.sequence})` : '(FULL PO)'}
+                      </Text>
+                      <div style={{ fontWeight: 800, fontSize: 15, color: '#059669', fontFamily: 'monospace', marginTop: 2 }}>
+                        Rp {invoiceTotalAmount.toLocaleString('id-ID')}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2 }}>
+                        {activeTerm
+                          ? `${activeTerm.percentage}% dari Total Kontrak (${activeTerm.termName})`
+                          : '100% Nilai Kontrak PO'}
+                      </div>
+                    </div>
+                  </Col>
+                  <Col xs={24} sm={8}>
+                    <div style={{ background: '#ffffff', padding: '10px 14px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>3. STATUS MATCHING &amp; VERIFIKASI</Text>
+                      <div style={{ marginTop: 4 }}>
+                        {activeTerm && !activeTermEligibility.isEligible ? (
+                          <Tag color="error" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
+                            ● {activeTermEligibility.statusTag.replace(/[\[\]]/g, '')}
+                          </Tag>
+                        ) : (
+                          <Tag color="gold" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
+                            ● PENDING VERIFIKASI
+                          </Tag>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: activeTerm && !activeTermEligibility.isEligible ? '#dc2626' : '#64748b', marginTop: 4 }}>
+                        {activeTerm && !activeTermEligibility.isEligible
+                          ? (activeTermEligibility.reasons[0] || 'Syarat penagihan belum terpenuhi')
+                          : po?.orderType === 'SERVICE'
+                          ? (selectedServiceClaimId ? 'Divalidasi dengan Klaim Jasa yang Disetujui' : isDpTerm ? 'Uang Muka / DP Disetujui Kontrak' : 'Menunggu pemilihan Klaim Jasa')
+                          : isProgressTerm
+                          ? (selectedGr ? `Divalidasi dengan ${selectedGr.grNumber}` : 'Menunggu pemilihan Goods Receipt')
+                          : 'Dievaluasi Matching Engine SSOT'}
+                      </div>
+                    </div>
+                  </Col>
+                </Row>
+              </Card>
+
+              {/* ITEMS BREAKDOWN TABLE (For Progress Material: Justified GR Items; For Others/Service: Full PO Items) */}
+              <div style={{ border: '1px solid #cbd5e1', borderRadius: 8, overflow: 'hidden' }}>
+                <div
+                  style={{
+                    padding: '8px 12px',
+                    background: (isProgressTerm && po?.orderType !== 'SERVICE') ? '#f0fdf4' : '#f8fafc',
+                    borderBottom: '1px solid #e2e8f0',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 8,
+                  }}
+                >
+                  <span style={{ fontWeight: 700, fontSize: 12.5, color: (isProgressTerm && po?.orderType !== 'SERVICE') ? '#166534' : '#334155' }}>
+                    {(isProgressTerm && po?.orderType !== 'SERVICE')
+                      ? `Rincian Item Yang Divalidasi GR #${selectedGr?.grNumber || '—'} (${progressInvoiceItems.length} Item Diterima Fisik)`
+                      : `Daftar Item Kontrak PO: ${vendorName} (${poItems.length} Item)`}
+                  </span>
+                  <Tag color={(isProgressTerm && po?.orderType !== 'SERVICE') ? 'green' : (po?.orderType === 'SERVICE' ? 'purple' : 'cyan')} style={{ fontSize: 10, margin: 0, fontWeight: 600 }}>
+                    {(isProgressTerm && po?.orderType !== 'SERVICE') ? 'KUANTITAS FISIK JUSTIFIKASI GR' : po?.orderType === 'SERVICE' ? 'RUANG LINGKUP JASA / SUBKON (READ-ONLY)' : 'HARGA & KUANTITAS KONTRAK (READ-ONLY)'}
+                  </Tag>
+                </div>
+
+                {(isProgressTerm && po?.orderType !== 'SERVICE') ? (
+                  <>
+                    {/* Desktop Table View */}
+                    <div className={styles.desktopTableView} data-testid="desktop-progress-items-table">
+                      <Table
+                        size="small"
+                        rowKey="key"
+                        dataSource={progressInvoiceItems}
+                        pagination={false}
+                        scroll={{ x: 700, y: 200 }}
+                        locale={{ emptyText: selectedGrId ? 'Tidak ada item yang diterima pada Goods Receipt ini' : 'Pilih Goods Receipt terlebih dahulu' }}
+                        columns={[
+                          {
+                            title: 'No',
+                            key: 'index',
+                            width: 40,
+                            align: 'center' as const,
+                            render: (_: any, __: any, index: number) => (
+                              <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
+                            ),
+                          },
+                          {
+                            title: 'Nama Item & Spesifikasi',
+                            dataIndex: 'itemName',
+                            key: 'itemName',
+                            render: (name: string, it: any) => (
+                              <div style={{ minWidth: 150 }}>
+                                <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a', wordBreak: 'break-word', whiteSpace: 'normal' }}>{name}</div>
+                                {it.specification && (
+                                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                    {it.specification}
+                                  </div>
+                                )}
+                                <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
+                                  <Tag
+                                    color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
+                                    style={{ fontSize: 9, margin: 0, padding: '0 4px' }}
+                                  >
+                                    {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
+                                  </Tag>
+                                  {it.wbsNodeId && (
+                                    <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                                      WBS #{it.wbsNodeId}
+                                    </Tag>
+                                  )}
+                                  {it.remarks && (
+                                    <Tag style={{ fontSize: 9, margin: 0, padding: '0 4px', color: '#64748b' }}>
+                                      {it.remarks}
+                                    </Tag>
+                                  )}
+                                </div>
+                              </div>
+                            ),
+                          },
+                          {
+                            title: 'Qty Kontrak',
+                            dataIndex: 'orderedQty',
+                            key: 'orderedQty',
+                            width: 75,
+                            align: 'center' as const,
+                            render: (qty: number) => <span style={{ color: '#64748b', fontSize: 11 }}>{qty}</span>,
+                          },
+                          {
+                            title: 'Qty Fisik (GR)',
+                            dataIndex: 'receivedQty',
+                            key: 'receivedQty',
+                            width: 80,
+                            align: 'center' as const,
+                            render: (qty: number) => (
+                              <Tag color="green" style={{ fontWeight: 700, fontSize: 11, margin: 0 }}>
+                                {qty}
+                              </Tag>
+                            ),
+                          },
+                          {
+                            title: 'Sisa Outstanding',
+                            dataIndex: 'outstandingQty',
+                            key: 'outstandingQty',
+                            width: 90,
+                            align: 'center' as const,
+                            render: (qty: number) => (
+                              <span style={{ fontSize: 11, color: qty > 0 ? '#d97706' : '#16a34a', fontWeight: 600 }}>
+                                {qty}
+                              </span>
+                            ),
+                          },
+                          {
+                            title: 'Qty Ditagih',
+                            dataIndex: 'quantity',
+                            key: 'quantity',
+                            width: 75,
+                            align: 'center' as const,
+                            render: (qty: number) => (
+                              <span style={{ fontWeight: 700, color: '#0f172a', fontSize: 12 }}>
+                                {qty}
+                              </span>
+                            ),
+                          },
+                          {
+                            title: 'Satuan',
+                            dataIndex: 'uom',
+                            key: 'uom',
+                            width: 55,
+                            align: 'center' as const,
+                            render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
+                          },
+                          {
+                            title: 'Harga Satuan',
+                            dataIndex: 'unitPrice',
+                            key: 'unitPrice',
+                            width: 115,
+                            align: 'right' as const,
+                            render: (price: number) => (
+                              <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
+                                Rp {price.toLocaleString('id-ID')}
+                              </span>
+                            ),
+                          },
+                          {
+                            title: 'Subtotal Fisik',
+                            dataIndex: 'totalPrice',
+                            key: 'totalPrice',
+                            width: 125,
+                            align: 'right' as const,
+                            render: (subtotal: number) => (
+                              <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
+                                Rp {subtotal.toLocaleString('id-ID')}
+                              </span>
+                            ),
+                          },
+                        ]}
+                      />
+                    </div>
+
+                    {/* Mobile Card View */}
+                    <div className={styles.mobileCardView} data-testid="mobile-progress-items-cards">
+                      {progressInvoiceItems.length === 0 ? (
+                        <div className={styles.emptyCardState}>
+                          {selectedGrId ? 'Tidak ada item yang diterima pada Goods Receipt ini' : 'Pilih Goods Receipt terlebih dahulu'}
+                        </div>
+                      ) : (
+                        progressInvoiceItems.map((it, idx) => (
+                          <div key={it.key || idx} className={styles.mobileItemCard} data-testid={`progress-item-card-${idx}`}>
+                            <div className={styles.cardHeader}>
+                              <div className={styles.itemTitleBlock}>
+                                <span className={styles.itemIndexBadge}>{idx + 1}</span>
+                                <div>
+                                  <div className={styles.itemNameText}>{it.itemName}</div>
+                                  {it.specification && (
+                                    <div className={styles.itemSpecificationText}>{it.specification}</div>
+                                  )}
+                                  <div className={styles.tagsRow}>
+                                    <Tag
+                                      color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
+                                      style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}
+                                    >
+                                      {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
+                                    </Tag>
+                                    {it.wbsNodeId && (
+                                      <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                                        WBS #{it.wbsNodeId}
+                                      </Tag>
+                                    )}
+                                    {it.remarks && (
+                                      <Tag style={{ fontSize: 9.5, margin: 0, padding: '0 4px', color: '#64748b' }}>
+                                        {it.remarks}
+                                      </Tag>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className={styles.cardStatsGrid}>
+                              <div className={styles.statItem}>
+                                <span className={styles.statLabel}>Qty Kontrak:</span>
+                                <span className={styles.statValue}>{it.orderedQty} {it.uom}</span>
+                              </div>
+                              <div className={styles.statItem}>
+                                <span className={styles.statLabel}>Qty Fisik (GR):</span>
+                                <span className={styles.statValue}>
+                                  <Tag color="green" style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}>
+                                    {it.receivedQty} {it.uom}
+                                  </Tag>
+                                </span>
+                              </div>
+                              <div className={styles.statItem}>
+                                <span className={styles.statLabel}>Sisa Outstanding:</span>
+                                <span style={{ fontSize: 12, color: it.outstandingQty > 0 ? '#d97706' : '#16a34a', fontWeight: 600 }}>
+                                  {it.outstandingQty} {it.uom}
+                                </span>
+                              </div>
+                              <div className={styles.statItem}>
+                                <span className={styles.statLabel}>Qty Ditagih:</span>
+                                <span className={styles.statValueBold}>{it.quantity} {it.uom}</span>
+                              </div>
+                            </div>
+
+                            <div className={styles.cardFooter}>
+                              <div>
+                                <span className={styles.statLabel} style={{ display: 'block' }}>Harga Satuan:</span>
+                                <span className={styles.statValueMono}>Rp {Number(it.unitPrice).toLocaleString('id-ID')}</span>
+                              </div>
+                              <div style={{ textAlign: 'right' }}>
+                                <span className={styles.statLabel} style={{ display: 'block' }}>Subtotal Fisik:</span>
+                                <span className={styles.statValueEmerald}>Rp {Number(it.totalPrice).toLocaleString('id-ID')}</span>
+                              </div>
                             </div>
                           </div>
-                        </div>
+                        ))
+                      )}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Desktop Table View */}
+                    <div className={styles.desktopTableView} data-testid="desktop-po-items-table">
+                      <Table
+                        size="small"
+                        rowKey="key"
+                        dataSource={poItems}
+                        pagination={false}
+                        scroll={{ x: 680, y: 200 }}
+                        columns={[
+                          {
+                            title: 'No',
+                            key: 'index',
+                            width: 40,
+                            align: 'center' as const,
+                            render: (_: any, __: any, index: number) => (
+                              <span style={{ color: '#64748b', fontSize: 11 }}>{index + 1}</span>
+                            ),
+                          },
+                          {
+                            title: 'Nama Item & Spesifikasi',
+                            dataIndex: 'itemName',
+                            key: 'itemName',
+                            render: (name: string, it: any) => (
+                              <div style={{ minWidth: 150 }}>
+                                <div style={{ fontWeight: 600, fontSize: 11.5, color: '#0f172a', wordBreak: 'break-word', whiteSpace: 'normal' }}>{name}</div>
+                                {it.specification && (
+                                  <div style={{ fontSize: 10.5, color: '#64748b', marginTop: 2, wordBreak: 'break-word', whiteSpace: 'normal' }}>
+                                    {it.specification}
+                                  </div>
+                                )}
+                                <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
+                                  <Tag
+                                    color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
+                                    style={{ fontSize: 9, margin: 0, padding: '0 4px' }}
+                                  >
+                                    {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
+                                  </Tag>
+                                  {it.wbsNodeId && (
+                                    <Tag color="geekblue" style={{ fontSize: 9, margin: 0, padding: '0 4px' }}>
+                                      WBS #{it.wbsNodeId}
+                                    </Tag>
+                                  )}
+                                </div>
+                              </div>
+                            ),
+                          },
+                          {
+                            title: 'Qty Kontrak',
+                            dataIndex: 'quantity',
+                            key: 'quantity',
+                            width: 75,
+                            align: 'center' as const,
+                            render: (qty: number) => <span style={{ fontWeight: 600 }}>{qty}</span>,
+                          },
+                          {
+                            title: po?.orderType === 'SERVICE' ? 'Status Realisasi' : 'Qty Diterima (GR)',
+                            dataIndex: 'receivedQuantity',
+                            key: 'receivedQuantity',
+                            width: po?.orderType === 'SERVICE' ? 115 : 100,
+                            align: 'center' as const,
+                            render: (rec: number, it: any) => {
+                              if (po?.orderType === 'SERVICE') {
+                                const approvedClaimTotal = (approvedServiceClaims || [])
+                                  .reduce((acc: number, c: any) => acc + Number(c.approvedClaimAmount || c.totalClaimAmount || 0), 0);
+                                const isFullyApproved = approvedClaimTotal >= Number(po?.totalAmount || 0) && approvedClaimTotal > 0;
+                                const hasApproved = approvedClaimTotal > 0;
+                                return (
+                                  <Tag
+                                    color={isFullyApproved ? 'green' : hasApproved ? 'cyan' : 'default'}
+                                    style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}
+                                  >
+                                    {isFullyApproved ? 'Klaim Disetujui' : hasApproved ? 'Klaim Parsial' : 'Menunggu Klaim'}
+                                  </Tag>
+                                );
+                              }
+                              return (
+                                <Tag
+                                  color={rec >= it.quantity ? 'green' : rec > 0 ? 'orange' : 'default'}
+                                  style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}
+                                >
+                                  {rec} / {it.quantity}
+                                </Tag>
+                              );
+                            },
+                          },
+                          {
+                            title: 'Satuan',
+                            dataIndex: 'uom',
+                            key: 'uom',
+                            width: 55,
+                            align: 'center' as const,
+                            render: (uom: string) => <span style={{ fontSize: 11, color: '#64748b' }}>{uom}</span>,
+                          },
+                          {
+                            title: 'Harga Satuan',
+                            dataIndex: 'unitPrice',
+                            key: 'unitPrice',
+                            width: 115,
+                            align: 'right' as const,
+                            render: (price: number) => (
+                              <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#0f172a', fontWeight: 600 }}>
+                                Rp {price.toLocaleString('id-ID')}
+                              </span>
+                            ),
+                          },
+                          {
+                            title: 'Subtotal Kontrak',
+                            dataIndex: 'totalPrice',
+                            key: 'totalPrice',
+                            width: 125,
+                            align: 'right' as const,
+                            render: (subtotal: number) => (
+                              <span style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 11.5, color: '#059669' }}>
+                                Rp {subtotal.toLocaleString('id-ID')}
+                              </span>
+                            ),
+                          },
+                        ]}
+                      />
+                    </div>
 
-                        <div className={styles.cardStatsGrid}>
-                          <div className={styles.statItem}>
-                            <span className={styles.statLabel}>Qty Kontrak:</span>
-                            <span className={styles.statValueBold}>{it.quantity} {it.uom}</span>
-                          </div>
-                          <div className={styles.statItem}>
-                            <span className={styles.statLabel}>
-                              {po?.orderType === 'SERVICE' ? 'Status Realisasi:' : 'Qty Diterima (GR):'}
-                            </span>
-                            <span className={styles.statValue}>{realizationBadge}</span>
-                          </div>
+                    {/* Mobile Card View */}
+                    <div className={styles.mobileCardView} data-testid="mobile-po-items-cards">
+                      {poItems.length === 0 ? (
+                        <div className={styles.emptyCardState}>
+                          Belum ada item kontrak PO
                         </div>
+                      ) : (
+                        poItems.map((it, idx) => {
+                          let realizationBadge: React.ReactNode;
+                          if (po?.orderType === 'SERVICE') {
+                            const approvedClaimTotal = (approvedServiceClaims || [])
+                              .reduce((acc: number, c: any) => acc + Number(c.approvedClaimAmount || c.totalClaimAmount || 0), 0);
+                            const isFullyApproved = approvedClaimTotal >= Number(po?.totalAmount || 0) && approvedClaimTotal > 0;
+                            const hasApproved = approvedClaimTotal > 0;
+                            realizationBadge = (
+                              <Tag
+                                color={isFullyApproved ? 'green' : hasApproved ? 'cyan' : 'default'}
+                                style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}
+                              >
+                                {isFullyApproved ? 'Klaim Disetujui' : hasApproved ? 'Klaim Parsial' : 'Menunggu Klaim'}
+                              </Tag>
+                            );
+                          } else {
+                            const rec = Number(it.receivedQuantity || 0);
+                            realizationBadge = (
+                              <Tag
+                                color={rec >= it.quantity ? 'green' : rec > 0 ? 'orange' : 'default'}
+                                style={{ fontWeight: 700, fontSize: 10.5, margin: 0 }}
+                              >
+                                {rec} / {it.quantity}
+                              </Tag>
+                            );
+                          }
 
-                        <div className={styles.cardFooter}>
-                          <div>
-                            <span className={styles.statLabel} style={{ display: 'block' }}>Harga Satuan:</span>
-                            <span className={styles.statValueMono}>Rp {Number(it.unitPrice).toLocaleString('id-ID')}</span>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <span className={styles.statLabel} style={{ display: 'block' }}>Subtotal Kontrak:</span>
-                            <span className={styles.statValueEmerald}>Rp {Number(it.totalPrice).toLocaleString('id-ID')}</span>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
+                          return (
+                            <div key={it.key || idx} className={styles.mobileItemCard} data-testid={`po-item-card-${idx}`}>
+                              <div className={styles.cardHeader}>
+                                <div className={styles.itemTitleBlock}>
+                                  <span className={styles.itemIndexBadge}>{idx + 1}</span>
+                                  <div>
+                                    <div className={styles.itemNameText}>{it.itemName}</div>
+                                    {it.specification && (
+                                      <div className={styles.itemSpecificationText}>{it.specification}</div>
+                                    )}
+                                    <div className={styles.tagsRow}>
+                                      <Tag
+                                        color={po?.orderType === 'SERVICE' || it.categoryName === 'Jasa / Subkon' ? 'purple' : 'blue'}
+                                        style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}
+                                      >
+                                        {it.categoryName || (po?.orderType === 'SERVICE' ? 'Jasa / Subkon' : 'Material')}
+                                      </Tag>
+                                      {it.wbsNodeId && (
+                                        <Tag color="geekblue" style={{ fontSize: 9.5, margin: 0, padding: '0 4px' }}>
+                                          WBS #{it.wbsNodeId}
+                                        </Tag>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className={styles.cardStatsGrid}>
+                                <div className={styles.statItem}>
+                                  <span className={styles.statLabel}>Qty Kontrak:</span>
+                                  <span className={styles.statValueBold}>{it.quantity} {it.uom}</span>
+                                </div>
+                                <div className={styles.statItem}>
+                                  <span className={styles.statLabel}>
+                                    {po?.orderType === 'SERVICE' ? 'Status Realisasi:' : 'Qty Diterima (GR):'}
+                                  </span>
+                                  <span className={styles.statValue}>{realizationBadge}</span>
+                                </div>
+                              </div>
+
+                              <div className={styles.cardFooter}>
+                                <div>
+                                  <span className={styles.statLabel} style={{ display: 'block' }}>Harga Satuan:</span>
+                                  <span className={styles.statValueMono}>Rp {Number(it.unitPrice).toLocaleString('id-ID')}</span>
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                  <span className={styles.statLabel} style={{ display: 'block' }}>Subtotal Kontrak:</span>
+                                  <span className={styles.statValueEmerald}>Rp {Number(it.totalPrice).toLocaleString('id-ID')}</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
-            </>
-          )}
-        </div>
+            </Col>
+
+            {/* RIGHT COLUMN: Administrasi Perpajakan Panel (Section 9 Mandate) */}
+            <Col xs={24} md={24} lg={11} xl={10} className={styles.rightColumn}>
+              <Card
+                size="small"
+                className={styles.taxCard}
+                title={
+                  <div className={styles.taxCardHeader}>
+                    <Space size={8}>
+                      <AuditOutlined style={{ color: '#2563eb', fontSize: 16 }} />
+                      <span style={{ fontWeight: 700, fontSize: 13, color: '#0f172a' }}>
+                        Administrasi Perpajakan
+                      </span>
+                    </Space>
+                    <Tag color="cyan" style={{ fontSize: 10, margin: 0, fontWeight: 700 }}>
+                      ADMINISTRATIF &amp; REKONSILIASI
+                    </Tag>
+                  </div>
+                }
+              >
+                {/* Informational Guidance Banner */}
+                <Alert
+                  type="info"
+                  showIcon
+                  className={styles.taxNoticeAlert}
+                  message="Faktur Pajak &amp; Bukti Potong Bersifat Opsional"
+                  description="Informasi dan dokumen perpajakan yang belum tersedia dapat dilengkapi kemudian melalui menu Lihat Invoice (Detail Invoice)."
+                />
+
+                {/* BAGIAN A: PAJAK PERTAMBAHAN NILAI (PPN) */}
+                <div className={styles.taxSectionContainer}>
+                  <div className={styles.taxSectionTitle}>
+                    <FileTextOutlined style={{ color: '#2563eb' }} />
+                    <span>Bagian A — Pajak Pertambahan Nilai (PPN)</span>
+                  </div>
+
+                  <Row gutter={10}>
+                    <Col xs={24} sm={14}>
+                      <Form.Item
+                        label={<span className={styles.formLabel}>Nomor Faktur Pajak (NSFP)</span>}
+                        name="taxInvoiceNumber"
+                        className={styles.formItem}
+                        tooltip="Format e-Faktur: 010.000-26.12345678 (16 digit angka)"
+                        rules={[
+                          {
+                            validator: async (_, value) => {
+                              if (!value || String(value).trim() === '') return Promise.resolve();
+                              const cleaned = String(value).trim().replace(/[\.\-]/g, '');
+                              if (!/^[0-9]{16}$/.test(cleaned)) {
+                                return Promise.reject(
+                                  new Error('Nomor Faktur Pajak (NSFP) harus terdiri dari tepat 16 digit angka (contoh: 010.000-26.12345678).')
+                                );
+                              }
+                              return Promise.resolve();
+                            },
+                          },
+                        ]}
+                      >
+                        <Input
+                          placeholder="010.000-26.12345678"
+                          className={styles.formInput}
+                          allowClear
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={10}>
+                      <Form.Item
+                        label={<span className={styles.formLabel}>Tanggal Faktur Pajak</span>}
+                        name="fakturPajakDate"
+                        className={styles.formItem}
+                      >
+                        <DatePicker
+                          className={styles.formDatePicker}
+                          format="DD/MM/YYYY"
+                          style={{ width: '100%' }}
+                          placeholder="Pilih tgl..."
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Row gutter={10}>
+                    <Col xs={24} sm={14}>
+                      <Form.Item
+                        label={
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                            <span className={styles.formLabel}>DPP PPN (Rp)</span>
+                            <Button
+                              type="link"
+                              size="small"
+                              className={styles.quickActionBtn}
+                              onClick={handleSyncDpp}
+                            >
+                              Samakan DPP
+                            </Button>
+                          </div>
+                        }
+                        name="dppAmount"
+                        className={styles.formItem}
+                      >
+                        <InputNumber
+                          className={styles.formInputNumber}
+                          placeholder="0"
+                          formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}
+                          parser={(value) => (value ? Number(value.replace(/\./g, '')) : 0)}
+                          onChange={handleDppChange}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={10}>
+                      <Form.Item
+                        label={<span className={styles.formLabel}>Tarif PPN (%)</span>}
+                        name="ppnRate"
+                        className={styles.formItem}
+                      >
+                        <InputNumber
+                          className={styles.formInputNumber}
+                          placeholder="Contoh: 11"
+                          min={0}
+                          max={100}
+                          step={0.05}
+                          onChange={handlePpnRateChange}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Row gutter={10}>
+                    <Col xs={24} sm={24}>
+                      <Form.Item
+                        label={
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 4 }}>
+                            <span className={styles.formLabel}>Nominal PPN (Rp)</span>
+                            <Space size={4}>
+                              {isPpnOverridden ? (
+                                <>
+                                  <Tag color="orange" className={styles.overrideTag}>
+                                    Override Manual
+                                  </Tag>
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    className={styles.quickActionBtn}
+                                    onClick={handleResetPpnAuto}
+                                    style={{ padding: 0, height: 'auto', fontSize: 11 }}
+                                  >
+                                    Hitung Ulang
+                                  </Button>
+                                </>
+                              ) : (ppnRateWatch !== undefined && ppnRateWatch !== null && ppnRateWatch !== '' && dppAmountWatch !== undefined && dppAmountWatch !== null && dppAmountWatch !== '') ? (
+                                <Tag color="blue" className={styles.autoTag}>
+                                  Dihitung Otomatis
+                                </Tag>
+                              ) : null}
+                            </Space>
+                          </div>
+                        }
+                        name="ppnAmount"
+                        className={styles.formItem}
+                      >
+                        <InputNumber
+                          className={styles.formInputNumber}
+                          placeholder="0"
+                          formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}
+                          parser={(value) => (value ? Number(value.replace(/\./g, '')) : 0)}
+                          onChange={handlePpnAmountChange}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  {/* Upload Faktur Pajak PDF */}
+                  <div style={{ marginTop: 2 }}>
+                    <div className={styles.uploadRow}>
+                      <span className={styles.uploadLabel}>
+                        Unggah Berkas Faktur Pajak (PDF Maks. 10 MB):
+                      </span>
+                      {!fakturPajakFile && (
+                        <Upload
+                          beforeUpload={handleFakturPajakUpload}
+                          showUploadList={false}
+                          accept="application/pdf"
+                        >
+                          <Button icon={<UploadOutlined />} size="small" className={styles.uploadBtn}>
+                            Pilih Berkas Faktur Pajak (PDF)
+                          </Button>
+                        </Upload>
+                      )}
+                    </div>
+                    {fakturPajakFile && (
+                      <div className={styles.filePreviewCard}>
+                        <Space size={6}>
+                          <FilePdfOutlined style={{ color: '#dc2626', fontSize: 16 }} />
+                          <span className={styles.fileNameText} title={fakturPajakFile.name}>
+                            {fakturPajakFile.name} ({(fakturPajakFile.size / 1024).toFixed(0)} KB)
+                          </span>
+                        </Space>
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => setFakturPajakFile(null)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* BAGIAN B: PAJAK PENGHASILAN (PPH) */}
+                <div className={styles.taxSectionContainer}>
+                  <div className={styles.taxSectionTitle}>
+                    <DollarOutlined style={{ color: '#059669' }} />
+                    <span>Bagian B — Pajak Penghasilan (PPh)</span>
+                  </div>
+
+                  <Row gutter={10}>
+                    <Col xs={24} sm={15}>
+                      <Form.Item
+                        label={<span className={styles.formLabel}>Jenis Pemotongan PPh</span>}
+                        name="pphType"
+                        className={styles.formItem}
+                      >
+                        <Select
+                          placeholder="Pilih Jenis PPh (Opsional)..."
+                          options={PPH_TYPE_OPTIONS}
+                          allowClear
+                          popupMatchSelectWidth={false}
+                          className={styles.formSelect}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={9}>
+                      <Form.Item
+                        label={<span className={styles.formLabel}>Tarif PPh (%)</span>}
+                        name="pphRate"
+                        className={styles.formItem}
+                      >
+                        <InputNumber
+                          className={styles.formInputNumber}
+                          placeholder="Contoh: 2"
+                          min={0}
+                          max={100}
+                          step={0.05}
+                          onChange={handlePphRateChange}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Row gutter={10}>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label={
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                            <span className={styles.formLabel}>Dasar Pengenaan PPh (Rp)</span>
+                            <Button
+                              type="link"
+                              size="small"
+                              className={styles.quickActionBtn}
+                              onClick={handleSyncPphBase}
+                            >
+                              Samakan DPP
+                            </Button>
+                          </div>
+                        }
+                        name="taxableBase"
+                        className={styles.formItem}
+                      >
+                        <InputNumber
+                          className={styles.formInputNumber}
+                          placeholder="0"
+                          formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}
+                          parser={(value) => (value ? Number(value.replace(/\./g, '')) : 0)}
+                          onChange={handleTaxableBaseChange}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={12}>
+                      <Form.Item
+                        label={
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 4 }}>
+                            <span className={styles.formLabel}>Nominal Terpotong (Rp)</span>
+                            <Space size={4}>
+                              {isPphOverridden ? (
+                                <>
+                                  <Tag color="orange" className={styles.overrideTag}>
+                                    Override Manual
+                                  </Tag>
+                                  <Button
+                                    type="link"
+                                    size="small"
+                                    className={styles.quickActionBtn}
+                                    onClick={handleResetPphAuto}
+                                    style={{ padding: 0, height: 'auto', fontSize: 11 }}
+                                  >
+                                    Hitung Ulang
+                                  </Button>
+                                </>
+                              ) : (pphRateWatch !== undefined && pphRateWatch !== null && pphRateWatch !== '' && taxableBaseWatch !== undefined && taxableBaseWatch !== null && taxableBaseWatch !== '') ? (
+                                <Tag color="blue" className={styles.autoTag}>
+                                  Dihitung Otomatis
+                                </Tag>
+                              ) : null}
+                            </Space>
+                          </div>
+                        }
+                        name="withheldAmount"
+                        className={styles.formItem}
+                      >
+                        <InputNumber
+                          className={styles.formInputNumber}
+                          placeholder="0"
+                          formatter={(value) => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, '.')}
+                          parser={(value) => (value ? Number(value.replace(/\./g, '')) : 0)}
+                          onChange={handleWithheldAmountChange}
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  <Row gutter={10}>
+                    <Col xs={24} sm={14}>
+                      <Form.Item
+                        label={<span className={styles.formLabel}>Nomor Bukti Potong (BPU)</span>}
+                        name="buktiPotongNumber"
+                        className={styles.formItem}
+                      >
+                        <Input
+                          placeholder="Nomor Bukti Potong..."
+                          className={styles.formInput}
+                          allowClear
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} sm={10}>
+                      <Form.Item
+                        label={<span className={styles.formLabel}>Tanggal Bukti Potong</span>}
+                        name="buktiPotongDate"
+                        className={styles.formItem}
+                      >
+                        <DatePicker
+                          className={styles.formDatePicker}
+                          format="DD/MM/YYYY"
+                          style={{ width: '100%' }}
+                          placeholder="Pilih tgl..."
+                        />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+
+                  {/* Upload Bukti Potong PDF */}
+                  <div style={{ marginTop: 2 }}>
+                    <div className={styles.uploadRow}>
+                      <span className={styles.uploadLabel}>
+                        Unggah Berkas Bukti Potong (PDF Maks. 10 MB):
+                      </span>
+                      {!buktiPotongFile && (
+                        <Upload
+                          beforeUpload={handleBuktiPotongUpload}
+                          showUploadList={false}
+                          accept="application/pdf"
+                        >
+                          <Button icon={<UploadOutlined />} size="small" className={styles.uploadBtn}>
+                            Pilih Berkas Bukti Potong (PDF)
+                          </Button>
+                        </Upload>
+                      )}
+                    </div>
+                    {buktiPotongFile && (
+                      <div className={styles.filePreviewCard}>
+                        <Space size={6}>
+                          <FilePdfOutlined style={{ color: '#dc2626', fontSize: 16 }} />
+                          <span className={styles.fileNameText} title={buktiPotongFile.name}>
+                            {buktiPotongFile.name} ({(buktiPotongFile.size / 1024).toFixed(0)} KB)
+                          </span>
+                        </Space>
+                        <Button
+                          type="text"
+                          danger
+                          size="small"
+                          icon={<DeleteOutlined />}
+                          onClick={() => setBuktiPotongFile(null)}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* SETTLEMENT PARITY & ESTIMASI KAS BERSIH KE VENDOR */}
+                <div className={styles.settlementCard}>
+                  <div className={styles.settlementTitle}>
+                    <CalculatorOutlined style={{ color: '#16a34a' }} />
+                    <span>Settlement Parity &amp; Estimasi Kas Bersih ke Rekening Vendor</span>
+                  </div>
+
+                  <div className={styles.settlementRow}>
+                    <span className={styles.settlementLabel}>1. Nilai Komersial Pokok / DPP:</span>
+                    <span className={styles.settlementValueMono} style={{ color: '#0f172a' }}>
+                      Rp {Number(dppAmountWatch !== undefined && dppAmountWatch !== null && dppAmountWatch !== '' ? dppAmountWatch : invoiceTotalAmount).toLocaleString('id-ID')}
+                    </span>
+                  </div>
+
+                  {Number(ppnAmountWatch || 0) > 0 && (
+                    <div className={styles.settlementRow}>
+                      <span className={styles.settlementLabel} style={{ color: '#0369a1' }}>
+                        2. PPN Masukan Dicatat Faktur:
+                      </span>
+                      <span className={styles.settlementValueMono} style={{ color: '#0369a1' }}>
+                        + Rp {Number(ppnAmountWatch || 0).toLocaleString('id-ID')}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className={styles.settlementRow}>
+                    <span className={styles.settlementLabel} style={{ fontWeight: 600, color: '#0f172a' }}>
+                      3. Nilai Tagihan Bruto Komersial (L_comm):
+                    </span>
+                    <span className={styles.settlementValueMono} style={{ fontWeight: 700, color: '#0f172a' }}>
+                      Rp {(Number(dppAmountWatch !== undefined && dppAmountWatch !== null && dppAmountWatch !== '' ? dppAmountWatch : invoiceTotalAmount) + Number(ppnAmountWatch || 0)).toLocaleString('id-ID')}
+                    </span>
+                  </div>
+
+                  <div className={styles.settlementRow}>
+                    <span className={styles.settlementLabel} style={{ color: '#b91c1c' }}>
+                      4. Potongan PPh Dipungut Perusahaan (W_tax):
+                    </span>
+                    <span className={styles.settlementValueMono} style={{ color: '#b91c1c' }}>
+                      - Rp {Number(withheldAmountWatch || 0).toLocaleString('id-ID')}
+                    </span>
+                  </div>
+
+                  <div className={styles.settlementRowDivider} />
+
+                  <div className={styles.settlementTotalRow}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#166534', fontSize: 12 }}>
+                        Estimasi Kas Bersih ke Vendor (D_cash):
+                      </div>
+                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>
+                        Formula: D_cash = L_comm - W_tax (DPP + PPN - PPh)
+                      </div>
+                    </div>
+                    <div className={styles.settlementNetValue}>
+                      Rp {Math.max(
+                        0,
+                        Number(dppAmountWatch !== undefined && dppAmountWatch !== null && dppAmountWatch !== '' ? dppAmountWatch : invoiceTotalAmount) +
+                          Number(ppnAmountWatch || 0) -
+                          Number(withheldAmountWatch || 0)
+                      ).toLocaleString('id-ID')}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </Col>
+          </Row>
+        </Form>
       </div>
     </ResponsiveFinanceModal>
   );

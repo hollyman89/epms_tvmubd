@@ -67,7 +67,12 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
   const paymentDate = payment.paymentDate;
   const paymentMethod = payment.paymentMethod || 'BANK_TRANSFER';
   const referenceNumber = payment.referenceNumber || '—';
-  const bankName = payment.bankName || 'Bank Mandiri (Rekening Operasional Proyek)';
+  const sourceSnapshot = payment.sourceAccountSnapshot;
+  const sourceBankDisplay = sourceSnapshot
+    ? `${sourceSnapshot.bankName} — ${sourceSnapshot.maskedAccountNumber || sourceSnapshot.accountNumber} (a/n ${sourceSnapshot.accountHolderName}, ${sourceSnapshot.legalEntityName || sourceSnapshot.companyCode})`
+    : (payment.companyBankAccount
+      ? `${payment.companyBankAccount.bankName} — ${payment.companyBankAccount.accountNumber} (a/n ${payment.companyBankAccount.accountHolderName}, ${payment.companyBankAccount.companyCode})`
+      : (payment.bankName || 'Bank Mandiri (Rekening Operasional Proyek)'));
   const createdAt = payment.createdAt;
   const notes = payment.notes;
 
@@ -201,7 +206,12 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
             </Descriptions.Item>
             <Descriptions.Item label="Rekening / Bank Sumber Dana">
               <BankOutlined style={{ marginRight: 4, color: '#64748b' }} />
-              {bankName}
+              {sourceBankDisplay}
+              {sourceSnapshot?.accountPurpose && (
+                <Tag color="geekblue" style={{ marginLeft: 6, fontSize: 10 }}>
+                  {sourceSnapshot.accountPurpose}
+                </Tag>
+              )}
             </Descriptions.Item>
             <Descriptions.Item label="Pencatat / Petugas Pembayaran">
               <UserIdentityDisplay
@@ -263,7 +273,7 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({
               <div className={styles.cardFieldLabel}>REKENING / BANK SUMBER DANA</div>
               <div className={styles.cardFieldValue}>
                 <BankOutlined style={{ marginRight: 4, color: '#64748b' }} />
-                {bankName}
+                {sourceBankDisplay}
               </div>
             </div>
           </div>

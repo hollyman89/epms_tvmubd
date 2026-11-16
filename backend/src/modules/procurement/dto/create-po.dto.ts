@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayNotEmpty, IsArray, IsNotEmpty, IsNumber, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsNotEmpty, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator';
 import { CreatePoPaymentTermDto } from './create-po-payment-term.dto';
 
 export class PoItemDto {
@@ -12,17 +12,19 @@ export class PoItemDto {
   @ApiProperty({ example: 2 })
   @IsNumber()
   @IsNotEmpty()
+  @Min(0.01, { message: 'Kuantitas item harus lebih besar dari 0' })
   quantity: number;
 
   @ApiProperty({ example: 25000000 })
   @IsNumber()
   @IsNotEmpty()
+  @Min(0, { message: 'Harga satuan tidak boleh negatif' })
   unit_price: number;
 
-  @ApiProperty({ example: 50000000 })
+  @ApiProperty({ example: 50000000, required: false })
+  @IsOptional()
   @IsNumber()
-  @IsNotEmpty()
-  total_price: number;
+  total_price?: number;
 
   @ApiProperty({ example: 1, required: false })
   @IsOptional()

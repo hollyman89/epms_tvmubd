@@ -1,5 +1,5 @@
 import { IsNumber, IsNotEmpty, IsDateString, Min, IsEnum, IsString, IsOptional } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreatePaymentDto {
   @ApiProperty({ example: 1, description: 'ID of the Invoice to be paid' })
@@ -38,6 +38,11 @@ export class CreatePaymentDto {
   @IsString()
   @IsNotEmpty()
   referenceNumber: string;
+
+  @ApiPropertyOptional({ example: 1, description: 'ID of the authorized company bank account (mandatory for new payment execution)' })
+  @IsOptional()
+  @IsNumber()
+  companyBankAccountId?: number;
 
   @ApiProperty({ required: false, example: 'Bank Mandiri' })
   @IsOptional()

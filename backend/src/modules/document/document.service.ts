@@ -5,6 +5,7 @@ import { Document, DocumentCategory } from '../../entities/document.entity';
 import { Project } from '../../entities/project.entity';
 import { Contract } from '../../entities/contract.entity';
 import { Tender } from '../../entities/tender.entity';
+import { Invoice } from '../../entities/invoice.entity';
 import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import * as fs from 'fs';
@@ -64,6 +65,8 @@ export class DocumentService {
         return ['contract/', 'contracts/'];
       case 'TENDER':
         return ['tender/', 'tenders/'];
+      case 'INVOICE':
+        return ['invoice/', 'invoices/'];
       default:
         return [`${normalized.toLowerCase()}/`, `${normalized.toLowerCase()}s/`];
     }
@@ -430,6 +433,46 @@ export class DocumentService {
 
         throw new ForbiddenException(
           'Akses ditolak: Hanya Marketing PIC atau manajemen yang berhak mengakses dokumen tender ini',
+        );
+      }
+
+      case 'INVOICE': {
+        const invoice = await this.documentRepository.manager.findOne(Invoice, {
+          where: { id: entityId },
+          relations: ['purchaseOrder', 'purchaseOrder.purchaseRequest', 'purchaseOrder.purchaseRequest.project'],
+        });
+        if (!invoice) {
+          throw new NotFoundException(`Invoice #${entityId} tidak ditemukan`);
+        }
+
+        // Executive, Management, and Finance roles allowed
+        if (
+          roles.includes('SUPER_ADMIN') ||
+          roles.includes('FINANCE') ||
+          roles.includes('FINANCE_STAFF') ||
+          roles.includes('FINANCE_MANAGER') ||
+          roles.includes('DIRECTOR') ||
+          roles.includes('GENERAL_MANAGER') ||
+          roles.includes('HEAD_OF_OPERATIONS')
+        ) {
+          return;
+        }
+
+        // Invoice creator or assigned Project Manager of the underlying project
+        const assignedPmId = invoice.purchaseOrder?.purchaseRequest?.project?.managerId
+          ? Number(invoice.purchaseOrder.purchaseRequest.project.managerId)
+          : null;
+        const creatorId = invoice.createdBy ? Number(invoice.createdBy) : null;
+
+        if (
+          (assignedPmId && assignedPmId === currentUserId) ||
+          (creatorId && creatorId === currentUserId)
+        ) {
+          return;
+        }
+
+        throw new ForbiddenException(
+          'Akses ditolak: Anda tidak memiliki wewenang untuk mengakses dokumen invoice ini',
         );
       }
 

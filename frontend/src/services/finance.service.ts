@@ -251,6 +251,7 @@ export interface InvoiceDto {
   paymentTerm?: PoPaymentTermDto;
   items?: InvoiceItemDto[];
   payments?: any[];
+  invoiceTaxDetail?: any;
 }
 
 export interface PaymentDto {
@@ -259,10 +260,28 @@ export interface PaymentDto {
   paymentNumber: string;
   paymentDate: string;
   amount: number;
+  companyCode?: string;
+  companyBankAccountId?: number | null;
   paymentMethod?: string;
   referenceNumber?: string;
   bankName?: string;
   notes?: string;
+  sourceAccountSnapshot?: {
+    companyBankAccountId: number;
+    companyCode: string;
+    legalEntityName: string;
+    bankName: string;
+    bankCode?: string | null;
+    accountNumber: string;
+    maskedAccountNumber: string;
+    accountHolderName: string;
+    accountType: string;
+    accountPurpose: string;
+    currency: string;
+    executionTimestamp: string;
+    executedBy?: number | null;
+  } | null;
+  companyBankAccount?: CompanyBankAccountDto;
   createdBy?: number;
   creator?: {
     id: number;
@@ -284,10 +303,109 @@ export interface CreatePaymentPayload {
   paymentDate: string;
   paymentAmount: number;
   amount?: number;
+  companyBankAccountId?: number;
   paymentMethod: string;
   referenceNumber: string;
   bankName?: string;
   notes?: string;
+}
+
+export interface CompanyBankAccountDto {
+  id: number;
+  companyCode: 'UBD' | 'TVM';
+  bankName: string;
+  bankCode?: string | null;
+  accountNumber: string;
+  accountHolderName: string;
+  accountType: string;
+  accountPurpose: string;
+  currency: string;
+  status: 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
+  isDefault: boolean;
+  effectiveDate: string;
+  expiryDate?: string | null;
+  picName?: string | null;
+  notes?: string | null;
+  lastChangeReason?: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCompanyBankAccountPayload {
+  companyCode: 'UBD' | 'TVM';
+  bankName: string;
+  bankCode?: string;
+  accountNumber: string;
+  accountHolderName: string;
+  accountType: string;
+  accountPurpose: string;
+  currency?: string;
+  isDefault?: boolean;
+  effectiveDate: string;
+  expiryDate?: string | null;
+  picName?: string;
+  notes?: string;
+  changeReason: string;
+}
+
+export interface UpdateCompanyBankAccountPayload {
+  bankName?: string;
+  bankCode?: string;
+  accountNumber?: string;
+  accountHolderName?: string;
+  accountType?: string;
+  accountPurpose?: string;
+  currency?: string;
+  status?: 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
+  isDefault?: boolean;
+  effectiveDate?: string;
+  expiryDate?: string | null;
+  picName?: string;
+  notes?: string;
+  changeReason: string;
+}
+
+export interface ApprovalSnapshotDto {
+  invoiceId: number;
+  invoiceNumber: string;
+  invoiceAmount: number;
+  invoiceVersion: number;
+  invoiceUpdatedAt?: string;
+  paymentTermId?: number | null;
+  paymentTermName?: string | null;
+  requestedAmount: number;
+  dppAmount?: number | null;
+  ppnAmount?: number | null;
+  ppnRate?: number | null;
+  grossAmount?: number | null;
+  pphAmount?: number | null;
+  pphType?: string | null;
+  pphRate?: number | null;
+  wapuAmount?: number | null;
+  priorDeductionsAmount?: number | null;
+  netPayableAmount?: number | null;
+  fakturPajakNumber?: string | null;
+  fakturPajakDate?: string | null;
+  buktiPotongNumber?: string | null;
+  buktiPotongDate?: string | null;
+  vendorId?: number | null;
+  vendorName?: string | null;
+  vendorBankAccount?: string | null;
+  vendorBankName?: string | null;
+  vendorBankAccountHolder?: string | null;
+  goodsReceiptId?: number | null;
+  goodsReceiptNumber?: string | null;
+  serviceClaimId?: number | null;
+  serviceClaimNumber?: string | null;
+  poId?: number | null;
+  poNumber?: string | null;
+  projectName?: string | null;
+  matchStatus?: string | null;
+  verifiedBy?: number | null;
+  verifiedByName?: string | null;
+  verifiedAt?: string | null;
+  timestamp: string;
 }
 
 export interface PaymentRequestDto {
@@ -306,7 +424,7 @@ export interface PaymentRequestDto {
   approvedAt?: string | null;
   rejectionReason?: string | null;
   notes?: string | null;
-  approvalSnapshot?: any;
+  approvalSnapshot?: ApprovalSnapshotDto | any;
   version?: number;
   createdAt?: string;
   updatedAt?: string;
@@ -331,6 +449,70 @@ export interface CreateInvoiceItemPayload {
   totalPrice: number;
 }
 
+export interface CreateInvoiceTaxPpnPayload {
+  fakturPajakNumber?: string;
+  fakturPajakDate?: string;
+  dppAmount?: number;
+  ppnRate?: number;
+  ppnAmount?: number;
+  documentId?: number;
+}
+
+export interface CreateInvoiceTaxPphPayload {
+  pphType?: string;
+  rate?: number;
+  taxableBase?: number;
+  withheldAmount?: number;
+  buktiPotongNumber?: string;
+  buktiPotongDate?: string;
+  documentId?: number;
+}
+
+export interface CreateInvoiceTaxPayload {
+  ppn?: CreateInvoiceTaxPpnPayload;
+  pph?: CreateInvoiceTaxPphPayload;
+  documentId?: number;
+}
+
+export interface InvoiceTaxDetailsResponse {
+  taxDetail: {
+    id: number;
+    invoiceId: number;
+    companyCode: string;
+    taxBasis: number;
+    ppnRate: number;
+    ppnAmount: number;
+    pphRate: number;
+    pphAmount: number;
+    settlementNetExpected: number;
+    fakturPajakNumber?: string;
+    fakturPajakDate?: string;
+    buktiPotongNumber?: string;
+    buktiPotongDate?: string;
+  } | null;
+  ppnRecords: Array<{
+    id: number;
+    invoiceId: number;
+    fakturPajakNumber: string;
+    fakturPajakDate: string;
+    dppAmount: number;
+    ppnAmount: number;
+    documentId?: number;
+    creditableStatus?: string;
+  }>;
+  pphRecords: Array<{
+    id: number;
+    invoiceId: number;
+    taxableBase: number;
+    withholdingRate: number;
+    withheldAmount: number;
+    buktiPotongNumber?: string;
+    buktiPotongDate?: string;
+    documentId?: number;
+    withholdingStatus?: string;
+  }>;
+}
+
 export interface CreateInvoicePayload {
   purchaseOrderId: number;
   paymentTermId?: number;
@@ -339,6 +521,7 @@ export interface CreateInvoicePayload {
   evidenceRef?: string;
   invoiceDate: string;
   items?: CreateInvoiceItemPayload[];
+  tax?: CreateInvoiceTaxPayload;
 }
 
 // 3. FINANCE CENTRALIZED API SERVICE
@@ -381,6 +564,54 @@ export class FinanceService {
   static async getInvoiceById(id: number): Promise<InvoiceDto> {
     const res = await apiClient.get(`/finance/invoices/${id}`);
     return this.unwrapData<InvoiceDto>(res);
+  }
+
+  /**
+   * Fetch Tax Administration Details for an Invoice (SSOT)
+   * Endpoint: GET /finance/invoices/:id/tax
+   */
+  static async getInvoiceTax(id: number): Promise<InvoiceTaxDetailsResponse> {
+    const res = await apiClient.get(`/finance/invoices/${id}/tax`);
+    return this.unwrapData<InvoiceTaxDetailsResponse>(res);
+  }
+
+  /**
+   * Update Tax Administration Information on Existing Invoice
+   * Endpoint: PATCH /finance/invoices/:id/tax
+   */
+  static async updateInvoiceTax(id: number, payload: CreateInvoiceTaxPayload): Promise<any> {
+    const res = await apiClient.patch(`/finance/invoices/${id}/tax`, payload);
+    return this.unwrapData<any>(res);
+  }
+
+  /**
+   * Upload Document for an Invoice (Faktur Pajak, Bukti Potong, dll.)
+   * Endpoint: POST /documents/upload
+   */
+  static async uploadInvoiceDocument(params: {
+    file: File;
+    entityType?: string;
+    entityId: number;
+    category?: string;
+  }): Promise<any> {
+    const formData = new FormData();
+    formData.append('file', params.file);
+    formData.append('entityType', params.entityType || 'INVOICE');
+    formData.append('entityId', String(params.entityId));
+    if (params.category) {
+      formData.append('category', params.category);
+    }
+    const res = await apiClient.post('/documents/upload', formData);
+    return this.unwrapData<any>(res);
+  }
+
+  /**
+   * Get all documents attached to an Invoice (Faktur Pajak, Bukti Potong, dll.)
+   * Endpoint: GET /documents/entity/INVOICE/:id
+   */
+  static async getInvoiceDocuments(invoiceId: number): Promise<any[]> {
+    const res = await apiClient.get(`/documents/entity/INVOICE/${invoiceId}`);
+    return this.unwrapData<any[]>(res);
   }
 
   /**
@@ -516,5 +747,109 @@ export class FinanceService {
   ): Promise<PaymentRequestDto> {
     const res = await apiClient.post(`/finance/payment-requests/${id}/resubmit`, payload);
     return this.unwrapData<PaymentRequestDto>(res);
+  }
+
+  // =========================================================================
+  // COMPANY BANK ACCOUNT MASTER DATA METHODS
+  // =========================================================================
+
+  /**
+   * Get all Company Bank Accounts
+   * Endpoint: GET /finance/company-bank-accounts
+   */
+  static async getCompanyBankAccounts(params?: {
+    companyCode?: string;
+    status?: string;
+    purpose?: string;
+    search?: string;
+  }): Promise<CompanyBankAccountDto[]> {
+    const res = await apiClient.get('/finance/company-bank-accounts', { params });
+    return this.unwrapData<CompanyBankAccountDto[]>(res) || [];
+  }
+
+  /**
+   * Get eligible active Company Bank Accounts for payment execution
+   * Endpoint: GET /finance/company-bank-accounts/eligible
+   */
+  static async getEligibleCompanyBankAccounts(companyCode?: string): Promise<CompanyBankAccountDto[]> {
+    const res = await apiClient.get('/finance/company-bank-accounts/eligible', {
+      params: companyCode ? { companyCode } : undefined,
+    });
+    return this.unwrapData<CompanyBankAccountDto[]>(res) || [];
+  }
+
+  /**
+   * Get Company Bank Account by ID
+   * Endpoint: GET /finance/company-bank-accounts/:id
+   */
+  static async getCompanyBankAccountById(id: number): Promise<CompanyBankAccountDto> {
+    const res = await apiClient.get(`/finance/company-bank-accounts/${id}`);
+    return this.unwrapData<CompanyBankAccountDto>(res);
+  }
+
+  /**
+   * Create Company Bank Account (SUPER_ADMIN / ADMIN only)
+   * Endpoint: POST /finance/company-bank-accounts
+   */
+  static async createCompanyBankAccount(payload: CreateCompanyBankAccountPayload): Promise<CompanyBankAccountDto> {
+    const res = await apiClient.post('/finance/company-bank-accounts', payload);
+    return this.unwrapData<CompanyBankAccountDto>(res);
+  }
+
+  /**
+   * Update Company Bank Account metadata (SUPER_ADMIN / ADMIN only)
+   * Endpoint: PATCH /finance/company-bank-accounts/:id
+   */
+  static async updateCompanyBankAccount(
+    id: number,
+    payload: UpdateCompanyBankAccountPayload,
+  ): Promise<CompanyBankAccountDto> {
+    const res = await apiClient.patch(`/finance/company-bank-accounts/${id}`, payload);
+    return this.unwrapData<CompanyBankAccountDto>(res);
+  }
+
+  /**
+   * Activate Company Bank Account
+   * Endpoint: POST /finance/company-bank-accounts/:id/activate
+   */
+  static async activateCompanyBankAccount(id: number, changeReason: string): Promise<CompanyBankAccountDto> {
+    const res = await apiClient.post(`/finance/company-bank-accounts/${id}/activate`, { changeReason });
+    return this.unwrapData<CompanyBankAccountDto>(res);
+  }
+
+  /**
+   * Deactivate Company Bank Account
+   * Endpoint: POST /finance/company-bank-accounts/:id/deactivate
+   */
+  static async deactivateCompanyBankAccount(id: number, changeReason: string): Promise<CompanyBankAccountDto> {
+    const res = await apiClient.post(`/finance/company-bank-accounts/${id}/deactivate`, { changeReason });
+    return this.unwrapData<CompanyBankAccountDto>(res);
+  }
+
+  /**
+   * Block Company Bank Account
+   * Endpoint: POST /finance/company-bank-accounts/:id/block
+   */
+  static async blockCompanyBankAccount(id: number, changeReason: string): Promise<CompanyBankAccountDto> {
+    const res = await apiClient.post(`/finance/company-bank-accounts/${id}/block`, { changeReason });
+    return this.unwrapData<CompanyBankAccountDto>(res);
+  }
+
+  /**
+   * Set Default Company Bank Account
+   * Endpoint: POST /finance/company-bank-accounts/:id/set-default
+   */
+  static async setDefaultCompanyBankAccount(id: number, changeReason: string): Promise<CompanyBankAccountDto> {
+    const res = await apiClient.post(`/finance/company-bank-accounts/${id}/set-default`, { changeReason });
+    return this.unwrapData<CompanyBankAccountDto>(res);
+  }
+
+  /**
+   * Get Company Bank Account Audit History
+   * Endpoint: GET /finance/company-bank-accounts/:id/history
+   */
+  static async getCompanyBankAccountHistory(id: number): Promise<any[]> {
+    const res = await apiClient.get(`/finance/company-bank-accounts/${id}/history`);
+    return this.unwrapData<any[]>(res) || [];
   }
 }

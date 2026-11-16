@@ -746,24 +746,44 @@ export class ProcurementService {
       const poNumber = `PO-${dateStr}-${seq}`;
 
       let totalAmount = 0;
+      let winningQuote: Quotation | null = null;
       if (dto.po_items && dto.po_items.length > 0) {
         for (const item of dto.po_items) {
-          totalAmount += Number(item.total_price);
+          const qty = Number(item.quantity);
+          const unitPrice = Number(item.unit_price);
+          if (!Number.isFinite(qty) || qty <= 0) {
+            throw new BadRequestException(
+              `Kuantitas item "${item.item_name || 'Item'}" harus lebih besar dari 0`,
+            );
+          }
+          if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+            throw new BadRequestException(
+              `Harga satuan item "${item.item_name || 'Item'}" tidak boleh negatif`,
+            );
+          }
+          const lineTotal = Math.round(qty * unitPrice * 100) / 100;
+          totalAmount += lineTotal;
         }
       } else if (rfqIds.length > 0) {
-        const quote = await queryRunner.manager.findOne(Quotation, {
+        winningQuote = await queryRunner.manager.findOne(Quotation, {
           where: { rfqId: In(rfqIds), vendorId: dto.vendor_id },
           relations: ['items'],
         });
-        if (quote && quote.items && quote.items.length > 0) {
-          for (const qi of quote.items) {
-            totalAmount += Number(qi.quantity || 0) * Number(qi.unitPrice || 0);
+        if (winningQuote && winningQuote.items && winningQuote.items.length > 0) {
+          for (const qi of winningQuote.items) {
+            const qty = Number(qi.quantity || 0);
+            const unitPrice = Number(qi.unitPrice || 0);
+            const lineTotal = Math.round(qty * unitPrice * 100) / 100;
+            totalAmount += lineTotal;
           }
         }
       } else if (pr.items && pr.items.length > 0) {
         // Direct Service PO: derive total amount from PR items
         for (const pi of pr.items) {
-          totalAmount += Number(pi.quantity || 0) * Number(pi.estimatedUnitPrice || 0);
+          const qty = Number(pi.quantity || 0);
+          const price = Number(pi.estimatedUnitPrice || 0);
+          const lineTotal = Math.round(qty * price * 100) / 100;
+          totalAmount += lineTotal;
         }
       } else {
         totalAmount = Number(pr.totalEstimatedAmount || 0);
@@ -886,15 +906,39 @@ export class ProcurementService {
               (item.pr_item_id && Number(pi.id) === Number(item.pr_item_id)) ||
               (pi.itemName && item.item_name && pi.itemName.trim() === item.item_name.trim()),
           ) || (pr.items || [])[idx];
+          const qty = Number(item.quantity);
+          const unitPrice = Number(item.unit_price);
+          const authoritativeLineTotal = Math.round(qty * unitPrice * 100) / 100;
           return queryRunner.manager.create(PurchaseOrderItem, {
             purchaseOrderId: savedPo.id,
             prItemId: matchingPrItem ? matchingPrItem.id : (item.pr_item_id || null),
             costItemId: matchingPrItem ? matchingPrItem.costItemId : (item.cost_item_id || null),
             itemName: item.item_name,
-            quantity: item.quantity,
-            unitPrice: item.unit_price,
-            totalPrice: item.total_price,
+            quantity: qty,
+            unitPrice: unitPrice,
+            totalPrice: authoritativeLineTotal,
             uom: (item as any).uom || matchingPrItem?.uom || 'Unit',
+          });
+        });
+        await queryRunner.manager.save(items);
+      } else if (winningQuote && winningQuote.items && winningQuote.items.length > 0) {
+        // Quotation Fallback: map from winningQuote.items with winning vendor prices
+        items = winningQuote.items.map((qi) => {
+          const matchingPrItem = (pr.items || []).find(
+            (pi) => qi.prItemId && Number(pi.id) === Number(qi.prItemId),
+          );
+          const qty = Number(qi.quantity || 0);
+          const unitPrice = Number(qi.unitPrice || 0);
+          const authoritativeLineTotal = Math.round(qty * unitPrice * 100) / 100;
+          return queryRunner.manager.create(PurchaseOrderItem, {
+            purchaseOrderId: savedPo.id,
+            prItemId: qi.prItemId || null,
+            costItemId: matchingPrItem ? matchingPrItem.costItemId : null,
+            itemName: qi.itemName,
+            quantity: qty,
+            unitPrice: unitPrice,
+            totalPrice: authoritativeLineTotal,
+            uom: qi.uom || matchingPrItem?.uom || 'Unit',
           });
         });
         await queryRunner.manager.save(items);
@@ -903,6 +947,7 @@ export class ProcurementService {
         items = pr.items.map((pi) => {
           const qty = Number(pi.quantity || 0);
           const price = Number(pi.estimatedUnitPrice || 0);
+          const authoritativeLineTotal = Math.round(qty * price * 100) / 100;
           return queryRunner.manager.create(PurchaseOrderItem, {
             purchaseOrderId: savedPo.id,
             prItemId: pi.id,
@@ -910,7 +955,7 @@ export class ProcurementService {
             itemName: pi.itemName,
             quantity: qty,
             unitPrice: price,
-            totalPrice: Math.round(qty * price * 100) / 100,
+            totalPrice: authoritativeLineTotal,
             uom: pi.uom || 'Unit',
           });
         });

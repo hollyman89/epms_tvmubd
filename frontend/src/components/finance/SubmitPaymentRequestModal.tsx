@@ -44,17 +44,62 @@ export const SubmitPaymentRequestModal: React.FC<SubmitPaymentRequestModalProps>
 }) => {
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
+  const [taxDetail, setTaxDetail] = useState<any>((invoice as any)?.invoiceTaxDetail || null);
+  const [loadingTax, setLoadingTax] = useState<boolean>(false);
 
   useEffect(() => {
     if (open && invoice) {
-      const remaining = Number(invoice.totalAmount || 0);
-      form.setFieldsValue({
-        requestedAmount: remaining,
-        bankName: 'Bank Mandiri',
-        bankAccountNumber: '123-456-7890',
-        bankAccountHolder: invoice.purchaseOrder?.vendor?.name || 'PT Vendor Rekanan',
-        notes: `Pengajuan pembayaran faktur ${invoice.invoiceNumber}`,
-      });
+      let isSubscribed = true;
+      const directItd = (invoice as any).invoiceTaxDetail;
+      if (directItd) {
+        setTaxDetail(directItd);
+        const netCash = directItd.netVendorCashPayable != null
+          ? Number(directItd.netVendorCashPayable)
+          : Number(invoice.totalAmount || 0);
+        form.setFieldsValue({
+          requestedAmount: netCash,
+          bankName: 'Bank Mandiri',
+          bankAccountNumber: '123-456-7890',
+          bankAccountHolder: invoice.purchaseOrder?.vendor?.name || 'PT Vendor Rekanan',
+          notes: `Pengajuan pembayaran faktur ${invoice.invoiceNumber}`,
+        });
+      } else if (invoice.id) {
+        setLoadingTax(true);
+        FinanceService.getInvoiceTax(invoice.id)
+          .then((res: any) => {
+            if (!isSubscribed) return;
+            const fetchedItd = res?.taxDetail || res?.invoiceTaxDetail || res?.data?.invoiceTaxDetail || res?.data?.taxDetail;
+            setTaxDetail(fetchedItd || null);
+            const netCash = fetchedItd?.netVendorCashPayable != null
+              ? Number(fetchedItd.netVendorCashPayable)
+              : Number(invoice.totalAmount || 0);
+            form.setFieldsValue({
+              requestedAmount: netCash,
+              bankName: 'Bank Mandiri',
+              bankAccountNumber: '123-456-7890',
+              bankAccountHolder: invoice.purchaseOrder?.vendor?.name || 'PT Vendor Rekanan',
+              notes: `Pengajuan pembayaran faktur ${invoice.invoiceNumber}`,
+            });
+          })
+          .catch(() => {
+            if (isSubscribed) {
+              form.setFieldsValue({
+                requestedAmount: Number(invoice.totalAmount || 0),
+                bankName: 'Bank Mandiri',
+                bankAccountNumber: '123-456-7890',
+                bankAccountHolder: invoice.purchaseOrder?.vendor?.name || 'PT Vendor Rekanan',
+                notes: `Pengajuan pembayaran faktur ${invoice.invoiceNumber}`,
+              });
+            }
+          })
+          .finally(() => {
+            if (isSubscribed) setLoadingTax(false);
+          });
+      }
+
+      return () => {
+        isSubscribed = false;
+      };
     }
   }, [open, invoice, form]);
 
@@ -63,6 +108,23 @@ export const SubmitPaymentRequestModal: React.FC<SubmitPaymentRequestModalProps>
     activeRequest &&
     ['PENDING_DIRECTOR_APPROVAL', 'NEEDS_REVISION', 'APPROVED_FOR_PAYMENT'].includes(activeRequest.status || '')
   );
+
+  // Financial breakdown variables (Authoritative Tax Settlement)
+  const dppAmount = Number(taxDetail?.dppCommercial ?? invoice?.totalAmount ?? 0);
+  const ppnAmount = Number(taxDetail?.ppnAmount ?? 0);
+  const grossLiability = Number(taxDetail?.grossCommercialLiability ?? (dppAmount + ppnAmount));
+  const pphAmount = Number(taxDetail?.pphWithholdingAmount ?? 0);
+  const wapuAmount = Number(taxDetail?.wapuPpnWithheldAmount ?? 0);
+  const priorDeductions = Number(taxDetail?.priorDeductionsAmount ?? 0);
+
+  // Existing cash payments already disbursed
+  const existingPaymentsSum = Array.isArray(invoice?.payments)
+    ? invoice.payments.reduce((acc: number, p: any) => (!p.deletedAt ? acc + Number(p.amount || 0) : acc), 0)
+    : 0;
+
+  const netVendorCashPayable = Number(taxDetail?.netVendorCashPayable ?? Math.max(0, grossLiability - pphAmount - wapuAmount - priorDeductions));
+  const remainingNetPayable = Math.max(0, netVendorCashPayable - existingPaymentsSum);
+  const hasTaxOrDeductions = ppnAmount > 0 || pphAmount > 0 || wapuAmount > 0 || priorDeductions > 0;
 
   const handleSubmit = async (values: any) => {
     if (!invoice?.id) return;
@@ -143,57 +205,118 @@ export const SubmitPaymentRequestModal: React.FC<SubmitPaymentRequestModalProps>
           style={{ marginBottom: 16 }}
         />
 
-        <Card size="small" style={{ marginBottom: 16, backgroundColor: '#f8fafc' }}>
-          <Row gutter={[16, 12]}>
+        <Card size="small" style={{ marginBottom: 16, backgroundColor: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+          <Row gutter={[16, 10]}>
             <Col xs={24} sm={12}>
-              <Text type="secondary" style={{ fontSize: 12 }}>Nomor Invoice:</Text>
-              <div style={{ fontWeight: 700, fontFamily: 'monospace', color: '#1d4ed8' }}>
+              <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase' }}>Nomor Invoice:</Text>
+              <div style={{ fontWeight: 700, fontFamily: 'monospace', color: '#1d4ed8', fontSize: 13 }}>
                 {invoice.invoiceNumber}
               </div>
             </Col>
             <Col xs={24} sm={12}>
-              <Text type="secondary" style={{ fontSize: 12 }}>Nomor PO:</Text>
-              <div style={{ fontWeight: 600, fontFamily: 'monospace', color: '#0f766e' }}>
+              <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase' }}>Nomor PO:</Text>
+              <div style={{ fontWeight: 600, fontFamily: 'monospace', color: '#0f766e', fontSize: 13 }}>
                 {invoice.purchaseOrder?.poNumber || '—'}
               </div>
             </Col>
             <Col xs={24} sm={12}>
-              <Text type="secondary" style={{ fontSize: 12 }}>Vendor Penerima:</Text>
-              <div style={{ fontWeight: 600, color: '#0f172a' }}>
+              <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase' }}>Vendor Penerima:</Text>
+              <div style={{ fontWeight: 600, color: '#0f172a', fontSize: 12.5 }}>
                 <ShopOutlined style={{ marginRight: 4 }} />
                 {invoice.purchaseOrder?.vendor?.name || '—'}
               </div>
             </Col>
-            <Col xs={24} sm={12}>
-              <Text type="secondary" style={{ fontSize: 12 }}>Total Tagihan:</Text>
-              <div style={{ fontWeight: 800, color: '#059669', fontSize: 14 }}>
-                {formatCurrency(Number(invoice.totalAmount || 0))}
-              </div>
-            </Col>
             {invoice.paymentTerm?.termName && (
-              <Col span={24}>
-                <Text type="secondary" style={{ fontSize: 12 }}>Termin:</Text>
+              <Col xs={24} sm={12}>
+                <Text type="secondary" style={{ fontSize: 11, textTransform: 'uppercase' }}>Termin Procurement:</Text>
                 <div>
-                  <Tag color="cyan">{invoice.paymentTerm.termName}</Tag>
+                  <Tag color="cyan" style={{ fontSize: 11, margin: 0, fontWeight: 600 }}>{invoice.paymentTerm.termName}</Tag>
                 </div>
               </Col>
             )}
           </Row>
+
+          {/* Authoritative Settlement Breakdown */}
+          <div
+            style={{
+              marginTop: 12,
+              padding: '10px 14px',
+              borderRadius: 6,
+              background: '#ffffff',
+              border: '1px solid #cbd5e1',
+            }}
+          >
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: '#1e3a8a', marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              Rincian Rekonsiliasi Tagihan &amp; Kas Bersih Vendor
+            </div>
+            <Row gutter={[12, 8]}>
+              <Col xs={12} sm={hasTaxOrDeductions ? 5 : 8}>
+                <Text type="secondary" style={{ fontSize: 10.5 }}>Nilai DPP:</Text>
+                <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 12.5, color: '#0f172a' }}>
+                  {formatCurrency(dppAmount)}
+                </div>
+              </Col>
+              {ppnAmount > 0 && (
+                <Col xs={12} sm={5}>
+                  <Text type="secondary" style={{ fontSize: 10.5 }}>PPN (11%):</Text>
+                  <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 12.5, color: '#0284c7' }}>
+                    + {formatCurrency(ppnAmount)}
+                  </div>
+                </Col>
+              )}
+              <Col xs={12} sm={hasTaxOrDeductions ? 5 : 8}>
+                <Text type="secondary" style={{ fontSize: 10.5 }}>Total Tagihan Bruto:</Text>
+                <div style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: 13, color: '#1d4ed8' }}>
+                  {formatCurrency(grossLiability)}
+                </div>
+              </Col>
+              {pphAmount > 0 && (
+                <Col xs={12} sm={4}>
+                  <Text type="secondary" style={{ fontSize: 10.5 }}>Potongan PPh:</Text>
+                  <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 12.5, color: '#dc2626' }}>
+                    - {formatCurrency(pphAmount)}
+                  </div>
+                </Col>
+              )}
+              <Col xs={12} sm={hasTaxOrDeductions ? 5 : 8}>
+                <Text type="secondary" style={{ fontSize: 10.5, color: '#059669', fontWeight: 600 }}>Jumlah Kas Bersih Vendor:</Text>
+                <div style={{ fontWeight: 800, fontFamily: 'monospace', fontSize: 13.5, color: '#059669' }}>
+                  {formatCurrency(netVendorCashPayable)}
+                </div>
+              </Col>
+            </Row>
+
+            {existingPaymentsSum > 0 && (
+              <div style={{ marginTop: 8, paddingTop: 6, borderTop: '1px dashed #e2e8f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11 }}>
+                <span>Kas Sudah Dibayar: <strong style={{ color: '#0f172a' }}>{formatCurrency(existingPaymentsSum)}</strong></span>
+                <span>Sisa Kas Bersih yang Dapat Diajukan: <strong style={{ color: '#059669' }}>{formatCurrency(remainingNetPayable)}</strong></span>
+              </div>
+            )}
+          </div>
         </Card>
 
         <Form form={form} layout="vertical" onFinish={handleSubmit}>
           <Form.Item
-            label="Jumlah yang Diajukan (Rp)"
+            label={
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', flexWrap: 'wrap', gap: 4 }}>
+                <span>Jumlah yang Diajukan (Rp)</span>
+                <span style={{ fontSize: 11, color: '#059669', fontWeight: 600 }}>
+                  Maksimum Kas Bersih: {formatCurrency(remainingNetPayable)}
+                </span>
+              </div>
+            }
             name="requestedAmount"
             rules={[
               { required: true, message: 'Jumlah yang diajukan wajib diisi' },
               {
                 validator: async (_, value) => {
-                  if (value && value > Number(invoice.totalAmount)) {
-                    return Promise.reject(new Error('Jumlah melebihi total tagihan invoice'));
-                  }
                   if (value && value <= 0) {
                     return Promise.reject(new Error('Jumlah harus lebih besar dari 0'));
+                  }
+                  if (value && value > remainingNetPayable) {
+                    return Promise.reject(
+                      new Error(`Jumlah melebihi sisa kas bersih yang dapat dibayarkan ke vendor (${formatCurrency(remainingNetPayable)})`)
+                    );
                   }
                   return Promise.resolve();
                 },
@@ -205,6 +328,7 @@ export const SubmitPaymentRequestModal: React.FC<SubmitPaymentRequestModalProps>
               formatter={(v) => `${v}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}
               parser={(v) => (v ? Number(v.replace(/[^0-9]/g, '')) : 0)}
               min={1}
+              max={remainingNetPayable}
               id="input-requested-amount"
             />
           </Form.Item>

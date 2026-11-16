@@ -1,6 +1,7 @@
-import { Injectable, BadRequestException, ConflictException, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, BadRequestException, ConflictException, NotFoundException, Inject, Optional } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource, Like, In, OptimisticLockVersionMismatchError, EntityManager } from 'typeorm';
+import { Repository, DataSource, Like, In, IsNull, OptimisticLockVersionMismatchError, EntityManager } from 'typeorm';
+import Decimal from 'decimal.js';
 import { Invoice } from '../../entities/invoice.entity';
 import { InvoiceItem } from '../../entities/invoice-item.entity';
 import { Payment } from '../../entities/payment.entity';
@@ -13,7 +14,7 @@ import { randomUUID } from 'crypto';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { OutboxEvent, OutboxStatus } from '../../entities/outbox-event.entity';
 import { BusinessEvent, NotificationPolicy } from '../../shared/contracts/business-event.contract';
-import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { CreateInvoiceDto, CreateInvoiceTaxDto } from './dto/create-invoice.dto';
 import { CreatePaymentDto } from './dto/create-payment.dto';
 import { VerifyInvoiceDto } from './dto/verify-invoice.dto';
 import { SubmitPaymentRequestDto } from './dto/submit-payment-request.dto';
@@ -23,6 +24,24 @@ import { PaymentRequest, PaymentRequestStatus, ApprovalSnapshot } from '../../en
 import { User } from '../../entities/user.entity';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { MismatchCode, MatchingMismatch, MatchingResult } from './finance.types';
+import { InvoiceTaxDetail } from '../../entities/invoice-tax-detail.entity';
+import { PpnMasukanRecord, CreditabilityStatus, SptMasaStatus, ValidationStatus } from '../../entities/ppn-masukan-record.entity';
+import { PphWithholdingRecord, RecognitionStatus, StatutoryTriggerType } from '../../entities/pph-withholding-record.entity';
+import { StatutoryTaxLiability, StatutoryLiabilityStatus } from '../../entities/statutory-tax-liability.entity';
+import { TaxRegimeRule, TaxCategory, TaxRuleVerificationStatus } from '../../entities/tax-regime-rule.entity';
+import { TaxSupportingDocument, TaxTargetType, TaxDocumentCategory } from '../../entities/tax-supporting-document.entity';
+import {
+  CompanyBankAccount,
+  CompanyBankAccountType,
+  CompanyBankAccountPurpose,
+  CompanyBankAccountStatus,
+} from '../../entities/company-bank-account.entity';
+import {
+  CreateCompanyBankAccountDto,
+  UpdateCompanyBankAccountDto,
+  ChangeCompanyBankAccountStatusDto,
+  QueryCompanyBankAccountDto,
+} from './dto/company-bank-account.dto';
 
 @Injectable()
 export class FinanceService {
@@ -38,8 +57,22 @@ export class FinanceService {
     private paymentRepository: Repository<Payment>,
     @InjectRepository(PoPaymentTerm)
     private paymentTermRepository: Repository<PoPaymentTerm>,
-    private readonly eventEmitter: EventEmitter2
-  ) {}
+    @Optional()
+    @InjectRepository(CompanyBankAccount)
+    private companyBankAccountRepository?: Repository<CompanyBankAccount>,
+    private readonly eventEmitter?: EventEmitter2
+  ) { }
+
+  /**
+   * Helper: Exact decimal conversion for monetary & calculation precision.
+   * Standardizes values to scale 2 with half-up rounding (CP1.2-03 SSOT).
+   */
+  private toMoneyDec(val: any): Decimal {
+    if (val === null || val === undefined || val === '') return new Decimal(0);
+    const num = Number(val);
+    if (isNaN(num) || !isFinite(num)) return new Decimal(0);
+    return new Decimal(String(val).trim()).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+  }
 
   async createInvoice(dto: CreateInvoiceDto, userId: number) {
     const queryRunner = this.dataSource.createQueryRunner();
@@ -258,10 +291,13 @@ export class FinanceService {
             }
           }
 
-          const currentTermAmount = Number(paymentTerm.amount);
-          if (Math.round((previousProgressBilled + currentTermAmount) * 100) / 100 > Math.round(totalReceivedPhysicalValue * 100) / 100 + 0.01) {
+          const currentTermAmountDec = this.toMoneyDec(paymentTerm.amount);
+          const previousProgressBilledDec = this.toMoneyDec(previousProgressBilled);
+          const totalReceivedPhysicalValueDec = this.toMoneyDec(totalReceivedPhysicalValue);
+          const totalProgressDec = previousProgressBilledDec.plus(currentTermAmountDec);
+          if (totalProgressDec.greaterThan(totalReceivedPhysicalValueDec)) {
             throw new BadRequestException(
-              `Akumulasi penagihan progress (Rp${(previousProgressBilled + currentTermAmount).toLocaleString('id-ID')}) melebihi total nilai fisik barang yang telah diterima (Rp${totalReceivedPhysicalValue.toLocaleString('id-ID')}).`
+              `Akumulasi penagihan progress (Rp${totalProgressDec.toNumber().toLocaleString('id-ID')}) melebihi total nilai fisik barang yang telah diterima (Rp${totalReceivedPhysicalValueDec.toNumber().toLocaleString('id-ID')}).`
             );
           }
         }
@@ -287,6 +323,7 @@ export class FinanceService {
         const isDp = paymentTerm.termType === PaymentTermType.DOWN_PAYMENT ||
           (paymentTerm.termName || '').toUpperCase().includes('DP') ||
           (paymentTerm.termName || '').toUpperCase().includes('UANG MUKA');
+        const isRetention = paymentTerm.termType === PaymentTermType.RETENTION || Boolean(paymentTerm.isRetention);
 
         if (po.orderType === 'SERVICE' || dto.serviceClaimId) {
           if (po.orderType === 'SERVICE' && !isDp && !dto.serviceClaimId) {
@@ -331,20 +368,21 @@ export class FinanceService {
             const activeInvoicesForClaim = await queryRunner.manager.find(Invoice, {
               where: { serviceClaimId: referencedClaim.id },
             });
-            let alreadyInvoicedClaimAmount = 0;
+            let alreadyInvoicedDec = new Decimal(0);
             for (const inv of activeInvoicesForClaim) {
               if (inv.deletedAt || inv.status === 'CANCELLED' || inv.matchStatus === 'REJECTED') {
                 continue;
               }
-              alreadyInvoicedClaimAmount += Number(inv.totalAmount || 0);
+              alreadyInvoicedDec = alreadyInvoicedDec.plus(this.toMoneyDec(inv.totalAmount));
             }
 
-            const approvedClaimValue = Number(referencedClaim.approvedClaimAmount || 0);
-            const remainingClaimCapacity = Math.max(0, Math.round((approvedClaimValue - alreadyInvoicedClaimAmount) * 100) / 100);
+            const approvedClaimDec = this.toMoneyDec(referencedClaim.approvedClaimAmount);
+            const remainingClaimCapacityDec = Decimal.max(0, approvedClaimDec.minus(alreadyInvoicedDec));
+            const totalInvoiceDec = this.toMoneyDec(totalInvoiceAmount);
 
-            if (totalInvoiceAmount > remainingClaimCapacity + 0.01) {
+            if (totalInvoiceDec.greaterThan(remainingClaimCapacityDec)) {
               throw new BadRequestException(
-                `Nilai invoice (Rp${totalInvoiceAmount.toLocaleString('id-ID')}) melebihi sisa kapasitas klaim jasa yang disetujui (Tersedia: Rp${remainingClaimCapacity.toLocaleString('id-ID')}, Disetujui: Rp${approvedClaimValue.toLocaleString('id-ID')}, Sudah ditagihkan: Rp${alreadyInvoicedClaimAmount.toLocaleString('id-ID')}).`
+                `Nilai invoice (Rp${totalInvoiceDec.toNumber().toLocaleString('id-ID')}) melebihi sisa kapasitas klaim jasa yang disetujui (Tersedia: Rp${remainingClaimCapacityDec.toNumber().toLocaleString('id-ID')}, Disetujui: Rp${approvedClaimDec.toNumber().toLocaleString('id-ID')}, Sudah ditagihkan: Rp${alreadyInvoicedDec.toNumber().toLocaleString('id-ID')}).`
               );
             }
           }
@@ -369,14 +407,100 @@ export class FinanceService {
             previouslyInvoicedQtyMap.set(Number(item.poItemId), current + Number(item.quantity || 0));
           }
         }
-        const poTotalAmount = Number(po.totalAmount || 0);
-        if (Math.round((activeInvoicedSum + totalInvoiceAmount) * 100) / 100 > poTotalAmount + 0.01) {
+        const poTotalAmountDec = this.toMoneyDec(po.totalAmount);
+        const activeInvoicedSumDec = this.toMoneyDec(activeInvoicedSum);
+        const totalInvoiceDec = this.toMoneyDec(totalInvoiceAmount);
+        if (activeInvoicedSumDec.plus(totalInvoiceDec).greaterThan(poTotalAmountDec)) {
           throw new BadRequestException('Akumulasi nilai invoice melebihi total Purchase Order.');
         }
 
-        // A9. Invoice Items handling
+        // A9. Invoice Items handling (CP1.2-04 Header-Detail Reconciliation)
         const invoiceItems: InvoiceItem[] = [];
-        if (po.orderType !== 'SERVICE' && paymentTerm.termType === PaymentTermType.PROGRESS) {
+        if (isDp || isRetention) {
+          if (!dto.items || dto.items.length === 0) {
+            // Standalone milestone invoice detail when PO item allocation is not applicable (CP1.2-04 Rule 4, 5, 6)
+            const invItem = new InvoiceItem();
+            invItem.poItemId = null as any;
+            invItem.itemName = (paymentTerm.termName || '').trim() || (isDp ? 'Down Payment / Uang Muka' : 'Retensi');
+            invItem.quantity = 1;
+            invItem.unitPrice = totalInvoiceAmount;
+            invItem.totalPrice = totalInvoiceAmount;
+            invItem.createdBy = userId;
+            invoiceItems.push(invItem);
+          } else {
+            for (const itemDto of dto.items) {
+              if (itemDto.poItemId) {
+                const poItem = po.items?.find(i => Number(i.id) === Number(itemDto.poItemId));
+                if (!poItem) {
+                  throw new BadRequestException(`PO Item ${itemDto.poItemId} not found in this PO`);
+                }
+                const authoritativeUnitPrice = Number(poItem.unitPrice || 0);
+                const invItem = new InvoiceItem();
+                invItem.poItemId = itemDto.poItemId;
+                invItem.itemName = poItem.itemName;
+                invItem.quantity = Number(itemDto.quantity);
+                invItem.unitPrice = authoritativeUnitPrice;
+                invItem.totalPrice = Math.round(Number(itemDto.quantity) * authoritativeUnitPrice * 100) / 100;
+                invItem.createdBy = userId;
+                invoiceItems.push(invItem);
+              } else {
+                const invItem = new InvoiceItem();
+                invItem.poItemId = null as any;
+                invItem.itemName = (itemDto as any).itemName || (paymentTerm.termName || '').trim() || (isDp ? 'Down Payment / Uang Muka' : 'Retensi');
+                invItem.quantity = Number(itemDto.quantity || 1);
+                invItem.unitPrice = Number(itemDto.unitPrice || totalInvoiceAmount);
+                invItem.totalPrice = Math.round(invItem.quantity * invItem.unitPrice * 100) / 100;
+                invItem.createdBy = userId;
+                invoiceItems.push(invItem);
+              }
+            }
+          }
+        } else if (po.orderType === 'SERVICE') {
+          // Service PO Progress & Final Delivery
+          if (dto.items && dto.items.length > 0) {
+            for (const itemDto of dto.items) {
+              const poItem = po.items?.find(i => Number(i.id) === Number(itemDto.poItemId));
+              if (!poItem) {
+                throw new BadRequestException(`PO Item ${itemDto.poItemId} not found in this PO`);
+              }
+              const authoritativeUnitPrice = Number(poItem.unitPrice || 0);
+              const invItem = new InvoiceItem();
+              invItem.poItemId = itemDto.poItemId;
+              invItem.itemName = poItem.itemName;
+              invItem.quantity = Number(itemDto.quantity);
+              invItem.unitPrice = authoritativeUnitPrice;
+              invItem.totalPrice = Math.round(Number(itemDto.quantity) * authoritativeUnitPrice * 100) / 100;
+              invItem.createdBy = userId;
+              invoiceItems.push(invItem);
+            }
+          } else if (referencedClaim?.items && referencedClaim.items.length > 0) {
+            for (const ci of referencedClaim.items) {
+              const poItem = po.items?.find(i => Number(i.id) === Number(ci.poItemId));
+              const authoritativeUnitPrice = Number(ci.contractUnitRateSnapshot || poItem?.unitPrice || 0);
+              const invItem = new InvoiceItem();
+              invItem.poItemId = ci.poItemId;
+              invItem.itemName = ci.itemNameSnapshot || poItem?.itemName;
+              invItem.quantity = Number(ci.currentClaimQuantity);
+              invItem.unitPrice = authoritativeUnitPrice;
+              invItem.totalPrice = Math.round(Number(ci.currentClaimQuantity) * authoritativeUnitPrice * 100) / 100;
+              invItem.createdBy = userId;
+              invoiceItems.push(invItem);
+            }
+          } else {
+            // Standalone service progress/final claim detail referencing approved Service Claim
+            const invItem = new InvoiceItem();
+            invItem.poItemId = null as any;
+            invItem.itemName = referencedClaim?.claimNumber
+              ? `Klaim Jasa ${referencedClaim.claimNumber} - ${paymentTerm.termName}`
+              : (paymentTerm.termName || 'Penagihan Jasa');
+            invItem.quantity = 1;
+            invItem.unitPrice = totalInvoiceAmount;
+            invItem.totalPrice = totalInvoiceAmount;
+            invItem.createdBy = userId;
+            invoiceItems.push(invItem);
+          }
+        } else {
+          // Material PO Progress & Final Delivery
           if (dto.items && dto.items.length > 0) {
             for (const itemDto of dto.items) {
               const poItem = po.items?.find(i => Number(i.id) === Number(itemDto.poItemId));
@@ -439,7 +563,10 @@ export class FinanceService {
                 previouslyInvoicedQtyMap.set(Number(poItem.id), previouslyInvoiced + billableQty);
 
                 const authoritativeUnitPrice = Number(poItem.unitPrice || 0);
-                const authoritativeTotalPrice = Math.round(billableQty * authoritativeUnitPrice * 100) / 100;
+                const authoritativeTotalPrice = this.toMoneyDec(billableQty)
+                  .times(this.toMoneyDec(authoritativeUnitPrice))
+                  .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+                  .toNumber();
 
                 const invItem = new InvoiceItem();
                 invItem.poItemId = poItem.id;
@@ -452,30 +579,26 @@ export class FinanceService {
               }
             }
           }
-        } else {
-          // DP and Retention
-          if (dto.items && dto.items.length > 0) {
-            for (const itemDto of dto.items) {
-              const poItem = po.items?.find(i => Number(i.id) === Number(itemDto.poItemId));
-              if (!poItem) {
-                throw new BadRequestException(`PO Item ${itemDto.poItemId} not found in this PO`);
-              }
-              const authoritativeUnitPrice = Number(poItem.unitPrice || 0);
-              const invItem = new InvoiceItem();
-              invItem.poItemId = itemDto.poItemId;
-              invItem.itemName = poItem.itemName;
-              invItem.quantity = Number(itemDto.quantity);
-              invItem.unitPrice = authoritativeUnitPrice;
-              invItem.totalPrice = Math.round(Number(itemDto.quantity) * authoritativeUnitPrice * 100) / 100;
-              invItem.createdBy = userId;
-              invoiceItems.push(invItem);
-            }
+        }
+
+        // Header-to-detail reconciliation guard
+        if (isDp || isRetention || (dto.items && dto.items.length > 0)) {
+          let detailSumDec = new Decimal(0);
+          for (const it of invoiceItems) {
+            detailSumDec = detailSumDec.plus(this.toMoneyDec(it.totalPrice));
+          }
+          const totalInvoiceDec = this.toMoneyDec(totalInvoiceAmount);
+          if (!detailSumDec.equals(totalInvoiceDec)) {
+            throw new BadRequestException(
+              `Total rincian item invoice (Rp${detailSumDec.toNumber().toLocaleString('id-ID')}) tidak sesuai dengan nominal termin pembayaran (Rp${totalInvoiceDec.toNumber().toLocaleString('id-ID')}).`
+            );
           }
         }
 
         // A10. Create and Save Invoice
         const invoice = new Invoice();
         invoice.poId = po.id;
+        invoice.companyCode = po.companyCode || (po.purchaseRequest?.project as any)?.companyCode || 'UBD';
         invoice.paymentTermId = paymentTerm.id;
         if (referencedClaim) {
           invoice.serviceClaimId = referencedClaim.id;
@@ -492,6 +615,11 @@ export class FinanceService {
         }
 
         const savedInvoice = await queryRunner.manager.save(Invoice, invoice);
+
+        // Process optional tax administration (PPN / PPh)
+        if (dto.tax) {
+          await this.processAndPersistInvoiceTax(queryRunner.manager, savedInvoice, po, dto.tax, userId);
+        }
 
         // A11. Update Payment Term status to INVOICE_SUBMITTED
         paymentTerm.status = PaymentTermStatus.INVOICE_SUBMITTED;
@@ -636,7 +764,10 @@ export class FinanceService {
 
           // P0-3 & Part D: Authoritative Pricing (strictly ignore client unitPrice and totalPrice)
           const authoritativeUnitPrice = Number(poItem.unitPrice || 0);
-          const authoritativeTotalPrice = Math.round(itemQty * authoritativeUnitPrice * 100) / 100;
+          const authoritativeTotalPrice = this.toMoneyDec(itemQty)
+            .times(this.toMoneyDec(authoritativeUnitPrice))
+            .toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+            .toNumber();
 
           const invItem = new InvoiceItem();
           invItem.poItemId = poItem.id;
@@ -650,33 +781,35 @@ export class FinanceService {
           totalInvoiceAmount += authoritativeTotalPrice;
         }
       }
-      totalInvoiceAmount = Math.round(totalInvoiceAmount * 100) / 100;
+      totalInvoiceAmount = this.toMoneyDec(totalInvoiceAmount).toNumber();
 
       // Calculate 3-Way Matching Data
-      const totalPoAmount = Number(po.totalAmount);
+      const totalPoAmountDec = this.toMoneyDec(po.totalAmount);
+      const totalInvoiceDec = this.toMoneyDec(totalInvoiceAmount);
       const goodsReceipts = await queryRunner.manager.find(GoodsReceipt, {
         where: { poId: po.id },
         relations: ['items'],
       });
 
-      let totalGrAmount = 0;
+      let totalGrAmountDec = new Decimal(0);
       for (const gr of goodsReceipts) {
         for (const grItem of gr.items) {
           const matchedPoItem = po.items?.find(i => i.id === grItem.poItemId);
           if (matchedPoItem) {
-            totalGrAmount += Number(grItem.receivedQuantity) * Number(matchedPoItem.unitPrice);
+            const grQty = this.toMoneyDec(grItem.receivedQuantity);
+            const poPrice = this.toMoneyDec(matchedPoItem.unitPrice);
+            const grLineTotal = grQty.times(poPrice).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+            totalGrAmountDec = totalGrAmountDec.plus(grLineTotal);
           }
         }
       }
 
-      const isMatched = (
-        Math.abs(totalInvoiceAmount - totalPoAmount) < 0.01 &&
-        Math.abs(totalPoAmount - totalGrAmount) < 0.01
-      );
+      const isMatched = totalInvoiceDec.equals(totalPoAmountDec) && totalPoAmountDec.equals(totalGrAmountDec);
       const matchStatus = isMatched ? 'MATCHED' : 'MISMATCHED';
 
       const invoice = new Invoice();
       invoice.poId = po.id;
+      invoice.companyCode = po.companyCode || (po.purchaseRequest?.project as any)?.companyCode || 'UBD';
       invoice.invoiceNumber = invoiceNumber;
       invoice.invoiceDate = dto.invoiceDate ? new Date(dto.invoiceDate) : new Date();
       invoice.totalAmount = totalInvoiceAmount;
@@ -687,6 +820,11 @@ export class FinanceService {
       invoice.items = invoiceItems;
 
       const savedInvoice = await queryRunner.manager.save(Invoice, invoice);
+
+      // Process optional tax administration (PPN / PPh)
+      if (dto.tax) {
+        await this.processAndPersistInvoiceTax(queryRunner.manager, savedInvoice, po, dto.tax, userId);
+      }
 
       // Canonical AuditLog: Invoice CREATE (Legacy Full PO)
       const invoiceAudit = queryRunner.manager.create(AuditLog, {
@@ -771,8 +909,8 @@ export class FinanceService {
           invoiceNumber: savedInvoice.invoiceNumber,
           poId: po.id,
           totalInvoice: totalInvoiceAmount,
-          totalPO: totalPoAmount,
-          totalGR: totalGrAmount,
+          totalPO: totalPoAmountDec.toNumber(),
+          totalGR: totalGrAmountDec.toNumber(),
           createdAt: new Date().toISOString(),
         });
       }
@@ -797,6 +935,7 @@ export class FinanceService {
       const invoice = await queryRunner.manager.findOne(Invoice, {
         where: { id: dto.invoiceId },
         lock: { mode: 'pessimistic_write' },
+        relations: ['invoiceTaxDetail'],
       });
 
       if (!invoice || invoice.deletedAt) {
@@ -844,6 +983,126 @@ export class FinanceService {
         );
       }
 
+      // 1.c Stale Approval Snapshot Integrity Guard
+      if (
+        prq.approvalSnapshot?.invoiceVersion &&
+        invoice.version &&
+        invoice.version > prq.approvalSnapshot.invoiceVersion
+      ) {
+        throw new BadRequestException(
+          `Pembayaran ditolak: Terdeteksi perubahan data invoice (versi ${invoice.version}) setelah persetujuan Direktur diberikan (versi snapshot ${prq.approvalSnapshot.invoiceVersion}). Harap minta revisi Payment Request terlebih dahulu.`
+        );
+      }
+
+      // 1.d Vendor Destination Account Guard
+      if (
+        prq.approvalSnapshot &&
+        (!prq.approvalSnapshot.vendorBankAccount || String(prq.approvalSnapshot.vendorBankAccount).trim() === '')
+      ) {
+        throw new BadRequestException(
+          'Rekening bank tujuan vendor tidak ditemukan atau belum terdaftar pada master data / snapshot persetujuan.'
+        );
+      }
+
+      // 1.e Bank Transfer Reference Requirement
+      if (dto.paymentMethod === 'BANK_TRANSFER' && (!dto.referenceNumber || dto.referenceNumber.trim().length === 0)) {
+        throw new BadRequestException(
+          'Nomor referensi transaksi / bukti transfer wajib diisi untuk metode transfer bank.'
+        );
+      }
+
+      // 1.f Authoritative Legal Entity Resolution & Strict Cross-Entity Control
+      let po: PurchaseOrder | null = null;
+      if (invoice.poId) {
+        po = await queryRunner.manager.findOne(PurchaseOrder, {
+          where: { id: invoice.poId },
+          relations: ['purchaseRequest', 'purchaseRequest.project'],
+        });
+      }
+
+      const transactionCompanyCode = this.resolveTransactionCompanyCode(
+        prq,
+        invoice,
+        po,
+        (po as any)?.purchaseRequest?.project || (po as any)?.project
+      );
+
+      // 1.g Mandatory Authoritative Company Source Bank Account Selection & Eligibility Gate
+      if (!dto.companyBankAccountId) {
+        throw new BadRequestException(
+          'Payment execution blocked: Company source bank account must be selected.'
+        );
+      }
+
+      const sourceAccount = await queryRunner.manager.findOne(CompanyBankAccount, {
+        where: { id: dto.companyBankAccountId },
+      });
+
+      if (!sourceAccount || sourceAccount.deletedAt) {
+        throw new BadRequestException(
+          'Payment execution blocked: Selected company bank account does not exist.'
+        );
+      }
+
+      if (sourceAccount.companyCode !== transactionCompanyCode) {
+        throw new BadRequestException(
+          `Payment execution blocked: Selected company bank account belongs to ${sourceAccount.companyCode}, but payment transaction belongs to ${transactionCompanyCode}. Cross-entity account usage is strictly prohibited.`
+        );
+      }
+
+      if (sourceAccount.status === CompanyBankAccountStatus.BLOCKED) {
+        throw new BadRequestException(
+          'Payment execution blocked: Selected company bank account is BLOCKED.'
+        );
+      }
+
+      if (sourceAccount.status !== CompanyBankAccountStatus.ACTIVE) {
+        throw new BadRequestException(
+          `Payment execution blocked: Selected company bank account is ${sourceAccount.status}. Only ACTIVE accounts can be used for payment execution.`
+        );
+      }
+
+      const paymentDateObj = new Date(dto.paymentDate || new Date());
+      const effectiveDateObj = new Date(sourceAccount.effectiveDate);
+      if (paymentDateObj < effectiveDateObj) {
+        throw new BadRequestException(
+          'Payment execution blocked: Selected company bank account is not yet effective for the payment date.'
+        );
+      }
+
+      if (sourceAccount.expiryDate) {
+        const expiryDateObj = new Date(sourceAccount.expiryDate);
+        if (paymentDateObj > expiryDateObj) {
+          throw new BadRequestException(
+            'Payment execution blocked: Selected company bank account has expired.'
+          );
+        }
+      }
+
+      const maskedAccountNumber =
+        sourceAccount.accountNumber.length > 4
+          ? '••••••' + sourceAccount.accountNumber.slice(-4)
+          : sourceAccount.accountNumber;
+
+      const legalEntityName =
+        sourceAccount.companyCode === 'TVM' ? 'PT TVM' : 'PT UBD';
+
+      const sourceAccountSnapshot = {
+        companyBankAccountId: Number(sourceAccount.id),
+        companyCode: sourceAccount.companyCode,
+        legalEntityName,
+        bankName: sourceAccount.bankName,
+        bankCode: sourceAccount.bankCode || null,
+        accountNumber: sourceAccount.accountNumber,
+        maskedAccountNumber,
+        accountHolderName: sourceAccount.accountHolderName,
+        accountType: sourceAccount.accountType,
+        accountPurpose: sourceAccount.accountPurpose,
+        currency: sourceAccount.currency || 'IDR',
+        executionTimestamp: new Date().toISOString(),
+        executedBy: userId ? Number(userId) : null,
+      };
+
       // 2. Validate Invoice Match / Verification Status (MATCHED or VERIFIED)
       if (invoice.matchStatus !== 'MATCHED' && invoice.matchStatus !== 'VERIFIED') {
         throw new BadRequestException('Invoice belum disetujui untuk pembayaran');
@@ -859,6 +1118,7 @@ export class FinanceService {
       if (!paymentAmount || isNaN(paymentAmount) || paymentAmount <= 0 || !isFinite(paymentAmount)) {
         throw new BadRequestException('Payment amount harus lebih besar dari 0');
       }
+      const paymentAmountDec = this.toMoneyDec(paymentAmount);
 
       // 4.b Validate Director Approved Amount Ceiling (CRIT-01 Enforcement)
       const approvedAmount = Number(prq.approvedAmount);
@@ -873,28 +1133,52 @@ export class FinanceService {
           'Nominal persetujuan Direktur (approvedAmount) tidak valid pada Payment Request ini.'
         );
       }
+      const approvedAmountDec = this.toMoneyDec(approvedAmount);
 
-      if (Math.round(paymentAmount * 100) / 100 > Math.round(approvedAmount * 100) / 100 + 0.001) {
-        throw new BadRequestException(
-          `Payment amount (${paymentAmount}) melebihi nominal yang disetujui Direktur (${approvedAmount})`
-        );
-      }
-
-      // 5. Calculate Already Paid & Remaining on Invoice
+      // 5. Calculate Already Paid & Remaining on Invoice & Payment Request
       const existingPayments = (await queryRunner.manager.find(Payment, {
         where: { invoiceId: invoice.id },
       })) || [];
-      let alreadyPaid = 0;
+      let alreadyPaidDec = new Decimal(0);
+      let alreadyPaidOnThisPrqDec = new Decimal(0);
       for (const p of existingPayments) {
         if (!p.deletedAt) {
-          alreadyPaid += Number(p.amount);
+          const pAmount = this.toMoneyDec(p.amount);
+          alreadyPaidDec = alreadyPaidDec.plus(pAmount);
+          if (p.paymentRequestId && Number(p.paymentRequestId) === Number(prq.id)) {
+            alreadyPaidOnThisPrqDec = alreadyPaidOnThisPrqDec.plus(pAmount);
+          }
         }
       }
-      alreadyPaid = Math.round(alreadyPaid * 100) / 100;
-      const invoiceTotal = Number(invoice.totalAmount);
-      const remaining = Math.round((invoiceTotal - alreadyPaid) * 100) / 100;
+      const alreadyPaid = alreadyPaidDec.toNumber();
 
-      if (Math.round(paymentAmount * 100) / 100 > remaining + 0.001) {
+      // Validate against remaining approved amount on this Payment Request
+      const remainingApprovedOnPrqDec = Decimal.max(0, approvedAmountDec.minus(alreadyPaidOnThisPrqDec));
+      if (paymentAmountDec.greaterThan(remainingApprovedOnPrqDec)) {
+        throw new BadRequestException(
+          `Payment amount (${paymentAmount}) melebihi nominal yang disetujui Direktur (${remainingApprovedOnPrqDec.toNumber()})`
+        );
+      }
+
+      // Validate against remaining net vendor cash payable (if tax detail is recorded)
+      if (invoice.invoiceTaxDetail?.netVendorCashPayable != null) {
+        const netCashPayableDec = this.toMoneyDec(invoice.invoiceTaxDetail.netVendorCashPayable);
+        const remainingNetCashDec = Decimal.max(0, netCashPayableDec.minus(alreadyPaidDec));
+        if (paymentAmountDec.greaterThan(remainingNetCashDec)) {
+          throw new BadRequestException(
+            `Payment amount (${paymentAmount}) melebihi sisa kas bersih yang dapat dibayarkan ke vendor (${remainingNetCashDec.toNumber()})`
+          );
+        }
+      }
+
+      // Validate against remaining gross invoice liability
+      const effectiveInvoiceGrossDec = invoice.invoiceTaxDetail?.grossCommercialLiability != null
+        ? this.toMoneyDec(invoice.invoiceTaxDetail.grossCommercialLiability)
+        : this.toMoneyDec(invoice.totalAmount);
+      const remainingDec = Decimal.max(0, effectiveInvoiceGrossDec.minus(alreadyPaidDec));
+      const remaining = remainingDec.toNumber();
+
+      if (paymentAmountDec.greaterThan(remainingDec)) {
         throw new BadRequestException(
           `Payment amount (${paymentAmount}) melebihi sisa tagihan invoice (${remaining})`
         );
@@ -902,33 +1186,46 @@ export class FinanceService {
 
       // 6. PO-Level Overpayment Guard
       if (invoice.poId) {
-        const po = await queryRunner.manager.findOne(PurchaseOrder, {
-          where: { id: invoice.poId },
-        });
+        if (!po) {
+          po = await queryRunner.manager.findOne(PurchaseOrder, {
+            where: { id: invoice.poId },
+          });
+        }
         if (po) {
           const poInvoices = (await queryRunner.manager.find(Invoice, {
             where: { poId: po.id },
+            relations: ['invoiceTaxDetail'],
           })) || [];
           const poInvoiceIds = poInvoices.map((inv) => inv.id);
 
-          let totalPoPaidBefore = 0;
+          let totalPoPaidBeforeDec = new Decimal(0);
           if (poInvoiceIds.length > 0) {
             const allPoPayments = (await queryRunner.manager.find(Payment, {
               where: { invoiceId: In(poInvoiceIds) },
             })) || [];
             for (const p of allPoPayments) {
               if (!p.deletedAt) {
-                totalPoPaidBefore += Number(p.amount);
+                totalPoPaidBeforeDec = totalPoPaidBeforeDec.plus(this.toMoneyDec(p.amount));
               }
             }
           }
-          totalPoPaidBefore = Math.round(totalPoPaidBefore * 100) / 100;
-          const poTotal = Number(po.totalAmount || 0);
-          const projectedTotalPaid = Math.round((totalPoPaidBefore + paymentAmount) * 100) / 100;
+          const totalPoPaidBefore = totalPoPaidBeforeDec.toNumber();
+          const poTotalDec = this.toMoneyDec(po.totalAmount);
 
-          if (projectedTotalPaid > poTotal + 0.001) {
+          // Account for cumulative PPN billed across PO invoices under tax-exclusive pricing
+          let totalPoPpnDec = new Decimal(0);
+          for (const inv of poInvoices) {
+            if (!inv.deletedAt && inv.status !== 'CANCELLED' && inv.invoiceTaxDetail?.ppnAmount) {
+              totalPoPpnDec = totalPoPpnDec.plus(this.toMoneyDec(inv.invoiceTaxDetail.ppnAmount));
+            }
+          }
+          const effectivePoTotalDec = poTotalDec.plus(totalPoPpnDec);
+          const poTotal = effectivePoTotalDec.toNumber();
+          const projectedTotalPaidDec = totalPoPaidBeforeDec.plus(paymentAmountDec);
+
+          if (projectedTotalPaidDec.greaterThan(effectivePoTotalDec)) {
             throw new BadRequestException(
-              `Akumulasi pembayaran PO (${projectedTotalPaid}) melebihi total Purchase Order (${poTotal})`
+              `Akumulasi pembayaran PO (${projectedTotalPaidDec.toNumber()}) melebihi total Purchase Order (${poTotal})`
             );
           }
         }
@@ -961,14 +1258,39 @@ export class FinanceService {
         }
 
         // Invariant 2 & 4: Enforce authoritative Procurement Payment Term amount
-        // Finance must execute the exact amount defined by the authoritative Procurement Payment Term
+        // DEC-TAX-08 Remediation: Dual-Entry Settlement Engine
+        // Total Settlement Credit = D_cash + W_tax + W_wapu_ppn + P_ded == expectedTermTargetDec
         if (paymentTerm.amount !== undefined && paymentTerm.amount !== null) {
-          const expectedTermTarget = Math.round(Number(paymentTerm.amount) * 100) / 100;
-          const roundedPayment = Math.round(paymentAmount * 100) / 100;
+          const baseTermAmountDec = this.toMoneyDec(paymentTerm.amount);
+          const expectedTermTargetDec = invoice.invoiceTaxDetail?.grossCommercialLiability != null
+            ? this.toMoneyDec(invoice.invoiceTaxDetail.grossCommercialLiability)
+            : baseTermAmountDec;
 
-          if (Math.abs(roundedPayment - expectedTermTarget) > 0.001) {
+          const wTaxDec = this.toMoneyDec(invoice.invoiceTaxDetail?.pphWithholdingAmount || 0);
+          const wWapuDec = this.toMoneyDec(invoice.invoiceTaxDetail?.wapuPpnWithheldAmount || 0);
+          const pDedDec = this.toMoneyDec(invoice.invoiceTaxDetail?.priorDeductionsAmount || 0);
+          const cumulativePaidCashDec = alreadyPaidDec.plus(paymentAmountDec);
+          const totalSettlementCreditDec = cumulativePaidCashDec.plus(wTaxDec).plus(wWapuDec).plus(pDedDec);
+          const singlePaymentCreditDec = paymentAmountDec.plus(wTaxDec).plus(wWapuDec).plus(pDedDec);
+
+          const isExactGrossMatch =
+            cumulativePaidCashDec.equals(expectedTermTargetDec) ||
+            cumulativePaidCashDec.equals(baseTermAmountDec) ||
+            paymentAmountDec.equals(expectedTermTargetDec) ||
+            paymentAmountDec.equals(baseTermAmountDec);
+          const isDualEntryMatch =
+            totalSettlementCreditDec.equals(expectedTermTargetDec) ||
+            totalSettlementCreditDec.equals(baseTermAmountDec) ||
+            singlePaymentCreditDec.equals(expectedTermTargetDec) ||
+            singlePaymentCreditDec.equals(baseTermAmountDec);
+
+          if (!isExactGrossMatch && !isDualEntryMatch) {
+            const hasTaxOrDeductions = wTaxDec.greaterThan(0) || wWapuDec.greaterThan(0) || pDedDec.greaterThan(0) || (invoice.invoiceTaxDetail?.ppnAmount ?? 0) > 0;
+            const extraMsg = hasTaxOrDeductions
+              ? ` atau net cash disbursement D_cash (${expectedTermTargetDec.minus(wTaxDec).minus(wWapuDec).minus(pDedDec).toNumber()}) dengan withholding tax diakui (${wTaxDec.plus(wWapuDec).toNumber()})`
+              : '';
             throw new BadRequestException(
-              `Payment amount (${paymentAmount}) harus sesuai dengan nilai termin pembayaran Procurement (${expectedTermTarget}). Pembayaran dengan nominal berbeda dari jadwal termin Procurement tidak diizinkan.`
+              `Payment amount (${paymentAmount}) harus sesuai dengan nilai termin pembayaran Procurement (${expectedTermTargetDec.toNumber()})${extraMsg}. Pembayaran dengan nominal berbeda dari jadwal termin Procurement tidak diizinkan.`
             );
           }
         }
@@ -1010,6 +1332,12 @@ export class FinanceService {
       payment.paymentDate = new Date(dto.paymentDate);
       payment.amount = paymentAmount;
       payment.createdBy = userId;
+      payment.companyCode = transactionCompanyCode;
+      payment.companyBankAccountId = Number(sourceAccount.id);
+      payment.paymentMethod = dto.paymentMethod || 'BANK_TRANSFER';
+      payment.referenceNumber = dto.referenceNumber;
+      payment.notes = dto.notes || null;
+      payment.sourceAccountSnapshot = sourceAccountSnapshot;
 
       const saved = await queryRunner.manager.save(Payment, payment);
       const savedPayment = (saved && (saved.paymentNumber || saved.id)) ? { ...payment, ...saved } : payment;
@@ -1019,8 +1347,23 @@ export class FinanceService {
       await queryRunner.manager.save(PaymentRequest, prq);
 
       // 10. Update Invoice Payment Status
-      const remainingAfter = Math.round((remaining - paymentAmount) * 100) / 100;
-      const isFullyPaid = remainingAfter <= 0.01;
+      // Finding 2 Remediation: Dual-Entry Settlement Status Recognition
+      // Total recognized settlement credit towards the commercial invoice liability:
+      // Total Settlement = Total Cash Paid + Legitimate Withholding Tax Credits (PPh + WAPU + Prior Deductions)
+      const wTaxDec = this.toMoneyDec(invoice.invoiceTaxDetail?.pphWithholdingAmount || 0);
+      const wWapuDec = this.toMoneyDec(invoice.invoiceTaxDetail?.wapuPpnWithheldAmount || 0);
+      const pDedDec = this.toMoneyDec(invoice.invoiceTaxDetail?.priorDeductionsAmount || 0);
+      const totalNonCashCreditsDec = wTaxDec.plus(wWapuDec).plus(pDedDec);
+
+      const totalPaidCashDec = alreadyPaidDec.plus(paymentAmountDec);
+      const totalSettlementRecognizedDec = totalPaidCashDec.plus(totalNonCashCreditsDec);
+
+      const remainingCommercialDec = Decimal.max(
+        0,
+        effectiveInvoiceGrossDec.minus(Decimal.min(effectiveInvoiceGrossDec, totalSettlementRecognizedDec)),
+      );
+      const isFullyPaid = remainingCommercialDec.equals(0);
+      const remainingAfter = remainingCommercialDec.toNumber();
 
       invoice.paymentStatus = isFullyPaid ? 'PAID' : 'PARTIALLY_PAID';
       invoice.status = invoice.paymentStatus;
@@ -1048,6 +1391,12 @@ export class FinanceService {
           paymentDate: savedPayment.paymentDate,
           paymentMethod: dto.paymentMethod,
           referenceNumber: dto.referenceNumber,
+          notes: dto.notes || null,
+          companyCode: transactionCompanyCode,
+          companyBankAccountId: Number(sourceAccount.id),
+          bankName: sourceAccount.bankName,
+          accountNumberMasked: sourceAccountSnapshot.maskedAccountNumber,
+          sourceAccountSnapshot,
           invoicePaymentStatusAfter: invoice.paymentStatus,
           isFullyPaid,
           remainingAmount: remainingAfter > 0 ? remainingAfter : 0,
@@ -1087,25 +1436,26 @@ export class FinanceService {
 
           // Re-read all active payments across active invoices of this PO
           const activeInvoiceIds = activeInvoices.map((i) => i.id);
-          let cumulativePoPayments = 0;
+          let cumulativePoPaymentsDec = new Decimal(0);
           if (activeInvoiceIds.length > 0) {
             const allPoPayments = (await queryRunner.manager.find(Payment, {
               where: { invoiceId: In(activeInvoiceIds) },
             })) || [];
             for (const p of allPoPayments) {
               if (!p.deletedAt) {
-                cumulativePoPayments += Number(p.amount);
+                cumulativePoPaymentsDec = cumulativePoPaymentsDec.plus(this.toMoneyDec(p.amount));
               }
             }
           }
-          cumulativePoPayments = Math.round(cumulativePoPayments * 100) / 100;
-          const poTotal = Number(lockedPo.totalAmount || 0);
+          const cumulativePoPayments = cumulativePoPaymentsDec.toNumber();
+          const poTotalDec = this.toMoneyDec(lockedPo.totalAmount);
+          const poTotal = poTotalDec.toNumber();
 
           // Authoritative Financial Closure Condition:
           // a. All active payment terms are PAID (if terms exist)
           const allTermsPaid = activeTerms.length > 0 && activeTerms.every((t) => t.status === PaymentTermStatus.PAID);
           // b. Cumulative active payments >= PO total amount
-          const isPoAmountSettled = cumulativePoPayments >= poTotal - 0.001;
+          const isPoAmountSettled = cumulativePoPaymentsDec.greaterThanOrEqualTo(poTotalDec);
           // c. All active invoices are PAID
           const allInvoicesPaid = activeInvoices.length > 0 && activeInvoices.every((inv) => inv.paymentStatus === 'PAID');
 
@@ -1183,17 +1533,19 @@ export class FinanceService {
                   const prPoInvsPaid = activePrPoInvs.length > 0 && activePrPoInvs.every((inv) => inv.paymentStatus === 'PAID');
 
                   const prPoInvIds = activePrPoInvs.map((i) => i.id);
-                  let prPoPaymentsSum = 0;
+                  let prPoPaymentsSumDec = new Decimal(0);
                   if (prPoInvIds.length > 0) {
                     const prPoPmts = (await queryRunner.manager.find(Payment, {
                       where: { invoiceId: In(prPoInvIds) },
                     })) || [];
                     for (const pm of prPoPmts) {
-                      if (!pm.deletedAt) prPoPaymentsSum += Number(pm.amount);
+                      if (!pm.deletedAt) prPoPaymentsSumDec = prPoPaymentsSumDec.plus(this.toMoneyDec(pm.amount));
                     }
                   }
+                  const prPoPaymentsSum = prPoPaymentsSumDec.toNumber();
+                  const prPoTotalDec = this.toMoneyDec(prPo.totalAmount);
 
-                  if (!prPoTermsPaid || !prPoInvsPaid || prPoPaymentsSum < Number(prPo.totalAmount || 0) - 0.001) {
+                  if (!prPoTermsPaid || !prPoInvsPaid || prPoPaymentsSumDec.lessThan(prPoTotalDec)) {
                     allPosComplete = false;
                     break;
                   }
@@ -1412,11 +1764,12 @@ export class FinanceService {
     }
 
     if (isServicePo && serviceClaim) {
-      const approvedClaimAmount = Number(serviceClaim.approvedClaimAmount || 0);
-      if (invoicedAmount > approvedClaimAmount + 0.01) {
+      const approvedClaimDec = this.toMoneyDec(serviceClaim.approvedClaimAmount);
+      const invoicedAmountDec = this.toMoneyDec(invoicedAmount);
+      if (invoicedAmountDec.greaterThan(approvedClaimDec)) {
         mismatches.push({
           code: MismatchCode.AMOUNT_EXCEEDED_TERM,
-          message: `Nilai invoice (Rp${invoicedAmount.toLocaleString('id-ID')}) melebihi nilai klaim jasa yang disetujui (Rp${approvedClaimAmount.toLocaleString('id-ID')}).`,
+          message: `Nilai invoice (Rp${invoicedAmountDec.toNumber().toLocaleString('id-ID')}) melebihi nilai klaim jasa yang disetujui (Rp${approvedClaimDec.toNumber().toLocaleString('id-ID')}).`,
         });
       }
 
@@ -1429,10 +1782,10 @@ export class FinanceService {
       }
       const otherInvoiceForClaim = claimInvoices.find(
         i => Number(i.id) !== Number(invoice.id) &&
-             !i.deletedAt &&
-             i.status !== 'CANCELLED' &&
-             i.status !== 'REJECTED' &&
-             i.matchStatus !== 'REJECTED'
+          !i.deletedAt &&
+          i.status !== 'CANCELLED' &&
+          i.status !== 'REJECTED' &&
+          i.matchStatus !== 'REJECTED'
       );
       if (otherInvoiceForClaim) {
         mismatches.push({
@@ -1513,20 +1866,27 @@ export class FinanceService {
       for (const invItem of invoice.items) {
         if (invItem.deletedAt) continue;
 
+        if (!invItem.poItemId) {
+          // Standalone milestone detail (e.g. DOWN_PAYMENT or RETENTION without PO Item allocation)
+          continue;
+        }
+
         const authoritativePoItem = poItems.find(pi => Number(pi.id) === Number(invItem.poItemId));
-        
+
         if (!authoritativePoItem || (authoritativePoItem.purchaseOrderId && po?.id && Number(authoritativePoItem.purchaseOrderId) !== Number(po.id))) {
           mismatches.push({
             code: MismatchCode.ITEM_NOT_FOUND,
             message: `Item invoice (PO Item ID: ${invItem.poItemId}) bukan merupakan bagian dari Purchase Order ini.`,
           });
-          continue; 
+          continue;
         }
 
-        if (Math.abs(Number(invItem.unitPrice) - Number(authoritativePoItem.unitPrice)) > 0.01) {
+        const invUnitPriceDec = this.toMoneyDec(invItem.unitPrice);
+        const poUnitPriceDec = this.toMoneyDec(authoritativePoItem.unitPrice);
+        if (!invUnitPriceDec.equals(poUnitPriceDec)) {
           mismatches.push({
             code: MismatchCode.PRICE_MISMATCH,
-            message: `Harga satuan item invoice (Rp${Number(invItem.unitPrice).toLocaleString('id-ID')}) tidak sesuai dengan harga PO (Rp${Number(authoritativePoItem.unitPrice).toLocaleString('id-ID')}).`,
+            message: `Harga satuan item invoice (Rp${invUnitPriceDec.toNumber().toLocaleString('id-ID')}) tidak sesuai dengan harga PO (Rp${poUnitPriceDec.toNumber().toLocaleString('id-ID')}).`,
           });
         }
 
@@ -1741,11 +2101,14 @@ export class FinanceService {
                   }
                 }
 
-                const currentInvoiceAmount = Number(invoice.totalAmount || 0);
-                if (Math.round((previousProgressBilled + currentInvoiceAmount) * 100) / 100 > Math.round(totalReceivedPhysicalValue * 100) / 100 + 0.01) {
+                const currentInvoiceAmountDec = this.toMoneyDec(invoice.totalAmount);
+                const previousProgressBilledDec = this.toMoneyDec(previousProgressBilled);
+                const totalReceivedPhysicalValueDec = this.toMoneyDec(totalReceivedPhysicalValue);
+                const totalProgressDec = previousProgressBilledDec.plus(currentInvoiceAmountDec);
+                if (totalProgressDec.greaterThan(totalReceivedPhysicalValueDec)) {
                   mismatches.push({
                     code: MismatchCode.PROGRESS_BILLING_EXCEEDS_RECEIVED,
-                    message: `Nilai akumulasi penagihan progress (Rp${(previousProgressBilled + currentInvoiceAmount).toLocaleString('id-ID')}) melebihi total nilai fisik barang yang telah diterima (Rp${totalReceivedPhysicalValue.toLocaleString('id-ID')}).`,
+                    message: `Nilai akumulasi penagihan progress (Rp${totalProgressDec.toNumber().toLocaleString('id-ID')}) melebihi total nilai fisik barang yang telah diterima (Rp${totalReceivedPhysicalValueDec.toNumber().toLocaleString('id-ID')}).`,
                   });
                 }
 
@@ -1890,7 +2253,9 @@ export class FinanceService {
       }
 
       // Cap checks
-      if (po && Math.round(cumulativeInvoicedAmount * 100) / 100 > Math.round(poTotal * 100) / 100 + 0.01) {
+      const cumulativeInvoicedDec = this.toMoneyDec(cumulativeInvoicedAmount);
+      const poTotalDec = this.toMoneyDec(poTotal);
+      if (po && cumulativeInvoicedDec.greaterThan(poTotalDec)) {
         mismatches.push({
           code: MismatchCode.CUMULATIVE_AMOUNT_EXCEEDED_PO,
           message: 'Akumulasi nilai invoice melebihi total Purchase Order.',
@@ -1898,27 +2263,31 @@ export class FinanceService {
       }
 
       if (paymentTerm && termAmount !== undefined) {
-        if (invoicedAmount > termAmount + 0.01) {
+        const termAmountDec = this.toMoneyDec(termAmount);
+        const invoicedAmountDec = this.toMoneyDec(invoicedAmount);
+        const cumulativeTermInvoicedDec = this.toMoneyDec(cumulativeTermInvoicedAmount);
+
+        if (invoicedAmountDec.greaterThan(termAmountDec)) {
           mismatches.push({
             code: MismatchCode.AMOUNT_EXCEEDED_TERM,
-            message: `Nominal invoice (Rp${invoicedAmount.toLocaleString('id-ID')}) tidak sesuai dengan nominal termin (Rp${termAmount.toLocaleString('id-ID')}).`,
+            message: `Nominal invoice (Rp${invoicedAmountDec.toNumber().toLocaleString('id-ID')}) tidak sesuai dengan nominal termin (Rp${termAmountDec.toNumber().toLocaleString('id-ID')}).`,
           });
-        } else if (Math.round(cumulativeTermInvoicedAmount * 100) / 100 > Math.round(termAmount * 100) / 100 + 0.01) {
+        } else if (cumulativeTermInvoicedDec.greaterThan(termAmountDec)) {
           mismatches.push({
             code: MismatchCode.AMOUNT_EXCEEDED_TERM,
-            message: `Akumulasi invoice termin (Rp${cumulativeTermInvoicedAmount.toLocaleString('id-ID')}) melebihi nominal termin (Rp${termAmount.toLocaleString('id-ID')}).`,
+            message: `Akumulasi invoice termin (Rp${cumulativeTermInvoicedDec.toNumber().toLocaleString('id-ID')}) melebihi nominal termin (Rp${termAmountDec.toNumber().toLocaleString('id-ID')}).`,
           });
         }
 
-        const priorTermInvoiced = cumulativeTermInvoicedAmount - invoicedAmount;
-        if (priorTermInvoiced >= termAmount - 0.01 && invoicedAmount > 0.01) {
+        const priorTermInvoicedDec = cumulativeTermInvoicedDec.minus(invoicedAmountDec);
+        if (priorTermInvoicedDec.greaterThanOrEqualTo(termAmountDec) && invoicedAmountDec.greaterThan(0)) {
           mismatches.push({
             code: MismatchCode.TERM_ALREADY_INVOICED,
             message: 'Payment term sudah selesai ditagihkan seluruhnya.',
           });
         }
 
-        remainingTermAmount = Math.max(0, Math.round((termAmount - cumulativeTermInvoicedAmount) * 100) / 100);
+        remainingTermAmount = Decimal.max(0, termAmountDec.minus(cumulativeTermInvoicedDec)).toNumber();
       }
     } else {
       // Legacy full PO
@@ -1936,40 +2305,43 @@ export class FinanceService {
             relations: ['items'],
           })) || [];
 
-          let totalGrAmount = 0;
+          let totalGrAmountDec = new Decimal(0);
           for (const gr of goodsReceipts) {
             for (const grItem of gr.items || []) {
               const matchedPoItem = po.items?.find(i => i.id === grItem.poItemId);
               if (matchedPoItem) {
-                totalGrAmount += Number(grItem.receivedQuantity) * Number(matchedPoItem.unitPrice);
+                const grQty = this.toMoneyDec(grItem.receivedQuantity);
+                const poPrice = this.toMoneyDec(matchedPoItem.unitPrice);
+                const grLineTotal = grQty.times(poPrice).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+                totalGrAmountDec = totalGrAmountDec.plus(grLineTotal);
               }
             }
           }
 
-          const isMatched = (
-            Math.abs(invoicedAmount - totalGrAmount) < 0.01
-          );
+          const invoicedAmountDec = this.toMoneyDec(invoicedAmount);
+          const isMatched = invoicedAmountDec.equals(totalGrAmountDec);
 
           if (!isMatched) {
             mismatches.push({
               code: MismatchCode.THREE_WAY_MISMATCH,
-              message: `3-Way Matching gagal: Nilai tagihan (Rp${invoicedAmount.toLocaleString('id-ID')}) tidak sesuai dengan nilai penerimaan barang (Rp${totalGrAmount.toLocaleString('id-ID')}).`,
+              message: `3-Way Matching gagal: Nilai tagihan (Rp${invoicedAmountDec.toNumber().toLocaleString('id-ID')}) tidak sesuai dengan nilai penerimaan barang (Rp${totalGrAmountDec.toNumber().toLocaleString('id-ID')}).`,
             });
           }
         } else {
-          const approvedClaimAmount = serviceClaim ? Number(serviceClaim.approvedClaimAmount || 0) : 0;
-          const isMatched = Math.abs(invoicedAmount - approvedClaimAmount) < 0.01;
+          const approvedClaimDec = serviceClaim ? this.toMoneyDec(serviceClaim.approvedClaimAmount) : new Decimal(0);
+          const invoicedAmountDec = this.toMoneyDec(invoicedAmount);
+          const isMatched = invoicedAmountDec.equals(approvedClaimDec);
           if (!isMatched) {
             mismatches.push({
               code: MismatchCode.THREE_WAY_MISMATCH,
-              message: `Rekonsiliasi Jasa gagal: Nilai tagihan (Rp${invoicedAmount.toLocaleString('id-ID')}) tidak sesuai dengan nilai klaim jasa yang disetujui (Rp${approvedClaimAmount.toLocaleString('id-ID')}).`,
+              message: `Rekonsiliasi Jasa gagal: Nilai tagihan (Rp${invoicedAmountDec.toNumber().toLocaleString('id-ID')}) tidak sesuai dengan nilai klaim jasa yang disetujui (Rp${approvedClaimDec.toNumber().toLocaleString('id-ID')}).`,
             });
           }
         }
       }
     }
 
-    const remainingPoAmount = Math.max(0, Math.round((poTotal - cumulativeInvoicedAmount) * 100) / 100);
+    const remainingPoAmount = Decimal.max(0, this.toMoneyDec(poTotal).minus(this.toMoneyDec(cumulativeInvoicedAmount))).toNumber();
 
     // 7. Duplicate invoice number check (Section I)
     if (invoice.invoiceNumber && em && typeof em.findOne === 'function') {
@@ -1985,7 +2357,9 @@ export class FinanceService {
     }
 
     // 8. Cumulative payment guard (Section G)
-    if (cumulativePaidAmount > invoicedAmount + 0.01) {
+    const cumulativePaidDec = this.toMoneyDec(cumulativePaidAmount);
+    const invoicedAmountDec = this.toMoneyDec(invoicedAmount);
+    if (cumulativePaidDec.greaterThan(invoicedAmountDec)) {
       mismatches.push({
         code: MismatchCode.OTHER,
         message: 'Akumulasi pembayaran melebihi nilai invoice.',
@@ -2058,7 +2432,19 @@ export class FinanceService {
       const invoice = await queryRunner.manager.findOne(Invoice, {
         where: { id: invoiceId },
         lock: { mode: 'pessimistic_write' },
-        relations: ['purchaseOrder', 'purchaseOrder.items', 'purchaseOrder.vendor', 'paymentTerm', 'items', 'payments', 'serviceClaim', 'serviceClaim.items'],
+        relations: [
+          'purchaseOrder',
+          'purchaseOrder.items',
+          'purchaseOrder.vendor',
+          'paymentTerm',
+          'items',
+          'payments',
+          'serviceClaim',
+          'serviceClaim.items',
+          'invoiceTaxDetail',
+          'ppnMasukanRecords',
+          'pphWithholdingRecords',
+        ],
       });
 
       if (!invoice || invoice.deletedAt) {
@@ -2168,6 +2554,79 @@ export class FinanceService {
         if (lockedPaymentTerm) {
           invoice.paymentTerm = lockedPaymentTerm;
         }
+      }
+
+      // 1.b Authoritative Finance Verification Gate: Mandatory Tax Administration Field Completeness
+      const taxValidationErrors: string[] = [];
+
+      const itd = invoice.invoiceTaxDetail;
+      const ppnRecords = invoice.ppnMasukanRecords;
+      const pphRecords = invoice.pphWithholdingRecords;
+
+      const snapshot = itd?.taxRuleSnapshot;
+      const firstPpn = ppnRecords?.[0];
+      const firstPph = pphRecords?.[0];
+
+      // Determine whether PPN applies (recorded PPN amount > 0 or PPN rate > 0)
+      const ppnAmountVal = Number(itd?.ppnAmount ?? snapshot?.ppn?.ppnAmount ?? firstPpn?.ppnAmount ?? 0);
+      const ppnRateVal = Number(snapshot?.ppn?.ppnRate ?? (itd?.ppnRate != null ? Number(itd.ppnRate) * 100 : 0));
+      const isPpnApplicable = ppnAmountVal > 0 || ppnRateVal > 0;
+
+      // Determine whether PPh withholding applies (withholding amount > 0 or PPh rate > 0)
+      const pphAmountVal = Number(itd?.pphWithholdingAmount ?? snapshot?.pph?.withheldAmount ?? firstPph?.withheldAmount ?? 0);
+      const pphRateVal = Number(snapshot?.pph?.rate ?? (firstPph?.withholdingRate != null ? (Number(firstPph.withholdingRate) <= 1 ? Number(firstPph.withholdingRate) * 100 : Number(firstPph.withholdingRate)) : 0));
+      const isPphApplicable = pphAmountVal > 0 || pphRateVal > 0;
+
+      if (isPpnApplicable) {
+        // NSFP validation: mandatory, exactly 16 numeric digits
+        const rawNsfp = snapshot?.ppn?.fakturPajakNumber || snapshot?.fakturPajakNumber || firstPpn?.fakturPajakNumber || (itd as any)?.fakturPajakNumber;
+        if (!rawNsfp || !String(rawNsfp).trim()) {
+          taxValidationErrors.push('Nomor Faktur Pajak (NSFP) wajib diisi.');
+        } else {
+          const cleanNsfp = String(rawNsfp).trim().replace(/[\.\-]/g, '');
+          if (!/^[0-9]{16}$/.test(cleanNsfp)) {
+            taxValidationErrors.push('Nomor Faktur Pajak (NSFP) harus terdiri dari 16 digit angka.');
+          }
+        }
+
+        // Tanggal Faktur Pajak validation: mandatory, valid date
+        const rawFpDate = snapshot?.ppn?.fakturPajakDate || (!snapshot ? firstPpn?.fakturPajakDate : undefined) || (itd as any)?.fakturPajakDate;
+        if (!rawFpDate || !String(rawFpDate).trim()) {
+          taxValidationErrors.push('Tanggal Faktur Pajak wajib diisi.');
+        } else {
+          const parsedFpDate = new Date(rawFpDate);
+          if (isNaN(parsedFpDate.getTime())) {
+            taxValidationErrors.push('Tanggal Faktur Pajak tidak valid.');
+          }
+        }
+      }
+
+      if (isPphApplicable) {
+        // Bukti Potong Number validation: mandatory, non-empty
+        const rawBpNum = snapshot?.pph?.buktiPotongNumber || snapshot?.buktiPotongNumber || (!snapshot ? firstPph?.buktiPotongNumber : undefined) || (itd as any)?.buktiPotongNumber;
+        if (!rawBpNum || !String(rawBpNum).trim()) {
+          taxValidationErrors.push('Nomor Bukti Potong wajib diisi.');
+        }
+
+        // Tanggal Bukti Potong validation: mandatory, valid date
+        const rawBpDate = snapshot?.pph?.buktiPotongDate || (!snapshot ? firstPph?.buktiPotongDate : undefined) || (itd as any)?.buktiPotongDate;
+        if (!rawBpDate || !String(rawBpDate).trim()) {
+          taxValidationErrors.push('Tanggal Bukti Potong wajib diisi.');
+        } else {
+          const parsedBpDate = new Date(rawBpDate);
+          if (isNaN(parsedBpDate.getTime())) {
+            taxValidationErrors.push('Tanggal Bukti Potong tidak valid.');
+          }
+        }
+      }
+
+      if (taxValidationErrors.length > 0) {
+        const primaryMessage = `Lengkapi administrasi perpajakan sebelum melakukan Verifikasi Invoice: ${taxValidationErrors.join(' ')}`;
+        throw new BadRequestException({
+          message: primaryMessage,
+          errors: taxValidationErrors,
+          code: 'TAX_ADMIN_INCOMPLETE',
+        });
       }
 
       // 2. Run authoritative matching engine
@@ -2328,7 +2787,7 @@ export class FinanceService {
         if (queryRunner.isTransactionActive !== false) {
           await queryRunner.rollbackTransaction();
         }
-      } catch (_) {}
+      } catch (_) { }
       if (
         err instanceof OptimisticLockVersionMismatchError ||
         err.name === 'OptimisticLockVersionMismatchError' ||
@@ -2336,6 +2795,357 @@ export class FinanceService {
       ) {
         throw new ConflictException('Data invoice telah berubah atau sedang diproses oleh pengguna lain. Silakan refresh halaman.');
       }
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Process and persist optional PPN Masukan and PPh Withholding administrative records.
+   * Keeps invoice gross total and contract amounts 100% immutable while recording tax data.
+   */
+  private async processAndPersistInvoiceTax(
+    manager: EntityManager,
+    invoice: Invoice,
+    po: PurchaseOrder,
+    taxDto: CreateInvoiceTaxDto,
+    userId: number,
+  ) {
+    const now = new Date();
+    const companyCode = invoice.companyCode || po.companyCode || (po.purchaseRequest?.project as any)?.companyCode || 'UBD';
+    let totalDpp = new Decimal(0);
+    let totalPpn = new Decimal(0);
+    let totalPph = new Decimal(0);
+    let hasTaxData = false;
+
+    // 1. Process PPN Masukan
+    if (
+      taxDto.ppn &&
+      (taxDto.ppn.fakturPajakNumber || taxDto.ppn.ppnAmount !== undefined || taxDto.ppn.dppAmount !== undefined || taxDto.ppn.ppnRate !== undefined)
+    ) {
+      hasTaxData = true;
+      const dppDec = this.toMoneyDec(taxDto.ppn.dppAmount ?? invoice.totalAmount);
+      const ppnDec = this.toMoneyDec(taxDto.ppn.ppnAmount ?? 0);
+      totalDpp = dppDec;
+      totalPpn = ppnDec;
+
+      // Tanggal Faktur Pajak: validate and preserve original submitted date (never substitute current date)
+      let fpDate: Date | null = null;
+      if (taxDto.ppn.fakturPajakDate) {
+        fpDate = new Date(taxDto.ppn.fakturPajakDate);
+        if (isNaN(fpDate.getTime())) {
+          throw new BadRequestException('Tanggal Faktur Pajak tidak valid.');
+        }
+      }
+      const recordFpDate = fpDate || (invoice.invoiceDate ? new Date(invoice.invoiceDate) : now);
+      const periodMonth = recordFpDate.getMonth() + 1;
+      const periodYear = recordFpDate.getFullYear();
+
+      // Finding 1 Remediation: Strict NSFP Data Integrity (no silent padding or fabrication)
+      const rawFp = taxDto.ppn.fakturPajakNumber ? String(taxDto.ppn.fakturPajakNumber).trim() : '';
+      if (!rawFp && taxDto.ppn.fakturPajakNumber !== undefined) {
+        throw new BadRequestException(
+          'Nomor Faktur Pajak (NSFP) wajib diisi untuk pencatatan administrasi PPN.',
+        );
+      }
+      // Remove only supported formatting separators (dots and hyphens)
+      const nsfp = rawFp.replace(/[\.\-]/g, '');
+      if (rawFp && !/^[0-9]{16}$/.test(nsfp)) {
+        throw new BadRequestException(
+          'Nomor Faktur Pajak (NSFP) tidak valid. NSFP harus terdiri dari tepat 16 digit angka (contoh: 010.000-26.12345678).',
+        );
+      }
+
+      // Vendor NPWP 16 digits: do NOT substitute default fake NPWP (Correction Requirement 2)
+      const vendorNpwpRaw = String((po.vendor as any)?.npwp || (po as any)?.vendor?.npwp || '').replace(/[^0-9]/g, '');
+      const vendorTaxId = vendorNpwpRaw.length === 16 ? vendorNpwpRaw : 'UNVERIFIED';
+
+      if (nsfp) {
+        let existingPpn = await manager.findOne(PpnMasukanRecord, {
+          where: { invoiceId: invoice.id },
+        });
+        if (!existingPpn) {
+          existingPpn = manager.create(PpnMasukanRecord, {
+            invoiceId: invoice.id,
+            companyCode,
+            vendorTaxId,
+            fakturPajakNumber: nsfp,
+            fakturPajakDate: recordFpDate,
+            transactionCode: nsfp.length >= 2 ? nsfp.slice(0, 2) : '01',
+            replacementCode: '0',
+            dppAmount: dppDec.toNumber(),
+            ppnAmount: ppnDec.toNumber(),
+            creditabilityStatus: CreditabilityStatus.UNVERIFIED,
+            reportingPeriodMonth: periodMonth,
+            reportingPeriodYear: periodYear,
+            sptMasaStatus: SptMasaStatus.UNREPORTED,
+            validationStatus: vendorTaxId === 'UNVERIFIED' ? ValidationStatus.VENDOR_MISMATCH : ValidationStatus.VALID,
+          });
+        } else {
+          existingPpn.companyCode = companyCode;
+          existingPpn.vendorTaxId = vendorTaxId;
+          existingPpn.fakturPajakNumber = nsfp;
+          existingPpn.fakturPajakDate = recordFpDate;
+          existingPpn.transactionCode = nsfp.length >= 2 ? nsfp.slice(0, 2) : '01';
+          existingPpn.dppAmount = dppDec.toNumber();
+          existingPpn.ppnAmount = ppnDec.toNumber();
+          existingPpn.reportingPeriodMonth = periodMonth;
+          existingPpn.reportingPeriodYear = periodYear;
+          if (vendorTaxId === 'UNVERIFIED') {
+            existingPpn.validationStatus = ValidationStatus.VENDOR_MISMATCH;
+          }
+        }
+        await manager.save(PpnMasukanRecord, existingPpn);
+      }
+    }
+
+    // 2. Process PPh Withholding (Administrative Recording)
+    if (
+      taxDto.pph &&
+      (taxDto.pph.withheldAmount !== undefined || taxDto.pph.pphType || taxDto.pph.buktiPotongNumber)
+    ) {
+      hasTaxData = true;
+      const pphBaseDec = this.toMoneyDec(
+        taxDto.pph.taxableBase ?? (totalDpp.greaterThan(0) ? totalDpp.toNumber() : invoice.totalAmount),
+      );
+      const pphWithheldDec = this.toMoneyDec(taxDto.pph.withheldAmount ?? 0);
+      const rateDec = new Decimal(taxDto.pph.rate ? taxDto.pph.rate / 100 : 0);
+      totalPph = pphWithheldDec;
+
+      // Tanggal Bukti Potong: validate and preserve original submitted date (never substitute current date)
+      let bpDate: Date | null = null;
+      if (taxDto.pph.buktiPotongDate) {
+        bpDate = new Date(taxDto.pph.buktiPotongDate);
+        if (isNaN(bpDate.getTime())) {
+          throw new BadRequestException('Tanggal Bukti Potong tidak valid.');
+        }
+      }
+      const recordBpDate = bpDate || (invoice.invoiceDate ? new Date(invoice.invoiceDate) : now);
+      const rawBp = taxDto.pph.buktiPotongNumber ? String(taxDto.pph.buktiPotongNumber).trim() : '';
+
+      const periodMonth = recordBpDate.getMonth() + 1;
+      const periodYear = recordBpDate.getFullYear();
+      const pphRegime = (taxDto.pph.pphType || 'PPH_23_SERVICE').toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+
+      // Check for existing reference rule and liability (Correction Requirement 1: DO NOT create or update them)
+      const liability = await manager.findOne(StatutoryTaxLiability, {
+        where: { companyCode, taxPeriodYear: periodYear, taxPeriodMonth: periodMonth, taxRegime: pphRegime },
+      });
+
+      const rule = await manager.findOne(TaxRegimeRule, {
+        where: { regimeCode: pphRegime, taxCategory: TaxCategory.PPH },
+      });
+
+      if (liability && rule) {
+        let existingPph = await manager.findOne(PphWithholdingRecord, {
+          where: { invoiceId: invoice.id },
+        });
+        if (!existingPph) {
+          existingPph = manager.create(PphWithholdingRecord, {
+            invoiceId: invoice.id,
+            taxRegimeRuleId: rule.id,
+            pphTaxCategory: 'PPH',
+            paymentTermId: invoice.paymentTermId ? Number(invoice.paymentTermId) : null,
+            companyCode,
+            vendorId: Number(po.vendorId || 1),
+            pphRegime,
+            taxPeriodMonth: periodMonth,
+            taxPeriodYear: periodYear,
+            statutoryTaxLiabilityId: liability.id,
+            taxableBase: pphBaseDec.toNumber(),
+            withholdingRate: rateDec.toNumber(),
+            withheldAmount: pphWithheldDec.toNumber(),
+            totalRemittedAmount: 0.0,
+            outstandingWithheldAmount: pphWithheldDec.toNumber(),
+            statutoryTriggerType: StatutoryTriggerType.DUE_DATE,
+            statutoryTriggerDate: recordBpDate,
+            recognitionStatus: RecognitionStatus.RECOGNIZED_UNREMITTED,
+            buktiPotongNumber: rawBp || null,
+            buktiPotongDate: recordBpDate,
+          });
+        } else {
+          existingPph.taxRegimeRuleId = rule.id;
+          existingPph.statutoryTaxLiabilityId = liability.id;
+          existingPph.pphRegime = pphRegime;
+          existingPph.taxableBase = pphBaseDec.toNumber();
+          existingPph.withholdingRate = rateDec.toNumber();
+          existingPph.withheldAmount = pphWithheldDec.toNumber();
+          existingPph.outstandingWithheldAmount = pphWithheldDec.toNumber();
+          existingPph.buktiPotongNumber = rawBp || existingPph.buktiPotongNumber;
+          existingPph.buktiPotongDate = recordBpDate;
+        }
+        await manager.save(PphWithholdingRecord, existingPph);
+      }
+    }
+
+    // 3. Persist InvoiceTaxDetail header snapshot
+    if (hasTaxData) {
+      if (totalDpp.equals(0)) {
+        totalDpp = this.toMoneyDec(invoice.totalAmount);
+      }
+      const grossCommercialLiability = totalDpp.plus(totalPpn).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+      const netVendorCashPayable = grossCommercialLiability.minus(totalPph).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+      const ppnRateDec = taxDto.ppn?.ppnRate != null
+        ? new Decimal(taxDto.ppn.ppnRate).dividedBy(100).toDecimalPlaces(4)
+        : (totalDpp.greaterThan(0) ? totalPpn.dividedBy(totalDpp).toDecimalPlaces(4) : new Decimal(0));
+
+      let invoiceTaxDetail = await manager.findOne(InvoiceTaxDetail, {
+        where: { invoiceId: invoice.id },
+      });
+      if (!invoiceTaxDetail) {
+        invoiceTaxDetail = manager.create(InvoiceTaxDetail, {
+          invoiceId: invoice.id,
+          companyCode,
+          dppCommercial: totalDpp.toNumber(),
+          ppnRate: ppnRateDec.toNumber(),
+          ppnAmount: totalPpn.toNumber(),
+          grossCommercialLiability: grossCommercialLiability.toNumber(),
+          pphWithholdingAmount: totalPph.toNumber(),
+          wapuPpnWithheldAmount: 0.0,
+          priorDeductionsAmount: 0.0,
+          netVendorCashPayable: netVendorCashPayable.toNumber(),
+          statutoryTaxLiability: totalPph.toNumber(),
+          calculationEngineVersion: 'EPMS-TAX-2B-ADMIN',
+          taxRuleSnapshot: {
+            recordedAt: now.toISOString(),
+            recordedBy: userId,
+            mode: 'ADMINISTRATIVE_RECORDING',
+            fakturPajakNumber: taxDto.ppn?.fakturPajakNumber,
+            buktiPotongNumber: taxDto.pph?.buktiPotongNumber,
+            ppn: taxDto.ppn
+              ? {
+                fakturPajakNumber: taxDto.ppn.fakturPajakNumber,
+                fakturPajakDate: taxDto.ppn.fakturPajakDate,
+                dppAmount: taxDto.ppn.dppAmount,
+                ppnRate: taxDto.ppn.ppnRate,
+                ppnAmount: taxDto.ppn.ppnAmount,
+              }
+              : undefined,
+            pph: taxDto.pph
+              ? {
+                pphType: taxDto.pph.pphType,
+                rate: taxDto.pph.rate,
+                taxableBase: taxDto.pph.taxableBase,
+                withheldAmount: taxDto.pph.withheldAmount,
+                buktiPotongNumber: taxDto.pph.buktiPotongNumber,
+                buktiPotongDate: taxDto.pph.buktiPotongDate,
+              }
+              : undefined,
+          },
+        });
+      } else {
+        invoiceTaxDetail.companyCode = companyCode;
+        invoiceTaxDetail.dppCommercial = totalDpp.toNumber();
+        invoiceTaxDetail.ppnRate = ppnRateDec.toNumber();
+        invoiceTaxDetail.ppnAmount = totalPpn.toNumber();
+        invoiceTaxDetail.grossCommercialLiability = grossCommercialLiability.toNumber();
+        invoiceTaxDetail.pphWithholdingAmount = totalPph.toNumber();
+        invoiceTaxDetail.netVendorCashPayable = netVendorCashPayable.toNumber();
+        invoiceTaxDetail.statutoryTaxLiability = totalPph.toNumber();
+        invoiceTaxDetail.taxRuleSnapshot = {
+          recordedAt: now.toISOString(),
+          recordedBy: userId,
+          mode: 'ADMINISTRATIVE_RECORDING',
+          fakturPajakNumber: taxDto.ppn?.fakturPajakNumber,
+          buktiPotongNumber: taxDto.pph?.buktiPotongNumber,
+          ppn: taxDto.ppn
+            ? {
+              fakturPajakNumber: taxDto.ppn.fakturPajakNumber,
+              fakturPajakDate: taxDto.ppn.fakturPajakDate,
+              dppAmount: taxDto.ppn.dppAmount,
+              ppnRate: taxDto.ppn.ppnRate,
+              ppnAmount: taxDto.ppn.ppnAmount,
+            }
+            : undefined,
+          pph: taxDto.pph
+            ? {
+              pphType: taxDto.pph.pphType,
+              rate: taxDto.pph.rate,
+              taxableBase: taxDto.pph.taxableBase,
+              withheldAmount: taxDto.pph.withheldAmount,
+              buktiPotongNumber: taxDto.pph.buktiPotongNumber,
+              buktiPotongDate: taxDto.pph.buktiPotongDate,
+            }
+            : undefined,
+        };
+      }
+      await manager.save(InvoiceTaxDetail, invoiceTaxDetail);
+    }
+  }
+
+  /**
+   * Update or complete tax administration records for an existing invoice.
+   */
+  async updateInvoiceTax(invoiceId: number, dto: CreateInvoiceTaxDto, userId: number) {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const invoice = await queryRunner.manager.findOne(Invoice, {
+        where: { id: invoiceId },
+        relations: ['purchaseOrder', 'purchaseOrder.vendor', 'paymentTerm'],
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!invoice) {
+        throw new NotFoundException(`Invoice #${invoiceId} tidak ditemukan`);
+      }
+      const po = invoice.purchaseOrder;
+      if (!po) {
+        throw new BadRequestException('PO terkait invoice tidak ditemukan');
+      }
+
+      // Mandatory Tax Administration Field Validation on Update
+      if (dto.ppn && (dto.ppn.fakturPajakNumber !== undefined || dto.ppn.fakturPajakDate !== undefined || dto.ppn.ppnAmount !== undefined || dto.ppn.ppnRate !== undefined || dto.ppn.dppAmount !== undefined)) {
+        const rawFp = dto.ppn.fakturPajakNumber ? String(dto.ppn.fakturPajakNumber).trim() : '';
+        if (!rawFp) {
+          throw new BadRequestException('Nomor Faktur Pajak (NSFP) wajib diisi.');
+        }
+        const cleanFp = rawFp.replace(/[\.\-]/g, '');
+        if (!/^[0-9]{16}$/.test(cleanFp)) {
+          throw new BadRequestException('Nomor Faktur Pajak (NSFP) harus terdiri dari 16 digit angka.');
+        }
+        if (!dto.ppn.fakturPajakDate || !String(dto.ppn.fakturPajakDate).trim()) {
+          throw new BadRequestException('Tanggal Faktur Pajak wajib diisi.');
+        }
+        if (isNaN(new Date(dto.ppn.fakturPajakDate).getTime())) {
+          throw new BadRequestException('Tanggal Faktur Pajak tidak valid.');
+        }
+      }
+
+      if (dto.pph && (dto.pph.buktiPotongNumber !== undefined || dto.pph.buktiPotongDate !== undefined || dto.pph.withheldAmount !== undefined || dto.pph.rate !== undefined || dto.pph.pphType !== undefined || dto.pph.taxableBase !== undefined)) {
+        const rawBp = dto.pph.buktiPotongNumber ? String(dto.pph.buktiPotongNumber).trim() : '';
+        if (!rawBp) {
+          throw new BadRequestException('Nomor Bukti Potong wajib diisi.');
+        }
+        if (!dto.pph.buktiPotongDate || !String(dto.pph.buktiPotongDate).trim()) {
+          throw new BadRequestException('Tanggal Bukti Potong wajib diisi.');
+        }
+        if (isNaN(new Date(dto.pph.buktiPotongDate).getTime())) {
+          throw new BadRequestException('Tanggal Bukti Potong tidak valid.');
+        }
+      }
+
+      await this.processAndPersistInvoiceTax(queryRunner.manager, invoice, po, dto, userId);
+
+      const audit = queryRunner.manager.create(AuditLog, {
+        table_name: 'invoices',
+        record_id: invoice.id,
+        action: 'UPDATE_TAX',
+        old_value: null,
+        new_value: {
+          taxUpdated: true,
+          fakturPajakNumber: dto.ppn?.fakturPajakNumber,
+          buktiPotongNumber: dto.pph?.buktiPotongNumber,
+        },
+        created_by: userId ? Number(userId) : null,
+      });
+      await queryRunner.manager.save(AuditLog, audit);
+
+      await queryRunner.commitTransaction();
+      return this.getInvoiceById(invoiceId);
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
       throw err;
     } finally {
       await queryRunner.release();
@@ -2354,6 +3164,7 @@ export class FinanceService {
         'purchaseOrder.purchaseRequest',
         'purchaseOrder.purchaseRequest.project',
         'paymentTerm',
+        'invoiceTaxDetail',
       ],
     });
   }
@@ -2372,12 +3183,122 @@ export class FinanceService {
         'purchaseOrder.purchaseRequest.project',
         'paymentTerm',
         'payments',
+        'invoiceTaxDetail',
       ],
     });
     if (!invoice) {
       throw new BadRequestException('Invoice tidak ditemukan');
     }
     return invoice;
+  }
+
+  async getInvoiceTaxDetails(invoiceId: number) {
+    const invoice = await this.invoiceRepository.findOne({
+      where: { id: invoiceId },
+      relations: ['invoiceTaxDetail', 'ppnMasukanRecords', 'pphWithholdingRecords'],
+    });
+    if (!invoice) {
+      return null;
+    }
+
+    const itd = invoice.invoiceTaxDetail;
+    const snapshotPpn = itd?.taxRuleSnapshot?.ppn;
+    const snapshotPph = itd?.taxRuleSnapshot?.pph;
+    const firstPpn = invoice.ppnMasukanRecords?.[0];
+    const firstPph = invoice.pphWithholdingRecords?.[0];
+
+    const dppAmount = Number(itd?.dppCommercial ?? firstPpn?.dppAmount ?? snapshotPpn?.dppAmount ?? invoice.totalAmount ?? 0);
+    const ppnRate = Number(snapshotPpn?.ppnRate ?? (itd?.ppnRate != null ? Number(itd.ppnRate) * 100 : 0));
+    const ppnAmount = Number(itd?.ppnAmount ?? firstPpn?.ppnAmount ?? snapshotPpn?.ppnAmount ?? 0);
+
+    const pphType = snapshotPph?.pphType || firstPph?.pphRegime || null;
+    const pphRate = Number(snapshotPph?.rate ?? (firstPph?.withholdingRate != null ? (Number(firstPph.withholdingRate) <= 1 ? Number(firstPph.withholdingRate) * 100 : Number(firstPph.withholdingRate)) : 0));
+    const taxableBase = Number(snapshotPph?.taxableBase ?? firstPph?.taxableBase ?? itd?.dppCommercial ?? invoice.totalAmount ?? 0);
+    const pphAmount = Number(itd?.pphWithholdingAmount ?? snapshotPph?.withheldAmount ?? firstPph?.withheldAmount ?? 0);
+
+    const grossCommercialLiability = Number(itd?.grossCommercialLiability ?? (dppAmount + ppnAmount));
+    const netVendorCashPayable = Number(itd?.netVendorCashPayable ?? Math.max(0, grossCommercialLiability - pphAmount));
+
+    const fakturPajakNumber = firstPpn?.fakturPajakNumber || snapshotPpn?.fakturPajakNumber || itd?.taxRuleSnapshot?.fakturPajakNumber || '';
+    const fakturPajakDate = firstPpn?.fakturPajakDate ? (typeof firstPpn.fakturPajakDate === 'string' ? firstPpn.fakturPajakDate.split('T')[0] : new Date(firstPpn.fakturPajakDate).toISOString().split('T')[0]) : (snapshotPpn?.fakturPajakDate || '');
+    const buktiPotongNumber = firstPph?.buktiPotongNumber || snapshotPph?.buktiPotongNumber || itd?.taxRuleSnapshot?.buktiPotongNumber || '';
+    const buktiPotongDate = firstPph?.buktiPotongDate ? (typeof firstPph.buktiPotongDate === 'string' ? firstPph.buktiPotongDate.split('T')[0] : new Date(firstPph.buktiPotongDate).toISOString().split('T')[0]) : (snapshotPph?.buktiPotongDate || '');
+
+    const taxDetail = (itd || snapshotPpn || snapshotPph || firstPpn || firstPph) ? {
+      id: itd?.id ? Number(itd.id) : 0,
+      invoiceId: invoice.id,
+      companyCode: itd?.companyCode || invoice.companyCode || 'UBD',
+      taxBasis: dppAmount,
+      dppCommercial: dppAmount,
+      ppnRate,
+      ppnAmount,
+      pphRate,
+      pphAmount,
+      pphType: pphType || undefined,
+      settlementNetExpected: netVendorCashPayable,
+      grossCommercialLiability,
+      netVendorCashPayable,
+      fakturPajakNumber: fakturPajakNumber || undefined,
+      fakturPajakDate: fakturPajakDate || undefined,
+      buktiPotongNumber: buktiPotongNumber || undefined,
+      buktiPotongDate: buktiPotongDate || undefined,
+      taxRuleSnapshot: itd?.taxRuleSnapshot || undefined,
+    } : null;
+
+    const ppnRecords = (invoice.ppnMasukanRecords && invoice.ppnMasukanRecords.length > 0)
+      ? invoice.ppnMasukanRecords.map(pmr => ({
+        id: Number(pmr.id),
+        invoiceId: Number(pmr.invoiceId),
+        fakturPajakNumber: pmr.fakturPajakNumber,
+        fakturPajakDate: pmr.fakturPajakDate ? String(pmr.fakturPajakDate).split('T')[0] : '',
+        taxRate: ppnRate,
+        dppAmount: Number(pmr.dppAmount),
+        ppnAmount: Number(pmr.ppnAmount),
+        creditableStatus: pmr.creditabilityStatus,
+        creditabilityStatus: pmr.creditabilityStatus,
+      }))
+      : (snapshotPpn ? [{
+        id: 0,
+        invoiceId: invoice.id,
+        fakturPajakNumber: snapshotPpn.fakturPajakNumber || '',
+        fakturPajakDate: snapshotPpn.fakturPajakDate ? String(snapshotPpn.fakturPajakDate).split('T')[0] : '',
+        taxRate: Number(snapshotPpn.ppnRate ?? ppnRate),
+        dppAmount: Number(snapshotPpn.dppAmount ?? dppAmount),
+        ppnAmount: Number(snapshotPpn.ppnAmount ?? ppnAmount),
+        creditableStatus: 'TERCATAT',
+        creditabilityStatus: 'TERCATAT',
+      }] : []);
+
+    const pphRecords = (invoice.pphWithholdingRecords && invoice.pphWithholdingRecords.length > 0)
+      ? invoice.pphWithholdingRecords.map(pwr => ({
+        id: Number(pwr.id),
+        invoiceId: Number(pwr.invoiceId),
+        buktiPotongNumber: pwr.buktiPotongNumber || '',
+        buktiPotongDate: pwr.buktiPotongDate ? String(pwr.buktiPotongDate).split('T')[0] : '',
+        pphRegime: pwr.pphRegime,
+        withholdingRate: Number(pwr.withholdingRate) <= 1 ? Number(pwr.withholdingRate) * 100 : Number(pwr.withholdingRate),
+        taxableBase: Number(pwr.taxableBase),
+        withheldAmount: Number(pwr.withheldAmount),
+        withholdingStatus: pwr.recognitionStatus || 'TERCATAT',
+      }))
+      : (snapshotPph ? [{
+        id: 0,
+        invoiceId: invoice.id,
+        buktiPotongNumber: snapshotPph.buktiPotongNumber || '',
+        buktiPotongDate: snapshotPph.buktiPotongDate ? String(snapshotPph.buktiPotongDate).split('T')[0] : '',
+        pphRegime: snapshotPph.pphType || '',
+        withholdingRate: Number(snapshotPph.rate ?? pphRate),
+        taxableBase: Number(snapshotPph.taxableBase ?? taxableBase),
+        withheldAmount: Number(snapshotPph.withheldAmount ?? pphAmount),
+        withholdingStatus: 'TERCATAT',
+      }] : []);
+
+    return {
+      ...invoice,
+      taxDetail,
+      ppnRecords,
+      pphRecords,
+    };
   }
 
   async getPayments() {
@@ -2388,7 +3309,9 @@ export class FinanceService {
         'invoice.purchaseOrder.vendor',
         'invoice.purchaseOrder.purchaseRequest',
         'invoice.purchaseOrder.purchaseRequest.project',
+        'companyBankAccount',
       ],
+      order: { id: 'DESC' },
     });
   }
 
@@ -2457,7 +3380,7 @@ export class FinanceService {
       // 1. Lock invoice with pessimistic_write
       const invoice = await queryRunner.manager.findOne(Invoice, {
         where: { id: dto.invoiceId },
-        relations: ['purchaseOrder', 'purchaseOrder.vendor', 'paymentTerm'],
+        relations: ['purchaseOrder', 'purchaseOrder.vendor', 'paymentTerm', 'invoiceTaxDetail'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -2517,52 +3440,109 @@ export class FinanceService {
         throw new BadRequestException('Payment term bukan milik Purchase Order dari invoice ini.');
       }
 
-      // 5. Calculate remaining unpaid balance
+      // 5. Calculate authoritative tax and settlement liability
+      let itd = invoice.invoiceTaxDetail;
+      if (!itd) {
+        try {
+          itd = await queryRunner.manager.findOne(InvoiceTaxDetail, {
+            where: { invoiceId: invoice.id },
+          });
+          if (itd) {
+            invoice.invoiceTaxDetail = itd;
+          }
+        } catch (e) { }
+      }
+
+      const totalAmountDec = this.toMoneyDec(invoice.totalAmount);
+      const dppCommercialDec = itd?.dppCommercial != null ? this.toMoneyDec(itd.dppCommercial) : totalAmountDec;
+      const ppnAmountDec = this.toMoneyDec(itd?.ppnAmount || 0);
+
+      // Gross commercial liability: L_comm = DPP + PPN
+      const effectiveGrossLiabilityDec = itd?.grossCommercialLiability != null
+        ? this.toMoneyDec(itd.grossCommercialLiability)
+        : dppCommercialDec.plus(ppnAmountDec);
+
+      // Statutory deductions and non-cash settlement credits: W_tax (PPh), W_wapu (WAPU), P_ded (Prior deductions)
+      const wTaxDec = this.toMoneyDec(itd?.pphWithholdingAmount || 0);
+      const wWapuDec = this.toMoneyDec(itd?.wapuPpnWithheldAmount || 0);
+      const pDedDec = this.toMoneyDec(itd?.priorDeductionsAmount || 0);
+      const totalNonCashCreditsDec = wTaxDec.plus(wWapuDec).plus(pDedDec);
+
+      // Authoritative Net Vendor Cash Payable: D_cash = L_comm - W_tax - W_wapu - P_ded
+      const authoritativeNetPayableDec = itd?.netVendorCashPayable != null
+        ? this.toMoneyDec(itd.netVendorCashPayable)
+        : Decimal.max(0, effectiveGrossLiabilityDec.minus(totalNonCashCreditsDec));
+
+      // Calculate existing disbursed cash payments
       const existingPayments = await queryRunner.manager.find(Payment, {
         where: { invoiceId: invoice.id },
       });
-      let alreadyPaid = 0;
+      let alreadyPaidDec = new Decimal(0);
       for (const p of existingPayments) {
         if (!p.deletedAt) {
-          alreadyPaid += Number(p.amount);
+          alreadyPaidDec = alreadyPaidDec.plus(this.toMoneyDec(p.amount));
         }
       }
-      alreadyPaid = Math.round(alreadyPaid * 100) / 100;
-      const totalAmount = Number(invoice.totalAmount);
-      const remainingBalance = Math.round((totalAmount - alreadyPaid) * 100) / 100;
 
-      // Invariant 2 & Item 4/5: Procurement Schedule Integrity
-      // A payment term cannot be split into unauthorized residual Payment Requests after an earlier underpayment
-      if (termEntity && alreadyPaid > 0) {
-        throw new BadRequestException(
-          `Invoice termin ini telah memiliki pembayaran sebelumnya (Rp ${alreadyPaid.toLocaleString('id-ID')}). Termin pembayaran Procurement tidak dapat dipecah menjadi cicilan tambahan tanpa amandemen PO Procurement.`,
-        );
-      }
+      // Remaining net vendor cash payable: D_cash_remaining = D_cash - cashAlreadyPaid
+      const remainingNetPayableDec = Decimal.max(0, authoritativeNetPayableDec.minus(alreadyPaidDec));
+      const remainingNetPayable = remainingNetPayableDec.toNumber();
+
+      const effectiveGrossLiability = effectiveGrossLiabilityDec.toNumber();
+      const authoritativeNetPayable = authoritativeNetPayableDec.toNumber();
+      const alreadyPaid = alreadyPaidDec.toNumber();
+      const totalAmount = totalAmountDec.toNumber();
 
       // 6. Validate requested amount
-      const requestedAmount =
+      const defaultPayableDec = remainingNetPayableDec;
+      const requestedAmountDec =
         dto.requestedAmount !== undefined && dto.requestedAmount !== null
-          ? Number(dto.requestedAmount)
-          : (termEntity ? Number(termEntity.amount) : remainingBalance);
+          ? this.toMoneyDec(dto.requestedAmount)
+          : defaultPayableDec;
+      const requestedAmount = requestedAmountDec.toNumber();
 
-      if (isNaN(requestedAmount) || requestedAmount <= 0) {
+      if (requestedAmountDec.lessThanOrEqualTo(0)) {
         throw new BadRequestException('Jumlah yang diajukan harus lebih besar dari 0.');
       }
 
-      if (Math.round(requestedAmount * 100) / 100 > remainingBalance + 0.001) {
+      // Backend independent validation: Request cannot exceed remaining net cash payable
+      if (requestedAmountDec.greaterThan(remainingNetPayableDec)) {
         throw new BadRequestException(
-          `Jumlah yang diajukan (Rp ${requestedAmount.toLocaleString('id-ID')}) melebihi sisa tagihan invoice (Rp ${remainingBalance.toLocaleString('id-ID')}).`,
+          `Jumlah yang diajukan (Rp ${requestedAmount.toLocaleString('id-ID')}) melebihi sisa kas bersih yang dapat dibayarkan ke vendor (Rp ${remainingNetPayable.toLocaleString('id-ID')}).`,
         );
       }
 
-      // Invariant 2: Procurement Schedule Integrity
-      // If invoice is bound to a Payment Term, requested amount must match the authoritative term amount
+      // Invariant 2 & Procurement Schedule Integrity:
       if (termEntity) {
-        const authorizedTermAmount = Math.round(Number(termEntity.amount) * 100) / 100;
-        if (Math.round(requestedAmount * 100) / 100 !== authorizedTermAmount) {
+        // A payment term cannot be split into unauthorized residual Payment Requests after an earlier underpayment
+        if (alreadyPaidDec.greaterThan(0)) {
           throw new BadRequestException(
-            `Nominal pengajuan pembayaran (Rp ${requestedAmount.toLocaleString('id-ID')}) tidak sesuai dengan nilai termin pembayaran Procurement (Rp ${authorizedTermAmount.toLocaleString('id-ID')}). Pengajuan sebagian di luar termin tidak diizinkan.`,
+            `Invoice termin ini telah memiliki pembayaran sebelumnya (Rp ${alreadyPaid.toLocaleString('id-ID')}). Termin pembayaran Procurement tidak dapat dipecah menjadi cicilan tambahan tanpa amandemen PO Procurement.`,
           );
+        }
+
+        const authorizedTermAmountDec = this.toMoneyDec(termEntity.amount);
+        const authorizedGrossAmountDec = effectiveGrossLiabilityDec;
+        const expectedNetCashDec = authoritativeNetPayableDec;
+
+        // When statutory withholding applies (PPh / WAPU / deductions > 0):
+        // Cash request MUST match net vendor cash payable (D_cash), because withholding is remitted to state treasury
+        if (totalNonCashCreditsDec.greaterThan(0)) {
+          if (!requestedAmountDec.equals(expectedNetCashDec)) {
+            throw new BadRequestException(
+              `Nominal pengajuan pembayaran (Rp ${requestedAmount.toLocaleString('id-ID')}) tidak sesuai dengan estimasi kas bersih vendor (Rp ${expectedNetCashDec.toNumber().toLocaleString('id-ID')}) setelah pemotongan pajak (PPh/WAPU: Rp ${totalNonCashCreditsDec.toNumber().toLocaleString('id-ID')}). Pengajuan kas kotor tanpa pemotongan pajak tidak diizinkan.`,
+            );
+          }
+        } else {
+          // When no withholding applies (no tax, or PPN only where vendor receives full gross liability):
+          // requested amount must match authorized commercial term amount or gross liability
+          const isTermMatch = requestedAmountDec.equals(authorizedTermAmountDec);
+          const isGrossMatch = requestedAmountDec.equals(authorizedGrossAmountDec);
+          if (!isTermMatch && !isGrossMatch) {
+            throw new BadRequestException(
+              `Nominal pengajuan pembayaran (Rp ${requestedAmount.toLocaleString('id-ID')}) tidak sesuai dengan nilai termin pembayaran Procurement (Rp ${authorizedTermAmountDec.toNumber().toLocaleString('id-ID')}). Pengajuan sebagian di luar termin tidak diizinkan.`,
+            );
+          }
         }
       }
 
@@ -2580,7 +3560,7 @@ export class FinanceService {
       const seq = String(countToday + 1).padStart(3, '0');
       const requestNumber = `PRQ-${todayStr}-${seq}`;
 
-      // 8. Snapshot
+      // 8. Snapshot with transparent tax breakdown
       const po = invoice.purchaseOrder;
       const vendor = po?.vendor;
       const paymentTerm = invoice.paymentTerm;
@@ -2593,6 +3573,38 @@ export class FinanceService {
         });
       }
 
+      let sc: ServiceClaim | null = null;
+      if (invoice.serviceClaimId) {
+        try {
+          sc = await queryRunner.manager.findOne(ServiceClaim, {
+            where: { id: invoice.serviceClaimId },
+          });
+        } catch (e) { }
+      }
+
+      let verifierUser: User | null = null;
+      if (invoice.updatedBy) {
+        try {
+          verifierUser = await queryRunner.manager.findOne(User, {
+            where: { id: invoice.updatedBy },
+          });
+        } catch (e) { }
+      }
+
+      const snapTax = itd?.taxRuleSnapshot || {};
+      const ppnRateNum = itd?.ppnRate
+        ? (Number(itd.ppnRate) <= 1 ? Number(itd.ppnRate) * 100 : Number(itd.ppnRate))
+        : (ppnAmountDec.greaterThan(0) ? 11 : null);
+      const pphRateNum = (itd as any)?.pphRate
+        ? Number((itd as any).pphRate)
+        : (snapTax?.pph?.rate ? Number(snapTax.pph.rate) : null);
+      const pphTypeStr = (itd as any)?.pphType || snapTax?.pph?.pphType || (wTaxDec.greaterThan(0) ? 'PPh' : null);
+      const fakturPajakNumber = (itd as any)?.fakturPajakNumber || snapTax?.ppn?.fakturPajakNumber || snapTax?.fakturPajakNumber || null;
+      const fakturPajakDate = (itd as any)?.fakturPajakDate || snapTax?.ppn?.fakturPajakDate || null;
+      const buktiPotongNumber = (itd as any)?.buktiPotongNumber || snapTax?.pph?.buktiPotongNumber || snapTax?.buktiPotongNumber || null;
+      const buktiPotongDate = (itd as any)?.buktiPotongDate || snapTax?.pph?.buktiPotongDate || null;
+      const projectName = (po?.purchaseRequest as any)?.project?.name || null;
+
       const snapshot: ApprovalSnapshot = {
         invoiceId: invoice.id,
         invoiceNumber: invoice.invoiceNumber,
@@ -2602,14 +3614,36 @@ export class FinanceService {
         paymentTermId: termId,
         paymentTermName: termEntity?.termName || paymentTerm?.termName || null,
         requestedAmount: requestedAmount,
+        dppAmount: dppCommercialDec.toNumber(),
+        ppnAmount: ppnAmountDec.toNumber(),
+        ppnRate: ppnRateNum,
+        grossAmount: effectiveGrossLiabilityDec.toNumber(),
+        pphAmount: wTaxDec.toNumber(),
+        pphType: pphTypeStr,
+        pphRate: pphRateNum,
+        wapuAmount: wWapuDec.toNumber(),
+        priorDeductionsAmount: pDedDec.toNumber(),
+        netPayableAmount: authoritativeNetPayableDec.toNumber(),
+        fakturPajakNumber,
+        fakturPajakDate,
+        buktiPotongNumber,
+        buktiPotongDate,
         vendorId: vendor?.id ? Number(vendor.id) : null,
         vendorName: vendor?.name || null,
         vendorBankAccount: dto.bankAccountNumber || null,
         vendorBankName: dto.bankName || null,
+        vendorBankAccountHolder: dto.bankAccountHolder || null,
         goodsReceiptId: gr?.id ? Number(gr.id) : null,
         goodsReceiptNumber: gr?.grNumber || null,
+        serviceClaimId: sc?.id ? Number(sc.id) : null,
+        serviceClaimNumber: sc?.claimNumber || null,
         poId: po?.id ? Number(po.id) : null,
         poNumber: po?.poNumber || null,
+        projectName,
+        matchStatus: invoice.matchStatus || null,
+        verifiedBy: invoice.updatedBy || null,
+        verifiedByName: verifierUser?.fullName || null,
+        verifiedAt: invoice.updatedAt ? invoice.updatedAt.toISOString() : undefined,
         timestamp: new Date().toISOString(),
       };
 
@@ -2708,8 +3742,11 @@ export class FinanceService {
       .getRepository(PaymentRequest)
       .createQueryBuilder('prq')
       .leftJoinAndSelect('prq.invoice', 'invoice')
+      .leftJoinAndSelect('invoice.invoiceTaxDetail', 'invoiceTaxDetail')
       .leftJoinAndSelect('invoice.purchaseOrder', 'po')
       .leftJoinAndSelect('po.vendor', 'vendor')
+      .leftJoinAndSelect('po.purchaseRequest', 'purchaseRequest')
+      .leftJoinAndSelect('purchaseRequest.project', 'project')
       .leftJoinAndSelect('prq.paymentTerm', 'paymentTerm')
       .leftJoinAndSelect('prq.requester', 'requester')
       .leftJoinAndSelect('prq.approver', 'approver')
@@ -2730,8 +3767,11 @@ export class FinanceService {
       .getRepository(PaymentRequest)
       .createQueryBuilder('prq')
       .leftJoinAndSelect('prq.invoice', 'invoice')
+      .leftJoinAndSelect('invoice.invoiceTaxDetail', 'invoiceTaxDetail')
       .leftJoinAndSelect('invoice.purchaseOrder', 'po')
       .leftJoinAndSelect('po.vendor', 'vendor')
+      .leftJoinAndSelect('po.purchaseRequest', 'purchaseRequest')
+      .leftJoinAndSelect('purchaseRequest.project', 'project')
       .leftJoinAndSelect('prq.paymentTerm', 'paymentTerm')
       .leftJoinAndSelect('prq.requester', 'requester')
       .leftJoinAndSelect('prq.approver', 'approver')
@@ -2777,6 +3817,13 @@ export class FinanceService {
       const oldStatus = prq.status;
 
       if (dto.action === DirectorDecisionAction.APPROVE) {
+        // Enforce snapshot version integrity: prevent approval if invoice data was updated after snapshot
+        if (prq.approvalSnapshot?.invoiceVersion && prq.invoice?.version && prq.invoice.version > prq.approvalSnapshot.invoiceVersion) {
+          throw new BadRequestException(
+            `Terdeteksi perubahan data invoice (versi ${prq.invoice.version}) setelah pengajuan pembayaran dibuat (versi snapshot ${prq.approvalSnapshot.invoiceVersion}). Persetujuan tidak dapat diproses menggunakan data keuangan yang sudah usang (stale). Gunakan aksi RETURN (Minta Revisi) agar tim Finance mengajukan ulang sesuai data terbaru.`
+          );
+        }
+
         if (dto.approvedAmount !== undefined && dto.approvedAmount !== null) {
           const appAmt = Number(dto.approvedAmount);
           if (isNaN(appAmt) || appAmt <= 0) {
@@ -2963,11 +4010,43 @@ export class FinanceService {
       const oldStatus = prq.status;
 
       if (dto.requestedAmount !== undefined && dto.requestedAmount !== null) {
-        const amt = Number(dto.requestedAmount);
-        if (isNaN(amt) || amt <= 0) {
+        const amtDec = this.toMoneyDec(dto.requestedAmount);
+        if (amtDec.lessThanOrEqualTo(0)) {
           throw new BadRequestException('Jumlah pengajuan ulang harus lebih besar dari 0.');
         }
-        prq.requestedAmount = amt;
+
+        let itd = prq.invoice?.invoiceTaxDetail;
+        if (!itd) {
+          try {
+            itd = await queryRunner.manager.findOne(InvoiceTaxDetail, { where: { invoiceId: prq.invoiceId } });
+          } catch (e) { }
+        }
+
+        const grossLiabilityDec = itd?.grossCommercialLiability != null
+          ? this.toMoneyDec(itd.grossCommercialLiability)
+          : this.toMoneyDec(prq.invoice?.totalAmount || 0);
+        const wTaxDec = this.toMoneyDec(itd?.pphWithholdingAmount || 0);
+        const wWapuDec = this.toMoneyDec(itd?.wapuPpnWithheldAmount || 0);
+        const pDedDec = this.toMoneyDec(itd?.priorDeductionsAmount || 0);
+        const totalNonCashCreditsDec = wTaxDec.plus(wWapuDec).plus(pDedDec);
+        const netPayableDec = itd?.netVendorCashPayable != null
+          ? this.toMoneyDec(itd.netVendorCashPayable)
+          : Decimal.max(0, grossLiabilityDec.minus(totalNonCashCreditsDec));
+
+        const existingPayments = await queryRunner.manager.find(Payment, { where: { invoiceId: prq.invoiceId } });
+        let alreadyPaidDec = new Decimal(0);
+        for (const p of existingPayments) {
+          if (!p.deletedAt) alreadyPaidDec = alreadyPaidDec.plus(this.toMoneyDec(p.amount));
+        }
+        const remainingNetDec = Decimal.max(0, netPayableDec.minus(alreadyPaidDec));
+
+        if (amtDec.greaterThan(remainingNetDec)) {
+          throw new BadRequestException(
+            `Jumlah pengajuan ulang (Rp ${amtDec.toNumber().toLocaleString('id-ID')}) melebihi sisa kas bersih yang dapat dibayarkan ke vendor (Rp ${remainingNetDec.toNumber().toLocaleString('id-ID')}).`,
+          );
+        }
+
+        prq.requestedAmount = amtDec.toNumber();
       }
 
       if (dto.notes) {
@@ -3206,11 +4285,11 @@ export class FinanceService {
         }
       }
 
-      const currentTermAmount = Number(term.amount || 0);
-      if (
-        Math.round((previousProgressBilled + currentTermAmount) * 100) / 100 >
-        Math.round(totalReceivedPhysicalValue * 100) / 100 + 0.01
-      ) {
+      const currentTermAmountDec = this.toMoneyDec(term.amount);
+      const previousProgressBilledDec = this.toMoneyDec(previousProgressBilled);
+      const totalReceivedPhysicalValueDec = this.toMoneyDec(totalReceivedPhysicalValue);
+      const totalProgressDec = previousProgressBilledDec.plus(currentTermAmountDec);
+      if (totalProgressDec.greaterThan(totalReceivedPhysicalValueDec)) {
         return {
           isEligible: false,
           reason: 'Akumulasi penagihan progress melebihi total nilai fisik barang yang telah diterima.',
@@ -3430,6 +4509,550 @@ export class FinanceService {
     }
 
     return obligations;
+  }
+
+  // =========================================================================
+  // COMPANY BANK ACCOUNT MASTER DATA & LEGAL ENTITY CONTROL
+  // =========================================================================
+
+  /**
+   * Helper: Resolves authoritative company code ('UBD' | 'TVM') across the transaction chain.
+   * Strictly blocks if missing, unresolvable, or conflicting.
+   */
+  resolveTransactionCompanyCode(
+    prq?: PaymentRequest | null,
+    invoice?: Invoice | null,
+    po?: PurchaseOrder | any | null,
+    project?: any,
+  ): string {
+    const candidateEntities: { source: string; code: string }[] = [];
+
+    const normalizeEntity = (val?: string | null): string | null => {
+      if (!val) return null;
+      const str = String(val).trim().toUpperCase();
+      if (str === 'UBD' || str.includes('UBD') || str.includes('DANANJAYA')) return 'UBD';
+      if (str === 'TVM' || str.includes('TVM') || str.includes('TRI VISI')) return 'TVM';
+      return null;
+    };
+
+    const addEntity = (source: string, val?: string | null) => {
+      const code = normalizeEntity(val);
+      if (code) {
+        candidateEntities.push({ source, code });
+      }
+    };
+
+    if (prq) {
+      addEntity('PaymentRequest', prq.companyCode);
+    }
+    if (invoice) {
+      addEntity('Invoice', invoice.companyCode);
+      if (invoice.invoiceTaxDetail) {
+        addEntity('InvoiceTaxDetail', invoice.invoiceTaxDetail.companyCode);
+      }
+      if ((invoice as any).purchaseOrder) {
+        const invPo = (invoice as any).purchaseOrder;
+        addEntity('Invoice.PurchaseOrder', invPo.companyCode);
+        if (invPo.purchaseRequest?.project) {
+          addEntity('Invoice.PO.PurchaseRequest.Project.companyCode', invPo.purchaseRequest.project.companyCode);
+          addEntity('Invoice.PO.PurchaseRequest.Project.company', invPo.purchaseRequest.project.company);
+        }
+        if (invPo.project) {
+          addEntity('Invoice.PO.Project.companyCode', invPo.project.companyCode);
+          addEntity('Invoice.PO.Project.company', invPo.project.company);
+        }
+      }
+    }
+    if (po) {
+      addEntity('PurchaseOrder', po.companyCode);
+      if (po.purchaseRequest?.project) {
+        addEntity('PO.PurchaseRequest.Project.companyCode', po.purchaseRequest.project.companyCode);
+        addEntity('PO.PurchaseRequest.Project.company', po.purchaseRequest.project.company);
+      }
+      if (po.project) {
+        addEntity('PO.Project.companyCode', po.project.companyCode);
+        addEntity('PO.Project.company', po.project.company);
+      }
+    }
+    if (project) {
+      addEntity('Project.companyCode', project.companyCode);
+      addEntity('Project.company', project.company);
+    }
+
+    if (candidateEntities.length === 0) {
+      throw new BadRequestException(
+        'Payment execution blocked: Legal entity ownership is missing or cannot be reliably determined. Please complete authorized legacy data clarification before proceeding.'
+      );
+    }
+
+    const distinctEntities = Array.from(new Set(candidateEntities.map((e) => e.code)));
+    if (distinctEntities.length > 1) {
+      const details = candidateEntities.map((e) => `${e.source}=${e.code}`).join(', ');
+      throw new BadRequestException(
+        `Payment execution blocked: Conflicting legal entity ownership detected (${details}). Please resolve the data conflict before proceeding.`
+      );
+    }
+
+    const transactionCompanyCode = distinctEntities[0];
+    if (transactionCompanyCode !== 'UBD' && transactionCompanyCode !== 'TVM') {
+      throw new BadRequestException(
+        `Payment execution blocked: Unrecognized legal entity ownership '${transactionCompanyCode}'. Only 'UBD' or 'TVM' are authorized.`
+      );
+    }
+
+    return transactionCompanyCode;
+  }
+
+  async createCompanyBankAccount(dto: CreateCompanyBankAccountDto, userId: number) {
+    const repo = this.companyBankAccountRepository || this.dataSource.getRepository(CompanyBankAccount);
+    const companyCode = dto.companyCode.toUpperCase() as 'UBD' | 'TVM';
+    const bankName = dto.bankName.trim();
+    const accountNumber = dto.accountNumber.trim();
+
+    if (!dto.changeReason || dto.changeReason.trim().length === 0) {
+      throw new BadRequestException('Alasan perubahan (changeReason) wajib disertakan untuk pembuatan rekening bank.');
+    }
+
+    // Duplicate check
+    const existing = await repo.findOne({
+      where: {
+        companyCode,
+        bankName,
+        accountNumber,
+        deletedAt: IsNull(),
+      },
+    });
+
+    if (existing) {
+      throw new ConflictException(
+        `Rekening bank ${bankName} dengan nomor ${accountNumber} untuk entitas ${companyCode} sudah terdaftar.`
+      );
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      if (dto.isDefault) {
+        // Demote existing default accounts for this legal entity
+        await queryRunner.manager.update(
+          CompanyBankAccount,
+          { companyCode, isDefault: true, deletedAt: IsNull() },
+          { isDefault: false, updatedBy: userId }
+        );
+      }
+
+      const account = queryRunner.manager.create(CompanyBankAccount, {
+        companyCode,
+        bankName,
+        bankCode: dto.bankCode ? dto.bankCode.trim() : null,
+        accountNumber,
+        accountHolderName: dto.accountHolderName.trim(),
+        accountType: dto.accountType || CompanyBankAccountType.GIRO,
+        accountPurpose: dto.accountPurpose || CompanyBankAccountPurpose.OPERATIONAL,
+        currency: dto.currency ? dto.currency.trim().toUpperCase() : 'IDR',
+        status: CompanyBankAccountStatus.ACTIVE,
+        isDefault: Boolean(dto.isDefault),
+        effectiveDate: dto.effectiveDate,
+        expiryDate: dto.expiryDate || null,
+        picName: dto.picName ? dto.picName.trim() : null,
+        notes: dto.notes ? dto.notes.trim() : null,
+        lastChangeReason: dto.changeReason.trim(),
+        createdBy: userId,
+        updatedBy: userId,
+      });
+
+      const savedAccount = await queryRunner.manager.save(CompanyBankAccount, account);
+
+      // Audit Log
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'company_bank_accounts',
+        record_id: savedAccount.id,
+        action: 'CREATE',
+        old_value: null,
+        new_value: {
+          id: savedAccount.id,
+          companyCode: savedAccount.companyCode,
+          bankName: savedAccount.bankName,
+          accountNumber: savedAccount.accountNumber,
+          accountHolderName: savedAccount.accountHolderName,
+          accountType: savedAccount.accountType,
+          accountPurpose: savedAccount.accountPurpose,
+          currency: savedAccount.currency,
+          status: savedAccount.status,
+          isDefault: savedAccount.isDefault,
+          effectiveDate: savedAccount.effectiveDate,
+          expiryDate: savedAccount.expiryDate,
+          picName: savedAccount.picName,
+          notes: savedAccount.notes,
+          changeReason: dto.changeReason.trim(),
+        },
+        created_by: userId ? Number(userId) : null,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
+      await queryRunner.commitTransaction();
+      return savedAccount;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async getCompanyBankAccounts(query: QueryCompanyBankAccountDto = {}) {
+    const repo = this.companyBankAccountRepository || this.dataSource.getRepository(CompanyBankAccount);
+    const qb = repo.createQueryBuilder('cba')
+      .where('cba.deletedAt IS NULL');
+
+    if (query.companyCode) {
+      qb.andWhere('cba.companyCode = :companyCode', { companyCode: query.companyCode.toUpperCase() });
+    }
+    if (query.status) {
+      qb.andWhere('cba.status = :status', { status: query.status });
+    }
+    if (query.purpose) {
+      qb.andWhere('cba.accountPurpose = :purpose', { purpose: query.purpose });
+    }
+    if (query.search && query.search.trim().length > 0) {
+      const term = `%${query.search.trim()}%`;
+      qb.andWhere('(cba.bankName LIKE :term OR cba.accountNumber LIKE :term OR cba.accountHolderName LIKE :term)', { term });
+    }
+
+    qb.orderBy('cba.isDefault', 'DESC')
+      .addOrderBy('cba.status', 'ASC')
+      .addOrderBy('cba.bankName', 'ASC');
+
+    return qb.getMany();
+  }
+
+  async getEligibleCompanyBankAccounts(companyCode?: string) {
+    const repo = this.companyBankAccountRepository || this.dataSource.getRepository(CompanyBankAccount);
+    const today = new Date().toISOString().slice(0, 10);
+    const qb = repo.createQueryBuilder('cba')
+      .where('cba.deletedAt IS NULL')
+      .andWhere('cba.status = :status', { status: CompanyBankAccountStatus.ACTIVE })
+      .andWhere('cba.effectiveDate <= :today', { today })
+      .andWhere('(cba.expiryDate IS NULL OR cba.expiryDate >= :today)', { today });
+
+    if (companyCode) {
+      const codeUpper = companyCode.trim().toUpperCase();
+      if (codeUpper === 'UBD' || codeUpper === 'TVM') {
+        qb.andWhere('cba.companyCode = :codeUpper', { codeUpper });
+      }
+    }
+
+    qb.orderBy('cba.isDefault', 'DESC')
+      .addOrderBy('cba.bankName', 'ASC');
+
+    return qb.getMany();
+  }
+
+  async getCompanyBankAccountById(id: number) {
+    const repo = this.companyBankAccountRepository || this.dataSource.getRepository(CompanyBankAccount);
+    const account = await repo.findOne({
+      where: { id, deletedAt: IsNull() },
+    });
+    if (!account) {
+      throw new NotFoundException(`Rekening bank perusahaan dengan ID ${id} tidak ditemukan.`);
+    }
+    return account;
+  }
+
+  async updateCompanyBankAccount(id: number, dto: UpdateCompanyBankAccountDto, userId: number) {
+    const repo = this.companyBankAccountRepository || this.dataSource.getRepository(CompanyBankAccount);
+    const account = await this.getCompanyBankAccountById(id);
+
+    if (!dto.changeReason || dto.changeReason.trim().length === 0) {
+      throw new BadRequestException('Alasan perubahan (changeReason) wajib diisi untuk setiap modifikasi master rekening bank.');
+    }
+
+    // Check duplicate if updating bankName or accountNumber
+    const newBankName = dto.bankName ? dto.bankName.trim() : account.bankName;
+    const newAccountNumber = dto.accountNumber ? dto.accountNumber.trim() : account.accountNumber;
+    if (newBankName !== account.bankName || newAccountNumber !== account.accountNumber) {
+      const duplicate = await repo.findOne({
+        where: {
+          companyCode: account.companyCode,
+          bankName: newBankName,
+          accountNumber: newAccountNumber,
+          deletedAt: IsNull(),
+        },
+      });
+      if (duplicate && Number(duplicate.id) !== Number(id)) {
+        throw new ConflictException(
+          `Rekening bank ${newBankName} dengan nomor ${newAccountNumber} untuk entitas ${account.companyCode} sudah terdaftar.`
+        );
+      }
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const oldValue = {
+        bankName: account.bankName,
+        bankCode: account.bankCode,
+        accountNumber: account.accountNumber,
+        accountHolderName: account.accountHolderName,
+        accountType: account.accountType,
+        accountPurpose: account.accountPurpose,
+        currency: account.currency,
+        status: account.status,
+        isDefault: account.isDefault,
+        effectiveDate: account.effectiveDate,
+        expiryDate: account.expiryDate,
+        picName: account.picName,
+        notes: account.notes,
+        lastChangeReason: account.lastChangeReason,
+      };
+
+      if (dto.isDefault) {
+        // Demote existing default accounts for this legal entity
+        await queryRunner.manager.update(
+          CompanyBankAccount,
+          { companyCode: account.companyCode, isDefault: true, deletedAt: IsNull() },
+          { isDefault: false, updatedBy: userId }
+        );
+        account.isDefault = true;
+      } else if (dto.isDefault === false) {
+        account.isDefault = false;
+      }
+
+      if (dto.bankName !== undefined) account.bankName = dto.bankName.trim();
+      if (dto.bankCode !== undefined) account.bankCode = dto.bankCode ? dto.bankCode.trim() : null;
+      if (dto.accountNumber !== undefined) account.accountNumber = dto.accountNumber.trim();
+      if (dto.accountHolderName !== undefined) account.accountHolderName = dto.accountHolderName.trim();
+      if (dto.accountType !== undefined) account.accountType = dto.accountType;
+      if (dto.accountPurpose !== undefined) account.accountPurpose = dto.accountPurpose;
+      if (dto.currency !== undefined) account.currency = dto.currency ? dto.currency.trim().toUpperCase() : 'IDR';
+      if (dto.status !== undefined) {
+        account.status = dto.status;
+        if (dto.status !== CompanyBankAccountStatus.ACTIVE) {
+          account.isDefault = false;
+        }
+      }
+      if (dto.effectiveDate !== undefined) account.effectiveDate = dto.effectiveDate;
+      if (dto.expiryDate !== undefined) account.expiryDate = dto.expiryDate || null;
+      if (dto.picName !== undefined) account.picName = dto.picName ? dto.picName.trim() : null;
+      if (dto.notes !== undefined) account.notes = dto.notes ? dto.notes.trim() : null;
+
+      account.lastChangeReason = dto.changeReason.trim();
+      account.updatedBy = userId;
+
+      const savedAccount = await queryRunner.manager.save(CompanyBankAccount, account);
+
+      // Audit Log
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'company_bank_accounts',
+        record_id: savedAccount.id,
+        action: 'UPDATE',
+        old_value: oldValue,
+        new_value: {
+          ...account,
+          changeReason: dto.changeReason.trim(),
+        },
+        created_by: userId ? Number(userId) : null,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
+      await queryRunner.commitTransaction();
+      return savedAccount;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async activateCompanyBankAccount(id: number, changeReason: string, userId: number) {
+    if (!changeReason || changeReason.trim().length === 0) {
+      throw new BadRequestException('Alasan aktivasi (changeReason) wajib disertakan.');
+    }
+    const account = await this.getCompanyBankAccountById(id);
+    if (account.status === CompanyBankAccountStatus.ACTIVE) return account;
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const oldValue = { status: account.status, lastChangeReason: account.lastChangeReason };
+      account.status = CompanyBankAccountStatus.ACTIVE;
+      account.lastChangeReason = changeReason.trim();
+      account.updatedBy = userId;
+      const savedAccount = await queryRunner.manager.save(CompanyBankAccount, account);
+
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'company_bank_accounts',
+        record_id: savedAccount.id,
+        action: 'ACTIVATE',
+        old_value: oldValue,
+        new_value: { status: savedAccount.status, changeReason: changeReason.trim() },
+        created_by: userId ? Number(userId) : null,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
+      await queryRunner.commitTransaction();
+      return savedAccount;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async deactivateCompanyBankAccount(id: number, changeReason: string, userId: number) {
+    if (!changeReason || changeReason.trim().length === 0) {
+      throw new BadRequestException('Alasan penonaktifan (changeReason) wajib disertakan.');
+    }
+    const account = await this.getCompanyBankAccountById(id);
+    if (account.status === CompanyBankAccountStatus.INACTIVE) return account;
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const oldValue = { status: account.status, isDefault: account.isDefault, lastChangeReason: account.lastChangeReason };
+      account.status = CompanyBankAccountStatus.INACTIVE;
+      account.isDefault = false;
+      account.lastChangeReason = changeReason.trim();
+      account.updatedBy = userId;
+      const savedAccount = await queryRunner.manager.save(CompanyBankAccount, account);
+
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'company_bank_accounts',
+        record_id: savedAccount.id,
+        action: 'DEACTIVATE',
+        old_value: oldValue,
+        new_value: { status: savedAccount.status, isDefault: savedAccount.isDefault, changeReason: changeReason.trim() },
+        created_by: userId ? Number(userId) : null,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
+      await queryRunner.commitTransaction();
+      return savedAccount;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async blockCompanyBankAccount(id: number, changeReason: string, userId: number) {
+    if (!changeReason || changeReason.trim().length === 0) {
+      throw new BadRequestException('Alasan pemblokiran (changeReason) wajib disertakan.');
+    }
+    const account = await this.getCompanyBankAccountById(id);
+    if (account.status === CompanyBankAccountStatus.BLOCKED) return account;
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      const oldValue = { status: account.status, isDefault: account.isDefault, lastChangeReason: account.lastChangeReason };
+      account.status = CompanyBankAccountStatus.BLOCKED;
+      account.isDefault = false;
+      account.lastChangeReason = changeReason.trim();
+      account.updatedBy = userId;
+      const savedAccount = await queryRunner.manager.save(CompanyBankAccount, account);
+
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'company_bank_accounts',
+        record_id: savedAccount.id,
+        action: 'BLOCK',
+        old_value: oldValue,
+        new_value: { status: savedAccount.status, isDefault: savedAccount.isDefault, changeReason: changeReason.trim() },
+        created_by: userId ? Number(userId) : null,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
+      await queryRunner.commitTransaction();
+      return savedAccount;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async setDefaultCompanyBankAccount(id: number, changeReason: string, userId: number) {
+    if (!changeReason || changeReason.trim().length === 0) {
+      throw new BadRequestException('Alasan penentuan rekening default (changeReason) wajib disertakan.');
+    }
+    const account = await this.getCompanyBankAccountById(id);
+    if (account.status !== CompanyBankAccountStatus.ACTIVE) {
+      throw new BadRequestException('Hanya rekening berstatus ACTIVE yang dapat dijadikan rekening utama (default).');
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const effStr = account.effectiveDate instanceof Date ? account.effectiveDate.toISOString().slice(0, 10) : String(account.effectiveDate).slice(0, 10);
+    if (effStr > today) {
+      throw new BadRequestException('Rekening yang belum berlaku efektif tidak dapat dijadikan rekening utama (default).');
+    }
+    if (account.expiryDate) {
+      const expStr = account.expiryDate instanceof Date ? account.expiryDate.toISOString().slice(0, 10) : String(account.expiryDate).slice(0, 10);
+      if (expStr < today) {
+        throw new BadRequestException('Rekening yang telah kedaluwarsa tidak dapat dijadikan rekening utama (default).');
+      }
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // Demote all other accounts of the same legal entity
+      await queryRunner.manager.update(
+        CompanyBankAccount,
+        { companyCode: account.companyCode, isDefault: true, deletedAt: IsNull() },
+        { isDefault: false, updatedBy: userId }
+      );
+
+      account.isDefault = true;
+      account.lastChangeReason = changeReason.trim();
+      account.updatedBy = userId;
+      const savedAccount = await queryRunner.manager.save(CompanyBankAccount, account);
+
+      const auditLog = queryRunner.manager.create(AuditLog, {
+        table_name: 'company_bank_accounts',
+        record_id: savedAccount.id,
+        action: 'SET_DEFAULT',
+        old_value: { isDefault: false },
+        new_value: { isDefault: true, changeReason: changeReason.trim() },
+        created_by: userId ? Number(userId) : null,
+      });
+      await queryRunner.manager.save(AuditLog, auditLog);
+
+      await queryRunner.commitTransaction();
+      return savedAccount;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  async getCompanyBankAccountHistory(id: number) {
+    await this.getCompanyBankAccountById(id);
+    const auditRepo = this.dataSource.getRepository(AuditLog);
+    return auditRepo.find({
+      where: {
+        table_name: 'company_bank_accounts',
+        record_id: id,
+      },
+      order: { created_at: 'DESC' },
+    });
   }
 }
 

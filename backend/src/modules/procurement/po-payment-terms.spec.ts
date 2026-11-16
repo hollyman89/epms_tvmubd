@@ -456,4 +456,216 @@ describe('EPMS — PO Payment Terms Recovery & Contract Specification (Phases 1-
       expect.anything(),
     );
   });
+
+  // 12. CP1.1 Calculation: PO creation authoritatively calculates line totals from quantity * unit_price and sums PO header total
+  it('12. PO creation authoritatively calculates line totals from quantity * unit_price and sums PO header total', async () => {
+    const customItems = [
+      { item_name: 'Custom A', quantity: 3, unit_price: 15000 },
+      { item_name: 'Custom B', quantity: 2, unit_price: 25000 },
+    ];
+    const dto: any = {
+      purchase_request_id: 1,
+      vendor_id: 4,
+      po_items: customItems,
+      payment_terms: [
+        { sequence: 1, term_name: 'Pelunasan 100%', term_type: PaymentTermType.FINAL_DELIVERY, percentage: 100 },
+      ],
+    };
+
+    const res = await service.createPurchaseOrder(10, dto);
+    expect(res.success).toBe(true);
+    expect(res.data.totalAmount).toBe(95000); // (3 * 15000) + (2 * 25000) = 45000 + 50000 = 95000
+    expect(res.data.items).toHaveLength(2);
+    expect(res.data.items[0].totalPrice).toBe(45000);
+    expect(res.data.items[1].totalPrice).toBe(50000);
+  });
+
+  // 13. CP1.1 Validation: PO creation rejects item with quantity <= 0 with BadRequestException
+  it('13. PO creation rejects item with quantity <= 0 with BadRequestException', async () => {
+    const zeroQtyDto: any = {
+      purchase_request_id: 1,
+      vendor_id: 4,
+      po_items: [{ item_name: 'Zero Qty Item', quantity: 0, unit_price: 5000 }],
+      payment_terms: [
+        { sequence: 1, term_name: 'Pelunasan 100%', term_type: PaymentTermType.FINAL_DELIVERY, percentage: 100 },
+      ],
+    };
+
+    await expect(service.createPurchaseOrder(10, zeroQtyDto)).rejects.toThrow(BadRequestException);
+    await expect(service.createPurchaseOrder(10, zeroQtyDto)).rejects.toThrow('Kuantitas item "Zero Qty Item" harus lebih besar dari 0');
+
+    const negativeQtyDto: any = {
+      purchase_request_id: 1,
+      vendor_id: 4,
+      po_items: [{ item_name: 'Negative Qty Item', quantity: -5, unit_price: 5000 }],
+      payment_terms: [
+        { sequence: 1, term_name: 'Pelunasan 100%', term_type: PaymentTermType.FINAL_DELIVERY, percentage: 100 },
+      ],
+    };
+
+    await expect(service.createPurchaseOrder(10, negativeQtyDto)).rejects.toThrow(BadRequestException);
+    await expect(service.createPurchaseOrder(10, negativeQtyDto)).rejects.toThrow('Kuantitas item "Negative Qty Item" harus lebih besar dari 0');
+  });
+
+  // 14. CP1.1 Validation: PO creation rejects item with unit_price < 0 with BadRequestException
+  it('14. PO creation rejects item with unit_price < 0 with BadRequestException', async () => {
+    const negativePriceDto: any = {
+      purchase_request_id: 1,
+      vendor_id: 4,
+      po_items: [{ item_name: 'Negative Price Item', quantity: 5, unit_price: -1000 }],
+      payment_terms: [
+        { sequence: 1, term_name: 'Pelunasan 100%', term_type: PaymentTermType.FINAL_DELIVERY, percentage: 100 },
+      ],
+    };
+
+    await expect(service.createPurchaseOrder(10, negativePriceDto)).rejects.toThrow(BadRequestException);
+    await expect(service.createPurchaseOrder(10, negativePriceDto)).rejects.toThrow('Harga satuan item "Negative Price Item" tidak boleh negatif');
+  });
+
+  // 15. CP1.1 Defense (F-2A-01): Manipulated client total_price is never persisted as authoritative amount
+  it('15. PO creation overwrites manipulated client total_price with authoritative server-calculated value', async () => {
+    const manipulatedDto: any = {
+      purchase_request_id: 1,
+      vendor_id: 4,
+      po_items: [
+        { item_name: 'Tampered Item', quantity: 10, unit_price: 5000, total_price: 999999 }, // Manipulated total
+      ],
+      payment_terms: [
+        { sequence: 1, term_name: 'Pelunasan 100%', term_type: PaymentTermType.FINAL_DELIVERY, percentage: 100 },
+      ],
+    };
+
+    const res = await service.createPurchaseOrder(10, manipulatedDto);
+    expect(res.success).toBe(true);
+    expect(res.data.totalAmount).toBe(50000); // Server calculated 10 * 5000 = 50000, NOT 999999
+    expect(res.data.items[0].totalPrice).toBe(50000); // Authoritative line total persisted
+  });
+
+  // 16. CP1.1 Fallback: Direct Service PO fallback derives authoritative line totals from PR items
+  it('16. Direct Service PO fallback derives authoritative line totals from PR items when po_items is omitted', async () => {
+    jest.spyOn(service, 'resolvePurchaseRequestDomain').mockResolvedValue('SERVICE');
+
+    const mockServicePr = {
+      id: 2,
+      prNumber: 'PR-20261015-002',
+      status: 'APPROVED',
+      items: [
+        { id: 201, itemName: 'Service Item 1', quantity: 4, estimatedUnitPrice: 25000, costItemId: 10, uom: 'Bulan' },
+      ],
+    };
+    prRepoMock.findOne.mockResolvedValue(mockServicePr);
+    rfqRepoMock.find.mockResolvedValue([]); // Direct PO (no RFQs)
+
+    const dto: any = {
+      purchase_request_id: 2,
+      vendor_id: 4,
+      // po_items omitted
+      payment_terms: [
+        { sequence: 1, term_name: 'Pelunasan 100%', term_type: PaymentTermType.FINAL_DELIVERY, percentage: 100 },
+      ],
+    };
+
+    const res = await service.createPurchaseOrder(10, dto);
+    expect(res.success).toBe(true);
+    expect(res.data.totalAmount).toBe(100000); // 4 * 25000 = 100000
+    expect(res.data.items).toHaveLength(1);
+    expect(res.data.items[0].totalPrice).toBe(100000);
+    expect(res.data.items[0].quantity).toBe(4);
+    expect(res.data.items[0].unitPrice).toBe(25000);
+  });
+
+  // 17. CP1.2 DEF-CP1.2-02: Quotation fallback persists winning quotation prices and derives header from quotation items
+  it('17. Quotation fallback derives authoritative line totals from winning quotation prices and matches PO header', async () => {
+    const mockQuotePr = {
+      id: 3,
+      prNumber: 'PR-20261015-003',
+      status: 'APPROVED',
+      items: [
+        { id: 301, itemName: 'Item A', quantity: 2, estimatedUnitPrice: 10000, costItemId: 11, uom: 'PCS' },
+        { id: 302, itemName: 'Item B', quantity: 3, estimatedUnitPrice: 20000, costItemId: 12, uom: 'PCS' },
+      ], // PR estimated budget prices: 10000 and 20000
+    };
+    prRepoMock.findOne.mockResolvedValue(mockQuotePr);
+    rfqRepoMock.find.mockResolvedValue([{ id: 10, rfqNumber: 'RFQ-001', prId: 3 }]);
+
+    const mockWinningQuote = {
+      id: 50,
+      rfqId: 10,
+      vendorId: 4,
+      items: [
+        { id: 501, prItemId: 301, itemName: 'Item A', quantity: 2, unitPrice: 8500, uom: 'PCS' }, // Winning negotiated: 8500
+        { id: 502, prItemId: 302, itemName: 'Item B', quantity: 3, unitPrice: 17500, uom: 'PCS' }, // Winning negotiated: 17500
+      ],
+    };
+    queryRunnerMock.manager.findOne.mockImplementation((entity: any, opts: any) => {
+      if (entity === Quotation) return Promise.resolve(mockWinningQuote);
+      return Promise.resolve(null);
+    });
+
+    const dto: any = {
+      purchase_request_id: 3,
+      vendor_id: 4,
+      // po_items omitted -> triggers Quotation Fallback
+      payment_terms: [
+        { sequence: 1, term_name: 'Pelunasan 100%', term_type: PaymentTermType.FINAL_DELIVERY, percentage: 100 },
+      ],
+    };
+
+    const res = await service.createPurchaseOrder(10, dto);
+    expect(res.success).toBe(true);
+    // (2 * 8500) + (3 * 17500) = 17000 + 52500 = 69500 (NOT PR budget: 2*10000 + 3*20000 = 80000)
+    expect(res.data.totalAmount).toBe(69500);
+    expect(res.data.items).toHaveLength(2);
+    // Persists winning quotation prices, not PR estimated prices
+    expect(res.data.items[0].unitPrice).toBe(8500);
+    expect(res.data.items[0].totalPrice).toBe(17000);
+    expect(res.data.items[0].costItemId).toBe(11);
+    expect(res.data.items[1].unitPrice).toBe(17500);
+    expect(res.data.items[1].totalPrice).toBe(52500);
+    expect(res.data.items[1].costItemId).toBe(12);
+    // Exact header-detail parity
+    const sumOfItems = res.data.items.reduce((acc: number, it: any) => acc + it.totalPrice, 0);
+    expect(res.data.totalAmount).toBe(sumOfItems);
+  });
+
+  // 18. CP1.2 DEF-CP1.2-01: Multi-item fallback PO header reconciles exactly with sum of persisted line items with zero drift
+  it('18. Multi-item fallback PO header reconciles exactly with sum of persisted line items with zero drift', async () => {
+    jest.spyOn(service, 'resolvePurchaseRequestDomain').mockResolvedValue('SERVICE');
+
+    // 4 items with fractional unit rates: 1.25 * 10.01 = 12.5125 -> rounded per item = 12.51
+    // Unrounded aggregate would have produced 50.05, while sum of items is 50.04
+    const mockServicePr = {
+      id: 4,
+      prNumber: 'PR-20261015-004',
+      status: 'APPROVED',
+      items: [
+        { id: 401, itemName: 'Sub-cent Line 1', quantity: 1.25, estimatedUnitPrice: 10.01, costItemId: 1, uom: 'Jam' },
+        { id: 402, itemName: 'Sub-cent Line 2', quantity: 1.25, estimatedUnitPrice: 10.01, costItemId: 2, uom: 'Jam' },
+        { id: 403, itemName: 'Sub-cent Line 3', quantity: 1.25, estimatedUnitPrice: 10.01, costItemId: 3, uom: 'Jam' },
+        { id: 404, itemName: 'Sub-cent Line 4', quantity: 1.25, estimatedUnitPrice: 10.01, costItemId: 4, uom: 'Jam' },
+      ],
+    };
+    prRepoMock.findOne.mockResolvedValue(mockServicePr);
+    rfqRepoMock.find.mockResolvedValue([]); // Direct Service PO fallback
+
+    const dto: any = {
+      purchase_request_id: 4,
+      vendor_id: 4,
+      payment_terms: [
+        { sequence: 1, term_name: 'Pelunasan 100%', term_type: PaymentTermType.FINAL_DELIVERY, percentage: 100 },
+      ],
+    };
+
+    const res = await service.createPurchaseOrder(10, dto);
+    expect(res.success).toBe(true);
+    expect(res.data.items).toHaveLength(4);
+    expect(res.data.items[0].totalPrice).toBe(12.51);
+    expect(res.data.items[1].totalPrice).toBe(12.51);
+    expect(res.data.items[2].totalPrice).toBe(12.51);
+    expect(res.data.items[3].totalPrice).toBe(12.51);
+    // Header must equal 50.04 (NOT 50.05)
+    expect(res.data.totalAmount).toBe(50.04);
+    const sumOfItems = res.data.items.reduce((acc: number, it: any) => acc + it.totalPrice, 0);
+    expect(res.data.totalAmount).toBe(Math.round(sumOfItems * 100) / 100);
+  });
 });

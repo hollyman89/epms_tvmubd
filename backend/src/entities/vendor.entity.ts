@@ -1,7 +1,9 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, DeleteDateColumn, OneToMany, OneToOne } from 'typeorm';
 import { PurchaseOrder } from './purchase-order.entity';
 import { VendorComparison } from './vendor-comparison.entity';
 import { Quotation } from './quotation.entity';
+import { VendorTaxProfile } from './vendor-tax-profile.entity';
+import { PphWithholdingRecord } from './pph-withholding-record.entity';
 
 @Entity('vendors')
 export class Vendor {
@@ -49,4 +51,10 @@ export class Vendor {
 
   @OneToMany(() => Quotation, q => q.vendor)
   quotations: Quotation[];
+
+  @OneToOne(() => VendorTaxProfile, vtp => vtp.vendor, { cascade: true })
+  taxProfile?: VendorTaxProfile;
+
+  @OneToMany(() => PphWithholdingRecord, pwr => pwr.vendor)
+  pphWithholdingRecords: PphWithholdingRecord[];
 }

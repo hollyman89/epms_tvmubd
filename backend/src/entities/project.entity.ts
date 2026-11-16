@@ -6,6 +6,9 @@ export class Project {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({ name: 'company_code', type: 'varchar', length: 10, nullable: true })
+  companyCode?: string; // 'UBD' | 'TVM' (DEC-TAX-07)
+
   @Column({ name: 'contract_id', type: 'bigint', unsigned: true, nullable: true })
   contractId?: number;
 

@@ -20,7 +20,7 @@ import styles from './ResponsiveModal.module.css';
 export type ResponsiveModalSize = 'full' | 'wide' | 'medium' | 'form' | 'compact';
 
 export const RESPONSIVE_MODAL_PRESETS: Record<ResponsiveModalSize, string> = {
-  full: 'min(1180px, calc(100vw - 24px))',
+  full: 'min(1360px, calc(100vw - 24px))',
   wide: 'min(960px, calc(100vw - 24px))',
   medium: 'min(800px, calc(100vw - 24px))',
   form: 'min(680px, calc(100vw - 24px))',

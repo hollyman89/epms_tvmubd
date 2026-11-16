@@ -1,14 +1,20 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, JoinColumn, VersionColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, OneToOne, JoinColumn, VersionColumn } from 'typeorm';
 import { PurchaseOrder } from './purchase-order.entity';
 import { InvoiceItem } from './invoice-item.entity';
 import { Payment } from './payment.entity';
 import { PoPaymentTerm } from './po-payment-term.entity';
 import { ServiceClaim } from './service-claim.entity';
+import { InvoiceTaxDetail } from './invoice-tax-detail.entity';
+import { PpnMasukanRecord } from './ppn-masukan-record.entity';
+import { PphWithholdingRecord } from './pph-withholding-record.entity';
 
 @Entity('invoices')
 export class Invoice {
   @PrimaryGeneratedColumn()
   id: number;
+
+  @Column({ name: 'company_code', type: 'varchar', length: 10, nullable: true })
+  companyCode?: string; // 'UBD' | 'TVM' (DEC-TAX-07)
 
   @Column({ name: 'po_id' })
   poId: number;
@@ -75,5 +81,14 @@ export class Invoice {
 
   @OneToMany(() => Payment, payment => payment.invoice, { cascade: true })
   payments: Payment[];
+
+  @OneToOne(() => InvoiceTaxDetail, itd => itd.invoice, { cascade: true })
+  invoiceTaxDetail?: InvoiceTaxDetail;
+
+  @OneToMany(() => PpnMasukanRecord, pmr => pmr.invoice, { cascade: true })
+  ppnMasukanRecords: PpnMasukanRecord[];
+
+  @OneToMany(() => PphWithholdingRecord, pwr => pwr.invoice, { cascade: true })
+  pphWithholdingRecords: PphWithholdingRecord[];
 }
 

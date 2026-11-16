@@ -1,6 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, VersionColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToOne, JoinColumn, VersionColumn } from 'typeorm';
 import { Invoice } from './invoice.entity';
 import { PurchaseOrderItem } from './purchase-order-item.entity';
+import { InvoiceItemTaxDetail } from './invoice-item-tax-detail.entity';
 
 @Entity('invoice_items')
 export class InvoiceItem {
@@ -53,5 +54,8 @@ export class InvoiceItem {
   @ManyToOne(() => PurchaseOrderItem, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'po_item_id' })
   purchaseOrderItem?: PurchaseOrderItem;
+
+  @OneToOne(() => InvoiceItemTaxDetail, itd => itd.invoiceItem, { cascade: true })
+  taxDetail?: InvoiceItemTaxDetail;
 }
 
