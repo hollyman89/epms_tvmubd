@@ -42,7 +42,7 @@ import { formatCurrency, formatPercentage } from '@/lib/formatters';
 
 const { Title, Text, Paragraph } = Typography;
 
-// Enterprise Benchmark Targets (DEC-BI-05: Pending Board Ratification)
+// Enterprise Benchmark Targets (DEC-BI-04: Pending Board Ratification)
 // Hardcoded compliance claims removed in Phase A; targets will be dynamically loaded in Phase C.
 const KPI_TARGET_CONFIG = {
   winRate: null,
@@ -437,13 +437,16 @@ export default function KpiReportsPage() {
   }, [period, fetchKpiData]);
 
   // Format currency Helper with null-safe handling
+  // Canonical IDR Currency Formatter Helper (Preserves null/undefined as 'Belum tersedia')
   const formatIDR = useCallback((amount?: number | null) => {
-    return formatCurrency(amount ?? 0);
+    if (amount === null || amount === undefined) return 'Belum tersedia';
+    return formatCurrency(amount);
   }, []);
 
-  // Safe number formatter helper with canonical Indonesian locale
+  // Safe number formatter helper with canonical Indonesian locale (Preserves null/undefined as 'N/A')
   const safeToFixed = useCallback((val?: number | null, digits = 1): string => {
-    return formatPercentage(val ?? 0, { decimals: digits, showSymbol: false });
+    if (val === null || val === undefined) return 'N/A';
+    return formatPercentage(val, { decimals: digits, showSymbol: false });
   }, []);
 
   // Stage Code Humanization Helper for Funnel Chart
@@ -486,16 +489,16 @@ export default function KpiReportsPage() {
     };
   }, []);
 
-  // Derived Calculations with useMemo
+  // Derived Calculations with useMemo (Missing API values preserved as null, not forced to 0)
   const kpi = useMemo(() => ({
-    totalPipeline: analyticsData?.kpi?.totalPipeline ?? 0,
+    totalPipeline: analyticsData?.kpi?.totalPipeline !== undefined ? analyticsData.kpi.totalPipeline : null,
     winRate: analyticsData?.kpi?.winRate !== undefined ? analyticsData.kpi.winRate : null,
-    avgDealSize: analyticsData?.kpi?.avgDealSize ?? 0,
-    totalDeals: analyticsData?.kpi?.totalDeals ?? 0,
-    openDeals: analyticsData?.kpi?.openDeals ?? 0,
-    wonDeals: analyticsData?.kpi?.wonDeals ?? 0,
-    lostDeals: analyticsData?.kpi?.lostDeals ?? 0,
-    momGrowth: analyticsData?.kpi?.momGrowth ?? null,
+    avgDealSize: analyticsData?.kpi?.avgDealSize !== undefined ? analyticsData.kpi.avgDealSize : null,
+    totalDeals: analyticsData?.kpi?.totalDeals !== undefined ? analyticsData.kpi.totalDeals : null,
+    openDeals: analyticsData?.kpi?.openDeals !== undefined ? analyticsData.kpi.openDeals : null,
+    wonDeals: analyticsData?.kpi?.wonDeals !== undefined ? analyticsData.kpi.wonDeals : null,
+    lostDeals: analyticsData?.kpi?.lostDeals !== undefined ? analyticsData.kpi.lostDeals : null,
+    momGrowth: analyticsData?.kpi?.momGrowth !== undefined ? analyticsData.kpi.momGrowth : null,
     momGrowthType: analyticsData?.kpi?.momGrowthType ?? 'GROWTH',
   }), [analyticsData]);
 
@@ -508,17 +511,17 @@ export default function KpiReportsPage() {
     const ap = execData?.currentSnapshot?.accountsPayable;
 
     return {
-      activeProjects: projects?.activeProjects ?? 0,
-      planningProjects: projects?.planningProjects ?? 0,
-      inProgressProjects: projects?.inProgressProjects ?? 0,
-      pendingApprovals: approvals?.totalPendingTasks ?? 0,
-      legalPending: legal?.pendingLegalReview ?? 0,
-      legalExpired: legal?.revisionExpired ?? 0,
-      legalActive: legal?.activeContracts ?? 0,
-      vendorDisbursements: vendorPayments?.paymentValue ?? 0,
-      poCommittedValue: procurement?.poCommittedValue ?? 0,
-      poCount: procurement?.poCount ?? 0,
-      outstandingAP: ap?.outstandingInvoiceValue ?? 0,
+      activeProjects: projects?.activeProjects !== undefined ? projects.activeProjects : null,
+      planningProjects: projects?.planningProjects !== undefined ? projects.planningProjects : null,
+      inProgressProjects: projects?.inProgressProjects !== undefined ? projects.inProgressProjects : null,
+      pendingApprovals: approvals?.totalPendingTasks !== undefined ? approvals.totalPendingTasks : null,
+      legalPending: legal?.pendingLegalReview !== undefined ? legal.pendingLegalReview : null,
+      legalExpired: legal?.revisionExpired !== undefined ? legal.revisionExpired : null,
+      legalActive: legal?.activeContracts !== undefined ? legal.activeContracts : null,
+      vendorDisbursements: vendorPayments?.paymentValue !== undefined ? vendorPayments.paymentValue : null,
+      poCommittedValue: procurement?.poCommittedValue !== undefined ? procurement.poCommittedValue : null,
+      poCount: procurement?.poCount !== undefined ? procurement.poCount : null,
+      outstandingAP: ap?.outstandingInvoiceValue !== undefined ? ap.outstandingInvoiceValue : null,
     };
   }, [execData]);
 
@@ -698,14 +701,18 @@ export default function KpiReportsPage() {
           <Col xs={24} sm={12} lg={6}>
             <KpiCardItem
               title="Proyek Operasional Aktif"
-              value={`${execMetrics.activeProjects} Proyek`}
+              value={execMetrics.activeProjects !== null ? `${execMetrics.activeProjects} Proyek` : 'Belum tersedia'}
               icon={<ProjectOutlined />}
               iconBg="#f5f3ff"
               iconColor="#7c3aed"
               subtext={
-                <span style={{ color: '#64748b' }}>
-                  {execMetrics.planningProjects} Planning · {execMetrics.inProgressProjects} Eksekusi
-                </span>
+                execMetrics.activeProjects !== null ? (
+                  <span style={{ color: '#64748b' }}>
+                    {execMetrics.planningProjects ?? 0} Planning · {execMetrics.inProgressProjects ?? 0} Eksekusi
+                  </span>
+                ) : (
+                  <span style={{ color: '#64748b' }}>Data proyek belum tersedia</span>
+                )
               }
               badge={
                 <Tag color="purple" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
@@ -761,7 +768,7 @@ export default function KpiReportsPage() {
                   </div>
                 </div>
                 <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ fontSize: 12, color: '#64748b' }}>Target SLA: Menunggu Ratifikasi Direksi (DEC-BI-05)</Text>
+                  <Text style={{ fontSize: 12, color: '#64748b' }}>Target SLA: Menunggu Ratifikasi Direksi (DEC-BI-04)</Text>
                   <Tag color="default" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
                     Belum tersedia
                   </Tag>
@@ -801,8 +808,8 @@ export default function KpiReportsPage() {
                       <Text style={{ fontSize: 13, fontWeight: 600, color: '#64748b' }}>Pending Approval Queue</Text>
                       <RightOutlined style={{ fontSize: 12, color: '#94a3b8' }} />
                     </div>
-                    <div style={{ fontSize: 24, fontWeight: 700, margin: '8px 0', color: execMetrics.pendingApprovals > 0 ? '#d97706' : '#059669' }}>
-                      {execMetrics.pendingApprovals} Dokumen
+                    <div style={{ fontSize: 24, fontWeight: 700, margin: '8px 0', color: execMetrics.pendingApprovals !== null ? (execMetrics.pendingApprovals > 0 ? '#d97706' : '#059669') : '#64748b' }}>
+                      {execMetrics.pendingApprovals !== null ? `${execMetrics.pendingApprovals} Dokumen` : 'Belum tersedia'}
                     </div>
                   </div>
                   <Text style={{ fontSize: 12, color: '#64748b' }}>Tugas persetujuan aktif (workflow_tasks) menunggu tindakan</Text>
@@ -1061,7 +1068,7 @@ export default function KpiReportsPage() {
                       <TrophyOutlined style={{ color: '#d97706', fontSize: 16 }} />
                     </div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: '#1d4ed8', margin: '4px 0', fontVariantNumeric: 'tabular-nums' }}>
-                      {topPipeline ? formatIDR(topPipeline.pipelineValue) : 'Rp 0'}
+                      {topPipeline ? formatIDR(topPipeline.openPipelineValue ?? topPipeline.pipelineValue) : 'Belum ada data'}
                     </div>
                     <Text style={{ fontSize: 12, color: '#64748b' }}>
                       PIC: <Text style={{ fontWeight: 600, color: '#0f172a' }}>{topPipeline?.marketingName ?? '-'}</Text>
@@ -1105,7 +1112,7 @@ export default function KpiReportsPage() {
                       <CheckCircleOutlined style={{ color: '#7c3aed', fontSize: 16 }} />
                     </div>
                     <div style={{ fontSize: 20, fontWeight: 700, color: '#7c3aed', margin: '4px 0', fontVariantNumeric: 'tabular-nums' }}>
-                      {topWonTender ? topWonTender.wonTender : 0} Tender
+                      {topWonTender ? `${topWonTender.wonTender} Tender` : 'Belum ada data'}
                     </div>
                     <Text style={{ fontSize: 12, color: '#64748b' }}>
                       PIC: <Text style={{ fontWeight: 600, color: '#0f172a' }}>{topWonTender?.marketingName ?? '-'}</Text>
@@ -1280,14 +1287,18 @@ export default function KpiReportsPage() {
           <Col xs={24} md={8}>
             <KpiCardItem
               title="Total Proyek Operasional"
-              value={`${execMetrics.activeProjects} Proyek`}
+              value={execMetrics.activeProjects !== null ? `${execMetrics.activeProjects} Proyek` : 'Belum tersedia'}
               icon={<ProjectOutlined />}
               iconBg="#eff6ff"
               iconColor="#2563eb"
               subtext={
-                <span style={{ color: '#64748b' }}>
-                  {execMetrics.planningProjects} Planning · {execMetrics.inProgressProjects} Eksekusi
-                </span>
+                execMetrics.activeProjects !== null ? (
+                  <span style={{ color: '#64748b' }}>
+                    {execMetrics.planningProjects ?? 0} Planning · {execMetrics.inProgressProjects ?? 0} Eksekusi
+                  </span>
+                ) : (
+                  <span style={{ color: '#64748b' }}>Data proyek belum tersedia</span>
+                )
               }
               badge={
                 <Tag color="blue" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
@@ -1303,7 +1314,7 @@ export default function KpiReportsPage() {
               icon={<CheckCircleOutlined />}
               iconBg="#f1f5f9"
               iconColor="#64748b"
-              subtext={<span style={{ color: '#64748b' }}>Target SLA: Menunggu Ratifikasi Direksi (DEC-BI-05)</span>}
+              subtext={<span style={{ color: '#64748b' }}>Target SLA: Menunggu Ratifikasi Direksi (DEC-BI-04)</span>}
               badge={
                 <Tag color="default" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
                   Belum tersedia
@@ -1314,7 +1325,7 @@ export default function KpiReportsPage() {
           <Col xs={24} md={8}>
             <KpiCardItem
               title="Antrean Kontrak Pending Legal"
-              value={`${execMetrics.legalPending} Kontrak`}
+              value={execMetrics.legalPending !== null ? `${execMetrics.legalPending} Kontrak` : 'Belum tersedia'}
               icon={<ClockCircleOutlined />}
               iconBg="#fef3c7"
               iconColor="#d97706"
@@ -1347,7 +1358,11 @@ export default function KpiReportsPage() {
           </div>
           <Alert
             message="Integrasi PMO Operational Board Aktif"
-            description={`Terdapat ${execMetrics.activeProjects} proyek aktif dalam portofolio PMO (${execMetrics.planningProjects} tahap Planning dan ${execMetrics.inProgressProjects} tahap Eksekusi). Metrik On-Time SLA delivery aktual akan diaktifkan setelah integrasi milestone pelaporan berkala.`}
+            description={
+              execMetrics.activeProjects !== null
+                ? `Terdapat ${execMetrics.activeProjects} proyek aktif dalam portofolio PMO (${execMetrics.planningProjects ?? 0} tahap Planning dan ${execMetrics.inProgressProjects ?? 0} tahap Eksekusi). Metrik On-Time SLA delivery aktual akan diaktifkan setelah integrasi milestone pelaporan berkala.`
+                : 'Data portofolio PMO sedang dimuat atau belum tersedia.'
+            }
             type="info"
             showIcon
             style={{ borderRadius: 12 }}
@@ -1388,7 +1403,7 @@ export default function KpiReportsPage() {
               icon={<RiseOutlined />}
               iconBg="#f1f5f9"
               iconColor="#64748b"
-              subtext={<span style={{ color: '#64748b' }}>Target Marjin: Menunggu Ratifikasi Direksi (DEC-BI-05)</span>}
+              subtext={<span style={{ color: '#64748b' }}>Target Marjin: Menunggu Ratifikasi Direksi (DEC-BI-04)</span>}
               badge={
                 <Tag color="default" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
                   Formula Pending
@@ -1403,7 +1418,7 @@ export default function KpiReportsPage() {
               icon={<ShoppingCartOutlined />}
               iconBg="#eff6ff"
               iconColor="#2563eb"
-              subtext={<span style={{ color: '#64748b' }}>{execMetrics.poCount} Purchase Order diterbitkan</span>}
+              subtext={<span style={{ color: '#64748b' }}>{execMetrics.poCount !== null ? `${execMetrics.poCount} Purchase Order diterbitkan` : 'Belum ada data'}</span>}
               badge={
                 <Tag color="blue" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
                   Komitmen PO
@@ -1487,7 +1502,7 @@ export default function KpiReportsPage() {
           <Col xs={24} md={8}>
             <KpiCardItem
               title="Antrean Aktif Legal Review"
-              value={`${execMetrics.legalPending} Kontrak`}
+              value={execMetrics.legalPending !== null ? `${execMetrics.legalPending} Kontrak` : 'Belum tersedia'}
               icon={<SafetyCertificateOutlined />}
               iconBg="#eff6ff"
               iconColor="#2563eb"
@@ -1502,7 +1517,7 @@ export default function KpiReportsPage() {
           <Col xs={24} md={8}>
             <KpiCardItem
               title="Kontrak Kedaluwarsa Revisi Legal"
-              value={`${execMetrics.legalExpired} Kontrak`}
+              value={execMetrics.legalExpired !== null ? `${execMetrics.legalExpired} Kontrak` : 'Belum tersedia'}
               icon={<ExclamationCircleOutlined />}
               iconBg="#fef3c7"
               iconColor="#d97706"

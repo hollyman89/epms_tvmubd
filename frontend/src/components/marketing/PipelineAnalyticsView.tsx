@@ -57,7 +57,9 @@ export const PipelineAnalyticsView: React.FC<PipelineAnalyticsViewProps> = ({
               <Card style={{ borderRadius: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
                 <Text type="secondary">Total Pipeline</Text>
                 <Title level={3} style={{ marginTop: 4, marginBottom: 4 }}>
-                  Rp {(analyticsData.kpi?.totalPipeline || 0).toLocaleString('id-ID')}
+                  {analyticsData.kpi?.totalPipeline !== null && analyticsData.kpi?.totalPipeline !== undefined
+                    ? `Rp ${Number(analyticsData.kpi.totalPipeline).toLocaleString('id-ID')}`
+                    : 'Belum tersedia'}
                 </Title>
                 {analyticsData.kpi?.momGrowth !== null && analyticsData.kpi?.momGrowth !== undefined ? (
                   <Text type={analyticsData.kpi.momGrowth >= 0 ? "success" : "danger"}>
@@ -82,7 +84,9 @@ export const PipelineAnalyticsView: React.FC<PipelineAnalyticsViewProps> = ({
                 <Text type="secondary">
                   {analyticsData.kpi?.wonCount !== undefined && analyticsData.kpi?.lostCount !== undefined
                     ? `Dari ${analyticsData.kpi.wonCount} Menang / ${analyticsData.kpi.wonCount + analyticsData.kpi.lostCount} Diputus (${analyticsData.kpi.openCount || 0} Open)`
-                    : `Dari total ${analyticsData.kpi?.totalDeals || 0} Deals`}
+                    : analyticsData.kpi?.totalDeals !== undefined && analyticsData.kpi?.totalDeals !== null
+                    ? `Dari total ${analyticsData.kpi.totalDeals} Deals`
+                    : 'Belum ada data deals'}
                 </Text>
               </Card>
             </Col>
@@ -90,7 +94,9 @@ export const PipelineAnalyticsView: React.FC<PipelineAnalyticsViewProps> = ({
               <Card style={{ borderRadius: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
                 <Text type="secondary">Avg Deal Size</Text>
                 <Title level={3} style={{ marginTop: 4, marginBottom: 4 }}>
-                  Rp {(analyticsData.kpi?.avgDealSize || 0).toLocaleString('id-ID')}
+                  {analyticsData.kpi?.avgDealSize !== null && analyticsData.kpi?.avgDealSize !== undefined
+                    ? `Rp ${Number(analyticsData.kpi.avgDealSize).toLocaleString('id-ID')}`
+                    : 'Belum tersedia'}
                 </Title>
                 <Text type="secondary">Rata-rata per tender</Text>
               </Card>
