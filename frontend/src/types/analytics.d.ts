@@ -17,6 +17,8 @@ export interface DashboardAnalyticsResponse {
     momGrowth: number | null; // e.g., -0.05 for 5% decrease, null if no baseline
     growthStatus?: 'POSITIVE' | 'NEGATIVE' | 'ZERO' | 'NO_PRIOR_BASELINE' | 'NO_ACTIVITY';
     growthPeriodLabel?: string;
+    wonDeals?: number;
+    lostDeals?: number;
   };
   trendLine: Array<{ month: string; value: number }>;
   sectorDistribution: Array<{ sector: string; value: number; percentage: number }>;

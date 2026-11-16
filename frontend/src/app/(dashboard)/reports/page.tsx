@@ -85,8 +85,11 @@ interface KpiData {
   openDeals?: number;
   wonDeals?: number;
   lostDeals?: number;
+  wonCount?: number;
+  lostCount?: number;
   momGrowth?: number | null;
-  momGrowthType?: 'GROWTH' | 'NO_BASE' | 'NO_ACTIVITY';
+  growthStatus?: 'GROWTH' | 'NO_PRIOR_BASELINE' | 'NO_ACTIVITY' | string | null;
+  growthPeriodLabel?: string | null;
 }
 
 interface TrendItem {
@@ -496,10 +499,11 @@ export default function KpiReportsPage() {
     avgDealSize: analyticsData?.kpi?.avgDealSize !== undefined ? analyticsData.kpi.avgDealSize : null,
     totalDeals: analyticsData?.kpi?.totalDeals !== undefined ? analyticsData.kpi.totalDeals : null,
     openDeals: analyticsData?.kpi?.openDeals !== undefined ? analyticsData.kpi.openDeals : null,
-    wonDeals: analyticsData?.kpi?.wonDeals !== undefined ? analyticsData.kpi.wonDeals : null,
-    lostDeals: analyticsData?.kpi?.lostDeals !== undefined ? analyticsData.kpi.lostDeals : null,
+    wonDeals: analyticsData?.kpi?.wonDeals !== undefined ? analyticsData.kpi.wonDeals : (analyticsData?.kpi?.wonCount !== undefined ? analyticsData.kpi.wonCount : null),
+    lostDeals: analyticsData?.kpi?.lostDeals !== undefined ? analyticsData.kpi.lostDeals : (analyticsData?.kpi?.lostCount !== undefined ? analyticsData.kpi.lostCount : null),
     momGrowth: analyticsData?.kpi?.momGrowth !== undefined ? analyticsData.kpi.momGrowth : null,
-    momGrowthType: analyticsData?.kpi?.momGrowthType ?? 'GROWTH',
+    growthStatus: analyticsData?.kpi?.growthStatus ?? null,
+    growthPeriodLabel: analyticsData?.kpi?.growthPeriodLabel ?? null,
   }), [analyticsData]);
 
   const execMetrics = useMemo(() => {
@@ -631,20 +635,20 @@ export default function KpiReportsPage() {
               iconBg="#eff6ff"
               iconColor="#2563eb"
               subtext={
-                kpi.momGrowthType === 'NO_BASE' ? (
+                kpi.growthStatus === 'NO_PRIOR_BASELINE' ? (
                   <span style={{ color: '#0284c7', fontWeight: 600 }}>
-                    Periode Baru / Tanpa Basis Komparasi
+                    Tidak ada pembanding periode sebelumnya
                   </span>
-                ) : kpi.momGrowthType === 'NO_ACTIVITY' ? (
+                ) : kpi.growthStatus === 'NO_ACTIVITY' ? (
                   <span style={{ color: '#64748b', fontWeight: 500 }}>
                     Tidak ada aktivitas pipeline
                   </span>
                 ) : kpi.momGrowth !== null ? (
                   <span style={{ color: kpi.momGrowth >= 0 ? '#059669' : '#dc2626', fontWeight: 600 }}>
-                    {kpi.momGrowth >= 0 ? <RiseOutlined /> : <FallOutlined />} {safeToFixed(kpi.momGrowth * 100, 1)}% Pertumbuhan MoM
+                    {kpi.momGrowth >= 0 ? <RiseOutlined /> : <FallOutlined />} {safeToFixed(kpi.momGrowth * 100, 1)}% Pertumbuhan {kpi.growthPeriodLabel || 'MoM'}
                   </span>
                 ) : (
-                  <span style={{ color: '#64748b' }}>{kpi.openDeals} Tender Terbuka</span>
+                  <span style={{ color: '#64748b' }}>{kpi.openDeals !== null ? `${kpi.openDeals} Tender Terbuka` : 'Data tender belum tersedia'}</span>
                 )
               }
               badge={
