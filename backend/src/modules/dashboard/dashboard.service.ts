@@ -142,9 +142,9 @@ export class DashboardService {
 
   /**
    * Computes unclassified operational transactions metadata for consolidated reporting.
-   * Guarantees mathematical reconciliation: ALL = UBD + TVM + UNCLASSIFIED.
+   * Guarantees mathematical reconciliation: ALL = UBD + TVM + UNCLASSIFIED across all periods.
    */
-  async getUnclassifiedMetadata() {
+  async getUnclassifiedMetadata(start?: Date, end?: Date) {
     let ragilId = 9;
     let lukasId = 7;
     try {
@@ -160,15 +160,30 @@ export class DashboardService {
       // Keep fallback ID if resolution fails
     }
 
+    const hasDateRange = start instanceof Date && !isNaN(start.getTime()) && end instanceof Date && !isNaN(end.getTime());
+
+    const tenderDateWhere = hasDateRange ? 'AND t.created_at BETWEEN ? AND ?' : '';
+    const tenderParams = hasDateRange ? [ragilId, lukasId, start, end] : [ragilId, lukasId];
+
+    const poDateWhere = hasDateRange ? "AND po.created_at BETWEEN ? AND ? AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')" : '';
+    const poParams = hasDateRange ? [ragilId, lukasId, start, end] : [ragilId, lukasId];
+
+    const paymentDateWhere = hasDateRange ? 'AND pay.payment_date BETWEEN ? AND ?' : '';
+    const paymentParams = hasDateRange ? [ragilId, lukasId, start, end] : [ragilId, lukasId];
+
+    const contractParams = [ragilId, lukasId];
+    const projectParams = [ragilId, lukasId];
+
     const [tendersRes, contractsRes, projectsRes, posRes, paymentsRes] = await Promise.all([
       this.dataSource.query(
         `SELECT 
-           COUNT(id) as count,
-           COALESCE(SUM(COALESCE(negotiated_price, estimated_budget)), 0) as value
-         FROM tenders
-         WHERE deleted_at IS NULL
-           AND (COALESCE(marketing_pic_id, created_by) NOT IN (?, ?) OR COALESCE(marketing_pic_id, created_by) IS NULL)`,
-        [ragilId, lukasId],
+           COUNT(t.id) as count,
+           COALESCE(SUM(COALESCE(t.negotiated_price, t.estimated_budget)), 0) as value
+         FROM tenders t
+         WHERE t.deleted_at IS NULL
+           AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)
+           ${tenderDateWhere}`,
+        tenderParams,
       ),
       this.dataSource.query(
         `SELECT 
@@ -178,7 +193,7 @@ export class DashboardService {
          JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL
          WHERE c.deleted_at IS NULL
            AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)`,
-        [ragilId, lukasId],
+        contractParams,
       ),
       this.dataSource.query(
         `SELECT COUNT(p.id) as count
@@ -187,7 +202,7 @@ export class DashboardService {
          JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL
          WHERE p.deleted_at IS NULL
            AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)`,
-        [ragilId, lukasId],
+        projectParams,
       ),
       this.dataSource.query(
         `SELECT 
@@ -199,8 +214,9 @@ export class DashboardService {
          JOIN contracts c ON p.contract_id = c.id AND c.deleted_at IS NULL
          JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL
          WHERE po.deleted_at IS NULL
-           AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)`,
-        [ragilId, lukasId],
+           AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)
+           ${poDateWhere}`,
+        poParams,
       ),
       this.dataSource.query(
         `SELECT 
@@ -214,8 +230,9 @@ export class DashboardService {
          JOIN contracts c ON p.contract_id = c.id AND c.deleted_at IS NULL
          JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL
          WHERE pay.deleted_at IS NULL
-           AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)`,
-        [ragilId, lukasId],
+           AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)
+           ${paymentDateWhere}`,
+        paymentParams,
       ),
     ]);
 
@@ -354,7 +371,7 @@ export class DashboardService {
     const openPipelinePromise = this.dataSource.query(
       `SELECT 
          COUNT(t.id) as openDealsCount,
-         COALESCE(SUM(COALESCE(t.negotiated_price, t.estimated_budget)), 0) as openPipelineValue
+         COALESCE(SUM(COALESCE(negotiated_price, estimated_budget)), 0) as openPipelineValue
        FROM tenders t 
        WHERE t.status NOT IN ('WON', 'LOST', 'CANCELLED') 
          AND t.deleted_at IS NULL
@@ -649,7 +666,7 @@ export class DashboardService {
 
     // 9. Unclassified Metadata (for Consolidated ALL reporting scope reconciliation)
     const unclassifiedPromise = !isCompanyScope
-      ? this.getUnclassifiedMetadata()
+      ? this.getUnclassifiedMetadata(start, end)
       : Promise.resolve(null);
 
     // 10. Secondary Analytical Charts: Contracts, Payments, and POs Monthly Trend for Year
@@ -1166,7 +1183,7 @@ export class DashboardService {
   }
 
   async getSummary() {
-    this.logger.log('Fetching dashboard summary from DB...');
+    this.logger.log('Fetching dashboard summary from DB (Legacy Endpoint - Deprecated)...');
     
     // Execute independent database queries concurrently via Promise.all for maximum latency reduction
     const [
@@ -1176,10 +1193,10 @@ export class DashboardService {
       pendingPRs,
       pendingPOs
     ] = await Promise.all([
-      // 1. Total Projects (Active/Running)
-      this.projectRepo.count({ where: { status: 'ACTIVE' } }),
+      // 1. Total Projects (Active/Running: IN_PROGRESS)
+      this.projectRepo.count({ where: { status: 'IN_PROGRESS' } }),
 
-      // 2. Total Revenue (Sum of all payments)
+      // 2. Vendor Disbursements (Sum of all payments - AP Disbursements, NOT Revenue)
       this.paymentRepo
         .createQueryBuilder('payment')
         .select('SUM(payment.amount_paid)', 'total')
@@ -1198,27 +1215,24 @@ export class DashboardService {
       this.poRepo.count({ where: { status: 'DRAFT' } })
     ]);
 
-    const totalRevenue = revenueResult?.total ? parseFloat(revenueResult.total) : 0;
+    const vendorDisbursements = revenueResult?.total ? parseFloat(revenueResult.total) : 0;
     const totalExpense = poResult?.totalExpense ? parseFloat(poResult.totalExpense) : 0;
-
-    const totalBudget = 5000000000;
-    let avgProfitMargin = 0;
-    if (totalBudget > 0) {
-      avgProfitMargin = ((totalBudget - totalExpense) / totalBudget) * 100;
-      avgProfitMargin = Math.min(100, Math.max(0, avgProfitMargin)); 
-    } else {
-      avgProfitMargin = 25.5; 
-    }
-
     const pendingApprovals = pendingPRs + pendingPOs;
-    const onTimeRate = 92.4; 
 
+    // Phase A Stabilization: Eliminate synthetic hardcoded metrics and AP-as-Revenue misclassification
     return {
       totalProjects,
-      totalRevenue,
-      avgProfitMargin: parseFloat(avgProfitMargin.toFixed(2)),
+      totalRevenue: null,
+      revenueStatus: 'UNAVAILABLE',
+      vendorDisbursements,
+      totalExpense,
+      avgProfitMargin: null,
+      profitMarginStatus: 'UNAVAILABLE',
       pendingApprovals,
-      onTimeRate
+      onTimeRate: null,
+      onTimeRateStatus: 'UNAVAILABLE',
+      isDeprecated: true,
+      notice: 'Endpoint ini didepresiasi. Gunakan /dashboard/executive-summary untuk metrik resmi berbasis data nyata.'
     };
   }
 

@@ -107,6 +107,13 @@ const MONTH_TRANSLATE: Record<string, string> = {
   Jul: 'Jul', Aug: 'Agu', Sep: 'Sep', Oct: 'Okt', Nov: 'Nov', Dec: 'Des',
 };
 
+const formatAxisCurrency = (val: number): string => {
+  if (val <= 0 || isNaN(val)) return '0';
+  if (val >= 1_000_000_000) return `${(val / 1_000_000_000).toFixed(1)} Miliar`;
+  if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(0)} Juta`;
+  return val.toLocaleString('id-ID');
+};
+
 export const ExecutiveDashboardPreview: React.FC = () => {
   const [selectedPeriod, setSelectedPeriod] = useState<DashboardPeriodType>('YEAR_TO_DATE');
   const [selectedDivision, setSelectedDivision] = useState<string>('ALL');
@@ -447,7 +454,7 @@ export const ExecutiveDashboardPreview: React.FC = () => {
   const maxMarketingVal = useMemo(() => {
     const vals = marketingTrend.map((t) => t.value);
     const max = Math.max(...vals, 0);
-    return max > 0 ? max * 1.25 : 120000000000;
+    return max > 0 ? max * 1.25 : 1;
   }, [marketingTrend]);
 
   const hasMarketingData = useMemo(() => {
@@ -458,7 +465,7 @@ export const ExecutiveDashboardPreview: React.FC = () => {
   const maxContractVal = useMemo(() => {
     const vals = contractsMonthly.map((c) => c.value);
     const max = Math.max(...vals, 0);
-    return max > 0 ? max * 1.25 : 100000000000;
+    return max > 0 ? max * 1.25 : 1;
   }, [contractsMonthly]);
 
   const hasContractsData = useMemo(() => {
@@ -468,7 +475,7 @@ export const ExecutiveDashboardPreview: React.FC = () => {
   const maxPaymentVal = useMemo(() => {
     const vals = paymentsMonthly.map((p) => p.value);
     const max = Math.max(...vals, 0);
-    return max > 0 ? max * 1.25 : 1000000000;
+    return max > 0 ? max * 1.25 : 1;
   }, [paymentsMonthly]);
 
   const hasPaymentsData = useMemo(() => {
@@ -478,7 +485,7 @@ export const ExecutiveDashboardPreview: React.FC = () => {
   const maxPoVal = useMemo(() => {
     const vals = posMonthly.map((po) => po.value);
     const max = Math.max(...vals, 0);
-    return max > 0 ? max * 1.25 : 1000000000;
+    return max > 0 ? max * 1.25 : 1;
   }, [posMonthly]);
 
   const hasPosData = useMemo(() => {
@@ -922,7 +929,7 @@ export const ExecutiveDashboardPreview: React.FC = () => {
                     <g key={idx}>
                       <line x1="42" y1={y} x2="455" y2={y} stroke="#F1F5F9" strokeWidth="1" />
                       <text x="36" y={y + 4} textAnchor="end" fontSize="10.5" fill="#94A3B8" fontWeight="500">
-                        {labelVal > 0 ? `${(labelVal / 1e9).toFixed(0)} M` : '0'}
+                        {formatAxisCurrency(labelVal)}
                       </text>
                     </g>
                   );
@@ -1278,19 +1285,11 @@ export const ExecutiveDashboardPreview: React.FC = () => {
                 {[1, 0.5, 0].map((ratio, i) => {
                   const y = 20 + i * 50;
                   const labelVal = maxContractVal * ratio;
-                  const formattedY =
-                    labelVal >= 1000000000
-                      ? `${(labelVal / 1000000000).toFixed(labelVal % 1000000000 === 0 ? 0 : 1)} M`
-                      : labelVal >= 1000000
-                      ? `${(labelVal / 1000000).toFixed(0)} jt`
-                      : labelVal > 0
-                      ? `${labelVal}`
-                      : '0';
                   return (
                     <g key={i}>
                       <line x1="36" y1={y} x2="310" y2={y} stroke="#F1F5F9" strokeWidth="1" />
                       <text x="30" y={y + 4} textAnchor="end" fontSize="10" fill="#94A3B8">
-                        {formattedY}
+                        {formatAxisCurrency(labelVal)}
                       </text>
                     </g>
                   );
@@ -1355,7 +1354,7 @@ export const ExecutiveDashboardPreview: React.FC = () => {
                     <g key={i}>
                       <line x1="36" y1={y} x2="310" y2={y} stroke="#F1F5F9" strokeWidth="1" />
                       <text x="30" y={y + 4} textAnchor="end" fontSize="10" fill="#94A3B8">
-                        {labelVal > 0 ? `${(labelVal / 1e6).toFixed(0)} jt` : '0'}
+                        {formatAxisCurrency(labelVal)}
                       </text>
                     </g>
                   );
@@ -1415,7 +1414,7 @@ export const ExecutiveDashboardPreview: React.FC = () => {
                     <g key={i}>
                       <line x1="36" y1={y} x2="310" y2={y} stroke="#F1F5F9" strokeWidth="1" />
                       <text x="30" y={y + 4} textAnchor="end" fontSize="10" fill="#94A3B8">
-                        {labelVal > 0 ? `${(labelVal / 1e6).toFixed(0)} jt` : '0'}
+                        {formatAxisCurrency(labelVal)}
                       </text>
                     </g>
                   );

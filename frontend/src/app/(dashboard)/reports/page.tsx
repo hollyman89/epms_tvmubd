@@ -42,12 +42,13 @@ import { formatCurrency, formatPercentage } from '@/lib/formatters';
 
 const { Title, Text, Paragraph } = Typography;
 
-// Enterprise Benchmark Targets (Display Reference - Static Constant)
+// Enterprise Benchmark Targets (DEC-BI-05: Pending Board Ratification)
+// Hardcoded compliance claims removed in Phase A; targets will be dynamically loaded in Phase C.
 const KPI_TARGET_CONFIG = {
-  winRate: 35.0,         // Target Win Rate: 35.0%
-  avgProfitMargin: 15.0, // Target Profit Margin: 15.0%
-  onTimeRate: 90.0,      // Target On-Time Delivery: 90.0%
-  momGrowth: 5.0,        // Target Growth MoM: 5.0%
+  winRate: null,
+  avgProfitMargin: null,
+  onTimeRate: null,
+  momGrowth: null,
 };
 
 // Dynamic import for Area Chart with SSR disabled to prevent hydration mismatch
@@ -202,10 +203,16 @@ interface MarketingPerformanceItem {
   totalTender: number;
   openTender?: number;
   pipelineValue: number;
+  openPipelineValue?: number;
   wonTender: number;
+  wonValue?: number;
   lostTender?: number;
+  lostValue?: number;
+  totalPortfolioValue?: number;
   winRate: number | null;
+  winRateStatus?: string;
   averageDealSize: number;
+  isGenericAccount?: boolean;
 }
 
 interface KpiCardItemProps {
@@ -501,40 +508,48 @@ export default function KpiReportsPage() {
     const ap = execData?.currentSnapshot?.accountsPayable;
 
     return {
-      activeProjects: projects?.activeProjects ?? 75,
-      planningProjects: projects?.planningProjects ?? 40,
-      inProgressProjects: projects?.inProgressProjects ?? 35,
-      pendingApprovals: approvals?.totalPendingTasks ?? 31,
-      legalPending: legal?.pendingLegalReview ?? 3,
-      legalExpired: legal?.revisionExpired ?? 2,
-      legalActive: legal?.activeContracts ?? 89,
-      vendorDisbursements: vendorPayments?.paymentValue ?? 1201126000,
-      poCommittedValue: procurement?.poCommittedValue ?? 2318679600,
-      poCount: procurement?.poCount ?? 18,
+      activeProjects: projects?.activeProjects ?? 0,
+      planningProjects: projects?.planningProjects ?? 0,
+      inProgressProjects: projects?.inProgressProjects ?? 0,
+      pendingApprovals: approvals?.totalPendingTasks ?? 0,
+      legalPending: legal?.pendingLegalReview ?? 0,
+      legalExpired: legal?.revisionExpired ?? 0,
+      legalActive: legal?.activeContracts ?? 0,
+      vendorDisbursements: vendorPayments?.paymentValue ?? 0,
+      poCommittedValue: procurement?.poCommittedValue ?? 0,
+      poCount: procurement?.poCount ?? 0,
       outstandingAP: ap?.outstandingInvoiceValue ?? 0,
     };
   }, [execData]);
 
   const insights = useMemo(() => analyticsData?.insights ?? {}, [analyticsData]);
 
+  const individualMktPerformance = useMemo(() => {
+    return mktPerformance.filter((item) => !item.isGenericAccount);
+  }, [mktPerformance]);
+
+  const genericMktPerformance = useMemo(() => {
+    return mktPerformance.filter((item) => !!item.isGenericAccount);
+  }, [mktPerformance]);
+
   const topPipeline = useMemo(() => (
-    mktPerformance.length > 0
-      ? [...mktPerformance].sort((a, b) => b.pipelineValue - a.pipelineValue)[0]
+    individualMktPerformance.length > 0
+      ? [...individualMktPerformance].sort((a, b) => (b.openPipelineValue ?? b.pipelineValue) - (a.openPipelineValue ?? a.pipelineValue))[0]
       : null
-  ), [mktPerformance]);
+  ), [individualMktPerformance]);
 
   const topWinRate = useMemo(() => {
-    const valid = mktPerformance.filter((item) => item.winRate !== null);
+    const valid = individualMktPerformance.filter((item) => item.winRate !== null);
     return valid.length > 0
       ? [...valid].sort((a, b) => (b.winRate ?? 0) - (a.winRate ?? 0))[0]
       : null;
-  }, [mktPerformance]);
+  }, [individualMktPerformance]);
 
   const topWonTender = useMemo(() => (
-    mktPerformance.length > 0
-      ? [...mktPerformance].sort((a, b) => b.wonTender - a.wonTender)[0]
+    individualMktPerformance.length > 0
+      ? [...individualMktPerformance].sort((a, b) => b.wonTender - a.wonTender)[0]
       : null
-  ), [mktPerformance]);
+  ), [individualMktPerformance]);
 
   // Humanized Funnel Dataset
   const funnelData = useMemo(() => {
@@ -582,10 +597,6 @@ export default function KpiReportsPage() {
     if (loading && !analyticsData) {
       return renderTabSkeleton();
     }
-
-    const winRateComp = kpi.winRate !== null
-      ? compareActualVsTarget(kpi.winRate * 100, KPI_TARGET_CONFIG.winRate)
-      : null;
 
     return (
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
@@ -654,22 +665,16 @@ export default function KpiReportsPage() {
               subtext={
                 kpi.winRate !== null ? (
                   <span style={{ color: '#64748b' }}>
-                    Target: {KPI_TARGET_CONFIG.winRate}% ({kpi.wonDeals} Won / {kpi.wonDeals + kpi.lostDeals} Closed)
+                    {kpi.wonDeals} Menang / {kpi.wonDeals + kpi.lostDeals} Diputus (Target belum disahkan)
                   </span>
                 ) : (
                   <span style={{ color: '#64748b' }}>Belum ada tender diputus (Won/Lost)</span>
                 )
               }
               badge={
-                winRateComp ? (
-                  <Tag color={winRateComp.isAbove ? 'green' : 'orange'} style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
-                    {winRateComp.formattedDelta}
-                  </Tag>
-                ) : (
-                  <Tag color="default" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
-                    N/A
-                  </Tag>
-                )
+                <Tag color="default" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
+                  Target Belum Disahkan
+                </Tag>
               }
             />
           </Col>
@@ -756,7 +761,7 @@ export default function KpiReportsPage() {
                   </div>
                 </div>
                 <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <Text style={{ fontSize: 12, color: '#64748b' }}>Target SLA: {KPI_TARGET_CONFIG.onTimeRate}%</Text>
+                  <Text style={{ fontSize: 12, color: '#64748b' }}>Target SLA: Menunggu Ratifikasi Direksi (DEC-BI-05)</Text>
                   <Tag color="default" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
                     Belum tersedia
                   </Tag>
@@ -1004,8 +1009,9 @@ export default function KpiReportsPage() {
               axis={{
                 y: {
                   labelFormatter: (v: number) => {
-                    if (v >= 1000000000) return `Rp ${(v / 1000000000).toFixed(1)} M`;
-                    if (v >= 1000000) return `Rp ${(v / 1000000).toFixed(0)} Jt`;
+                    if (v === 0) return 'Rp 0';
+                    if (Math.abs(v) >= 1000000000) return `Rp ${(v / 1000000000).toFixed(1)} Miliar`;
+                    if (Math.abs(v) >= 1000000) return `Rp ${(v / 1000000).toFixed(0)} Juta`;
                     return formatIDR(v);
                   }
                 }
@@ -1109,22 +1115,33 @@ export default function KpiReportsPage() {
               </Row>
 
               {/* Ant Design Table Breakdown */}
+              {genericMktPerformance.length > 0 && genericMktPerformance.map((gen) => (
+                <Alert
+                  key={String(gen.marketingId ?? gen.marketingName)}
+                  type="warning"
+                  showIcon
+                  message={`Antrean Tender Belum Dialokasikan / Akun Umum (${gen.marketingName})`}
+                  description={`Terdapat ${gen.totalTender} tender (${gen.openTender ?? 0} terbuka, nilai pipeline ${formatIDR(gen.openPipelineValue ?? gen.pipelineValue)}) yang tercatat di bawah akun umum atau belum dialokasikan ke PIC perorangan definitif. Data ini diisolasi dari leaderboard perorangan untuk menjaga akurasi evaluasi performa.`}
+                  style={{ borderRadius: 10, marginBottom: 16 }}
+                />
+              ))}
+
               {mktLoading ? (
                 <div style={{ padding: '20px 0' }}>
                   <Skeleton active paragraph={{ rows: 4 }} />
                 </div>
-              ) : mktPerformance.length === 0 ? (
+              ) : individualMktPerformance.length === 0 ? (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={<span style={{ color: '#64748b' }}>Belum ada data performa PIC Marketing untuk periode ini</span>}
+                  description={<span style={{ color: '#64748b' }}>Belum ada data performa individual PIC Marketing untuk periode ini</span>}
                 />
               ) : (
                 <Table
                   className="epms-reports-table"
-                  dataSource={mktPerformance}
+                  dataSource={individualMktPerformance}
                   rowKey={(record) => String(record.marketingId ?? record.marketingName)}
                   pagination={false}
-                  scroll={{ x: 900 }}
+                  scroll={{ x: 1000 }}
                   columns={[
                     {
                       title: '#',
@@ -1144,29 +1161,29 @@ export default function KpiReportsPage() {
                       render: (name: string) => <Text style={{ fontWeight: 600, color: '#1e293b' }}>{name}</Text>
                     },
                     {
-                      title: 'Total Tender',
-                      dataIndex: 'totalTender',
-                      key: 'totalTender',
+                      title: 'Tender Terbuka',
+                      key: 'openTender',
                       align: 'center',
-                      render: (val: number) => (
-                        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>{val}</span>
+                      render: (_: any, record: MarketingPerformanceItem) => (
+                        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                          {record.openTender ?? (record.totalTender - record.wonTender - (record.lostTender ?? 0))}
+                        </span>
                       ),
-                      sorter: (a, b) => a.totalTender - b.totalTender
+                      sorter: (a, b) => (a.openTender ?? 0) - (b.openTender ?? 0)
                     },
                     {
                       title: 'Nilai Pipeline (Open)',
-                      dataIndex: 'pipelineValue',
                       key: 'pipelineValue',
                       align: 'right',
-                      render: (val: number) => (
+                      render: (_: any, record: MarketingPerformanceItem) => (
                         <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: '#0f172a' }}>
-                          {formatIDR(val)}
+                          {formatIDR(record.openPipelineValue ?? record.pipelineValue)}
                         </span>
                       ),
-                      sorter: (a, b) => a.pipelineValue - b.pipelineValue
+                      sorter: (a, b) => (a.openPipelineValue ?? a.pipelineValue) - (b.openPipelineValue ?? b.pipelineValue)
                     },
                     {
-                      title: 'Won Tender',
+                      title: 'Won',
                       dataIndex: 'wonTender',
                       key: 'wonTender',
                       align: 'center',
@@ -1176,6 +1193,28 @@ export default function KpiReportsPage() {
                         </Tag>
                       ),
                       sorter: (a, b) => a.wonTender - b.wonTender
+                    },
+                    {
+                      title: 'Lost',
+                      key: 'lostTender',
+                      align: 'center',
+                      render: (_: any, record: MarketingPerformanceItem) => (
+                        <Tag color="default" style={{ borderRadius: 6, fontWeight: 600 }}>
+                          {record.lostTender ?? 0}
+                        </Tag>
+                      ),
+                      sorter: (a, b) => (a.lostTender ?? 0) - (b.lostTender ?? 0)
+                    },
+                    {
+                      title: 'Total Portofolio',
+                      key: 'totalPortfolioValue',
+                      align: 'right',
+                      render: (_: any, record: MarketingPerformanceItem) => (
+                        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600, color: '#0f172a' }}>
+                          {formatIDR(record.totalPortfolioValue ?? record.pipelineValue)}
+                        </span>
+                      ),
+                      sorter: (a, b) => (a.totalPortfolioValue ?? a.pipelineValue) - (b.totalPortfolioValue ?? b.pipelineValue)
                     },
                     {
                       title: 'Win Rate',
@@ -1211,7 +1250,7 @@ export default function KpiReportsPage() {
                       title: 'Performa',
                       key: 'performance',
                       align: 'center',
-                      width: 150,
+                      width: 140,
                       render: (_: any, record: MarketingPerformanceItem) => {
                         if (record.winRate === null) return <Tag color="default" style={{ borderRadius: 6, fontWeight: 600 }}>N/A</Tag>;
                         if (record.winRate >= 35) return <Tag color="green" style={{ borderRadius: 6, fontWeight: 600 }}>Star Performer</Tag>;
@@ -1264,7 +1303,7 @@ export default function KpiReportsPage() {
               icon={<CheckCircleOutlined />}
               iconBg="#f1f5f9"
               iconColor="#64748b"
-              subtext={<span style={{ color: '#64748b' }}>Target SLA: {KPI_TARGET_CONFIG.onTimeRate}% (Instrumen aktual belum aktif)</span>}
+              subtext={<span style={{ color: '#64748b' }}>Target SLA: Menunggu Ratifikasi Direksi (DEC-BI-05)</span>}
               badge={
                 <Tag color="default" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
                   Belum tersedia
@@ -1349,7 +1388,7 @@ export default function KpiReportsPage() {
               icon={<RiseOutlined />}
               iconBg="#f1f5f9"
               iconColor="#64748b"
-              subtext={<span style={{ color: '#64748b' }}>Target acuan: {KPI_TARGET_CONFIG.avgProfitMargin}% (Menunggu formula resmi)</span>}
+              subtext={<span style={{ color: '#64748b' }}>Target Marjin: Menunggu Ratifikasi Direksi (DEC-BI-05)</span>}
               badge={
                 <Tag color="default" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
                   Formula Pending
@@ -1462,15 +1501,15 @@ export default function KpiReportsPage() {
           </Col>
           <Col xs={24} md={8}>
             <KpiCardItem
-              title="Demoted Expiration SPK Required"
+              title="Kontrak Kedaluwarsa Revisi Legal"
               value={`${execMetrics.legalExpired} Kontrak`}
               icon={<ExclamationCircleOutlined />}
               iconBg="#fef3c7"
               iconColor="#d97706"
-              subtext={<span style={{ color: '#64748b' }}>Grace period 48 jam terlewati</span>}
+              subtext={<span style={{ color: '#64748b' }}>Batas waktu revisi 72 jam terlewati</span>}
               badge={
                 <Tag color="orange" style={{ fontSize: 11, margin: 0, borderRadius: 6, fontWeight: 600 }}>
-                  Expired
+                  Revision Expired
                 </Tag>
               }
             />

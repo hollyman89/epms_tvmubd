@@ -59,20 +59,30 @@ export const PipelineAnalyticsView: React.FC<PipelineAnalyticsViewProps> = ({
                 <Title level={3} style={{ marginTop: 4, marginBottom: 4 }}>
                   Rp {(analyticsData.kpi?.totalPipeline || 0).toLocaleString('id-ID')}
                 </Title>
-                <Text type={analyticsData.kpi?.momGrowth >= 0 ? "success" : "danger"}>
-                  {analyticsData.kpi?.momGrowth >= 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />} 
-                  {Math.abs(analyticsData.kpi?.momGrowth * 100).toFixed(1)}% dari bulan lalu
-                </Text>
+                {analyticsData.kpi?.momGrowth !== null && analyticsData.kpi?.momGrowth !== undefined ? (
+                  <Text type={analyticsData.kpi.momGrowth >= 0 ? "success" : "danger"}>
+                    {analyticsData.kpi.momGrowth >= 0 ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
+                    {Math.abs(analyticsData.kpi.momGrowth * 100).toFixed(1)}% ({analyticsData.kpi.growthPeriodLabel || 'periode sebelumnya'})
+                  </Text>
+                ) : (
+                  <Text type="secondary">
+                    Tidak ada pembanding periode sebelumnya
+                  </Text>
+                )}
               </Card>
             </Col>
             <Col span={8}>
               <Card style={{ borderRadius: 10, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
-                <Text type="secondary">Win Rate</Text>
+                <Text type="secondary">Win Rate (Keputusan Selesai)</Text>
                 <Title level={3} style={{ marginTop: 4, marginBottom: 4 }}>
-                  {((analyticsData.kpi?.winRate || 0) * 100).toFixed(1)}%
+                  {analyticsData.kpi?.winRate !== null && analyticsData.kpi?.winRate !== undefined
+                    ? `${(analyticsData.kpi.winRate * 100).toFixed(1)}%`
+                    : 'Belum Ada Keputusan'}
                 </Title>
                 <Text type="secondary">
-                  Dari total {analyticsData.kpi?.totalDeals || 0} Deals
+                  {analyticsData.kpi?.wonCount !== undefined && analyticsData.kpi?.lostCount !== undefined
+                    ? `Dari ${analyticsData.kpi.wonCount} Menang / ${analyticsData.kpi.wonCount + analyticsData.kpi.lostCount} Diputus (${analyticsData.kpi.openCount || 0} Open)`
+                    : `Dari total ${analyticsData.kpi?.totalDeals || 0} Deals`}
                 </Text>
               </Card>
             </Col>
@@ -101,7 +111,13 @@ export const PipelineAnalyticsView: React.FC<PipelineAnalyticsViewProps> = ({
                       style={{ stroke: '#1677ff', lineWidth: 2 }}
                       axis={{
                         y: {
-                          labelFormatter: (v: any) => `Rp ${(Number(v) / 1000000000).toFixed(1)}M`
+                          labelFormatter: (v: any) => {
+                            const val = Number(v);
+                            if (isNaN(val) || val === 0) return 'Rp 0';
+                            if (Math.abs(val) >= 1000000000) return `Rp ${(val / 1000000000).toFixed(1)} Miliar`;
+                            if (Math.abs(val) >= 1000000) return `Rp ${(val / 1000000).toFixed(1)} Juta`;
+                            return `Rp ${val.toLocaleString('id-ID')}`;
+                          }
                         }
                       }}
                       tooltip={{

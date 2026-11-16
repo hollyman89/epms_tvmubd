@@ -27,27 +27,61 @@ export class AnalyticsService {
       this.getTrendLine(end, userId, isManagement), // Trendline always uses 'end' as the reference point for the 12 months
     ]);
 
-    // Calculate MoM Growth
-    const prevTotal = Number(prevKpiData.totalPipeline);
-    const currTotal = Number(kpiData.totalPipeline);
-    let momGrowth = 0;
-    if (prevTotal === 0 && currTotal > 0) {
-      momGrowth = 1; // 100% growth
+    // Calculate Period Growth (MoM / QoQ / YoY) with robust baseline handling
+    const prevTotal = Number(prevKpiData.totalPipeline || 0);
+    const currTotal = Number(kpiData.totalPipeline || 0);
+    let momGrowth: number | null = null;
+    let growthStatus: 'GROWTH' | 'NO_PRIOR_BASELINE' | 'NO_ACTIVITY' = 'GROWTH';
+    let growthPeriodLabel: string | null = 'MoM';
+
+    if (period === DashboardPeriod.THIS_QUARTER || period === DashboardPeriod.LAST_QUARTER) {
+      growthPeriodLabel = 'QoQ';
+    } else if (period === DashboardPeriod.YEAR_TO_DATE) {
+      growthPeriodLabel = 'YTD';
+    } else if (period === DashboardPeriod.ALL_TIME) {
+      growthPeriodLabel = null;
+    } else {
+      growthPeriodLabel = 'MoM';
+    }
+
+    if (period === DashboardPeriod.ALL_TIME) {
+      momGrowth = null;
+      growthStatus = 'NO_PRIOR_BASELINE';
+    } else if (prevTotal === 0 && currTotal === 0) {
+      momGrowth = 0;
+      growthStatus = 'NO_ACTIVITY';
+    } else if (prevTotal === 0 && currTotal > 0) {
+      momGrowth = null;
+      growthStatus = 'NO_PRIOR_BASELINE';
     } else if (prevTotal > 0) {
-      momGrowth = (currTotal - prevTotal) / prevTotal;
+      momGrowth = Number(((currTotal - prevTotal) / prevTotal).toFixed(4));
+      growthStatus = 'GROWTH';
     }
 
     // Generate NLG Insights
-    const insights = this.generateInsights(Number(kpiData.totalDeals), momGrowth);
+    const insights = this.generateInsights(Number(kpiData.totalDeals), momGrowth, growthStatus, growthPeriodLabel);
 
     return {
       period,
       kpi: {
         totalPipeline: Number(kpiData.totalPipeline),
-        winRate: Number(kpiData.winRate),
+        winRate: kpiData.winRate,
+        winRateStatus: kpiData.winRateStatus,
+        wonCount: kpiData.wonCount,
+        lostCount: kpiData.lostCount,
+        openCount: kpiData.openCount,
+        openPipelineValue: kpiData.openPipelineValue,
+        wonValue: kpiData.wonValue,
+        lostValue: kpiData.lostValue,
+        closedValueWinRate: kpiData.closedValueWinRate,
+        overallConversionYield: kpiData.overallConversionYield,
         avgDealSize: Number(kpiData.avgDealSize),
         totalDeals: Number(kpiData.totalDeals),
         momGrowth: momGrowth,
+        growthStatus: growthStatus,
+        growthPeriodLabel: growthPeriodLabel,
+        wonDeals: kpiData.wonCount,
+        lostDeals: kpiData.lostCount,
       },
       trendLine: trendData,
       sectorDistribution: sectorData,
@@ -120,18 +154,73 @@ export class AnalyticsService {
       params.push(userId, userId);
     }
 
-    // Amendment 1: COALESCE ganda to guarantee 0 instead of null
     const result = await this.tenderRepository.query(`
       SELECT 
+        COUNT(id) as totalDeals,
+        COUNT(CASE WHEN status = 'WON' THEN 1 END) as wonCount,
+        COUNT(CASE WHEN status = 'LOST' THEN 1 END) as lostCount,
+        COUNT(CASE WHEN status NOT IN ('WON', 'LOST') OR status IS NULL THEN 1 END) as openCount,
+        COALESCE(SUM(CASE WHEN status NOT IN ('WON', 'LOST') OR status IS NULL THEN COALESCE(negotiated_price, estimated_budget) ELSE 0 END), 0) as openPipelineValue,
+        COALESCE(SUM(CASE WHEN status = 'WON' THEN COALESCE(negotiated_price, estimated_budget) ELSE 0 END), 0) as wonValue,
+        COALESCE(SUM(CASE WHEN status = 'LOST' THEN COALESCE(negotiated_price, estimated_budget) ELSE 0 END), 0) as lostValue,
         COALESCE(SUM(COALESCE(negotiated_price, estimated_budget)), 0) as totalPipeline,
-        COALESCE((COUNT(CASE WHEN status = 'WON' THEN 1 END) * 1.0 / NULLIF(COUNT(id), 0)), 0) as winRate,
-        COALESCE(AVG(CASE WHEN status = 'WON' THEN negotiated_price END), 0) as avgDealSize,
-        COUNT(id) as totalDeals
+        COALESCE(AVG(CASE WHEN status = 'WON' THEN negotiated_price END), 0) as avgDealSize
       FROM tenders
       WHERE created_at BETWEEN ? AND ? AND deleted_at IS NULL ${userFilter}
     `, params);
 
-    return result[0];
+    const row = result[0] || {};
+    const totalDeals = Number(row.totalDeals || 0);
+    const wonCount = Number(row.wonCount || 0);
+    const lostCount = Number(row.lostCount || 0);
+    const openCount = Number(row.openCount || 0);
+    const openPipelineValue = Number(row.openPipelineValue || 0);
+    const wonValue = Number(row.wonValue || 0);
+    const lostValue = Number(row.lostValue || 0);
+    const totalPipeline = Number(row.totalPipeline || 0);
+    const avgDealSize = Number(row.avgDealSize || 0);
+
+    const decidedCount = wonCount + lostCount;
+    let winRate: number | null = null;
+    let winRateStatus: 'DECIDED_OUTCOME' | 'UNAVAILABLE' = 'DECIDED_OUTCOME';
+
+    if (decidedCount === 0) {
+      winRate = null;
+      winRateStatus = 'UNAVAILABLE';
+    } else {
+      winRate = Number((wonCount / decidedCount).toFixed(4));
+    }
+
+    const closedValueTotal = wonValue + lostValue;
+    let closedValueWinRate: number | null = null;
+    if (closedValueTotal > 0) {
+      closedValueWinRate = Number((wonValue / closedValueTotal).toFixed(4));
+    } else {
+      closedValueWinRate = null;
+    }
+
+    let overallConversionYield: number | null = null;
+    if (totalDeals > 0) {
+      overallConversionYield = Number((wonCount / totalDeals).toFixed(4));
+    } else {
+      overallConversionYield = null;
+    }
+
+    return {
+      totalDeals,
+      wonCount,
+      lostCount,
+      openCount,
+      openPipelineValue,
+      wonValue,
+      lostValue,
+      totalPipeline,
+      avgDealSize,
+      winRate,
+      winRateStatus,
+      closedValueWinRate,
+      overallConversionYield,
+    };
   }
 
   private async getSectorDistribution(start: Date, end: Date, userId?: number, isManagement?: boolean) {
@@ -180,17 +269,19 @@ export class AnalyticsService {
       GROUP BY stage
     `, params);
 
-    // Map stage values (including WON/LOST as they passed through all earlier stages)
+    // Map stage values
     const stageMap = new Map<string, number>(result.map((r: any) => [String(r.stage || '').toUpperCase(), Number(r.count)]));
     
     // Cumulative funnel: each stage count includes all tenders that reached that stage or beyond
+    // Decided correction: LOST tenders do NOT inflate the NEGOTIATION stage
     const wonCount: number = stageMap.get('WON') ?? 0;
     const lostCount: number = stageMap.get('LOST') ?? 0;
-    const negCount: number = (stageMap.get('NEGOTIATION') ?? 0) + (stageMap.get('PENDING_APPROVAL') ?? 0) + wonCount + lostCount;
+    const activeNegCount: number = (stageMap.get('NEGOTIATION') ?? 0) + (stageMap.get('PENDING_APPROVAL') ?? 0);
+    const negCount: number = activeNegCount + wonCount;
     const propCount: number = (stageMap.get('PROPOSAL') ?? 0) + negCount;
     const qualCount: number = (stageMap.get('QUALIFICATION') ?? 0) + propCount;
     const waitingGoNoGoCount: number = (stageMap.get('WAITING_GO_NO_GO') ?? 0) + qualCount;
-    const leadCount: number = (stageMap.get('LEAD') ?? 0) + waitingGoNoGoCount;
+    const leadCount: number = (stageMap.get('LEAD') ?? 0) + waitingGoNoGoCount + lostCount;
 
     return [
       { stage: 'LEAD', count: leadCount },
@@ -248,8 +339,12 @@ export class AnalyticsService {
     return trendLine;
   }
 
-  private generateInsights(totalDeals: number, momGrowth: number) {
-    // Amendment 4: Hard logic based NLG
+  private generateInsights(
+    totalDeals: number,
+    momGrowth: number | null,
+    growthStatus: string = 'GROWTH',
+    periodLabel: string | null = 'MoM',
+  ) {
     if (totalDeals === 0) {
       return {
         topInsight: "Belum ada aktivitas tender untuk periode ini. Fokus pada pengisian pipeline.",
@@ -260,16 +355,28 @@ export class AnalyticsService {
     let topInsight = "";
     let warningInsight = "";
 
-    if (momGrowth > 0.10) {
-      topInsight = `Pipeline tumbuh fantastis sebesar ${(momGrowth * 100).toFixed(1)}% dibanding periode lalu. Momentum yang sangat baik!`;
-    } else if (momGrowth >= 0) {
-      topInsight = `Pipeline stabil dengan pertumbuhan ${(momGrowth * 100).toFixed(1)}%. Lanjutkan eksekusi strategi yang ada.`;
+    if (growthStatus === 'NO_PRIOR_BASELINE') {
+      topInsight = periodLabel === null
+        ? "Analisis mencakup seluruh riwayat portofolio tender (All Time)."
+        : "Tidak ada pembanding periode sebelumnya untuk menghitung pertumbuhan.";
+    } else if (growthStatus === 'NO_ACTIVITY') {
+      topInsight = "Tidak ada pergerakan pipeline pada periode pembanding sebelumnya.";
+    } else if (momGrowth !== null) {
+      const label = periodLabel || 'periode lalu';
+      if (momGrowth > 0.10) {
+        topInsight = `Pipeline tumbuh sebesar ${(momGrowth * 100).toFixed(1)}% dibanding ${label}. Momentum yang baik.`;
+      } else if (momGrowth >= 0) {
+        topInsight = `Pipeline stabil dengan pertumbuhan ${(momGrowth * 100).toFixed(1)}% dibanding ${label}.`;
+      } else {
+        topInsight = `Terdapat kontraksi pada pipeline sebesar ${Math.abs(momGrowth * 100).toFixed(1)}% dibanding ${label}.`;
+      }
     } else {
-      topInsight = `Terdapat kontraksi pada pipeline sebesar ${Math.abs(momGrowth * 100).toFixed(1)}%.`;
+      topInsight = "Data pertumbuhan periode belum tersedia.";
     }
 
-    if (momGrowth < -0.10) {
-      warningInsight = `Pipeline turun signifikan (${Math.abs(momGrowth * 100).toFixed(1)}%) dibanding bulan lalu. Periksa tender yang terhambat di tahap Proposal.`;
+    if (momGrowth !== null && momGrowth < -0.10) {
+      const label = periodLabel || 'periode lalu';
+      warningInsight = `Pipeline turun signifikan (${Math.abs(momGrowth * 100).toFixed(1)}%) dibanding ${label}. Periksa tender yang terhambat di tahap Proposal.`;
     } else {
       warningInsight = `Monitor pergerakan tender di tahap NEGOTIATION untuk mempercepat closing dan meningkatkan Win Rate.`;
     }
@@ -286,28 +393,61 @@ export class AnalyticsService {
       SELECT 
         COALESCE(t.marketing_pic_id, t.created_by) AS marketingId,
         COALESCE(u.full_name, 'Unassigned') AS marketingName,
+        u.email AS marketingEmail,
         COUNT(t.id) AS totalTender,
-        COALESCE(SUM(COALESCE(t.negotiated_price, t.estimated_budget)), 0) AS pipelineValue,
-        COUNT(CASE WHEN t.status = 'WON' THEN 1 END) AS wonTender,
-        COALESCE(ROUND((COUNT(CASE WHEN t.status = 'WON' THEN 1 END) * 100.0 / NULLIF(COUNT(t.id), 0)), 1), 0) AS winRate,
+        COUNT(CASE WHEN t.status NOT IN ('WON', 'LOST') OR t.status IS NULL THEN 1 END) AS openCount,
+        COALESCE(SUM(CASE WHEN t.status NOT IN ('WON', 'LOST') OR t.status IS NULL THEN COALESCE(t.negotiated_price, t.estimated_budget) ELSE 0 END), 0) AS openPipelineValue,
+        COUNT(CASE WHEN t.status = 'WON' THEN 1 END) AS wonCount,
+        COALESCE(SUM(CASE WHEN t.status = 'WON' THEN COALESCE(t.negotiated_price, t.estimated_budget) ELSE 0 END), 0) AS wonValue,
+        COUNT(CASE WHEN t.status = 'LOST' THEN 1 END) AS lostCount,
+        COALESCE(SUM(CASE WHEN t.status = 'LOST' THEN COALESCE(t.negotiated_price, t.estimated_budget) ELSE 0 END), 0) AS lostValue,
+        COALESCE(SUM(COALESCE(t.negotiated_price, t.estimated_budget)), 0) AS totalPortfolioValue,
         COALESCE(AVG(CASE WHEN t.status = 'WON' THEN t.negotiated_price END), 0) AS averageDealSize
       FROM tenders t
       LEFT JOIN users u ON u.id = COALESCE(t.marketing_pic_id, t.created_by)
       WHERE t.created_at BETWEEN ? AND ? AND t.deleted_at IS NULL
-      GROUP BY COALESCE(t.marketing_pic_id, t.created_by), COALESCE(u.full_name, 'Unassigned')
-      ORDER BY pipelineValue DESC
+      GROUP BY COALESCE(t.marketing_pic_id, t.created_by), COALESCE(u.full_name, 'Unassigned'), u.email
+      ORDER BY openPipelineValue DESC
       `,
       [start, end],
     );
 
-    return rawData.map((row: any) => ({
-      marketingId: row.marketingId ? Number(row.marketingId) : null,
-      marketingName: row.marketingName,
-      totalTender: Number(row.totalTender || 0),
-      pipelineValue: Number(row.pipelineValue || 0),
-      wonTender: Number(row.wonTender || 0),
-      winRate: Number(row.winRate || 0),
-      averageDealSize: Number(row.averageDealSize || 0),
-    }));
+    return (rawData || []).map((row: any) => {
+      const marketingId = row.marketingId ? Number(row.marketingId) : null;
+      const marketingEmail = String(row.marketingEmail || '').toLowerCase();
+      const isGeneric =
+        marketingId === 4709 ||
+        marketingEmail === 'marketing@epms.com' ||
+        row.marketingName === 'Unassigned' ||
+        row.marketingName === 'Marketing Staff';
+
+      const wonCount = Number(row.wonCount || 0);
+      const lostCount = Number(row.lostCount || 0);
+      const openCount = Number(row.openCount || 0);
+      const decidedCount = wonCount + lostCount;
+      const winRate = decidedCount > 0 ? Number(((wonCount * 100.0) / decidedCount).toFixed(1)) : null;
+
+      return {
+        marketingId,
+        marketingName: row.marketingName,
+        marketingEmail: row.marketingEmail,
+        isGenericAccount: isGeneric,
+        totalTender: Number(row.totalTender || 0),
+        openCount,
+        openTender: openCount,
+        openPipelineValue: Number(row.openPipelineValue || 0),
+        pipelineValue: Number(row.openPipelineValue || 0), // Canonical: pipelineValue represents Open Pipeline Value!
+        wonCount,
+        wonTender: wonCount, // Backward compatibility
+        wonValue: Number(row.wonValue || 0),
+        lostCount,
+        lostTender: lostCount,
+        lostValue: Number(row.lostValue || 0),
+        totalPortfolioValue: Number(row.totalPortfolioValue || 0),
+        winRate,
+        winRateStatus: decidedCount > 0 ? 'DECIDED_OUTCOME' : 'UNAVAILABLE',
+        averageDealSize: Number(row.averageDealSize || 0),
+      };
+    });
   }
 }
