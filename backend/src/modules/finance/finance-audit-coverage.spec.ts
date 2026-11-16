@@ -10,6 +10,8 @@ import { PurchaseOrder } from '../../entities/purchase-order.entity';
 import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { PoPaymentTerm, PaymentTermStatus, PaymentTermType } from '../../entities/po-payment-term.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
+import { PaymentRequest, PaymentRequestStatus } from '../../entities/payment-request.entity';
+import { CompanyBankAccount, CompanyBankAccountStatus } from '../../entities/company-bank-account.entity';
 import { MismatchCode } from './finance.types';
 
 describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL-4D)', () => {
@@ -421,12 +423,52 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
       const mockInvoice = {
         id: 7,
         invoiceNumber: 'INV-20260911-007',
+        companyCode: 'UBD',
         poId: 12,
         paymentTermId: 4,
         totalAmount: 30000000,
         matchStatus: 'VERIFIED',
         paymentStatus: 'UNPAID',
         createdBy: actorUserId,
+      };
+
+      const mockPo = {
+        id: 12,
+        companyCode: 'UBD',
+        status: 'ISSUED',
+        totalAmount: 30000000,
+        vendor: {
+          id: 1,
+          name: 'PT Vendor',
+          bankAccount: '123-456-7890',
+          bankName: 'Bank Mandiri',
+        },
+      };
+
+      const mockPrq = {
+        id: 701,
+        invoiceId: 7,
+        companyCode: 'UBD',
+        status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+        approvedBy: checkerUserId,
+        approvedAmount: 30000000,
+        approvalSnapshot: {
+          vendorBankAccount: '123-456-7890',
+          vendorBankName: 'Bank Mandiri',
+          requestedAmount: 30000000,
+        },
+        deletedAt: null,
+      };
+
+      const defaultCba = {
+        id: 1,
+        companyCode: 'UBD',
+        bankName: 'Bank Central Asia',
+        accountNumber: '1234567890',
+        accountHolder: 'PT Ultima Bintang Digital',
+        status: CompanyBankAccountStatus.ACTIVE,
+        isActive: true,
+        deletedAt: null,
       };
 
       const mockTerm = {
@@ -457,8 +499,11 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
 
       queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any) => {
         if (entityClass === Invoice) return mockInvoice;
+        if (entityClass === PaymentRequest) return mockPrq;
+        if (entityClass === PurchaseOrder) return mockPo;
         if (entityClass === AuditLog) return verifyAudit;
         if (entityClass === PoPaymentTerm) return mockTerm;
+        if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
         return null;
       });
 
@@ -467,6 +512,8 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
 
       const dto: any = {
         invoiceId: 7,
+        paymentRequestId: 701,
+        companyBankAccountId: 1,
         paymentDate: '2026-09-11',
         paymentAmount: 10000000,
         paymentMethod: 'BANK_TRANSFER',
@@ -486,7 +533,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
       expect(audit.record_id).toBe(result.id);
       expect(audit.created_by).toBe(actorUserId);
       expect(audit.old_value).toBeNull();
-      expect(audit.new_value).toEqual({
+      expect(audit.new_value).toEqual(expect.objectContaining({
         paymentNumber: expect.stringMatching(/^PAY-\d{8}-001$/),
         invoiceId: 7,
         poId: 12,
@@ -498,7 +545,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
         isFullyPaid: false,
         remainingAmount: 20000000,
         paymentTermStatusAfter: PaymentTermStatus.VERIFIED,
-      });
+      }));
 
       // Verify audit chronology: CREATE -> VERIFY -> PAYMENT
       const relevantAudits = savedAuditLogs.filter(
@@ -521,12 +568,52 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
       const mockInvoice = {
         id: 8,
         invoiceNumber: 'INV-20260911-008',
+        companyCode: 'UBD',
         poId: 15,
         paymentTermId: 9,
         totalAmount: 25000000,
         matchStatus: 'VERIFIED',
         paymentStatus: 'UNPAID',
         createdBy: actorUserId,
+      };
+
+      const mockPo = {
+        id: 15,
+        companyCode: 'UBD',
+        status: 'ISSUED',
+        totalAmount: 25000000,
+        vendor: {
+          id: 1,
+          name: 'PT Vendor',
+          bankAccount: '123-456-7890',
+          bankName: 'Bank Mandiri',
+        },
+      };
+
+      const mockPrq = {
+        id: 702,
+        invoiceId: 8,
+        companyCode: 'UBD',
+        status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+        approvedBy: checkerUserId,
+        approvedAmount: 25000000,
+        approvalSnapshot: {
+          vendorBankAccount: '123-456-7890',
+          vendorBankName: 'Bank Mandiri',
+          requestedAmount: 25000000,
+        },
+        deletedAt: null,
+      };
+
+      const defaultCba = {
+        id: 1,
+        companyCode: 'UBD',
+        bankName: 'Bank Central Asia',
+        accountNumber: '1234567890',
+        accountHolder: 'PT Ultima Bintang Digital',
+        status: CompanyBankAccountStatus.ACTIVE,
+        isActive: true,
+        deletedAt: null,
       };
 
       const mockTerm = {
@@ -557,8 +644,11 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
 
       queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any) => {
         if (entityClass === Invoice) return mockInvoice;
+        if (entityClass === PaymentRequest) return mockPrq;
+        if (entityClass === PurchaseOrder) return mockPo;
         if (entityClass === AuditLog) return verifyAudit;
         if (entityClass === PoPaymentTerm) return mockTerm;
+        if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
         return null;
       });
 
@@ -567,6 +657,8 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
 
       const dto: any = {
         invoiceId: 8,
+        paymentRequestId: 702,
+        companyBankAccountId: 1,
         paymentDate: '2026-09-11',
         paymentAmount: 25000000,
         paymentMethod: 'CHEQUE',
@@ -585,7 +677,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
       expect(audit.record_id).toBe(result.id);
       expect(audit.created_by).toBe(actorUserId);
       expect(audit.old_value).toBeNull();
-      expect(audit.new_value).toEqual({
+      expect(audit.new_value).toEqual(expect.objectContaining({
         paymentNumber: expect.stringMatching(/^PAY-\d{8}-001$/),
         invoiceId: 8,
         poId: 15,
@@ -597,7 +689,7 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
         isFullyPaid: true,
         remainingAmount: 0,
         paymentTermStatusAfter: PaymentTermStatus.PAID,
-      });
+      }));
 
       // Verify audit chronology: CREATE -> VERIFY -> PAYMENT
       const relevantAudits = savedAuditLogs.filter(
@@ -659,21 +751,53 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
     it('should rollback transaction if error occurs during Payment RECORD', async () => {
       const mockInvoice = {
         id: 8,
+        companyCode: 'UBD',
         poId: 15,
         totalAmount: 25000000,
         matchStatus: 'VERIFIED',
         paymentStatus: 'UNPAID',
       };
+      const mockPo = {
+        id: 15,
+        companyCode: 'UBD',
+        status: 'ISSUED',
+        totalAmount: 25000000,
+        vendor: { id: 1, name: 'PT Vendor', bankAccount: '123-456-7890', bankName: 'Bank Mandiri' },
+      };
+      const mockPrq = {
+        id: 703,
+        invoiceId: 8,
+        companyCode: 'UBD',
+        status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+        approvedBy: 1,
+        approvedAmount: 25000000,
+        approvalSnapshot: { vendorBankAccount: '123-456-7890', vendorBankName: 'Bank Mandiri', requestedAmount: 25000000 },
+      };
+      const defaultCba = {
+        id: 1,
+        companyCode: 'UBD',
+        bankName: 'Bank Central Asia',
+        accountNumber: '1234567890',
+        accountHolder: 'PT Ultima Bintang Digital',
+        status: CompanyBankAccountStatus.ACTIVE,
+        isActive: true,
+        deletedAt: null,
+      };
 
-      queryRunnerMock.manager.findOne
-        .mockResolvedValueOnce(mockInvoice)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null);
+      queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any) => {
+        if (entityClass === Invoice) return mockInvoice;
+        if (entityClass === PaymentRequest) return mockPrq;
+        if (entityClass === PurchaseOrder) return mockPo;
+        if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
+        return null;
+      });
 
       queryRunnerMock.commitTransaction.mockRejectedValueOnce(new Error('Payment write failed'));
 
       const dto: any = {
         invoiceId: 8,
+        paymentRequestId: 703,
+        companyBankAccountId: 1,
         paymentDate: '2026-09-11',
         paymentAmount: 25000000,
         paymentMethod: 'BANK_TRANSFER',
@@ -761,20 +885,53 @@ describe('FinanceService & Controller - Canonical AuditLog Coverage (AUDIT-TRAIL
       const mockInvoice = {
         id: 77,
         invoiceNumber: 'INV-20260911-077',
+        companyCode: 'UBD',
         poId: 12,
         totalAmount: 10000000,
         matchStatus: 'VERIFIED',
         paymentStatus: 'UNPAID',
       };
-      queryRunnerMock.manager.findOne
-        .mockResolvedValueOnce(mockInvoice)
-        .mockResolvedValueOnce(null)
-        .mockResolvedValueOnce(null);
+      const mockPo = {
+        id: 12,
+        companyCode: 'UBD',
+        status: 'ISSUED',
+        totalAmount: 10000000,
+        vendor: { id: 1, name: 'PT Vendor', bankAccount: '123-456-7890', bankName: 'Bank Mandiri' },
+      };
+      const mockPrq = {
+        id: 704,
+        invoiceId: 77,
+        companyCode: 'UBD',
+        status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
+        approvedBy: 99,
+        approvedAmount: 10000000,
+        approvalSnapshot: { vendorBankAccount: '123-456-7890', vendorBankName: 'Bank Mandiri', requestedAmount: 10000000 },
+      };
+      const defaultCba = {
+        id: 1,
+        companyCode: 'UBD',
+        bankName: 'Bank Central Asia',
+        accountNumber: '1234567890',
+        accountHolder: 'PT Ultima Bintang Digital',
+        status: CompanyBankAccountStatus.ACTIVE,
+        isActive: true,
+        deletedAt: null,
+      };
+
+      queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any) => {
+        if (entityClass === Invoice) return mockInvoice;
+        if (entityClass === PaymentRequest) return mockPrq;
+        if (entityClass === PurchaseOrder) return mockPo;
+        if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
+        return null;
+      });
       queryRunnerMock.manager.count.mockResolvedValue(0);
       queryRunnerMock.manager.find.mockResolvedValue([]);
 
       const dto: any = {
         invoiceId: 77,
+        paymentRequestId: 704,
+        companyBankAccountId: 1,
         paymentDate: '2026-09-11',
         paymentAmount: 10000000,
         paymentMethod: 'BANK_TRANSFER',

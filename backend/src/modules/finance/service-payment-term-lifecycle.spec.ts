@@ -12,6 +12,7 @@ import { DataSource } from 'typeorm';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { PaymentRequest, PaymentRequestStatus } from '../../entities/payment-request.entity';
 import { DirectorDecisionAction } from './dto/decide-payment-request.dto';
+import { CompanyBankAccount, CompanyBankAccountStatus } from '../../entities/company-bank-account.entity';
 
 describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', () => {
   let service: FinanceService;
@@ -88,16 +89,33 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
     service = module.get<FinanceService>(FinanceService);
   });
 
+  const defaultCba = {
+    id: 1,
+    companyCode: 'UBD',
+    bankName: 'Bank Central Asia',
+    accountNumber: '1234567890',
+    accountHolder: 'PT Ultima Bintang Digital',
+    status: CompanyBankAccountStatus.ACTIVE,
+    isActive: true,
+    deletedAt: null,
+  };
+
   // Canonical SERVICE specimen generator
   const createServiceSpecimen = () => {
     const po: Partial<PurchaseOrder> = {
       id: 2,
       poNumber: 'PO-20261104-001',
       orderType: PurchaseOrderType.SERVICE,
+      companyCode: 'UBD',
       status: 'ISSUED',
       totalAmount: 4152000,
       vendorId: 1,
-      vendor: { id: 1, name: 'PT Solusi Rekanan Layanan' } as any,
+      vendor: {
+        id: 1,
+        name: 'PT Solusi Rekanan Layanan',
+        bankAccount: '123-456-7890',
+        bankName: 'Bank Mandiri',
+      } as any,
       items: [
         {
           id: 5,
@@ -141,6 +159,7 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
     const invoice: Partial<Invoice> = {
       id: 10,
       invoiceNumber: 'INV-20261104-001',
+      companyCode: 'UBD',
       poId: 2,
       paymentTermId: 201,
       serviceClaimId: 50,
@@ -160,6 +179,7 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
     const paymentRequest: Partial<PaymentRequest> = {
       id: 501,
       requestNumber: 'PRQ-20261104-001',
+      companyCode: 'UBD',
       invoiceId: 10,
       paymentTermId: 201,
       status: PaymentRequestStatus.PENDING_DIRECTOR_APPROVAL,
@@ -179,6 +199,8 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
         requestedAmount: 4152000,
         vendorId: 1,
         vendorName: 'PT Solusi Rekanan Layanan',
+        vendorBankAccount: '123-456-7890',
+        vendorBankName: 'Bank Mandiri',
         goodsReceiptId: null, // Service has null GR
         goodsReceiptNumber: null,
         poId: 2,
@@ -197,6 +219,7 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
     paymentDate: '2026-11-05',
     paymentMethod: 'BANK_TRANSFER',
     referenceNumber: 'REF-SRV-20261105-001',
+    companyBankAccountId: 1,
     ...overrides,
   });
 
@@ -214,6 +237,7 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
       if (entityClass === PaymentRequest) return prqApproved;
       if (entityClass === PoPaymentTerm) return specimen.paymentTerm;
       if (entityClass === PurchaseOrder) return specimen.po;
+      if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
       if (entityClass === Payment) return null; // No candidate duplicate payment number
       if (entityClass === AuditLog) return null; // No duplicate closure audit
       return null;
@@ -467,11 +491,13 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
     ).rejects.toThrow('Payment term bukan milik Purchase Order dari invoice ini.');
 
     // B. Rejection in createPayment when term poId !== invoice poId
-    setupPaymentExecutionMocks(specimen, 4152000);
+    const prqApproved = setupPaymentExecutionMocks(specimen, 4152000);
     mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
       if (entityClass === Invoice) return specimen.invoice;
-      if (entityClass === PaymentRequest) return { ...specimen.paymentRequest, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedAmount: 4152000 };
+      if (entityClass === PaymentRequest) return prqApproved;
       if (entityClass === PoPaymentTerm) return mismatchedTerm;
+      if (entityClass === PurchaseOrder) return specimen.po;
+      if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
       return null;
     });
 
@@ -493,11 +519,13 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
 
     // A. Term already PAID cannot be paid again
     const paidTerm = { ...specimen.paymentTerm, status: PaymentTermStatus.PAID };
-    setupPaymentExecutionMocks(specimen, 4152000);
+    const prqApproved = setupPaymentExecutionMocks(specimen, 4152000);
     mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
       if (entityClass === Invoice) return specimen.invoice;
-      if (entityClass === PaymentRequest) return { ...specimen.paymentRequest, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedAmount: 4152000 };
+      if (entityClass === PaymentRequest) return prqApproved;
       if (entityClass === PoPaymentTerm) return paidTerm;
+      if (entityClass === PurchaseOrder) return specimen.po;
+      if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
       return null;
     });
 
@@ -514,8 +542,10 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
     const unverifiedTerm = { ...specimen.paymentTerm, status: PaymentTermStatus.INVOICE_SUBMITTED };
     mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
       if (entityClass === Invoice) return specimen.invoice;
-      if (entityClass === PaymentRequest) return { ...specimen.paymentRequest, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedAmount: 4152000 };
+      if (entityClass === PaymentRequest) return prqApproved;
       if (entityClass === PoPaymentTerm) return unverifiedTerm;
+      if (entityClass === PurchaseOrder) return specimen.po;
+      if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
       return null;
     });
 
@@ -529,11 +559,13 @@ describe('EPMS — Service Payment Term Downstream Lifecycle Regression Spec', (
     ).rejects.toThrow('Pembayaran termin hanya dapat diproses untuk termin berstatus VERIFIED (status saat ini: INVOICE_SUBMITTED)');
 
     // C. Payment Request already PAID cannot be processed again
-    const paidPrq = { ...specimen.paymentRequest, status: PaymentRequestStatus.PAID, approvedAmount: 4152000 };
+    const paidPrq = { ...prqApproved, status: PaymentRequestStatus.PAID, approvedAmount: 4152000 };
     mockQueryRunner.manager.findOne.mockImplementation(async (entityClass: any) => {
       if (entityClass === Invoice) return specimen.invoice;
       if (entityClass === PaymentRequest) return paidPrq;
       if (entityClass === PoPaymentTerm) return specimen.paymentTerm;
+      if (entityClass === PurchaseOrder) return specimen.po;
+      if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
       return null;
     });
 

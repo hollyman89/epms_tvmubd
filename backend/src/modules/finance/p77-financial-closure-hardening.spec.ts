@@ -12,6 +12,7 @@ import { GoodsReceipt } from '../../entities/goods-receipt.entity';
 import { PoPaymentTerm, PaymentTermStatus, PaymentTermType } from '../../entities/po-payment-term.entity';
 import { AuditLog } from '../../entities/audit-log.entity';
 import { PaymentRequest, PaymentRequestStatus } from '../../entities/payment-request.entity';
+import { CompanyBankAccount, CompanyBankAccountStatus } from '../../entities/company-bank-account.entity';
 
 describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening', () => {
   let service: FinanceService;
@@ -96,6 +97,17 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     service = module.get<FinanceService>(FinanceService);
   });
 
+  const defaultCba = {
+    id: 1,
+    companyCode: 'UBD',
+    bankName: 'Bank Central Asia',
+    accountNumber: '1234567890',
+    accountHolder: 'PT Ultima Bintang Digital',
+    status: CompanyBankAccountStatus.ACTIVE,
+    isActive: true,
+    deletedAt: null,
+  };
+
   const setupDefaultEntities = (overrides?: {
     poStatus?: string;
     totalAmount?: number;
@@ -115,10 +127,17 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     const mockPo: any = {
       id: 101,
       poNumber: 'PO-P77-TEST',
+      companyCode: 'UBD',
       totalAmount,
       status: poStatus,
       purchaseRequestId: 501,
       deletedAt: null,
+      vendor: {
+        id: 1,
+        name: 'PT Vendor Mandiri',
+        bankAccount: '123-456-7890',
+        bankName: 'Bank Mandiri',
+      },
     };
 
     const mockTerm: any = {
@@ -133,6 +152,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     const mockInvoice: any = {
       id: 301,
       invoiceNumber: 'INV-P77-TEST',
+      companyCode: 'UBD',
       poId: mockPo.id,
       paymentTermId: overrides?.paymentTermId !== undefined ? overrides.paymentTermId : mockTerm.id,
       totalAmount,
@@ -146,13 +166,23 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
     const mockPr: any = {
       id: 501,
       prNumber: 'PR-P77-TEST',
+      companyCode: 'UBD',
       status: overrides?.prStatus ?? 'PO_ISSUED',
       deletedAt: null,
     };
 
     const terms = overrides?.terms ?? [mockTerm];
     const existingPayments = overrides?.existingPayments ?? [];
-    const prPos = overrides?.multiPos ?? [mockPo];
+    const prPos = (overrides?.multiPos ?? [mockPo]).map((p: any) => ({
+      companyCode: 'UBD',
+      ...p,
+      vendor: p.vendor || {
+        id: 1,
+        name: 'PT Vendor Mandiri',
+        bankAccount: '123-456-7890',
+        bankName: 'Bank Mandiri',
+      },
+    }));
 
     queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any, opts: any) => {
       if (entityClass === Invoice) {
@@ -188,11 +218,20 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
         return {
           id: 401,
           invoiceId: mockInvoice.id,
+          companyCode: 'UBD',
           status: PaymentRequestStatus.APPROVED_FOR_PAYMENT,
           approvedBy: checkerId,
           approvedAmount: 100000000,
+          approvalSnapshot: {
+            vendorBankAccount: '123-456-7890',
+            vendorBankName: 'Bank Mandiri',
+            requestedAmount: 100000000,
+          },
           deletedAt: null,
         };
+      }
+      if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') {
+        return defaultCba;
       }
       if (entityClass === Payment) {
         return null;
@@ -229,6 +268,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-01',
     };
 
@@ -255,10 +295,11 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       if (entityClass === AuditLog && opts?.where?.action === 'FINANCIAL_CLOSE') {
         return { id: 701, table_name: 'purchase_orders', record_id: 101, action: 'FINANCIAL_CLOSE' };
       }
-      if (entityClass === Invoice) return { id: 301, poId: 101, paymentTermId: 201, totalAmount: 100, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
-      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, approvedAmount: 100, deletedAt: null };
-      if (entityClass === PurchaseOrder) return { id: 101, totalAmount: 100, status: 'COMPLETED', purchaseRequestId: 501 };
+      if (entityClass === Invoice) return { id: 301, companyCode: 'UBD', poId: 101, paymentTermId: 201, totalAmount: 100, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
+      if (entityClass === PaymentRequest) return { id: 401, companyCode: 'UBD', invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, approvedAmount: 100, approvalSnapshot: { vendorBankAccount: '123-456-7890', vendorBankName: 'Bank Mandiri', requestedAmount: 100 }, deletedAt: null };
+      if (entityClass === PurchaseOrder) return { id: 101, companyCode: 'UBD', totalAmount: 100, status: 'COMPLETED', purchaseRequestId: 501, vendor: { id: 1, name: 'PT Vendor', bankAccount: '123-456-7890', bankName: 'Bank Mandiri' } };
       if (entityClass === PoPaymentTerm) return { id: 201, poId: 101, amount: 100, status: PaymentTermStatus.VERIFIED };
+      if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
       return null;
     });
     queryRunnerMock.manager.find.mockResolvedValue([]);
@@ -269,6 +310,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-02',
     };
 
@@ -292,6 +334,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 60000000, // 60M of 100M
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-03',
     };
 
@@ -320,6 +363,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 40000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-04',
     };
 
@@ -341,6 +385,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-05',
     };
 
@@ -368,6 +413,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 50000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-06',
     };
 
@@ -393,6 +439,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 10000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-07',
     };
 
@@ -411,6 +458,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 10000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-08',
     };
 
@@ -429,6 +477,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-09',
     };
 
@@ -485,6 +534,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 10000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-09c',
     };
 
@@ -503,6 +553,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 10000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-09d',
     };
 
@@ -521,6 +572,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 40000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-10',
     };
 
@@ -546,6 +598,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 50000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-11',
     };
 
@@ -576,6 +629,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-12',
     };
 
@@ -601,6 +655,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-13',
     };
 
@@ -629,6 +684,7 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
       paymentDate: '2026-09-17T00:00:00Z',
       paymentAmount: 100000000,
       paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1,
       referenceNumber: 'TRX-P77-14',
     };
 
@@ -644,28 +700,34 @@ describe('P7.7 Part B - Financial Closure, Payer SoD, and PR Closure Hardening',
 
     // 1. Zero amount rejection
     await expect(
-      service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 0, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R1' }, INDEPENDENT_PAYER_ID),
+      service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 0, paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1, referenceNumber: 'R1' }, INDEPENDENT_PAYER_ID),
     ).rejects.toThrow('Payment amount harus lebih besar dari 0');
 
     // 2. Overpayment rejection (approved amount is sufficient, but invoice balance is exceeded)
     queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any) => {
-      if (entityClass === Invoice) return { id: 301, poId: 101, paymentTermId: 201, totalAmount: 100000000, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
-      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, approvedAmount: 200000000 };
-      if (entityClass === PurchaseOrder) return { id: 101, totalAmount: 200000000, status: 'COMPLETED' };
+      if (entityClass === Invoice) return { id: 301, companyCode: 'UBD', poId: 101, paymentTermId: 201, totalAmount: 100000000, matchStatus: 'VERIFIED', paymentStatus: 'UNPAID', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
+      if (entityClass === PaymentRequest) return { id: 401, companyCode: 'UBD', invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, approvedAmount: 200000000, approvalSnapshot: { vendorBankAccount: '123-456-7890', vendorBankName: 'Bank Mandiri', requestedAmount: 200000000 } };
+      if (entityClass === PurchaseOrder) return { id: 101, companyCode: 'UBD', totalAmount: 200000000, status: 'COMPLETED', vendor: { id: 1, name: 'PT Vendor', bankAccount: '123-456-7890', bankName: 'Bank Mandiri' } };
+      if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
       return null;
     });
     await expect(
-      service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 150000000, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R2' }, INDEPENDENT_PAYER_ID),
+      service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 150000000, paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1, referenceNumber: 'R2' }, INDEPENDENT_PAYER_ID),
     ).rejects.toThrow('melebihi sisa tagihan invoice');
 
     // 3. Already paid rejection
     queryRunnerMock.manager.findOne.mockImplementation(async (entityClass: any) => {
-      if (entityClass === Invoice) return { id: 301, paymentStatus: 'PAID', matchStatus: 'VERIFIED', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
-      if (entityClass === PaymentRequest) return { id: 401, invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, approvedAmount: 100000000 };
+      if (entityClass === Invoice) return { id: 301, companyCode: 'UBD', paymentStatus: 'PAID', matchStatus: 'VERIFIED', createdBy: MAKER_ID, updatedBy: CHECKER_ID };
+      if (entityClass === PaymentRequest) return { id: 401, companyCode: 'UBD', invoiceId: 301, status: PaymentRequestStatus.APPROVED_FOR_PAYMENT, approvedBy: 999, approvedAmount: 100000000, approvalSnapshot: { vendorBankAccount: '123-456-7890', vendorBankName: 'Bank Mandiri', requestedAmount: 100000000 } };
+      if (entityClass === PurchaseOrder) return { id: 101, companyCode: 'UBD', totalAmount: 100000000, status: 'COMPLETED', vendor: { id: 1, name: 'PT Vendor', bankAccount: '123-456-7890', bankName: 'Bank Mandiri' } };
+      if (entityClass === CompanyBankAccount || entityClass?.name === 'CompanyBankAccount') return defaultCba;
       return null;
     });
     await expect(
-      service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 50000, paymentMethod: 'BANK_TRANSFER', referenceNumber: 'R3' }, INDEPENDENT_PAYER_ID),
+      service.createPayment({ invoiceId: 301, paymentRequestId: 401, paymentDate: '2026-09-17', paymentAmount: 50000, paymentMethod: 'BANK_TRANSFER',
+      companyBankAccountId: 1, referenceNumber: 'R3' }, INDEPENDENT_PAYER_ID),
     ).rejects.toThrow('Invoice is already PAID');
   });
 });
