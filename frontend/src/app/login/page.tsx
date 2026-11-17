@@ -140,28 +140,14 @@ export default function LoginPage() {
           z-index: 10;
           display: flex;
           align-items: center;
-          gap: 22px;
-          margin-bottom: 8px;
-        }
-        .epms-login-branding-divider {
-          width: 1px;
-          height: 32px;
-          background: rgba(255, 255, 255, 0.15);
-          flex-shrink: 0;
+          margin-bottom: 16px;
         }
         .epms-login-ubd-logo {
-          height: 48px;
-          width: auto;
-          object-fit: contain;
-          flex-shrink: 0;
-          filter: drop-shadow(0 3px 10px rgba(0, 0, 0, 0.35));
-        }
-        .epms-login-tvm-logo {
           height: 64px;
           width: auto;
           object-fit: contain;
           flex-shrink: 0;
-          filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.08)) drop-shadow(0 2px 8px rgba(0, 0, 0, 0.35));
+          filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.40));
         }
         .epms-login-hero-box {
           position: relative;
@@ -248,6 +234,8 @@ export default function LoginPage() {
           border: 1px solid #e2e8f0;
           padding: 44px 40px;
           box-sizing: border-box;
+          opacity: 1 !important;
+          visibility: visible !important;
         }
         .epms-login-card-title {
           font-size: 26px;
@@ -259,27 +247,71 @@ export default function LoginPage() {
         .epms-login-card-header {
           margin-bottom: 28px;
         }
+        .epms-login-card .ant-form-item-label {
+          padding: 0 0 8px !important;
+          height: 48px !important;
+          box-sizing: border-box !important;
+        }
+        .epms-login-card .ant-form-item-label > label {
+          height: 40px !important;
+          display: inline-flex !important;
+          align-items: center !important;
+        }
         .epms-login-divider {
           color: #94a3b8;
           font-size: 12.5px;
           font-weight: 400;
-          margin: 20px 0 18px;
+          margin: 16px 0 !important;
+          height: 25px !important;
+          line-height: 25px !important;
           width: 100%;
           min-width: 100%;
+          display: flex !important;
+          align-items: center !important;
+          white-space: nowrap !important;
+          text-align: center !important;
+        }
+        .epms-login-divider::before,
+        .epms-login-divider::after {
+          content: '' !important;
+          flex: 1 !important;
+          border-top: 1px solid #e2e8f0 !important;
+        }
+        .epms-login-divider::before {
+          margin-right: 14px !important;
+        }
+        .epms-login-divider::after {
+          margin-left: 14px !important;
         }
         .epms-login-input {
           width: 100%;
           border-radius: 8px !important;
           height: 44px !important;
-          border-color: #cbd5e1 !important;
+          min-height: 44px !important;
+          background-color: #ffffff !important;
+          border: 1px solid #cbd5e1 !important;
           font-size: 14px !important;
-          transition: all 0.2s ease-in-out !important;
+          display: flex !important;
+          align-items: center !important;
+          padding: 4px 12px !important;
+          box-sizing: border-box !important;
+          transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+        }
+        .epms-login-input .ant-input,
+        .epms-login-input input {
+          font-size: 14px !important;
+          background: transparent !important;
+          height: 100% !important;
+          border: none !important;
+          outline: none !important;
+          box-shadow: none !important;
         }
         .epms-login-input:hover {
           border-color: #94a3b8 !important;
         }
         .epms-login-input:focus,
-        .epms-login-input-focused {
+        .epms-login-input-focused,
+        .epms-login-input:focus-within {
           border-color: #0284c7 !important;
           box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.12) !important;
         }
@@ -289,10 +321,17 @@ export default function LoginPage() {
           border-radius: 8px !important;
           background: linear-gradient(180deg, #0284c7 0%, #0369a1 100%) !important;
           border: 1px solid #0284c7 !important;
+          color: #ffffff !important;
           font-size: 14.5px !important;
           font-weight: 600 !important;
+          display: inline-flex !important;
+          align-items: center !important;
+          justify-content: center !important;
           box-shadow: 0 1px 3px rgba(2, 132, 199, 0.3) !important;
-          transition: all 0.2s ease-in-out !important;
+          transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease !important;
+        }
+        .epms-login-primary-btn span {
+          color: #ffffff !important;
         }
         .epms-login-primary-btn:hover {
           background: linear-gradient(180deg, #0369a1 0%, #075985 100%) !important;
@@ -306,7 +345,7 @@ export default function LoginPage() {
           width: 100%;
           height: 44px !important;
           border-radius: 8px !important;
-          border-color: #cbd5e1 !important;
+          border: 1px solid #cbd5e1 !important;
           background-color: #ffffff !important;
           color: #334155 !important;
           font-size: 13.5px !important;
@@ -317,7 +356,7 @@ export default function LoginPage() {
           gap: 10px !important;
           margin-bottom: 20px !important;
           box-shadow: 0 1px 2px rgba(0,0,0,0.04) !important;
-          transition: all 0.2s ease-in-out !important;
+          transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
         }
         .epms-login-sso-btn:hover {
           background-color: #f8fafc !important;
@@ -405,19 +444,14 @@ export default function LoginPage() {
             display: none;
           }
           .epms-login-branding-header {
-            gap: 16px;
-            margin-bottom: 0;
-          }
-          .epms-login-branding-divider {
-            height: 24px;
+            margin-bottom: 6px;
           }
           .epms-login-ubd-logo {
-            height: 38px;
-            width: auto;
-          }
-          .epms-login-tvm-logo {
             height: 48px;
             width: auto;
+            object-fit: contain;
+            flex-shrink: 0;
+            filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.35));
           }
           .epms-login-hero-box {
             margin-top: 20px;
@@ -506,18 +540,12 @@ export default function LoginPage() {
           />
         </div>
 
-        {/* COMPANY LOGO HEADER: [ UBD LOGO ] | [ TVM LOGO ] */}
+        {/* COMPANY LOGO HEADER: [ UBD LOGO ] */}
         <div className="epms-login-branding-header">
           <img 
             src="/logo-ubd-clean.png" 
             alt="UBD Logo" 
             className="epms-login-ubd-logo"
-          />
-          <div className="epms-login-branding-divider" />
-          <img 
-            src="/TVM.png" 
-            alt="TVM Logo" 
-            className="epms-login-tvm-logo"
           />
         </div>
 

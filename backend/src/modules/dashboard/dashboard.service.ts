@@ -8,6 +8,19 @@ import { PurchaseRequest } from '../../entities/purchase-request.entity';
 import { AnalyticsService } from '../analytics/analytics.service';
 import { GetExecutiveSummaryDto } from './dto/get-executive-summary.dto';
 import { DashboardPeriod } from '../analytics/dto/get-analytics.dto';
+import {
+  getSandboxTenderFilter,
+  getSandboxContractFilter,
+  getSandboxProjectFilter,
+  getSandboxPrFilter,
+  getSandboxPoFilter,
+  getSandboxInvoiceFilter,
+  getSandboxPaymentFilter,
+  getSandboxGrFilter,
+  getSandboxProjectRiskFilter,
+  getSandboxProjectIssueFilter,
+  getSandboxPaymentRequestFilter,
+} from '../../shared/helpers/sandbox-kpi-filter.helper';
 
 @Injectable()
 export class DashboardService {
@@ -182,7 +195,8 @@ export class DashboardService {
          FROM tenders t
          WHERE t.deleted_at IS NULL
            AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)
-           ${tenderDateWhere}`,
+           ${tenderDateWhere}
+           ${getSandboxTenderFilter('t')}`,
         tenderParams,
       ),
       this.dataSource.query(
@@ -192,7 +206,9 @@ export class DashboardService {
          FROM contracts c
          JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL
          WHERE c.deleted_at IS NULL
-           AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)`,
+           AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)
+           ${getSandboxContractFilter('c')}
+           ${getSandboxTenderFilter('t')}`,
         contractParams,
       ),
       this.dataSource.query(
@@ -201,7 +217,10 @@ export class DashboardService {
          JOIN contracts c ON p.contract_id = c.id AND c.deleted_at IS NULL
          JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL
          WHERE p.deleted_at IS NULL
-           AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)`,
+           AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)
+           ${getSandboxProjectFilter('p')}
+           ${getSandboxContractFilter('c')}
+           ${getSandboxTenderFilter('t')}`,
         projectParams,
       ),
       this.dataSource.query(
@@ -215,7 +234,9 @@ export class DashboardService {
          JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL
          WHERE po.deleted_at IS NULL
            AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)
-           ${poDateWhere}`,
+           ${poDateWhere}
+           ${getSandboxPoFilter('po')}
+           ${getSandboxProjectFilter('p')}`,
         poParams,
       ),
       this.dataSource.query(
@@ -231,7 +252,9 @@ export class DashboardService {
          JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL
          WHERE pay.deleted_at IS NULL
            AND (COALESCE(t.marketing_pic_id, t.created_by) NOT IN (?, ?) OR COALESCE(t.marketing_pic_id, t.created_by) IS NULL)
-           ${paymentDateWhere}`,
+           ${paymentDateWhere}
+           ${getSandboxPaymentFilter('pay')}
+           ${getSandboxPoFilter('po')}`,
         paymentParams,
       ),
     ]);
@@ -363,7 +386,8 @@ export class DashboardService {
          COUNT(CASE WHEN t.status = 'LOST' THEN 1 END) as lostCount
        FROM tenders t 
        WHERE t.created_at BETWEEN ? AND ? AND t.deleted_at IS NULL
-       ${tenderScopeWhere}`,
+       ${tenderScopeWhere}
+       ${getSandboxTenderFilter('t')}`,
       [start, end, ...tenderScopeParams],
     );
 
@@ -375,7 +399,8 @@ export class DashboardService {
        FROM tenders t 
        WHERE t.status NOT IN ('WON', 'LOST', 'CANCELLED') 
          AND t.deleted_at IS NULL
-         ${tenderScopeWhere}`,
+         ${tenderScopeWhere}
+         ${getSandboxTenderFilter('t')}`,
       tenderScopeParams,
     );
 
@@ -398,7 +423,8 @@ export class DashboardService {
        LEFT JOIN contracts c ON p.contract_id = c.id AND c.deleted_at IS NULL
        ${isCompanyScope ? 'JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL' : ''}
        WHERE p.deleted_at IS NULL
-       ${projectScopeWhere}`,
+       ${projectScopeWhere}
+       ${getSandboxProjectFilter('p')}`,
       projectScopeParams,
     );
 
@@ -415,7 +441,8 @@ export class DashboardService {
            (wi.status = 'COMPLETED' OR wi.current_node_id = 'node_end')
            OR (wi.id IS NULL AND pmr.status = 'READY_FOR_KICKOFF')
          )
-         ${projectScopeWhere}`,
+         ${projectScopeWhere}
+         ${getSandboxProjectFilter('p')}`,
       projectScopeParams,
     );
 
@@ -428,7 +455,8 @@ export class DashboardService {
        WHERE c.status = 'ACTIVE' 
          AND c.deleted_at IS NULL
          AND (p.id IS NULL OR p.status = 'PLANNING')
-         ${contractScopeWhere}`,
+         ${contractScopeWhere}
+         ${getSandboxContractFilter('c')}`,
       contractScopeParams,
     );
 
@@ -440,7 +468,8 @@ export class DashboardService {
        FROM contracts c
        ${contractScopeJoin}
        WHERE c.deleted_at IS NULL AND (c.status = 'ACTIVE' OR c.legal_status = 'APPROVED')
-       ${contractScopeWhere}`,
+       ${contractScopeWhere}
+       ${getSandboxContractFilter('c')}`,
       contractScopeParams,
     );
 
@@ -454,7 +483,9 @@ export class DashboardService {
        ${isCompanyScope ? 'JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL' : ''}
        WHERE p.status IN ('PLANNING', 'IN_PROGRESS') 
          AND p.deleted_at IS NULL
-         ${isCompanyScope ? 'AND (t.marketing_pic_id = ? OR (t.marketing_pic_id IS NULL AND t.created_by = ?))' : ''}`,
+         ${isCompanyScope ? 'AND (t.marketing_pic_id = ? OR (t.marketing_pic_id IS NULL AND t.created_by = ?))' : ''}
+         ${getSandboxProjectFilter('p')}
+         ${getSandboxContractFilter('c')}`,
       isCompanyScope ? [marketingUserId, marketingUserId] : [],
     );
 
@@ -467,7 +498,8 @@ export class DashboardService {
          AND p.end_date < CURDATE()
          AND p.status NOT IN ('COMPLETED', 'CLOSED', 'CANCELLED')
          AND p.deleted_at IS NULL
-         ${projectScopeWhere}`,
+         ${projectScopeWhere}
+         ${getSandboxProjectFilter('p')}`,
       projectScopeParams,
     );
 
@@ -478,7 +510,8 @@ export class DashboardService {
        ${riskScopeJoin}
        WHERE prisk.status NOT IN ('CLOSED', 'CANCELLED')
          AND prisk.risk_level IN ('HIGH', 'CRITICAL')
-         ${riskScopeWhere}`,
+         ${riskScopeWhere}
+         ${getSandboxProjectRiskFilter('prisk')}`,
       riskScopeParams,
     );
 
@@ -490,7 +523,8 @@ export class DashboardService {
        WHERE piss.status NOT IN ('RESOLVED', 'CLOSED', 'CANCELLED')
          AND piss.due_date IS NOT NULL
          AND piss.due_date < CURDATE()
-         ${issueScopeWhere}`,
+         ${issueScopeWhere}
+         ${getSandboxProjectIssueFilter('piss')}`,
       issueScopeParams,
     );
 
@@ -498,8 +532,8 @@ export class DashboardService {
     const pendingDirectorDecisionsPromise = this.dataSource.query(
       `SELECT 
          (
-           (SELECT COUNT(id) FROM payment_requests WHERE status = 'PENDING_DIRECTOR_APPROVAL' AND deleted_at IS NULL) +
-           (SELECT COUNT(t.id) FROM tenders t WHERE t.stage = 'WAITING_GO_NO_GO' AND t.go_nogo_status = 'PENDING' AND t.deleted_at IS NULL ${tenderScopeWhere})
+           (SELECT COUNT(id) FROM payment_requests WHERE status = 'PENDING_DIRECTOR_APPROVAL' AND deleted_at IS NULL ${getSandboxPaymentRequestFilter()}) +
+           (SELECT COUNT(t.id) FROM tenders t WHERE t.stage = 'WAITING_GO_NO_GO' AND t.go_nogo_status = 'PENDING' AND t.deleted_at IS NULL ${tenderScopeWhere} ${getSandboxTenderFilter('t')})
          ) as pendingDirectorDecisions`,
       tenderScopeParams,
     );
@@ -516,7 +550,8 @@ export class DashboardService {
        FROM invoices i
        ${invoiceScopeJoin}
        WHERE i.invoice_date BETWEEN ? AND ? AND i.deleted_at IS NULL
-       ${invoiceScopeWhere}`,
+       ${invoiceScopeWhere}
+       ${getSandboxInvoiceFilter('i')}`,
       [start, end, ...invoiceScopeParams],
     );
 
@@ -535,12 +570,14 @@ export class DashboardService {
            SELECT invoice_id, SUM(amount_paid) as total_paid
            FROM payments 
            WHERE deleted_at IS NULL 
+           ${getSandboxPaymentFilter()}
            GROUP BY invoice_id
          ) p ON p.invoice_id = i.id
          WHERE i.match_status = 'VERIFIED' 
            AND i.deleted_at IS NULL
            AND (i.total_amount - COALESCE(p.total_paid, 0)) > 0
            ${invoiceScopeWhere}
+           ${getSandboxInvoiceFilter('i')}
        ) inv_summary`,
       invoiceScopeParams,
     );
@@ -553,7 +590,8 @@ export class DashboardService {
        FROM payments pay
        ${paymentScopeJoin}
        WHERE pay.payment_date BETWEEN ? AND ? AND pay.deleted_at IS NULL
-       ${paymentScopeWhere}`,
+       ${paymentScopeWhere}
+       ${getSandboxPaymentFilter('pay')}`,
       [start, end, ...paymentScopeParams],
     );
 
@@ -567,7 +605,8 @@ export class DashboardService {
        FROM purchase_requests pr
        ${prScopeJoin}
        WHERE pr.created_at BETWEEN ? AND ? AND pr.deleted_at IS NULL
-       ${prScopeWhere}`,
+       ${prScopeWhere}
+       ${getSandboxPrFilter('pr')}`,
       [start, end, ...prScopeParams],
     );
 
@@ -583,7 +622,8 @@ export class DashboardService {
        ${poScopeJoin}
        WHERE po.created_at BETWEEN ? AND ? AND po.deleted_at IS NULL
          AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
-       ${poScopeWhere}`,
+       ${poScopeWhere}
+       ${getSandboxPoFilter('po')}`,
       [start, end, ...poScopeParams],
     );
 
@@ -608,6 +648,7 @@ export class DashboardService {
            AND po.deleted_at IS NULL
            AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
            ${poScopeWhere}
+           ${getSandboxPoFilter('po')}
          GROUP BY po.id
        ) service_pos`,
       [start, end, ...poScopeParams],
@@ -620,7 +661,8 @@ export class DashboardService {
        FROM goods_receipts gr
        ${grScopeJoin}
        WHERE gr.receipt_date BETWEEN ? AND ? AND gr.deleted_at IS NULL
-       ${grScopeWhere}`,
+       ${grScopeWhere}
+       ${getSandboxGrFilter('gr')}`,
       [start, end, ...grScopeParams],
     );
 
@@ -660,7 +702,8 @@ export class DashboardService {
        FROM contracts c
        ${contractScopeJoin}
        WHERE c.deleted_at IS NULL
-       ${contractScopeWhere}`,
+       ${contractScopeWhere}
+       ${getSandboxContractFilter('c')}`,
       contractScopeParams,
     );
 
@@ -682,6 +725,7 @@ export class DashboardService {
          AND (c.status = 'ACTIVE' OR c.legal_status = 'APPROVED')
          AND YEAR(COALESCE(c.start_date, c.created_at)) = ?
        ${contractScopeWhere}
+       ${getSandboxContractFilter('c')}
        GROUP BY m ORDER BY m`,
       [currentYear, ...contractScopeParams],
     );
@@ -695,6 +739,7 @@ export class DashboardService {
        ${paymentScopeJoin}
        WHERE pay.deleted_at IS NULL AND YEAR(COALESCE(pay.payment_date, pay.created_at)) = ?
        ${paymentScopeWhere}
+       ${getSandboxPaymentFilter('pay')}
        GROUP BY m ORDER BY m`,
       [currentYear, ...paymentScopeParams],
     );
@@ -710,6 +755,7 @@ export class DashboardService {
          AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
          AND YEAR(COALESCE(po.created_at, po.delivery_date)) = ?
        ${poScopeWhere}
+       ${getSandboxPoFilter('po')}
        GROUP BY m ORDER BY m`,
       [currentYear, ...poScopeParams],
     );
@@ -744,6 +790,7 @@ export class DashboardService {
        ${isCompanyScope ? 'JOIN tenders t ON c.tender_id = t.id AND t.deleted_at IS NULL' : ''}
        WHERE p.deleted_at IS NULL AND p.status IN ('PLANNING', 'IN_PROGRESS')
        ${projectScopeWhere}
+       ${getSandboxProjectFilter('p')}
        ORDER BY p.id DESC LIMIT 4`,
       projectScopeParams,
     );
@@ -759,6 +806,7 @@ export class DashboardService {
        LEFT JOIN customers cust ON t.customer_id = cust.id
        WHERE t.deleted_at IS NULL
        ${tenderScopeWhere}
+       ${getSandboxTenderFilter('t')}
        ORDER BY t.id DESC LIMIT 4`,
       tenderScopeParams,
     );
@@ -776,6 +824,7 @@ export class DashboardService {
        WHERE po.deleted_at IS NULL
          AND po.status IN ('ISSUED', 'PARTIALLY_FULFILLED', 'COMPLETED')
        ${poScopeWhere}
+       ${getSandboxPoFilter('po')}
        ORDER BY po.id DESC LIMIT 4`,
       poScopeParams,
     );
@@ -792,6 +841,7 @@ export class DashboardService {
        LEFT JOIN vendors v ON po.vendor_id = v.id
        WHERE i.deleted_at IS NULL
        ${invoiceScopeWhere}
+       ${getSandboxInvoiceFilter('i')}
        ORDER BY i.id DESC LIMIT 4`,
       invoiceScopeParams,
     );

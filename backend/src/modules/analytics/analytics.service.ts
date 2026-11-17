@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Tender } from '../../entities/tender.entity';
 import { GetAnalyticsQueryDto, DashboardPeriod } from './dto/get-analytics.dto';
+import { getSandboxTenderFilter } from '../../shared/helpers/sandbox-kpi-filter.helper';
 
 @Injectable()
 export class AnalyticsService {
@@ -166,7 +167,7 @@ export class AnalyticsService {
         COALESCE(SUM(COALESCE(negotiated_price, estimated_budget)), 0) as totalPipeline,
         COALESCE(AVG(CASE WHEN status = 'WON' THEN negotiated_price END), 0) as avgDealSize
       FROM tenders
-      WHERE created_at BETWEEN ? AND ? AND deleted_at IS NULL ${userFilter}
+      WHERE created_at BETWEEN ? AND ? AND deleted_at IS NULL ${userFilter} ${getSandboxTenderFilter()}
     `, params);
 
     const row = result[0] || {};
@@ -236,7 +237,7 @@ export class AnalyticsService {
         COALESCE(business_sector, 'Lainnya') as sector, 
         SUM(COALESCE(negotiated_price, estimated_budget)) as value
       FROM tenders
-      WHERE created_at BETWEEN ? AND ? AND deleted_at IS NULL ${userFilter}
+      WHERE created_at BETWEEN ? AND ? AND deleted_at IS NULL ${userFilter} ${getSandboxTenderFilter()}
       GROUP BY COALESCE(business_sector, 'Lainnya')
       HAVING SUM(COALESCE(negotiated_price, estimated_budget)) > 0
       ORDER BY value DESC
@@ -265,7 +266,7 @@ export class AnalyticsService {
         stage, 
         COUNT(id) as count
       FROM tenders
-      WHERE created_at BETWEEN ? AND ? AND deleted_at IS NULL ${userFilter}
+      WHERE created_at BETWEEN ? AND ? AND deleted_at IS NULL ${userFilter} ${getSandboxTenderFilter()}
       GROUP BY stage
     `, params);
 
@@ -311,7 +312,7 @@ export class AnalyticsService {
         MONTH(created_at) as month, 
         SUM(COALESCE(negotiated_price, estimated_budget)) as value
       FROM tenders
-      WHERE created_at BETWEEN ? AND ? AND deleted_at IS NULL ${userFilter}
+      WHERE created_at BETWEEN ? AND ? AND deleted_at IS NULL ${userFilter} ${getSandboxTenderFilter()}
       GROUP BY YEAR(created_at), MONTH(created_at)
     `, params);
 
@@ -405,7 +406,7 @@ export class AnalyticsService {
         COALESCE(AVG(CASE WHEN t.status = 'WON' THEN t.negotiated_price END), 0) AS averageDealSize
       FROM tenders t
       LEFT JOIN users u ON u.id = COALESCE(t.marketing_pic_id, t.created_by)
-      WHERE t.created_at BETWEEN ? AND ? AND t.deleted_at IS NULL
+      WHERE t.created_at BETWEEN ? AND ? AND t.deleted_at IS NULL ${getSandboxTenderFilter('t')}
       GROUP BY COALESCE(t.marketing_pic_id, t.created_by), COALESCE(u.full_name, 'Unassigned'), u.email
       ORDER BY openPipelineValue DESC
       `,
